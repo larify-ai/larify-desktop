@@ -1,4 +1,4 @@
-import { app, screen, shell, BrowserWindow } from "electron"
+import { app, screen, shell, ipcMain, nativeTheme, BrowserWindow } from "electron"
 import { join } from "path"
 import { is } from "@electron-toolkit/utils"
 import type { Extension } from "kernel"
@@ -48,6 +48,26 @@ const extension: Extension = {
   activate(_app, context) {
     const win = createWindow()
     context.subscriptions.push({ dispose: () => win.destroy() })
+
+    ipcMain.handle("theme:set", (_e, theme) => {
+      if (theme === "light" || theme === "dark" || theme === "system") {
+        nativeTheme.themeSource = theme
+      }
+    })
+    ipcMain.handle("titlebar:set-symbol", (event, symbolColor) => {
+      if (isMac || typeof symbolColor !== "string") return
+      BrowserWindow.fromWebContents(event.sender)?.setTitleBarOverlay({
+        color: "rgba(0,0,0,0)",
+        symbolColor,
+        height: 40,
+      })
+    })
+    context.subscriptions.push({
+      dispose: () => {
+        ipcMain.removeHandler("theme:set")
+        ipcMain.removeHandler("titlebar:set-symbol")
+      },
+    })
 
     const onActivate = (): void => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()

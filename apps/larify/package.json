@@ -11,6 +11,7 @@
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "start": "electron-vite preview",
     "dev": "electron-vite dev",
+    "dev:debug": "electron-vite dev -- --remote-debugging-port=9222",
     "build": "npm run typecheck && electron-vite build",
     "postinstall": "electron-builder install-app-deps",
     "build:unpack": "npm run build && electron-builder --dir",
@@ -21,12 +22,20 @@
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
-    "kernel": "*"
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "kernel": "*",
+    "lucide-react": "^1.24.0",
+    "radix-ui": "^1.6.2",
+    "react-resizable-panels": "^2.1.9",
+    "tailwind-merge": "^3.6.0",
+    "tw-shimmer": "^0.4.11"
   },
   "devDependencies": {
     "@electron-toolkit/eslint-config-prettier": "^3.0.0",
     "@electron-toolkit/eslint-config-ts": "^3.1.0",
     "@electron-toolkit/tsconfig": "^2.0.0",
+    "@tailwindcss/vite": "^4.3.2",
     "@types/node": "^22.19.1",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
@@ -41,6 +50,7 @@
     "prettier": "^3.7.4",
     "react": "^19.2.1",
     "react-dom": "^19.2.1",
+    "tailwindcss": "^4.3.2",
     "typescript": "^5.9.3",
     "vite": "^7.2.6"
   }

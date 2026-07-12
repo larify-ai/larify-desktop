@@ -1,3 +1,4 @@
+import "./assets/main.css"
 import { createRoot } from "react-dom/client"
 import type { ReactNode } from "react"
 import { createApp, Loader } from "kernel"
@@ -20,7 +21,7 @@ async function boot(): Promise<void> {
   await loader.loadAll(EXTENSIONS)
 
   const root = createRoot(document.getElementById("root")!)
-  const view = host.getAll<RootView>("view")[0]
+  const view = host.get<RootView>("view", "root")
   root.render(view?.render())
 }
 

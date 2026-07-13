@@ -1,14 +1,11 @@
 import { app } from "electron"
 import { electronApp, optimizer } from "@electron-toolkit/utils"
 import { createApp, Loader } from "kernel"
-import type { Extension, Manifest } from "kernel"
+import type { Extension } from "kernel"
+import { discoverExtensions } from "../shared/discover-extensions"
 
-const manifests = import.meta.glob<{ default: Manifest }>("../extensions/*/manifest.json", {
-  eager: true,
-})
 const modules = import.meta.glob<{ default: Extension }>("../extensions/*/main/index.ts")
-
-const EXTENSIONS = Object.values(manifests).map((m) => m.default)
+const { extensions, loaders } = discoverExtensions(modules)
 
 if (process.platform === "darwin") {
   app.commandLine.appendSwitch("disable-features", "MacWebContentsOcclusion")
@@ -19,8 +16,8 @@ app.whenReady().then(async () => {
   app.on("browser-window-created", (_, window) => optimizer.watchWindowShortcuts(window))
 
   const host = createApp()
-  const loader = new Loader(host, (m) => modules[`../extensions/${m.id}/main/index.ts`]())
-  await loader.loadAll(EXTENSIONS)
+  const loader = new Loader(host, (m) => loaders.get(m.id)!())
+  await loader.loadAll(extensions)
 
   app.on("before-quit", () => void loader.unloadAll())
 })

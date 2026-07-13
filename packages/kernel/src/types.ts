@@ -4,7 +4,7 @@ export interface Disposable {
 
 export interface Manifest {
   id: string
-  version: string
+  version?: string
   displayName?: string
   description?: string
 }

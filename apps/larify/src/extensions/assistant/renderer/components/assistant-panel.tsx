@@ -1,8 +1,8 @@
+import { ArrowUpIcon, SquareIcon } from "lucide-react"
 import { useChat } from "@ai-sdk/react"
 import {
   Conversation,
   ConversationContent,
-  ConversationEmptyState,
   ConversationScrollButton,
 } from "@renderer/components/ai-elements/conversation"
 import {
@@ -13,6 +13,7 @@ import {
   PromptInputTextarea,
   type PromptInputMessage,
 } from "@renderer/components/ai-elements/prompt-input"
+import { Spinner } from "@renderer/components/ui/spinner"
 import { MessageView } from "./message-view"
 import { ipcTransport } from "../lib/transport"
 
@@ -25,37 +26,40 @@ export function AssistantPanel(): React.JSX.Element {
     if (text) void sendMessage({ text })
   }
 
+  const input = (
+    <div className="mx-auto w-full max-w-2xl px-4 pb-4">
+      <PromptInput
+        onSubmit={handleSubmit}
+        className="[&_[data-slot=input-group]]:rounded-2xl"
+      >
+        <PromptInputBody>
+          <PromptInputTextarea placeholder="描述任务..." className="max-h-48 min-h-12" />
+        </PromptInputBody>
+        <PromptInputFooter className="justify-end">
+          <PromptInputSubmit status={status} onStop={() => void stop()} className="rounded-full">
+            {isLive ? <SquareIcon className="size-4" /> : <ArrowUpIcon className="size-4" />}
+          </PromptInputSubmit>
+        </PromptInputFooter>
+      </PromptInput>
+    </div>
+  )
+
+  if (messages.length === 0) {
+    return <div className="flex h-full min-w-0 flex-1 flex-col justify-center px-4">{input}</div>
+  }
+
   return (
     <div className="flex h-full min-w-0 flex-1 flex-col">
       <Conversation className="min-w-0 flex-1">
         <ConversationContent className="mx-auto w-full max-w-2xl">
-          {messages.length === 0 ? (
-            <ConversationEmptyState
-              title="开始对话"
-              description="问点什么，比如「扫描 I2C 总线 1」"
-            />
-          ) : (
-            messages.map((m, i) => (
-              <MessageView
-                key={m.id}
-                message={m}
-                streaming={isLive && i === messages.length - 1}
-              />
-            ))
-          )}
+          {messages.map((m, i) => (
+            <MessageView key={m.id} message={m} streaming={isLive && i === messages.length - 1} />
+          ))}
+          {status === "submitted" && <Spinner className="text-muted-foreground" />}
         </ConversationContent>
         <ConversationScrollButton />
       </Conversation>
-      <div className="mx-auto w-full max-w-2xl p-4">
-        <PromptInput onSubmit={handleSubmit}>
-          <PromptInputBody>
-            <PromptInputTextarea placeholder="发消息…" />
-          </PromptInputBody>
-          <PromptInputFooter className="justify-end">
-            <PromptInputSubmit status={status} onStop={() => void stop()} />
-          </PromptInputFooter>
-        </PromptInput>
-      </div>
+      {input}
     </div>
   )
 }

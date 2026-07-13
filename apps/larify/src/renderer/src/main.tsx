@@ -19,3 +19,10 @@ async function boot(): Promise<void> {
 }
 
 boot()
+
+document.addEventListener("mousedown", (e) => {
+  const target = e.target as Element | null
+  if (!target?.closest?.(".select-text")) {
+    window.getSelection()?.removeAllRanges()
+  }
+})

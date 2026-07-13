@@ -16,7 +16,7 @@ export function MessageView({
   const hasText = message.parts.some((p) => p.type === "text")
   return (
     <Message from={message.role}>
-      <MessageContent>
+      <MessageContent className="select-text">
         {message.parts.map((part, i) => {
           if (part.type === "text") return <MessageResponse key={i}>{part.text}</MessageResponse>
           if (part.type === "reasoning")

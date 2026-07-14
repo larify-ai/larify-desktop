@@ -14,9 +14,11 @@ export function runAgent(
   tools?: ToolSet,
   model: LanguageModel = createModel(),
   abortSignal?: AbortSignal,
+  system?: string,
 ): ReadableStream<UIMessageChunk> {
   const result = streamText({
     model,
+    system,
     messages,
     tools,
     stopWhen: isLoopFinished(),

@@ -1,23 +1,51 @@
 import { ipcMain } from "electron"
 import { convertToModelMessages, type UIMessage } from "ai"
+import { z } from "zod"
 import type { Extension } from "kernel"
+import type { Toolkit } from "../../../shared/tool"
 import { runAgent } from "./agent"
+import { ToolRegistry } from "./registry"
+import { buildMetaTools } from "./meta-tools"
+import { buildSystemPrompt } from "./system-prompt"
 
 interface RunRequest {
   runId: string
   messages: UIMessage[]
 }
 
+const demoKit: Toolkit = {
+  name: "demo",
+  description: "Temporary demo tools",
+  tools: [
+    {
+      name: "echo",
+      description: "Echo back the given text",
+      inputSchema: z.object({ text: z.string() }),
+      execute: async (args) => (args as { text: string }).text,
+    },
+  ],
+}
+
 const extension: Extension = {
-  activate(_app, context) {
+  activate(app, context) {
+    app.register("tool", "demo", demoKit)
+
     const controllers = new Map<string, AbortController>()
 
     ipcMain.handle("agent:run", async (event, { runId, messages }: RunRequest) => {
       const controller = new AbortController()
       controllers.set(runId, controller)
       try {
+        const registry = new ToolRegistry(app.getAll<Toolkit>("tool"))
+        const tools = buildMetaTools(registry)
         const modelMessages = await convertToModelMessages(messages)
-        const reader = runAgent(modelMessages, undefined, undefined, controller.signal).getReader()
+        const reader = runAgent(
+          modelMessages,
+          tools,
+          undefined,
+          controller.signal,
+          buildSystemPrompt(registry),
+        ).getReader()
         for (;;) {
           const { done, value } = await reader.read()
           if (done) break

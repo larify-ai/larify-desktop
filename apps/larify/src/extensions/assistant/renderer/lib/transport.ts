@@ -1,7 +1,7 @@
 import type { ChatTransport, UIMessage, UIMessageChunk } from "ai"
 
 export const ipcTransport: ChatTransport<UIMessage> = {
-  async sendMessages({ messages, abortSignal }) {
+  async sendMessages({ chatId, messages, abortSignal }) {
     const runId = crypto.randomUUID()
     return new ReadableStream<UIMessageChunk>({
       start(controller) {
@@ -30,7 +30,7 @@ export const ipcTransport: ChatTransport<UIMessage> = {
           offs.push(() => abortSignal.removeEventListener("abort", onAbort))
         }
 
-        void window.bridge.invoke("agent:run", { runId, messages })
+        void window.bridge.invoke("agent:run", { runId, sessionId: chatId, messages })
       },
     })
   },

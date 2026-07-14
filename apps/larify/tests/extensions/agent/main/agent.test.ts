@@ -32,7 +32,11 @@ function textOf(message: UIMessage): string {
 }
 
 async function assemble(model: MockLanguageModelV4): Promise<UIMessage> {
-  const stream = runAgent([{ role: "user", content: "hi" }], undefined, model)
+  const stream = runAgent({
+    messages: [{ role: "user", content: "hi" }],
+    buildTools: () => ({}),
+    model,
+  })
   let last: UIMessage | undefined
   for await (const msg of readUIMessageStream({ stream })) last = msg
   if (!last) throw new Error("no message assembled")

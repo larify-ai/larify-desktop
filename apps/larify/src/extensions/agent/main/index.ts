@@ -5,11 +5,12 @@ import type { Extension } from "kernel"
 import type { Toolkit } from "../../../shared/tool"
 import { runAgent } from "./agent"
 import { ToolRegistry } from "./registry"
-import { buildMetaTools } from "./meta-tools"
+import { buildMetaTools, buildRepairToolCall } from "./meta-tools"
 import { buildSystemPrompt } from "./system-prompt"
 
 interface RunRequest {
   runId: string
+  sessionId: string
   messages: UIMessage[]
 }
 
@@ -32,20 +33,19 @@ const extension: Extension = {
 
     const controllers = new Map<string, AbortController>()
 
-    ipcMain.handle("agent:run", async (event, { runId, messages }: RunRequest) => {
+    ipcMain.handle("agent:run", async (event, { runId, sessionId, messages }: RunRequest) => {
       const controller = new AbortController()
       controllers.set(runId, controller)
       try {
         const registry = new ToolRegistry(app.getAll<Toolkit>("tool"))
-        const tools = buildMetaTools(registry)
         const modelMessages = await convertToModelMessages(messages)
-        const reader = runAgent(
-          modelMessages,
-          tools,
-          undefined,
-          controller.signal,
-          buildSystemPrompt(registry),
-        ).getReader()
+        const reader = runAgent({
+          messages: modelMessages,
+          buildTools: (writer) => buildMetaTools(registry, { sessionId }, writer),
+          repairToolCall: buildRepairToolCall(registry),
+          abortSignal: controller.signal,
+          system: buildSystemPrompt(registry),
+        }).getReader()
         for (;;) {
           const { done, value } = await reader.read()
           if (done) break

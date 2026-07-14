@@ -14,6 +14,13 @@ import {
 } from "@renderer/components/ai-elements/tool"
 import { FileDiff, type DiffMeta } from "./file-diff"
 
+export type ToolDisplayMeta = {
+  title?: string
+  icon?: string
+  defaultOpen?: boolean
+  hideRawDetails?: boolean
+}
+
 function asDiffMeta(data: unknown): DiffMeta | null {
   return data && typeof data === "object" && (data as DiffMeta).kind === "diff"
     ? (data as DiffMeta)
@@ -44,11 +51,24 @@ function unwrapToolDisplay(
 export function MessageView({
   message,
   streaming = false,
+  toolDisplays = {},
 }: {
   message: UIMessage
   streaming?: boolean
+  toolDisplays?: Record<string, ToolDisplayMeta>
 }): React.JSX.Element {
   const hasText = message.parts.some((p) => p.type === "text")
+  const toolMetaById = new Map<string, DiffMeta>()
+
+  for (const part of message.parts) {
+    if (part.type !== "data-tool-meta") continue
+    const data = (part as { data?: unknown }).data
+    const meta = asDiffMeta(data)
+    const id = (part as { id?: unknown }).id
+    if (typeof id !== "string") continue
+    if (meta) toolMetaById.set(id, meta)
+  }
+
   return (
     <Message from={message.role}>
       <MessageContent className="select-text">
@@ -61,20 +81,31 @@ export function MessageView({
                 <ReasoningContent>{part.text}</ReasoningContent>
               </Reasoning>
             )
-          if (part.type === "data-tool-meta") {
-            const meta = asDiffMeta((part as { data?: unknown }).data)
-            return meta ? <FileDiff key={i} meta={meta} /> : null
-          }
+          if (part.type === "data-tool-meta") return null
           if (isToolUIPart(part))
             {
               const display = unwrapToolDisplay(getToolName(part), part.input)
               if (!display) return null
+              const toolMeta = toolMetaById.get(part.toolCallId)
+              const toolDisplay = toolDisplays[display.toolName]
+              const showRawToolDetails = Boolean(part.errorText) || !toolDisplay?.hideRawDetails
               return (
-                <Tool key={i}>
-                  <ToolHeader type="dynamic-tool" toolName={display.toolName} state={part.state} />
+                <Tool key={i} defaultOpen={toolDisplay?.defaultOpen}>
+                  <ToolHeader
+                    type="dynamic-tool"
+                    toolName={display.toolName}
+                    title={toolDisplay?.title}
+                    icon={toolDisplay?.icon}
+                    state={part.state}
+                  />
                   <ToolContent>
-                    <ToolInput input={display.input} />
-                    <ToolOutput output={part.output} errorText={part.errorText} />
+                    {toolMeta ? <FileDiff meta={toolMeta} /> : null}
+                    {showRawToolDetails ? (
+                      <>
+                        <ToolInput input={display.input} />
+                        <ToolOutput output={part.output} errorText={part.errorText} />
+                      </>
+                    ) : null}
                   </ToolContent>
                 </Tool>
               )

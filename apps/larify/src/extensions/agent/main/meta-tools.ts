@@ -14,6 +14,11 @@ function isStructured(value: unknown): value is { output: unknown; metadata?: un
   return typeof value === "object" && value !== null && "output" in value
 }
 
+export const metaToolDisplays = {
+  list_tools: { title: "搜索工具", icon: "search" },
+  read_tool: { title: "搜索工具", icon: "search" },
+}
+
 export function buildRepairToolCall(registry: ToolRegistry): ToolCallRepairFunction<ToolSet> {
   return async ({ toolCall, error }) => {
     if (!NoSuchToolError.isInstance(error)) return null
@@ -44,7 +49,7 @@ export function buildMetaTools(
       execute: async ({ group }) => {
         const tools = registry.listTools(group)
         if (!tools) throw new Error(`Toolkit "${group}" not found`)
-        return tools.map((t) => `- **${t.name}** — ${t.description}`).join("\n")
+        return tools.map((t) => `- **${t.name}** - ${t.description}`).join("\n")
       },
     }),
     read_tool: tool({

@@ -12,6 +12,7 @@ const kit: Toolkit = {
     {
       name: "read_file",
       description: "Read a file",
+      metadata: { title: "读取文件", icon: "read", defaultOpen: true, hideRawDetails: true },
       inputSchema: z.object({ path: z.string() }),
       execute: async (args) => `content:${(args as { path: string }).path}`,
     },
@@ -40,7 +41,7 @@ async function drain(iter: AsyncIterable<unknown>): Promise<unknown[]> {
 describe("list_tools", () => {
   it("lists a toolkit's tools as markdown bullets", async () => {
     const result = await meta()("list_tools", { group: "file" })
-    expect(result).toBe("- **read_file** — Read a file\n- **ticker** — Emit ticks")
+    expect(result).toBe("- **read_file** - Read a file\n- **ticker** - Emit ticks")
   })
 
   it("throws on unknown toolkit", async () => {
@@ -82,6 +83,14 @@ describe("call_tool", () => {
     await expect(
       drain(meta()("call_tool", { name: "read_file", args: { path: 123 } })),
     ).rejects.toThrow("Invalid arguments")
+  })
+})
+
+describe("ToolRegistry", () => {
+  it("lists display metadata without exposing executable tool fields", () => {
+    expect(new ToolRegistry([kit]).listToolDisplays()).toEqual({
+      read_file: { title: "读取文件", icon: "read", defaultOpen: true, hideRawDetails: true },
+    })
   })
 })
 

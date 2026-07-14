@@ -17,8 +17,8 @@ export function FileDiff({ meta }: { meta: DiffMeta }): React.JSX.Element {
   const newContent = meta.newContent ?? ""
 
   return (
-    <div className="my-1 overflow-hidden rounded-lg border border-border text-xs">
-      <div className="border-b border-border bg-secondary px-3 py-1.5 font-mono text-muted-foreground">
+    <div className="larify-file-diff overflow-hidden rounded-md border border-border bg-muted/30 text-xs">
+      <div className="border-b border-border bg-muted/50 px-3 py-1.5 font-mono text-muted-foreground">
         {meta.path}
       </div>
       <DiffView

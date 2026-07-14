@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react"
 import { ArrowUpIcon, SquareIcon } from "lucide-react"
 import { useChat } from "@ai-sdk/react"
 import {
@@ -16,14 +17,29 @@ import {
 import { Spinner } from "@renderer/components/ui/spinner"
 import { MessageView } from "./message-view"
 import { ipcTransport } from "../lib/transport"
+import type { ToolDisplayMeta } from "./message-view"
 
 export function AssistantPanel(): React.JSX.Element {
   const { messages, sendMessage, status, stop } = useChat({ transport: ipcTransport })
+  const [toolDisplays, setToolDisplays] = useState<Record<string, ToolDisplayMeta>>({})
   const isLive = status === "streaming" || status === "submitted"
+
+  const refreshToolDisplays = async (): Promise<void> => {
+    try {
+      const displays = await window.bridge.invoke("agent:tool-displays")
+      setToolDisplays(displays as Record<string, ToolDisplayMeta>)
+    } catch (error) {
+      console.error("[agent:tool-displays]", error)
+    }
+  }
+
+  useEffect(() => {
+    void refreshToolDisplays()
+  }, [])
 
   const handleSubmit = (message: PromptInputMessage): void => {
     const text = message.text.trim()
-    if (text) void sendMessage({ text })
+    if (text) void refreshToolDisplays().finally(() => void sendMessage({ text }))
   }
 
   const input = (
@@ -53,7 +69,12 @@ export function AssistantPanel(): React.JSX.Element {
       <Conversation className="min-w-0 flex-1">
         <ConversationContent className="mx-auto w-full max-w-2xl">
           {messages.map((m, i) => (
-            <MessageView key={m.id} message={m} streaming={isLive && i === messages.length - 1} />
+            <MessageView
+              key={m.id}
+              message={m}
+              streaming={isLive && i === messages.length - 1}
+              toolDisplays={toolDisplays}
+            />
           ))}
           {status === "submitted" && <Spinner className="text-muted-foreground" />}
         </ConversationContent>

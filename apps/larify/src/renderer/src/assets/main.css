@@ -193,3 +193,34 @@ html {
   background-color: var(--primary);
   color: var(--primary-foreground);
 }
+
+.larify-file-diff .diff-tailwindcss-wrapper[data-theme="dark"] .diff-style-root {
+  --diff-border--: #3f3f46;
+  --diff-add-content--: #052e1a;
+  --diff-del-content--: #3b1219;
+  --diff-add-lineNumber--: #064e2b;
+  --diff-del-lineNumber--: #5f1824;
+  --diff-plain-content--: #18181b;
+  --diff-expand-content--: #202024;
+  --diff-plain-lineNumber--: #202024;
+  --diff-expand-lineNumber--: #202024;
+  --diff-plain-lineNumber-color--: #a1a1aa;
+  --diff-expand-lineNumber-color--: #a1a1aa;
+  --diff-hunk-content--: #27272a;
+  --diff-hunk-lineNumber--: #323238;
+  --diff-hunk-lineNumber-hover--: #a1a1aa;
+  --diff-add-content-highlight--: #0b5a32;
+  --diff-del-content-highlight--: #7f1d2d;
+  --diff-empty-content--: #18181b;
+  --diff-hunk-content-color--: #a1a1aa;
+}
+
+.larify-file-diff .diff-tailwindcss-wrapper[data-theme="dark"] [data-state="diff"],
+.larify-file-diff .diff-tailwindcss-wrapper[data-theme="dark"] [data-state="plain"],
+.larify-file-diff .diff-tailwindcss-wrapper[data-theme="dark"] [data-state="hunk"] {
+  color: var(--foreground);
+}
+
+.larify-file-diff .diff-view-wrapper {
+  border-radius: 0;
+}

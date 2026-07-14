@@ -13,6 +13,11 @@ import {
   ChevronDownIcon,
   CircleIcon,
   ClockIcon,
+  FileTextIcon,
+  type LucideIcon,
+  SearchIcon,
+  SquarePenIcon,
+  TerminalIcon,
   WrenchIcon,
   XCircleIcon,
 } from "lucide-react";
@@ -32,17 +37,26 @@ export const Tool = ({ className, ...props }: ToolProps) => (
 
 export type ToolPart = ToolUIPart | DynamicToolUIPart;
 
+const kindIcons: Record<string, LucideIcon> = {
+  search: SearchIcon,
+  execute: TerminalIcon,
+  read: FileTextIcon,
+  edit: SquarePenIcon,
+  other: WrenchIcon,
+};
+
 export type ToolHeaderProps = {
   title?: string;
+  icon?: string;
   className?: string;
 } & (
-  | { type: ToolUIPart["type"]; state: ToolUIPart["state"]; toolName?: never }
-  | {
+    | { type: ToolUIPart["type"]; state: ToolUIPart["state"]; toolName?: never }
+    | {
       type: DynamicToolUIPart["type"];
       state: DynamicToolUIPart["state"];
       toolName: string;
     }
-);
+  );
 
 const statusLabels: Record<ToolPart["state"], string> = {
   "approval-requested": "Awaiting Approval",
@@ -74,6 +88,7 @@ export const getStatusBadge = (status: ToolPart["state"]) => (
 export const ToolHeader = ({
   className,
   title,
+  icon,
   type,
   state,
   toolName,
@@ -81,21 +96,27 @@ export const ToolHeader = ({
 }: ToolHeaderProps) => {
   const derivedName =
     type === "dynamic-tool" ? toolName : type.split("-").slice(1).join("-");
+  const KindIcon = kindIcons[icon ?? "other"] ?? WrenchIcon;
 
   return (
     <CollapsibleTrigger
       className={cn(
-        "flex w-full items-center justify-between gap-4 p-3",
+        "flex w-full min-w-0 items-center justify-between gap-4 p-3",
         className
       )}
       {...props}
     >
-      <div className="flex items-center gap-2">
-        <WrenchIcon className="size-4 text-muted-foreground" />
-        <span className="font-medium text-sm">{title ?? derivedName}</span>
-        {getStatusBadge(state)}
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        <KindIcon className="size-4 shrink-0 text-muted-foreground" />
+        <span
+          className="min-w-0 flex-1 truncate text-left font-medium text-sm"
+          title={title ?? derivedName}
+        >
+          {title ?? derivedName}
+        </span>
+        <span className="shrink-0">{getStatusBadge(state)}</span>
       </div>
-      <ChevronDownIcon className="size-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
+      <ChevronDownIcon className="size-4 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
     </CollapsibleTrigger>
   );
 };

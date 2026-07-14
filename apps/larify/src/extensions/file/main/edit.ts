@@ -16,6 +16,7 @@ const inputSchema = z.object({
 export const editFileTool: Tool = {
   name: "edit_file",
   description: "Replace exact text in a file.",
+  metadata: { title: "编辑文件", icon: "edit", defaultOpen: true, hideRawDetails: true },
   inputSchema,
   execute: async (args, ctx) => {
     const { file_path, old_string, new_string, replace_all } = args as z.infer<typeof inputSchema>
@@ -55,7 +56,13 @@ export const editFileTool: Tool = {
       const patch = createTwoFilesPatch(file_path, file_path, content, updated, "", "", { context: 3 })
       return {
         output: replace_all ? `Edited ${file_path} (${count} replacements).` : `Edited ${file_path}.`,
-        metadata: { kind: "diff", path: file_path, patch, oldContent: content, newContent: updated },
+        metadata: {
+          kind: "diff",
+          path: file_path,
+          patch,
+          oldContent: content,
+          newContent: updated,
+        },
       }
     })
   },

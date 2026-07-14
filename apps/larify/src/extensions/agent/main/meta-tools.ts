@@ -22,7 +22,7 @@ export function buildMetaTools(registry: ToolRegistry): ToolSet {
         return JSON.stringify(asSchema(found.inputSchema).jsonSchema)
       },
     }),
-    invoke_tool: tool({
+    call_tool: tool({
       description: "Invoke a tool with JSON args matching its schema.",
       inputSchema: z.object({
         name: z.string().describe("The tool name"),

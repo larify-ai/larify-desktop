@@ -1,10 +1,17 @@
-import type { UIMessage } from "ai"
+import { getToolName, isToolUIPart, type UIMessage } from "ai"
 import { Message, MessageContent, MessageResponse } from "@renderer/components/ai-elements/message"
 import {
   Reasoning,
   ReasoningContent,
   ReasoningTrigger,
 } from "@renderer/components/ai-elements/reasoning"
+import {
+  Tool,
+  ToolContent,
+  ToolHeader,
+  ToolInput,
+  ToolOutput,
+} from "@renderer/components/ai-elements/tool"
 
 export function MessageView({
   message,
@@ -25,6 +32,16 @@ export function MessageView({
                 <ReasoningTrigger />
                 <ReasoningContent>{part.text}</ReasoningContent>
               </Reasoning>
+            )
+          if (isToolUIPart(part))
+            return (
+              <Tool key={i}>
+                <ToolHeader type="dynamic-tool" toolName={getToolName(part)} state={part.state} />
+                <ToolContent>
+                  <ToolInput input={part.input} />
+                  <ToolOutput output={part.output} errorText={part.errorText} />
+                </ToolContent>
+              </Tool>
             )
           return null
         })}

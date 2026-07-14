@@ -42,6 +42,7 @@
     "next-themes": "^0.4.6",
     "radix-ui": "^1.6.2",
     "react-resizable-panels": "^2.1.9",
+    "shiki": "^3.23.0",
     "streamdown": "^2.5.0",
     "tailwind-merge": "^3.6.0",
     "tw-shimmer": "^0.4.11",

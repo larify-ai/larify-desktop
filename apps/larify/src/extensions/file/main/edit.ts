@@ -14,7 +14,7 @@ const inputSchema = z.object({
 })
 
 export const editFileTool: Tool = {
-  name: "edit_file",
+  name: "edit",
   description: "Replace exact text in a file.",
   metadata: { icon: "edit" },
   inputSchema,
@@ -29,10 +29,10 @@ export const editFileTool: Tool = {
       const fileState = fileStateFor(ctx.sessionId)
       const readAt = fileState.get(file_path)
       if (readAt === undefined) {
-        throw new Error(`You must read ${file_path} before editing it.`)
+        throw new Error("Read the file before editing it.")
       }
       if (Math.floor((await stat(file_path)).mtimeMs) > readAt) {
-        throw new Error(`${file_path} was modified since you read it. Read it again before editing.`)
+        throw new Error("The file was modified since you read it. Read it again before editing.")
       }
 
       const buffer = await readFile(file_path)

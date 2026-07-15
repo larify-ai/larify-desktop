@@ -3,6 +3,7 @@ import { detect } from "chardet"
 import iconv from "iconv-lite"
 import { z } from "zod"
 import type { Tool } from "../../../shared/tool"
+import { splitLines } from "../../../main/utils/text"
 import { fileStateFor } from "./state"
 
 const inputSchema = z.object({
@@ -12,7 +13,7 @@ const inputSchema = z.object({
 })
 
 export const readFileTool: Tool = {
-  name: "read_file",
+  name: "read",
   description: "Read a text file.",
   metadata: { icon: "read" },
   inputSchema,
@@ -23,7 +24,7 @@ export const readFileTool: Tool = {
     const buffer = await readFile(file_path)
     fileStateFor(ctx.sessionId).set(file_path, Math.floor(stats.mtimeMs))
 
-    const lines = iconv.decode(buffer, detect(buffer) ?? "utf-8").split(/\r?\n/)
+    const lines = splitLines(iconv.decode(buffer, detect(buffer) ?? "utf-8"))
     const start = Math.max(1, offset)
     const end = Math.min(lines.length, start + limit - 1)
 

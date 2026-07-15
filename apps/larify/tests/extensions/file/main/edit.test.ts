@@ -21,7 +21,7 @@ function run(args: Record<string, unknown>): Promise<string> {
 beforeEach(() => fileStateFor("test").delete(filePath))
 afterAll(() => rmSync(filePath, { force: true }))
 
-describe("edit_file", () => {
+describe("edit", () => {
   it("replaces a unique match", async () => {
     write("hello world")
     await run({ old_string: "world", new_string: "there" })
@@ -30,7 +30,7 @@ describe("edit_file", () => {
 
   it("throws if the file was not read first", async () => {
     write("hello", false)
-    await expect(run({ old_string: "hello", new_string: "hi" })).rejects.toThrow("must read")
+    await expect(run({ old_string: "hello", new_string: "hi" })).rejects.toThrow("Read the file before editing it.")
   })
 
   it("throws if old_string is not found", async () => {

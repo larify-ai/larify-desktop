@@ -2,6 +2,7 @@ import type { z } from "zod"
 
 export interface ToolContext {
   sessionId: string
+  cwd?: string
 }
 
 export interface ToolResult {

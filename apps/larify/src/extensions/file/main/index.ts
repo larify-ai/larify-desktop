@@ -2,12 +2,15 @@ import type { Extension } from "kernel"
 import type { Toolkit } from "../../../shared/tool"
 import { readFileTool } from "./read"
 import { editFileTool } from "./edit"
+import { globFilesTool } from "./glob"
+import { grepFilesTool } from "./grep"
+import { lsTool } from "./ls"
 import { writeFileTool } from "./write"
 
 const fileKit: Toolkit = {
   name: "filesystem",
-  description: "Read, write files",
-  tools: [readFileTool, editFileTool, writeFileTool],
+  description: "Read, write, list, glob, and grep files",
+  tools: [readFileTool, editFileTool, writeFileTool, lsTool, globFilesTool, grepFilesTool],
 }
 
 const extension: Extension = {

@@ -15,7 +15,7 @@ function run(args: Record<string, unknown>): Promise<string> {
   return readFileTool.execute(readFileTool.inputSchema.parse(args), { sessionId: "test" }) as Promise<string>
 }
 
-describe("read_file", () => {
+describe("read", () => {
   it("reads the whole file", async () => {
     expect(await run({ file_path: filePath })).toBe(content)
   })

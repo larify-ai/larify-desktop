@@ -231,17 +231,17 @@ html {
 }
 
 .larify-message-markdown [data-streamdown="code-block-header"]:has(> span:empty) {
-  display: none;
+  display: flex;
 }
 
 .larify-message-markdown [data-streamdown="code-block"] > div:has(> [data-streamdown="code-block-actions"]) {
-  position: absolute;
+  position: sticky;
   top: 0.5rem;
-  right: 0.75rem;
   z-index: 10;
-  width: auto;
-  height: auto;
-  margin-top: 0;
+  display: flex;
+  height: 2rem;
+  justify-content: flex-end;
+  margin-top: -2.5rem;
   pointer-events: auto;
 }
 
@@ -250,8 +250,38 @@ html {
   pointer-events: auto;
 }
 
+.larify-message-markdown [data-streamdown="code-block-actions"] {
+  display: flex;
+  flex-direction: row-reverse;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.larify-message-markdown [data-streamdown="code-block-actions"] button {
+  width: auto;
+  height: auto;
+  min-width: 0;
+  min-height: 0;
+  padding: 0.25rem;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.larify-message-markdown [data-streamdown="code-block-actions"] button svg {
+  width: 0.875rem;
+  height: 0.875rem;
+}
+
 .larify-message-markdown
   [data-streamdown="code-block"]:has([data-streamdown="code-block-header"] > span:empty)
   [data-streamdown="code-block-body"] {
-  margin-top: 2.5rem;
+  margin-top: 0;
 }

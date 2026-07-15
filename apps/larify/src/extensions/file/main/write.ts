@@ -13,7 +13,7 @@ const inputSchema = z.object({
 })
 
 export const writeFileTool: Tool = {
-  name: "write_file",
+  name: "write",
   description: "Create or overwrite a text file.",
   metadata: { icon: "edit" },
   inputSchema,
@@ -29,10 +29,10 @@ export const writeFileTool: Tool = {
         const readAt = fileState.get(file_path)
         const stats = await stat(file_path)
         if (readAt === undefined) {
-          throw new Error(`You must read ${file_path} before overwriting it.`)
+          throw new Error("Read the file before overwriting it.")
         }
         if (Math.floor(stats.mtimeMs) > readAt) {
-          throw new Error(`${file_path} was modified since you read it. Read it again before writing.`)
+          throw new Error("The file was modified since you read it. Read it again before writing.")
         }
 
         const buffer = await readFile(file_path)

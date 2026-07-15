@@ -24,7 +24,7 @@ beforeEach(() => {
 
 afterAll(() => rmSync(filePath, { force: true }))
 
-describe("write_file", () => {
+describe("write", () => {
   it("creates a new file", async () => {
     const result = await run({ content: "hello" })
     expect(readFileSync(filePath, "utf8")).toBe("hello")
@@ -37,7 +37,7 @@ describe("write_file", () => {
 
   it("throws if an existing file was not read first", async () => {
     writeFileSync(filePath, "old")
-    await expect(run({ content: "new" })).rejects.toThrow("must read")
+    await expect(run({ content: "new" })).rejects.toThrow("Read the file before overwriting it.")
     expect(readFileSync(filePath, "utf8")).toBe("old")
   })
 

@@ -1,0 +1,42 @@
+import { readdir, stat } from "node:fs/promises"
+import path from "node:path"
+import { z } from "zod"
+import type { Tool } from "../../../shared/tool"
+
+const inputSchema = z.object({
+  path: z.string().optional().describe("The directory to list. If omitted, the session working directory is used."),
+  limit: z.number().int().positive().default(200).describe("Maximum number of items to return"),
+  offset: z.number().int().nonnegative().default(0).describe("Skip the first N items"),
+})
+
+interface Item {
+  name: string
+  isDirectory: boolean
+}
+
+const formatItem = (item: Item): string => item.name + (item.isDirectory ? "/" : "")
+
+export const lsTool: Tool = {
+  name: "ls",
+  description: "List directory contents.",
+  metadata: { icon: "read" },
+  inputSchema,
+  execute: async (args, ctx) => {
+    const { path: targetPath, limit, offset } = inputSchema.parse(args)
+    const root = path.resolve(targetPath ?? ctx.cwd ?? process.cwd())
+    const rootStats = await stat(root)
+    if (!rootStats.isDirectory()) throw new Error(`Path is not a directory: ${root}`)
+
+    const entries = await readdir(root, { withFileTypes: true })
+    const items = entries.map((entry) => ({ name: entry.name, isDirectory: entry.isDirectory() }))
+
+    const end = Math.min(items.length, offset + limit)
+    const page = items.slice(offset, end).map(formatItem)
+
+    if (page.length === 0) return "No items found."
+    let output = page.join("\n")
+    if (offset > 0) output = `(Items 1-${offset} omitted.)\n${output}`
+    if (end < items.length) output += `\n(Items ${end + 1}-${items.length} omitted.)`
+    return output
+  },
+}

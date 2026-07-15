@@ -38,22 +38,12 @@ export class ToolRegistry {
       [...this.tools.values()].flatMap((tool) => {
         const title = tool.metadata?.title
         const icon = tool.metadata?.icon
-        const defaultOpen = tool.metadata?.defaultOpen
-        const hideRawDetails = tool.metadata?.hideRawDetails
-        if (
-          typeof title !== "string" &&
-          typeof icon !== "string" &&
-          typeof defaultOpen !== "boolean" &&
-          typeof hideRawDetails !== "boolean"
-        )
-          return []
+        if (typeof title !== "string" && typeof icon !== "string") return []
         return [[
           tool.name,
           {
             ...(typeof title === "string" && { title }),
             ...(typeof icon === "string" && { icon }),
-            ...(typeof defaultOpen === "boolean" && { defaultOpen }),
-            ...(typeof hideRawDetails === "boolean" && { hideRawDetails }),
           },
         ]]
       }),

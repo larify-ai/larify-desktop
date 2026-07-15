@@ -23,8 +23,6 @@ import { FileDiff, type DiffMeta } from "./file-diff"
 export type ToolDisplayMeta = {
   title?: string
   icon?: string
-  defaultOpen?: boolean
-  hideRawDetails?: boolean
 }
 
 function asDiffMeta(data: unknown): DiffMeta | null {
@@ -139,9 +137,9 @@ export function MessageView({
               if (!display) return null
               const toolMeta = toolMetaById.get(part.toolCallId)
               const toolDisplay = toolDisplays[display.toolName]
-              const showRawToolDetails = Boolean(part.errorText) || !toolDisplay?.hideRawDetails
+              const showRawToolDetails = Boolean(part.errorText) || !toolMeta
               return (
-                <Tool key={i} defaultOpen={toolDisplay?.defaultOpen}>
+                <Tool key={i} defaultOpen={Boolean(toolMeta)}>
                   <ToolHeader
                     type="dynamic-tool"
                     toolName={display.toolName}

@@ -1,0 +1,198 @@
+import { mkdirSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest"
+import type { SessionTerminalsState, TerminalCreateOptions } from "../../../../src/extensions/terminal/main/types"
+
+const workspace = join(tmpdir(), "larify-terminal-service-workspace")
+const existingCwd = join(tmpdir(), "larify-terminal-service-existing")
+const managers: FakeManager[] = []
+const whichSync = vi.fn()
+
+vi.mock("which", () => ({
+  default: {
+    sync: whichSync,
+  },
+}))
+
+vi.mock("../../../../src/main/utils/app-paths", () => ({
+  larifyWorkspacePath: () => {
+    mkdirSync(workspace, { recursive: true })
+    return workspace
+  },
+}))
+
+class FakeManager {
+  readonly sessionId: string
+  create = vi.fn(() => 1)
+  write = vi.fn()
+  resize = vi.fn()
+  close = vi.fn()
+  setActive = vi.fn()
+  snapshot = vi.fn(() => "snapshot")
+  destroy = vi.fn()
+  private changeCallbacks = new Set<(state: SessionTerminalsState) => void>()
+  private dataCallbacks = new Set<(terminalId: number, data: string) => void>()
+  private exitCallbacks = new Set<(terminalId: number, exitCode: number) => void>()
+
+  constructor(sessionId: string) {
+    this.sessionId = sessionId
+    managers.push(this)
+  }
+
+  bindChange(callback: (state: SessionTerminalsState) => void): () => void {
+    this.changeCallbacks.add(callback)
+    return () => this.changeCallbacks.delete(callback)
+  }
+
+  bindData(callback: (terminalId: number, data: string) => void): () => void {
+    this.dataCallbacks.add(callback)
+    return () => this.dataCallbacks.delete(callback)
+  }
+
+  bindExit(callback: (terminalId: number, exitCode: number) => void): () => void {
+    this.exitCallbacks.add(callback)
+    return () => this.exitCallbacks.delete(callback)
+  }
+
+  state(): SessionTerminalsState {
+    return { sessionId: this.sessionId, terminals: [], activeId: null }
+  }
+
+  emitChange(): void {
+    for (const callback of this.changeCallbacks) callback(this.state())
+  }
+
+  emitData(terminalId: number, data: string): void {
+    for (const callback of this.dataCallbacks) callback(terminalId, data)
+  }
+
+  emitExit(terminalId: number, exitCode: number): void {
+    for (const callback of this.exitCallbacks) callback(terminalId, exitCode)
+  }
+}
+
+vi.mock("../../../../src/extensions/terminal/main/terminal-manager", () => ({
+  TerminalManager: FakeManager,
+}))
+
+async function importService() {
+  vi.resetModules()
+  return import("../../../../src/extensions/terminal/main/terminal-service")
+}
+
+beforeEach(() => {
+  managers.length = 0
+  whichSync.mockReset()
+  rmSync(workspace, { force: true, recursive: true })
+  mkdirSync(existingCwd, { recursive: true })
+})
+
+afterAll(() => {
+  rmSync(workspace, { force: true, recursive: true })
+  rmSync(existingCwd, { force: true, recursive: true })
+})
+
+describe("TerminalService", () => {
+  it("resolves default cwd and shell before creating a terminal", async () => {
+    whichSync.mockImplementation((candidate: string) =>
+      candidate === "powershell.exe" ? "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" : null,
+    )
+    const { TerminalService } = await importService()
+    const service = new TerminalService()
+
+    expect(service.create("session-1")).toBe(1)
+
+    expect(managers[0].create).toHaveBeenCalledWith({
+      cwd: workspace,
+      shell: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+      title: undefined,
+    })
+  })
+
+  it("keeps provided shell, title, and existing cwd", async () => {
+    const { TerminalService } = await importService()
+    const service = new TerminalService()
+    const opts: TerminalCreateOptions = { shell: "custom-shell", cwd: existingCwd, title: "Custom" }
+
+    service.create("session-1", opts)
+
+    expect(whichSync).not.toHaveBeenCalled()
+    expect(managers[0].create).toHaveBeenCalledWith({
+      shell: "custom-shell",
+      cwd: existingCwd,
+      title: "Custom",
+    })
+  })
+
+  it("reuses managers per session and forwards operations", async () => {
+    const { TerminalService } = await importService()
+    const service = new TerminalService()
+
+    service.create("session-1", { shell: "sh", cwd: existingCwd })
+    service.write("session-1", 1, "data")
+    service.resize("session-1", 1, 80, 24)
+    service.setActive("session-1", 1)
+    service.close("session-1", 1)
+    expect(service.snapshot("session-1", 1)).toBe("snapshot")
+
+    expect(managers).toHaveLength(1)
+    expect(managers[0].write).toHaveBeenCalledWith(1, "data")
+    expect(managers[0].resize).toHaveBeenCalledWith(1, 80, 24)
+    expect(managers[0].setActive).toHaveBeenCalledWith(1)
+    expect(managers[0].close).toHaveBeenCalledWith(1)
+    expect(managers[0].snapshot).toHaveBeenCalledWith(1)
+  })
+
+  it("forwards manager events with session ids", async () => {
+    const { TerminalService } = await importService()
+    const service = new TerminalService()
+    const onChange = vi.fn()
+    const onData = vi.fn()
+    const onExit = vi.fn()
+    service.bindChange(onChange)
+    service.bindData(onData)
+    service.bindExit(onExit)
+    service.create("session-1", { shell: "sh", cwd: existingCwd })
+
+    managers[0].emitChange()
+    managers[0].emitData(1, "output")
+    managers[0].emitExit(1, 2)
+
+    expect(onChange).toHaveBeenCalledWith({ sessionId: "session-1", terminals: [], activeId: null })
+    expect(onData).toHaveBeenCalledWith("session-1", 1, "output")
+    expect(onExit).toHaveBeenCalledWith("session-1", 1, 2)
+  })
+
+  it("supports multiple data listeners and unbinding", async () => {
+    const { TerminalService } = await importService()
+    const service = new TerminalService()
+    const first = vi.fn()
+    const second = vi.fn()
+    service.bindData(first)
+    const unbindSecond = service.bindData(second)
+    service.create("session-1", { shell: "sh", cwd: existingCwd })
+
+    managers[0].emitData(1, "before")
+    unbindSecond()
+    managers[0].emitData(1, "after")
+
+    expect(first).toHaveBeenCalledTimes(2)
+    expect(second).toHaveBeenCalledTimes(1)
+    expect(second).toHaveBeenCalledWith("session-1", 1, "before")
+  })
+
+  it("destroys one session or all sessions", async () => {
+    const { TerminalService } = await importService()
+    const service = new TerminalService()
+    service.create("session-1", { shell: "sh", cwd: existingCwd })
+    service.create("session-2", { shell: "sh", cwd: existingCwd })
+
+    service.destroySession("session-1")
+    expect(managers[0].destroy).toHaveBeenCalled()
+    expect(managers[1].destroy).not.toHaveBeenCalled()
+
+    service.destroy()
+    expect(managers[1].destroy).toHaveBeenCalled()
+  })
+})

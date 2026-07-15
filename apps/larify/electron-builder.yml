@@ -12,6 +12,7 @@ files:
 asarUnpack:
   - resources/**
   - node_modules/@vscode/ripgrep*/**
+  - node_modules/node-pty/**
 win:
   executableName: larify
 nsis:

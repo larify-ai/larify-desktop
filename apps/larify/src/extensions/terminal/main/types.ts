@@ -1,0 +1,34 @@
+export interface TerminalCreateOptions {
+  cwd?: string
+  shell?: string
+  title?: string
+  cols?: number
+  rows?: number
+}
+
+export interface TerminalState {
+  id: number
+  pid: number
+  title: string
+  cwd: string
+  shell: string
+  exitCode: number | null
+}
+
+export interface SessionTerminalsState {
+  sessionId: string
+  terminals: TerminalState[]
+  activeId: number | null
+}
+
+export interface TerminalDataEvent {
+  sessionId: string
+  terminalId: number
+  data: string
+}
+
+export interface TerminalExitEvent {
+  sessionId: string
+  terminalId: number
+  exitCode: number
+}

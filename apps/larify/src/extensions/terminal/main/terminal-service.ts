@@ -1,0 +1,116 @@
+import { existsSync } from "node:fs"
+import which from "which"
+import { larifyWorkspacePath } from "../../../main/utils/app-paths"
+import { addListener, type Listener } from "../../../main/utils/listener"
+import { TerminalManager } from "./terminal-manager"
+import type { SessionTerminalsState, TerminalCreateOptions } from "./types"
+
+const DEFAULT_WORKSPACE = larifyWorkspacePath()
+
+function shellCandidates(): string[] {
+  if (process.platform === "win32") {
+    return ["pwsh.exe", "powershell.exe", process.env.COMSPEC, "cmd.exe"].filter(Boolean) as string[]
+  }
+  if (process.platform === "darwin") {
+    return [process.env.SHELL, "/bin/zsh", "/bin/bash", "/bin/sh"].filter(Boolean) as string[]
+  }
+  return [process.env.SHELL, "/bin/bash", "/bin/sh"].filter(Boolean) as string[]
+}
+
+function resolveShell(shell?: string): string {
+  if (shell) return shell
+  const candidates = shellCandidates()
+  for (const candidate of candidates) {
+    const found = which.sync(candidate, { nothrow: true })
+    if (found) return found
+  }
+  return candidates[0]
+}
+
+function resolveCwd(cwd?: string): string {
+  if (cwd && existsSync(cwd)) return cwd
+  return DEFAULT_WORKSPACE
+}
+
+export class TerminalService {
+  private managers = new Map<string, TerminalManager>()
+  private changeListeners = new Set<Listener<[SessionTerminalsState]>>()
+  private dataListeners = new Set<Listener<[string, number, string]>>()
+  private exitListeners = new Set<Listener<[string, number, number]>>()
+
+  bindChange(callback: (state: SessionTerminalsState) => void): () => void {
+    return addListener(this.changeListeners, callback)
+  }
+
+  bindData(callback: (sessionId: string, terminalId: number, data: string) => void): () => void {
+    return addListener(this.dataListeners, callback)
+  }
+
+  bindExit(callback: (sessionId: string, terminalId: number, exitCode: number) => void): () => void {
+    return addListener(this.exitListeners, callback)
+  }
+
+  create(sessionId: string, opts?: TerminalCreateOptions): number {
+    const shell = resolveShell(opts?.shell)
+    return this.manager(sessionId).create({
+      ...opts,
+      cwd: resolveCwd(opts?.cwd),
+      shell,
+      title: opts?.title,
+    })
+  }
+
+  write(sessionId: string, terminalId: number, data: string): void {
+    this.manager(sessionId).write(terminalId, data)
+  }
+
+  resize(sessionId: string, terminalId: number, cols: number, rows: number): void {
+    this.manager(sessionId).resize(terminalId, cols, rows)
+  }
+
+  close(sessionId: string, terminalId: number): void {
+    this.manager(sessionId).close(terminalId)
+  }
+
+  setActive(sessionId: string, terminalId: number): void {
+    this.manager(sessionId).setActive(terminalId)
+  }
+
+  snapshot(sessionId: string, terminalId: number): string {
+    return this.manager(sessionId).snapshot(terminalId)
+  }
+
+  state(sessionId: string): SessionTerminalsState {
+    return this.manager(sessionId).state()
+  }
+
+  destroySession(sessionId: string): void {
+    const manager = this.managers.get(sessionId)
+    if (!manager) return
+    manager.destroy()
+    this.managers.delete(sessionId)
+  }
+
+  destroy(): void {
+    for (const manager of this.managers.values()) manager.destroy()
+    this.managers.clear()
+  }
+
+  private manager(sessionId: string): TerminalManager {
+    let manager = this.managers.get(sessionId)
+    if (!manager) {
+      manager = new TerminalManager(sessionId)
+      manager.bindChange((state) => {
+        for (const listener of this.changeListeners) listener(state)
+      })
+      manager.bindData((terminalId, data) => {
+        for (const listener of this.dataListeners) listener(sessionId, terminalId, data)
+      })
+      manager.bindExit((terminalId, exitCode) => {
+        for (const listener of this.exitListeners) listener(sessionId, terminalId, exitCode)
+      })
+      this.managers.set(sessionId, manager)
+    }
+    return manager
+  }
+}

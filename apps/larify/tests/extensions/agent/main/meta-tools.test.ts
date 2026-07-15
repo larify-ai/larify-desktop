@@ -29,63 +29,76 @@ const kit: Toolkit = {
 
 function meta() {
   const tools = buildMetaTools(createToolRegistry([kit]), { sessionId: "test" })
-  return (name: string, input: unknown) => (tools[name].execute as any)(input, {})
+  return (name: string, input: unknown) => {
+    const found = tools[name]
+    if (!found) return undefined
+    return (found.execute as any)(input, {})
+  }
 }
 
-async function drain(iter: AsyncIterable<unknown>): Promise<unknown[]> {
+function isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {
+  return typeof value === "object" && value !== null && Symbol.asyncIterator in value
+}
+
+async function drain(iter: AsyncIterable<unknown> | Promise<unknown>): Promise<unknown[]> {
+  if (!isAsyncIterable(iter)) return [await iter]
   const out: unknown[] = []
   for await (const value of iter) out.push(value)
   return out
 }
 
 const callTool = (name: string, args: unknown, title = "Call tool") =>
-  meta()("call_tool", { title, args: { name, args } })
+  meta()("call_tool", { title, tool_name: name, tool_args: args })
+
+const metaTool = (name: string, input: unknown) =>
+  meta()(name, input) as AsyncIterable<unknown> | Promise<unknown>
 
 describe("list_tools", () => {
   it("lists a toolkit's tools as markdown bullets through call_tool", async () => {
-    const result = await drain(callTool("list_tools", { group: "file" }, "List file tools"))
+    const result = await drain(metaTool("list_tools", { title: "List file tools", toolkit_name: "file" }))
     expect(result).toEqual(["- **read_file** - Read a file\n- **ticker** - Emit ticks"])
   })
 
   it("throws on unknown toolkit", async () => {
-    await expect(drain(callTool("list_tools", { group: "nope" }))).rejects.toThrow(
+    await expect(drain(metaTool("list_tools", { title: "List tools", toolkit_name: "nope" }))).rejects.toThrow(
       'Toolkit "nope" not found',
     )
   })
 
   it("lists agent meta tools separately", async () => {
-    const result = await drain(callTool("list_tools", { group: "agent" }, "List agent tools"))
-    expect(result).toEqual([
-      "- **list_tools** - List tools in a toolkit.\n- **read_tools** - Read tool schemas before invoking them.",
-    ])
+    await expect(drain(metaTool("list_tools", { title: "List agent tools", toolkit_name: "agent" }))).rejects.toThrow(
+      'Toolkit "agent" not found',
+    )
   })
 })
 
 describe("read_tools", () => {
   it("returns the tool schema wrapped as call_tool parameters", async () => {
-    const result = await drain(callTool("read_tools", { names: ["read_file"] }, "Read tool schema"))
+    const result = await drain(metaTool("read_tools", { title: "Read tool schema", tool_names: ["read_file"] }))
     const schemas = JSON.parse(result[0] as string)
-    const schema = schemas.read_file
-    expect(schema.type).toBe("object")
-    expect(schema.required).toEqual(["title", "args"])
-    expect(schema.properties).toHaveProperty("title")
-    expect(schema.properties.args.required).toEqual(["name", "args"])
-    expect(schema.properties.args.properties.name.const).toBe("read_file")
-    expect(schema.properties.args.properties.args.properties).toHaveProperty("path")
+    const schema = schemas[0]
+    expect(schema.name).toBe("call_tool")
+    expect(schema.parameters.type).toBe("object")
+    expect(schema.parameters.required).toEqual(["title", "tool_name", "tool_args"])
+    expect(schema.parameters.properties).toHaveProperty("title")
+    expect(schema.parameters.properties.tool_name.const).toBe("read_file")
+    expect(schema.parameters.properties.tool_args.properties).toHaveProperty("path")
   })
 
   it("throws on unknown tool", async () => {
-    await expect(drain(callTool("read_tools", { names: ["nope"] }))).rejects.toThrow(
+    await expect(drain(metaTool("read_tools", { title: "Read tool", tool_names: ["nope"] }))).rejects.toThrow(
       'Tool "nope" not found',
     )
   })
 
   it("returns multiple tool schemas at once", async () => {
-    const result = await drain(callTool("read_tools", { names: ["read_file", "ticker"] }, "Read tool schemas"))
+    const result = await drain(
+      metaTool("read_tools", { title: "Read tool schemas", tool_names: ["read_file", "ticker"] }),
+    )
     const schemas = JSON.parse(result[0] as string)
-    expect(Object.keys(schemas)).toEqual(["read_file", "ticker"])
-    expect(schemas.read_file.properties.args.properties.name.const).toBe("read_file")
-    expect(schemas.ticker.properties.args.properties.name.const).toBe("ticker")
+    expect(schemas.map((schema: { parameters: { properties: { tool_name: { const: string } } } }) =>
+      schema.parameters.properties.tool_name.const,
+    )).toEqual(["read_file", "ticker"])
   })
 })
 
@@ -112,30 +125,19 @@ describe("call_tool", () => {
 })
 
 describe("eager tools", () => {
-  it("exposes non-lazy tools as top-level shortcuts with call_tool-shaped input", async () => {
-    const out = await drain(
-      meta()("read_file", {
-        title: "Read a file",
-        args: { name: "read_file", args: { path: "a.txt" } },
-      }),
-    )
-    expect(out).toEqual(["content:a.txt"])
+  it("does not expose normal tools as top-level shortcuts", () => {
+    expect(meta()("read_file", { title: "Read a file", tool_args: { path: "a.txt" } })).toBeUndefined()
   })
 })
 
 describe("ToolRegistry", () => {
-  it("exposes meta tools as the agent toolkit", () => {
-    expect(createToolRegistry([kit]).listKits()).toEqual([
-      { name: "agent", description: "List tools and read tool schemas." },
-      { name: "file", description: "File operations" },
-    ])
+  it("lists registered toolkits", () => {
+    expect(createToolRegistry([kit]).listKits()).toEqual([{ name: "file", description: "File operations" }])
   })
 
   it("lists display metadata without exposing executable tool fields", () => {
     expect(createToolRegistry([kit]).listToolDisplays()).toEqual({
-      list_tools: { icon: "search" },
-      read_tools: { icon: "search" },
-      read_file: { title: "Read file", icon: "read", defaultOpen: true, hideRawDetails: true },
+      read_file: { title: "Read file", icon: "read" },
     })
   })
 })
@@ -157,7 +159,8 @@ describe("buildRepairToolCall", () => {
     expect(result).toMatchObject({ toolCallId: "c1", toolName: "call_tool" })
     expect(JSON.parse(result!.input)).toEqual({
       title: "采取行动",
-      args: { name: "read_file", args: { path: "a.txt" } },
+      tool_name: "read_file",
+      tool_args: { path: "a.txt" },
     })
   })
 

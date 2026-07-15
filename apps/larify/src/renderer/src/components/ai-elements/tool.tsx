@@ -37,7 +37,7 @@ export const Tool = ({ className, defaultOpen, open, onOpenChange, ...props }: T
 
   return (
     <Collapsible
-      className={cn("group not-prose mb-4 w-full rounded-md border", className)}
+      className={cn("group not-prose w-full rounded-md border", className)}
       open={open ?? internalOpen}
       onOpenChange={onOpenChange ?? setInternalOpen}
       {...props}

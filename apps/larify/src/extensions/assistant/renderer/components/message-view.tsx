@@ -62,7 +62,12 @@ function unwrapToolDisplay(
   if (toolName === "call_tool") return null
   return {
     toolName,
-    input,
+    input:
+      maybeCallToolInput &&
+      typeof maybeCallToolInput === "object" &&
+      "args" in maybeCallToolInput
+        ? maybeCallToolInput.args
+        : input,
     ...(maybeCallToolInput &&
       typeof maybeCallToolInput === "object" &&
       typeof maybeCallToolInput.title === "string" && { title: maybeCallToolInput.title }),

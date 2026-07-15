@@ -3,8 +3,8 @@ import { convertToModelMessages, type UIMessage } from "ai"
 import type { Extension } from "kernel"
 import type { Toolkit } from "../../../shared/tool"
 import { runAgent } from "./agent"
-import { ToolRegistry } from "./registry"
-import { buildMetaTools, buildRepairToolCall, metaToolDisplays } from "./meta-tools"
+import { createToolRegistry } from "./registry"
+import { buildMetaTools, buildRepairToolCall } from "./meta-tools"
 import { buildSystemPrompt } from "./system-prompt"
 import { createSessionStore } from "./session-store"
 
@@ -20,8 +20,8 @@ const extension: Extension = {
     const sessions = createSessionStore()
 
     ipcMain.handle("agent:tool-displays", () => {
-      const registry = new ToolRegistry(app.getAll<Toolkit>("tool"))
-      return { ...metaToolDisplays, ...registry.listToolDisplays() }
+      const registry = createToolRegistry(app.getAll<Toolkit>("tool"))
+      return registry.listToolDisplays()
     })
 
     ipcMain.handle("agent:session-load", (_event, sessionId: string) => {
@@ -40,7 +40,7 @@ const extension: Extension = {
       const controller = new AbortController()
       controllers.set(runId, controller)
       try {
-        const registry = new ToolRegistry(app.getAll<Toolkit>("tool"))
+        const registry = createToolRegistry(app.getAll<Toolkit>("tool"))
         const modelMessages = await convertToModelMessages(messages)
         const reader = runAgent({
           messages: modelMessages,

@@ -14,7 +14,7 @@ const inputSchema = z.object({
 export const readFileTool: Tool = {
   name: "read_file",
   description: "Read a text file.",
-  metadata: { icon: "read" },
+  metadata: { icon: "read", lazy: false },
   inputSchema,
   execute: async (args, ctx) => {
     const { file_path, offset, limit } = args as z.infer<typeof inputSchema>

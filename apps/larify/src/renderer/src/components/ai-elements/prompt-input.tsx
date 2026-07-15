@@ -181,6 +181,7 @@ const captureScreenshot = async (): Promise<File | null> => {
 export interface AttachmentsContext {
   files: (FileUIPart & { id: string })[];
   add: (files: File[] | FileList) => void;
+  addParts: (files: (FileUIPart & { id: string })[]) => void;
   remove: (id: string) => void;
   clear: () => void;
   openFileDialog: () => void;
@@ -237,6 +238,38 @@ export const useProviderAttachments = () => {
 const useOptionalProviderAttachments = () =>
   useContext(ProviderAttachmentsContext);
 
+const getFilePath = (file: File): string => {
+  try {
+    return window.bridge.getPathForFile(file);
+  } catch {
+    return "";
+  }
+};
+
+const isDirectoryPath = (path: string): boolean => {
+  try {
+    return window.bridge.isDirectoryPath(path);
+  } catch {
+    return false;
+  }
+};
+
+const createFilePart = (file: File): FileUIPart & { id: string } => {
+  const path = getFilePath(file);
+  const isDirectory = path ? isDirectoryPath(path) : false;
+  return {
+    filename: file.name,
+    id: nanoid(),
+    mediaType: isDirectory ? "inode/directory" : file.type || "application/octet-stream",
+    type: "file",
+    url: path || URL.createObjectURL(file),
+  };
+};
+
+const revokeAttachmentUrl = (url?: string): void => {
+  if (url?.startsWith("blob:")) URL.revokeObjectURL(url);
+};
+
 export type PromptInputProviderProps = PropsWithChildren<{
   initialInput?: string;
 }>;
@@ -269,22 +302,18 @@ export const PromptInputProvider = ({
 
     setAttachmentFiles((prev) => [
       ...prev,
-      ...incoming.map((file) => ({
-        filename: file.name,
-        id: nanoid(),
-        mediaType: file.type,
-        type: "file" as const,
-        url: URL.createObjectURL(file),
-      })),
+      ...incoming.map(createFilePart),
     ]);
+  }, []);
+
+  const addParts = useCallback((files: (FileUIPart & { id: string })[]) => {
+    setAttachmentFiles((prev) => [...prev, ...files]);
   }, []);
 
   const remove = useCallback((id: string) => {
     setAttachmentFiles((prev) => {
       const found = prev.find((f) => f.id === id);
-      if (found?.url) {
-        URL.revokeObjectURL(found.url);
-      }
+      revokeAttachmentUrl(found?.url);
       return prev.filter((f) => f.id !== id);
     });
   }, []);
@@ -292,9 +321,7 @@ export const PromptInputProvider = ({
   const clear = useCallback(() => {
     setAttachmentFiles((prev) => {
       for (const f of prev) {
-        if (f.url) {
-          URL.revokeObjectURL(f.url);
-        }
+        revokeAttachmentUrl(f.url);
       }
       return [];
     });
@@ -311,9 +338,7 @@ export const PromptInputProvider = ({
   useEffect(
     () => () => {
       for (const f of attachmentsRef.current) {
-        if (f.url) {
-          URL.revokeObjectURL(f.url);
-        }
+        revokeAttachmentUrl(f.url);
       }
     },
     []
@@ -326,13 +351,14 @@ export const PromptInputProvider = ({
   const attachments = useMemo<AttachmentsContext>(
     () => ({
       add,
+      addParts,
       clear,
       fileInputRef,
       files: attachmentFiles,
       openFileDialog,
       remove,
     }),
-    [attachmentFiles, add, remove, clear, openFileDialog]
+    [attachmentFiles, add, addParts, remove, clear, openFileDialog]
   );
 
   const __registerFileInput = useCallback(
@@ -613,13 +639,7 @@ export const PromptInput = ({
         }
         const next: (FileUIPart & { id: string })[] = [];
         for (const file of capped) {
-          next.push({
-            filename: file.name,
-            id: nanoid(),
-            mediaType: file.type,
-            type: "file",
-            url: URL.createObjectURL(file),
-          });
+          next.push(createFilePart(file));
         }
         return [...prev, ...next];
       });
@@ -631,9 +651,7 @@ export const PromptInput = ({
     (id: string) =>
       setItems((prev) => {
         const found = prev.find((file) => file.id === id);
-        if (found?.url) {
-          URL.revokeObjectURL(found.url);
-        }
+        revokeAttachmentUrl(found?.url);
         return prev.filter((file) => file.id !== id);
       }),
     []
@@ -689,9 +707,7 @@ export const PromptInput = ({
         ? controller?.attachments.clear()
         : setItems((prev) => {
             for (const file of prev) {
-              if (file.url) {
-                URL.revokeObjectURL(file.url);
-              }
+              revokeAttachmentUrl(file.url);
             }
             return [];
           }),
@@ -705,6 +721,13 @@ export const PromptInput = ({
 
   const add = usingProvider ? addWithProviderValidation : addLocal;
   const remove = usingProvider ? controller.attachments.remove : removeLocal;
+  const addPartsLocal = useCallback((files: (FileUIPart & { id: string })[]) => {
+    setItems((prev) => [...prev, ...files]);
+  }, []);
+
+  const addParts = usingProvider
+    ? controller.attachments.addParts
+    : addPartsLocal;
   const openFileDialog = usingProvider
     ? controller.attachments.openFileDialog
     : openFileDialogLocal;
@@ -780,11 +803,11 @@ export const PromptInput = ({
         add(e.dataTransfer.files);
       }
     };
-    document.addEventListener("dragover", onDragOver);
-    document.addEventListener("drop", onDrop);
+    document.addEventListener("dragover", onDragOver, { capture: true });
+    document.addEventListener("drop", onDrop, { capture: true });
     return () => {
-      document.removeEventListener("dragover", onDragOver);
-      document.removeEventListener("drop", onDrop);
+      document.removeEventListener("dragover", onDragOver, { capture: true });
+      document.removeEventListener("drop", onDrop, { capture: true });
     };
   }, [add, globalDrop]);
 
@@ -792,9 +815,7 @@ export const PromptInput = ({
     () => () => {
       if (!usingProvider) {
         for (const f of filesRef.current) {
-          if (f.url) {
-            URL.revokeObjectURL(f.url);
-          }
+          revokeAttachmentUrl(f.url);
         }
       }
     },
@@ -815,13 +836,14 @@ export const PromptInput = ({
   const attachmentsCtx = useMemo<AttachmentsContext>(
     () => ({
       add,
+      addParts,
       clear: clearAttachments,
       fileInputRef: inputRef,
       files: files.map((item) => ({ ...item, id: item.id })),
       openFileDialog,
       remove,
     }),
-    [files, add, remove, clearAttachments, openFileDialog]
+    [files, add, addParts, remove, clearAttachments, openFileDialog]
   );
 
   const refsCtx = useMemo<ReferencedSourcesContext>(

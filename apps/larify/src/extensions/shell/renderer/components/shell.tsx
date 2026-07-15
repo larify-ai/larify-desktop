@@ -30,7 +30,8 @@ const labels = {
 }
 
 const sidebarItemClass =
-  "mx-auto size-10 justify-center px-0 py-0 [&>svg]:size-6!"
+  "grid size-10 place-items-center gap-0 p-0 text-center [&>svg]:size-6! [&>svg]:shrink-0"
+const sidebarMenuClass = "w-full items-center gap-2 px-1"
 
 export function Shell({ app }: { app: App }): React.JSX.Element {
   return (
@@ -58,9 +59,9 @@ function ShellBody({ app }: { app: App }): React.JSX.Element {
         className="min-h-0 flex-1"
         style={{ "--sidebar-width": "3rem" } as CSSProperties}
       >
-        <Sidebar collapsible="none" className="border-r border-border-strong">
+        <Sidebar collapsible="none" className="shadow-[inset_-1px_0_0_var(--color-border-strong)]">
           <SidebarContent className="items-center gap-0 overflow-x-hidden pt-2">
-            <SidebarMenu className="items-center gap-2 px-1">
+            <SidebarMenu className={sidebarMenuClass}>
               <SidebarMenuItem>
                 <SidebarMenuButton
                   aria-label={labels.newTask}
@@ -73,8 +74,8 @@ function ShellBody({ app }: { app: App }): React.JSX.Element {
               </SidebarMenuItem>
             </SidebarMenu>
           </SidebarContent>
-          <SidebarFooter className="items-center px-1">
-            <SidebarMenu>
+          <SidebarFooter className="items-center px-0">
+            <SidebarMenu className={sidebarMenuClass}>
               <SidebarMenuItem>
                 <SidebarMenuButton
                   aria-label="账户"

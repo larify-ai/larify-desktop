@@ -1,4 +1,4 @@
-import { app, screen, shell, ipcMain, nativeTheme, BrowserWindow } from "electron"
+import { app, screen, shell, ipcMain, nativeTheme, BrowserWindow, dialog } from "electron"
 import { join } from "path"
 import { is } from "@electron-toolkit/utils"
 import type { Extension } from "kernel"
@@ -62,10 +62,18 @@ const extension: Extension = {
         height: 40,
       })
     })
+    ipcMain.handle("dialog:pick-directories", async (event) => {
+      const owner = BrowserWindow.fromWebContents(event.sender) ?? win
+      const result = await dialog.showOpenDialog(owner, {
+        properties: ["openDirectory", "multiSelections"],
+      })
+      return result.canceled ? [] : result.filePaths
+    })
     context.subscriptions.push({
       dispose: () => {
         ipcMain.removeHandler("theme:set")
         ipcMain.removeHandler("titlebar:set-symbol")
+        ipcMain.removeHandler("dialog:pick-directories")
       },
     })
 

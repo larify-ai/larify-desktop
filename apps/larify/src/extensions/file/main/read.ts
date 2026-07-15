@@ -8,13 +8,13 @@ import { fileStateFor } from "./state"
 const inputSchema = z.object({
   file_path: z.string().describe("Absolute path to the file"),
   offset: z.number().int().positive().default(1).describe("Start line (1-based)"),
-  limit: z.number().int().positive().default(500).describe("Number of lines to read"),
+  limit: z.number().int().positive().default(2000).describe("Number of lines to read"),
 })
 
 export const readFileTool: Tool = {
   name: "read_file",
   description: "Read a text file.",
-  metadata: { icon: "read", lazy: false },
+  metadata: { icon: "read" },
   inputSchema,
   execute: async (args, ctx) => {
     const { file_path, offset, limit } = args as z.infer<typeof inputSchema>

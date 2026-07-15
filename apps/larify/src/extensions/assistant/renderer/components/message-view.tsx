@@ -1,5 +1,11 @@
-import { getToolName, isToolUIPart, type UIMessage } from "ai"
+import { getToolName, isFileUIPart, isToolUIPart, type FileUIPart, type UIMessage } from "ai"
 import { Message, MessageContent, MessageResponse } from "@renderer/components/ai-elements/message"
+import {
+  Attachment,
+  AttachmentInfo,
+  AttachmentPreview,
+  Attachments,
+} from "@renderer/components/ai-elements/attachments"
 import {
   Reasoning,
   ReasoningContent,
@@ -27,39 +33,36 @@ function asDiffMeta(data: unknown): DiffMeta | null {
     : null
 }
 
-function asToolInvocationArgs(value: unknown): { name: string; args: unknown } | null {
-  if (!value || typeof value !== "object") return null
-  const candidate = value as { name?: unknown; args?: unknown }
-  return typeof candidate.name === "string" && "args" in candidate
-    ? { name: candidate.name, args: candidate.args }
-    : null
-}
-
 function unwrapToolDisplay(
   toolName: string,
   input: unknown,
 ): { toolName: string; input: unknown; title?: string } | null {
   const maybeCallToolInput = input as {
     title?: unknown
-    args?: {
-      name?: unknown
-      args?: unknown
-    }
+    tool_name?: unknown
+    tool_args?: unknown
   } | null
-  const maybeInnerArgs = asToolInvocationArgs(maybeCallToolInput?.args)
   if (
     toolName === "call_tool" &&
     maybeCallToolInput &&
     typeof maybeCallToolInput === "object" &&
-    maybeInnerArgs
+    typeof maybeCallToolInput.tool_name === "string"
   ) {
     return {
-      toolName: maybeInnerArgs.name,
-      input: maybeInnerArgs.args,
+      toolName: maybeCallToolInput.tool_name,
+      input: maybeCallToolInput.tool_args,
       ...(typeof maybeCallToolInput.title === "string" && { title: maybeCallToolInput.title }),
     }
   }
-  if (toolName === "call_tool") return null
+  if (toolName === "call_tool") {
+    return {
+      toolName,
+      input,
+      ...(maybeCallToolInput &&
+        typeof maybeCallToolInput === "object" &&
+        typeof maybeCallToolInput.title === "string" && { title: maybeCallToolInput.title }),
+    }
+  }
   return {
     toolName,
     input:
@@ -74,6 +77,25 @@ function unwrapToolDisplay(
   }
 }
 
+function FileGroup({
+  files,
+  messageId,
+}: {
+  files: FileUIPart[]
+  messageId: string
+}): React.JSX.Element {
+  return (
+    <Attachments variant="inline" className="group-[.is-user]:ml-auto group-[.is-user]:justify-end">
+      {files.map((file, index) => (
+        <Attachment data={{ ...file, id: `${messageId}-${index}` }} key={`${messageId}-${index}`}>
+          <AttachmentPreview />
+          <AttachmentInfo />
+        </Attachment>
+      ))}
+    </Attachments>
+  )
+}
+
 export function MessageView({
   message,
   streaming = false,
@@ -84,6 +106,7 @@ export function MessageView({
   toolDisplays?: Record<string, ToolDisplayMeta>
 }): React.JSX.Element {
   const hasText = message.parts.some((p) => p.type === "text")
+  const files = message.parts.filter(isFileUIPart)
   const toolMetaById = new Map<string, DiffMeta>()
 
   for (const part of message.parts) {
@@ -97,8 +120,10 @@ export function MessageView({
 
   return (
     <Message from={message.role}>
+      {files.length > 0 ? <FileGroup files={files} messageId={message.id} /> : null}
       <MessageContent className="select-text">
         {message.parts.map((part, i) => {
+          if (isFileUIPart(part)) return null
           if (part.type === "text") return <MessageResponse key={i}>{part.text}</MessageResponse>
           if (part.type === "reasoning")
             return (

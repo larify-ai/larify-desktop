@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
-import { ArrowUpIcon, PlusIcon, SquareIcon } from "lucide-react"
+import { ArrowUpIcon, FolderIcon, PlusIcon, SquareIcon } from "lucide-react"
 import { Chat, useChat } from "@ai-sdk/react"
-import type { UIMessage } from "ai"
+import type { FileUIPart, UIMessage } from "ai"
 import { formatDistanceToNow } from "date-fns"
 import { zhCN } from "date-fns/locale"
 import {
@@ -18,21 +18,44 @@ import {
   PromptInputActionMenuTrigger,
   PromptInputBody,
   PromptInputFooter,
+  PromptInputHeader,
   PromptInputSubmit,
   PromptInputTextarea,
   PromptInputTools,
   type PromptInputMessage,
+  usePromptInputAttachments,
 } from "@renderer/components/ai-elements/prompt-input"
+import {
+  Attachment,
+  AttachmentInfo,
+  AttachmentPreview,
+  AttachmentRemove,
+  Attachments,
+} from "@renderer/components/ai-elements/attachments"
 import { Spinner } from "@renderer/components/ui/spinner"
 import { MessageView } from "./message-view"
 import { ipcTransport } from "../lib/transport"
 import type { ToolDisplayMeta } from "./message-view"
 
+type LocalAttachment = FileUIPart & { id: string }
+
+const getPathFilename = (path: string): string => {
+  return path.split(/[\\/]/).filter(Boolean).at(-1) ?? path
+}
+
+const createDirectoryAttachment = (path: string): LocalAttachment => ({
+  filename: getPathFilename(path),
+  id: crypto.randomUUID(),
+  mediaType: "inode/directory",
+  type: "file",
+  url: path,
+})
+
 const labels = {
   placeholder: "描述任务...",
-  add: "添加",
+  add: "添加附件",
   addAttachment: "附件",
-  history: "历史",
+  history: "历史任务",
   noTasks: "暂无任务",
   unnamedTask: "未命名任务",
 }
@@ -147,6 +170,54 @@ export function AssistantPanel(): React.JSX.Element {
   )
 }
 
+function AttachmentPreviewBar({
+  onCountChange,
+}: {
+  onCountChange: (count: number) => void
+}): React.JSX.Element | null {
+  const { files, remove } = usePromptInputAttachments()
+
+  useEffect(() => {
+    onCountChange(files.length)
+  }, [files.length, onCountChange])
+
+  if (files.length === 0) return null
+  return (
+    <PromptInputHeader className="w-full px-3 pt-3 pb-0">
+      <Attachments variant="inline" className="ml-0 w-full">
+        {files.map((file) => (
+          <Attachment data={file} key={file.id} onRemove={() => remove(file.id)}>
+            <AttachmentPreview />
+            <AttachmentInfo />
+            <AttachmentRemove />
+          </Attachment>
+        ))}
+      </Attachments>
+    </PromptInputHeader>
+  )
+}
+
+function DirectoryAttachmentMenuItem(): React.JSX.Element {
+  const attachments = usePromptInputAttachments()
+
+  const pickDirectories = async (): Promise<void> => {
+    const paths = await window.bridge.invoke("dialog:pick-directories")
+    if (!Array.isArray(paths)) return
+    attachments.addParts(
+      paths
+        .filter((path): path is string => typeof path === "string" && path.length > 0)
+        .map(createDirectoryAttachment),
+    )
+  }
+
+  return (
+    <PromptInputActionMenuItem className="gap-2" onSelect={() => void pickDirectories()}>
+      <FolderIcon className="size-4" />
+      目录
+    </PromptInputActionMenuItem>
+  )
+}
+
 function AssistantChat({
   chat,
   sessions,
@@ -165,8 +236,9 @@ function AssistantChat({
   })
   const [actionMenuOpen, setActionMenuOpen] = useState(false)
   const [inputText, setInputText] = useState("")
+  const [attachmentCount, setAttachmentCount] = useState(0)
   const isLive = status === "streaming" || status === "submitted"
-  const canSubmit = inputText.trim().length > 0 || isLive
+  const canSubmit = inputText.trim().length > 0 || attachmentCount > 0 || isLive
 
   const refreshToolDisplays = async (): Promise<void> => {
     try {
@@ -183,9 +255,10 @@ function AssistantChat({
 
   const handleSubmit = (message: PromptInputMessage): void => {
     const text = message.text.trim()
-    if (text) {
+    const files = message.files
+    if (text || files.length > 0) {
       setInputText("")
-      void refreshToolDisplays().finally(() => void sendMessage({ text }))
+      void refreshToolDisplays().finally(() => void sendMessage({ text, files }))
     }
   }
 
@@ -221,7 +294,9 @@ function AssistantChat({
       <PromptInput
         onSubmit={handleSubmit}
         className="[&_[data-slot=input-group]]:rounded-2xl"
+        multiple
       >
+        <AttachmentPreviewBar onCountChange={setAttachmentCount} />
         <PromptInputBody>
           <PromptInputTextarea
             placeholder={labels.placeholder}
@@ -252,7 +327,8 @@ function AssistantChat({
                 <div className="px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground">
                   {labels.add}
                 </div>
-                <PromptInputActionAddAttachments label={labels.addAttachment} />
+                <PromptInputActionAddAttachments label="文件" />
+                <DirectoryAttachmentMenuItem />
                 <div className="px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground">
                   {labels.history}
                 </div>

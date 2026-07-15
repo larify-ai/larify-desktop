@@ -1,4 +1,5 @@
 import {
+  asSchema,
   tool,
   NoSuchToolError,
   type ToolSet,
@@ -26,7 +27,11 @@ export function buildRepairToolCall(registry: ToolRegistry): ToolCallRepairFunct
     return {
       ...toolCall,
       toolName: "call_tool",
-      input: JSON.stringify({ title: "采取行动", args: { name: toolCall.toolName, args } }),
+      input: JSON.stringify({
+        title: "采取行动",
+        tool_name: toolCall.toolName,
+        tool_args: args,
+      }),
     }
   }
 }
@@ -68,30 +73,48 @@ export function buildMetaTools(
   writer?: UIMessageStreamWriter,
 ): ToolSet {
   const tools: ToolSet = {
-    call_tool: tool({
-      description: "Invoke a tool with args matching its schema.",
+    list_tools: tool({
+      description: "List tools in a toolkit.",
       inputSchema: z.object({
-        title: z.string().min(1).describe("Short user-facing phrase describing the specific step"),
-        args: z.object({
-          name: z.string().describe("The tool name"),
-          args: z.unknown().describe("Arguments matching the tool's schema"),
-        }),
+        title: z.string().min(1).describe("Short user-facing phrase describing the step"),
+        toolkit_name: z.string().describe("The toolkit name"),
       }),
-      execute: async function* ({ args: toolInput }, { toolCallId }) {
-        const { name, args } = toolInput
-        yield* invokeTool(registry, ctx, name, args, writer, toolCallId)
+      execute: async ({ toolkit_name }) => {
+        const tools = registry.listTools(toolkit_name)
+        if (!tools) throw new Error(`Toolkit "${toolkit_name}" not found`)
+        return tools.map((tool) => `- **${tool.name}** - ${tool.description}`).join("\n")
       },
     }),
-  }
-  for (const found of registry.listEagerTools()) {
-    tools[found.name] = tool({
-      description: found.description,
-      inputSchema: callToolInvocationSchema(found),
-      execute: async function* ({ args: toolInput }, { toolCallId }) {
-        const { name, args } = toolInput
-        yield* invokeTool(registry, ctx, name, args, writer, toolCallId)
+    read_tools: tool({
+      description: "Read tool schemas before invoking them with call_tool wrapper.",
+      inputSchema: z.object({
+        title: z.string().min(1).describe("Short user-facing phrase describing the step"),
+        tool_names: z.array(z.string()).min(1).describe("The tool names"),
+      }),
+      execute: async ({ tool_names }) => {
+        const definitions = tool_names.map((name) => {
+          const found = registry.get(name)
+          if (!found) throw new Error(`Tool "${name}" not found`)
+          return {
+            name: "call_tool",
+            description: `Invoke ${found.name} with args matching its schema.`,
+            parameters: asSchema(callToolInvocationSchema(found)).jsonSchema,
+          }
+        })
+        return JSON.stringify(definitions)
       },
-    })
+    }),
+    call_tool: tool({
+      description: "Invoke a tool with args matching its schema with call_tool wrapper.",
+      inputSchema: z.object({
+        title: z.string().min(1).describe("Short user-facing phrase describing the step"),
+        tool_name: z.string().describe("The tool name"),
+        tool_args: z.unknown().describe("Arguments matching the tool's schema"),
+      }),
+      execute: async function* ({ tool_name, tool_args }, { toolCallId }) {
+        yield* invokeTool(registry, ctx, tool_name, tool_args, writer, toolCallId)
+      },
+    }),
   }
   return tools
 }

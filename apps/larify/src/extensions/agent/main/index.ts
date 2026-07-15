@@ -8,10 +8,37 @@ import { buildMetaTools, buildRepairToolCall } from "./meta-tools"
 import { buildSystemPrompt } from "./system-prompt"
 import { createSessionStore } from "./session-store"
 
+const metaToolDisplays = {
+  list_tools: { title: "搜索工具", icon: "search" },
+  read_tools: { title: "读取工具", icon: "search" },
+  call_tool: { title: "调用工具", icon: "other" },
+}
+
 interface RunRequest {
   runId: string
   sessionId: string
   messages: UIMessage[]
+}
+
+function prepareMessagesForModel(messages: UIMessage[]): UIMessage[] {
+  return messages.map((message) => {
+    if (message.role !== "user") return message
+
+    const files = message.parts.filter((part) => part.type === "file")
+    const paths = files.map((file) => file.url).filter(Boolean)
+    if (paths.length === 0) return message
+
+    return {
+      ...message,
+      parts: [
+        {
+          type: "text" as const,
+          text: `Attached paths:\n${paths.map((path) => `- ${path}`).join("\n")}\n\n`,
+        },
+        ...message.parts.filter((part) => part.type !== "file"),
+      ],
+    }
+  })
 }
 
 const extension: Extension = {
@@ -21,7 +48,7 @@ const extension: Extension = {
 
     ipcMain.handle("agent:tool-displays", () => {
       const registry = createToolRegistry(app.getAll<Toolkit>("tool"))
-      return registry.listToolDisplays()
+      return { ...metaToolDisplays, ...registry.listToolDisplays() }
     })
 
     ipcMain.handle("agent:session-load", (_event, sessionId: string) => {
@@ -41,7 +68,7 @@ const extension: Extension = {
       controllers.set(runId, controller)
       try {
         const registry = createToolRegistry(app.getAll<Toolkit>("tool"))
-        const modelMessages = await convertToModelMessages(messages)
+        const modelMessages = await convertToModelMessages(prepareMessagesForModel(messages))
         const reader = runAgent({
           messages: modelMessages,
           buildTools: (writer) => buildMetaTools(registry, { sessionId }, writer),

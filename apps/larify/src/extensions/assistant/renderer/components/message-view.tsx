@@ -27,25 +27,46 @@ function asDiffMeta(data: unknown): DiffMeta | null {
     : null
 }
 
+function asToolInvocationArgs(value: unknown): { name: string; args: unknown } | null {
+  if (!value || typeof value !== "object") return null
+  const candidate = value as { name?: unknown; args?: unknown }
+  return typeof candidate.name === "string" && "args" in candidate
+    ? { name: candidate.name, args: candidate.args }
+    : null
+}
+
 function unwrapToolDisplay(
   toolName: string,
   input: unknown,
-): { toolName: string; input: unknown } | null {
-  const maybeCallToolInput = input as { name?: unknown; args?: unknown } | null
+): { toolName: string; input: unknown; title?: string } | null {
+  const maybeCallToolInput = input as {
+    title?: unknown
+    args?: {
+      name?: unknown
+      args?: unknown
+    }
+  } | null
+  const maybeInnerArgs = asToolInvocationArgs(maybeCallToolInput?.args)
   if (
     toolName === "call_tool" &&
     maybeCallToolInput &&
     typeof maybeCallToolInput === "object" &&
-    typeof maybeCallToolInput.name === "string" &&
-    "args" in maybeCallToolInput
+    maybeInnerArgs
   ) {
     return {
-      toolName: maybeCallToolInput.name,
-      input: maybeCallToolInput.args,
+      toolName: maybeInnerArgs.name,
+      input: maybeInnerArgs.args,
+      ...(typeof maybeCallToolInput.title === "string" && { title: maybeCallToolInput.title }),
     }
   }
   if (toolName === "call_tool") return null
-  return { toolName, input }
+  return {
+    toolName,
+    input,
+    ...(maybeCallToolInput &&
+      typeof maybeCallToolInput === "object" &&
+      typeof maybeCallToolInput.title === "string" && { title: maybeCallToolInput.title }),
+  }
 }
 
 export function MessageView({
@@ -94,7 +115,7 @@ export function MessageView({
                   <ToolHeader
                     type="dynamic-tool"
                     toolName={display.toolName}
-                    title={toolDisplay?.title}
+                    title={display.title ?? toolDisplay?.title}
                     icon={toolDisplay?.icon}
                     state={part.state}
                   />

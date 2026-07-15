@@ -43,8 +43,8 @@ import { cn } from "@renderer/lib/utils";
 import type { ChatStatus, FileUIPart, SourceDocumentUIPart } from "ai";
 import {
   CornerDownLeftIcon,
-  ImageIcon,
   Monitor,
+  PaperclipIcon,
   PlusIcon,
   SquareIcon,
   XIcon,
@@ -429,8 +429,9 @@ export const PromptInputActionAddAttachments = ({
   );
 
   return (
-    <DropdownMenuItem {...props} onSelect={handleSelect}>
-      <ImageIcon className="mr-2 size-4" /> {label}
+    <DropdownMenuItem className="gap-2" {...props} onSelect={handleSelect}>
+      <PaperclipIcon className="size-4" />
+      {label}
     </DropdownMenuItem>
   );
 };

@@ -22,18 +22,28 @@ import {
   XCircleIcon,
 } from "lucide-react";
 import type { ComponentProps, ReactNode } from "react";
-import { isValidElement } from "react";
+import { isValidElement, useEffect, useState } from "react";
 
 import { CodeBlock } from "./code-block";
 
 export type ToolProps = ComponentProps<typeof Collapsible>;
 
-export const Tool = ({ className, ...props }: ToolProps) => (
-  <Collapsible
-    className={cn("group not-prose mb-4 w-full rounded-md border", className)}
-    {...props}
-  />
-);
+export const Tool = ({ className, defaultOpen, open, onOpenChange, ...props }: ToolProps) => {
+  const [internalOpen, setInternalOpen] = useState(Boolean(defaultOpen));
+
+  useEffect(() => {
+    if (defaultOpen) setInternalOpen(true);
+  }, [defaultOpen]);
+
+  return (
+    <Collapsible
+      className={cn("group not-prose mb-4 w-full rounded-md border", className)}
+      open={open ?? internalOpen}
+      onOpenChange={onOpenChange ?? setInternalOpen}
+      {...props}
+    />
+  );
+};
 
 export type ToolPart = ToolUIPart | DynamicToolUIPart;
 
@@ -137,13 +147,24 @@ export type ToolInputProps = ComponentProps<"div"> & {
   input: ToolPart["input"];
 };
 
+const cleanToolInput = (input: ToolPart["input"]) => {
+  if (input && typeof input === "object" && !Array.isArray(input) && "title" in input) {
+    const { title: _title, ...rest } = input as Record<string, unknown>;
+    return rest;
+  }
+  return input;
+};
+
 export const ToolInput = ({ className, input, ...props }: ToolInputProps) => (
   <div className={cn("space-y-2 overflow-hidden", className)} {...props}>
     <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
       Parameters
     </h4>
     <div className="rounded-md bg-muted/50">
-      <CodeBlock code={JSON.stringify(input, null, 2) ?? ""} language="json" />
+      <CodeBlock
+        code={JSON.stringify(cleanToolInput(input), null, 2) ?? ""}
+        language="json"
+      />
     </div>
   </div>
 );

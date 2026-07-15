@@ -8,7 +8,7 @@
 :root {
   color-scheme: light;
   --traffic-light-inset: 70px;
-  --titlebar-h: env(titlebar-area-height, 2.5rem);
+  --titlebar-h: env(titlebar-area-height, 2rem);
   --titlebar-inset-left: max(0.5rem, env(titlebar-area-x, var(--traffic-light-inset)));
   --background: oklch(1 0 0);
   --foreground: oklch(0.1450 0 0);
@@ -223,4 +223,35 @@ html {
 
 .larify-file-diff .diff-view-wrapper {
   border-radius: 0;
+}
+
+.larify-message-markdown [data-streamdown="code-block"] {
+  position: relative;
+  margin-block: 0.5rem;
+}
+
+.larify-message-markdown [data-streamdown="code-block-header"]:has(> span:empty) {
+  display: none;
+}
+
+.larify-message-markdown [data-streamdown="code-block"] > div:has(> [data-streamdown="code-block-actions"]) {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.75rem;
+  z-index: 10;
+  width: auto;
+  height: auto;
+  margin-top: 0;
+  pointer-events: auto;
+}
+
+.larify-message-markdown [data-streamdown="code-block-actions"],
+.larify-message-markdown [data-streamdown="code-block-actions"] button {
+  pointer-events: auto;
+}
+
+.larify-message-markdown
+  [data-streamdown="code-block"]:has([data-streamdown="code-block-header"] > span:empty)
+  [data-streamdown="code-block-body"] {
+  margin-top: 2.5rem;
 }

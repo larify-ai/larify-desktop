@@ -331,7 +331,7 @@ export const MessageResponse = memo(
   ({ className, ...props }: MessageResponseProps) => (
     <Streamdown
       className={cn(
-        "size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
+        "larify-message-markdown size-full space-y-2 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
         className
       )}
       controls={streamdownControls}

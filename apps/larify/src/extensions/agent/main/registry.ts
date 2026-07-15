@@ -1,4 +1,19 @@
+import { asSchema } from "ai"
+import { z } from "zod"
 import type { Tool, Toolkit } from "../../../shared/tool"
+
+const callToolArgsSchema = (tool: Tool) =>
+  z.object({
+    name: z.literal(tool.name).describe("The tool name to invoke through call_tool"),
+    args: tool.inputSchema,
+  })
+
+const callToolInvocationSchema = (tool: Tool) =>
+  z.object({
+    name: z.literal("call_tool").describe("The wrapper tool name"),
+    title: z.string().min(1).describe("Short user-facing phrase describing the specific step"),
+    args: callToolArgsSchema(tool),
+  })
 
 export class ToolRegistry {
   private readonly kits = new Map<string, Toolkit>()
@@ -17,6 +32,12 @@ export class ToolRegistry {
 
   listTools(name: string) {
     return this.kits.get(name)?.tools.map((tool) => ({ name: tool.name, description: tool.description }))
+  }
+
+  toolCallSchema(name: string) {
+    const tool = this.get(name)
+    if (!tool) return undefined
+    return asSchema(callToolInvocationSchema(tool)).jsonSchema
   }
 
   listToolDisplays() {

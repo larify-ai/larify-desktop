@@ -15,7 +15,7 @@ const inputSchema = z.object({
 export const writeFileTool: Tool = {
   name: "write_file",
   description: "Create or overwrite a text file.",
-  metadata: { title: "创建文件", icon: "edit", defaultOpen: true, hideRawDetails: true },
+  metadata: { icon: "edit", defaultOpen: true, hideRawDetails: true },
   inputSchema,
   execute: async (args, ctx) => {
     const { file_path, content } = args as z.infer<typeof inputSchema>

@@ -1,6 +1,5 @@
 import {
   tool,
-  asSchema,
   NoSuchToolError,
   type ToolSet,
   type UIMessageStreamWriter,
@@ -15,8 +14,8 @@ function isStructured(value: unknown): value is { output: unknown; metadata?: un
 }
 
 export const metaToolDisplays = {
-  list_tools: { title: "搜索工具", icon: "search" },
-  read_tool: { title: "搜索工具", icon: "search" },
+  list_tools: { icon: "search" },
+  read_tool: { icon: "search" },
 }
 
 export function buildRepairToolCall(registry: ToolRegistry): ToolCallRepairFunction<ToolSet> {
@@ -32,7 +31,7 @@ export function buildRepairToolCall(registry: ToolRegistry): ToolCallRepairFunct
     return {
       ...toolCall,
       toolName: "call_tool",
-      input: JSON.stringify({ name: toolCall.toolName, args }),
+      input: JSON.stringify({ title: "采取行动", args: { name: toolCall.toolName, args } }),
     }
   }
 }
@@ -45,7 +44,10 @@ export function buildMetaTools(
   return {
     list_tools: tool({
       description: "List all tools in a toolkit.",
-      inputSchema: z.object({ group: z.string().describe("The toolkit name") }),
+      inputSchema: z.object({
+        title: z.string().min(1).describe("Short user-facing phrase describing the specific step"),
+        group: z.string().describe("The toolkit name"),
+      }),
       execute: async ({ group }) => {
         const tools = registry.listTools(group)
         if (!tools) throw new Error(`Toolkit "${group}" not found`)
@@ -54,20 +56,27 @@ export function buildMetaTools(
     }),
     read_tool: tool({
       description: "Read a tool's parameter schema before invoking it.",
-      inputSchema: z.object({ name: z.string().describe("The tool name") }),
+      inputSchema: z.object({
+        title: z.string().min(1).describe("Short user-facing phrase describing the specific step"),
+        name: z.string().describe("The tool name"),
+      }),
       execute: async ({ name }) => {
-        const found = registry.get(name)
-        if (!found) throw new Error(`Tool "${name}" not found`)
-        return JSON.stringify(asSchema(found.inputSchema).jsonSchema)
+        const schema = registry.toolCallSchema(name)
+        if (!schema) throw new Error(`Tool "${name}" not found`)
+        return JSON.stringify(schema)
       },
     }),
     call_tool: tool({
       description: "Invoke a tool with args matching its schema.",
       inputSchema: z.object({
-        name: z.string().describe("The tool name"),
-        args: z.unknown().describe("Arguments matching the tool's schema"),
+        title: z.string().min(1).describe("Short user-facing phrase describing the specific step"),
+        args: z.object({
+          name: z.string().describe("The tool name"),
+          args: z.unknown().describe("Arguments matching the tool's schema"),
+        }),
       }),
-      execute: async function* ({ name, args }, { toolCallId }) {
+      execute: async function* ({ args: toolInput }, { toolCallId }) {
+        const { name, args } = toolInput
         const found = registry.get(name)
         if (!found) throw new Error(`Tool "${name}" not found`)
         const parsed = found.inputSchema.safeParse(args)
@@ -80,7 +89,11 @@ export function buildMetaTools(
         const value = await result
         if (isStructured(value)) {
           if (value.metadata !== undefined)
-            writer?.write({ type: "data-tool-meta", id: toolCallId, data: value.metadata })
+            writer?.write({
+              type: "data-tool-meta",
+              id: toolCallId,
+              data: value.metadata,
+            })
           yield value.output
         } else {
           yield value

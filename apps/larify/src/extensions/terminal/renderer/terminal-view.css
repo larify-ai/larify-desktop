@@ -1,0 +1,31 @@
+.larify-terminal-surface .xterm,
+.larify-terminal-surface .xterm-screen,
+.larify-terminal-surface .xterm-viewport {
+  background: var(--background) !important;
+}
+
+.larify-terminal-surface .xterm {
+  height: 100%;
+  padding: 0 !important;
+}
+
+.larify-terminal-surface .xterm-viewport {
+  bottom: 0 !important;
+  top: 0 !important;
+  overflow-y: auto !important;
+}
+
+.larify-terminal-surface .xterm-viewport::-webkit-scrollbar-button {
+  display: none;
+  height: 0;
+  width: 0;
+}
+
+.larify-terminal-surface .xterm-scrollable-element > .scrollbar.horizontal {
+  display: none !important;
+  height: 0 !important;
+}
+
+.larify-terminal-surface .xterm-screen {
+  padding-left: 8px;
+}

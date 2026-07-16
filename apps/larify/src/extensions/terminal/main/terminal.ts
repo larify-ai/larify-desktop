@@ -4,7 +4,7 @@ import { SerializeAddon } from "@xterm/addon-serialize"
 import { Terminal as HeadlessTerminal } from "@xterm/headless"
 import { spawn, type IPty } from "node-pty"
 import { addListener, type Listener } from "../../../main/utils/listener"
-import type { TerminalCreateOptions, TerminalSnapshot, TerminalState } from "./types"
+import type { TerminalCreateOptions, TerminalSnapshot, TerminalState } from "../shared/types"
 
 const EXIT_FLUSH_MS = 250
 const SCROLLBACK = 5000
@@ -91,6 +91,7 @@ export class Terminal {
     if (this.exited) return
     const nextCols = Math.max(cols, 1)
     const nextRows = Math.max(rows, 1)
+    if (nextCols === this.cols && nextRows === this.rows) return
     try {
       this.pty.resize(nextCols, nextRows)
       this.headless.resize(nextCols, nextRows)

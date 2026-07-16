@@ -1,6 +1,6 @@
 import { addListener, type Listener } from "../../../main/utils/listener"
 import { Terminal } from "./terminal"
-import type { SessionTerminalsState, TerminalCreateOptions, TerminalSnapshot } from "./types"
+import type { SessionTerminalsState, TerminalCreateOptions, TerminalSnapshot } from "../shared/types"
 
 export class TerminalManager {
   private terminals = new Map<number, Terminal>()
@@ -50,6 +50,17 @@ export class TerminalManager {
   setActive(id: number): void {
     if (!this.terminals.has(id) || this.activeId === id) return
     this.activeId = id
+    this.emit()
+  }
+
+  reorder(id: number, toIndex: number): void {
+    const terminal = this.terminals.get(id)
+    if (!terminal) return
+
+    const ordered = [...this.terminals.entries()].filter(([terminalId]) => terminalId !== id)
+    const nextIndex = Math.max(0, Math.min(toIndex, ordered.length))
+    ordered.splice(nextIndex, 0, [id, terminal])
+    this.terminals = new Map(ordered)
     this.emit()
   }
 

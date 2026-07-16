@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import type { SessionTerminalsState, TerminalCreateOptions } from "../../../../src/extensions/terminal/main/types"
+import type { SessionTerminalsState, TerminalCreateOptions } from "../../../../src/extensions/terminal/shared/types"
 
 const electronMock = vi.hoisted(() => {
   const handlers = new Map<string, (...args: unknown[]) => unknown>()
@@ -43,6 +43,7 @@ class FakeTerminalService {
   resize = vi.fn()
   close = vi.fn()
   setActive = vi.fn()
+  reorder = vi.fn()
   snapshot = vi.fn(async () => ({ data: "snapshot", cols: 80, rows: 24 }))
   state = vi.fn((sessionId: string): SessionTerminalsState => ({ sessionId, terminals: [], activeId: null }))
   destroySession = vi.fn()
@@ -99,7 +100,7 @@ describe("registerTerminalIpc", () => {
 
     registerTerminalIpc(service as never)
 
-    expect(electronMock.ipcMain.handle).toHaveBeenCalledTimes(8)
+    expect(electronMock.ipcMain.handle).toHaveBeenCalledTimes(9)
     expect(electronMock.handlers.get("terminal:create")?.({}, "session-1", { title: "Shell" })).toBe(7)
     expect(electronMock.handlers.get("terminal:getState")?.({}, "session-1")).toEqual({
       sessionId: "session-1",
@@ -109,6 +110,7 @@ describe("registerTerminalIpc", () => {
     electronMock.handlers.get("terminal:write")?.({}, "session-1", 7, "echo hi\r")
     electronMock.handlers.get("terminal:resize")?.({}, "session-1", 7, 120, 30)
     electronMock.handlers.get("terminal:setActive")?.({}, "session-1", 7)
+    electronMock.handlers.get("terminal:reorder")?.({}, "session-1", 7, 0)
     await expect(electronMock.handlers.get("terminal:snapshot")?.({}, "session-1", 7)).resolves.toEqual({
       data: "snapshot",
       cols: 80,
@@ -120,6 +122,7 @@ describe("registerTerminalIpc", () => {
     expect(service.write).toHaveBeenCalledWith("session-1", 7, "echo hi\r")
     expect(service.resize).toHaveBeenCalledWith("session-1", 7, 120, 30)
     expect(service.setActive).toHaveBeenCalledWith("session-1", 7)
+    expect(service.reorder).toHaveBeenCalledWith("session-1", 7, 0)
     expect(service.snapshot).toHaveBeenCalledWith("session-1", 7)
     expect(service.destroySession).toHaveBeenCalledWith("session-1")
   })
@@ -143,10 +146,10 @@ describe("registerTerminalIpc", () => {
     registerTerminalIpc(service as never)
 
     service.emitData("session-1", 7, "a")
-    service.emitData("session-1", 7, "b")
+    service.emitData("session-1", 7, "b", 1, 2)
     expect(electronMock.sends).toEqual([])
 
-    vi.advanceTimersByTime(5)
+    vi.advanceTimersByTime(10)
 
     expect(electronMock.sends).toEqual([
       { channel: "terminal:data", payload: { sessionId: "session-1", terminalId: 7, data: "ab" } },
@@ -189,7 +192,7 @@ describe("registerTerminalIpc", () => {
     expect(service.unbindChange).toHaveBeenCalled()
     expect(service.unbindData).toHaveBeenCalled()
     expect(service.unbindExit).toHaveBeenCalled()
-    expect(electronMock.ipcMain.removeHandler).toHaveBeenCalledTimes(8)
+    expect(electronMock.ipcMain.removeHandler).toHaveBeenCalledTimes(9)
     expect(electronMock.handlers.size).toBe(0)
   })
 })

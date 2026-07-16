@@ -1,8 +1,8 @@
 import { BrowserWindow, ipcMain } from "electron"
 import type { TerminalService } from "./terminal-service"
-import type { TerminalCreateOptions } from "./types"
+import type { TerminalCreateOptions, TerminalSnapshot } from "../shared/types"
 
-const BATCH_MS = 5
+const BATCH_MS = 10
 
 class DataBatcher {
   private chunks: string[] = []
@@ -81,7 +81,12 @@ export function registerTerminalIpc(service: TerminalService): () => void {
   ipcMain.handle("terminal:setActive", (_event, sessionId: string, terminalId: number) =>
     service.setActive(sessionId, terminalId),
   )
-  ipcMain.handle("terminal:snapshot", (_event, sessionId: string, terminalId: number) => {
+  ipcMain.handle(
+    "terminal:reorder",
+    (_event, sessionId: string, terminalId: number, toIndex: number) =>
+      service.reorder(sessionId, terminalId, toIndex),
+  )
+  ipcMain.handle("terminal:snapshot", (_event, sessionId: string, terminalId: number): Promise<TerminalSnapshot | null> => {
     batchers.get(batchKey(sessionId, terminalId))?.flush()
     return service.snapshot(sessionId, terminalId)
   })
@@ -96,6 +101,7 @@ export function registerTerminalIpc(service: TerminalService): () => void {
     "terminal:resize",
     "terminal:close",
     "terminal:setActive",
+    "terminal:reorder",
     "terminal:snapshot",
     "terminal:destroySession",
   ]

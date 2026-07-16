@@ -7,7 +7,7 @@ import type {
   SessionTerminalsState,
   TerminalCreateOptions,
   TerminalSnapshot,
-} from "./types"
+} from "../shared/types"
 
 const DEFAULT_WORKSPACE = larifyWorkspacePath()
 
@@ -78,6 +78,10 @@ export class TerminalService {
 
   setActive(sessionId: string, terminalId: number): void {
     this.manager(sessionId).setActive(terminalId)
+  }
+
+  reorder(sessionId: string, terminalId: number, toIndex: number): void {
+    this.manager(sessionId).reorder(terminalId, toIndex)
   }
 
   snapshot(sessionId: string, terminalId: number): Promise<TerminalSnapshot | null> {

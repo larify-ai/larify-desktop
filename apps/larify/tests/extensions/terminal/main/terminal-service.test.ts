@@ -2,7 +2,7 @@ import { mkdirSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest"
-import type { SessionTerminalsState, TerminalCreateOptions } from "../../../../src/extensions/terminal/main/types"
+import type { SessionTerminalsState, TerminalCreateOptions } from "../../../../src/extensions/terminal/shared/types"
 
 const workspace = join(tmpdir(), "larify-terminal-service-workspace")
 const existingCwd = join(tmpdir(), "larify-terminal-service-existing")
@@ -29,6 +29,7 @@ class FakeManager {
   resize = vi.fn()
   close = vi.fn()
   setActive = vi.fn()
+  reorder = vi.fn()
   snapshot = vi.fn(() => "snapshot")
   destroy = vi.fn()
   private changeCallbacks = new Set<(state: SessionTerminalsState) => void>()
@@ -133,6 +134,7 @@ describe("TerminalService", () => {
     service.write("session-1", 1, "data")
     service.resize("session-1", 1, 80, 24)
     service.setActive("session-1", 1)
+    service.reorder("session-1", 1, 0)
     service.close("session-1", 1)
     expect(service.snapshot("session-1", 1)).toBe("snapshot")
 
@@ -140,6 +142,7 @@ describe("TerminalService", () => {
     expect(managers[0].write).toHaveBeenCalledWith(1, "data")
     expect(managers[0].resize).toHaveBeenCalledWith(1, 80, 24)
     expect(managers[0].setActive).toHaveBeenCalledWith(1)
+    expect(managers[0].reorder).toHaveBeenCalledWith(1, 0)
     expect(managers[0].close).toHaveBeenCalledWith(1)
     expect(managers[0].snapshot).toHaveBeenCalledWith(1)
   })

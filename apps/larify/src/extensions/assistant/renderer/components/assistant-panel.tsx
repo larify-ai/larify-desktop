@@ -33,6 +33,7 @@ import {
   Attachments,
 } from "@renderer/components/ai-elements/attachments"
 import { Spinner } from "@renderer/components/ui/spinner"
+import { getAgentSessionId, setAgentSessionId } from "@renderer/lib/agent-session"
 import { MessageView } from "./message-view"
 import { ipcTransport } from "../lib/transport"
 import type { ToolDisplayMeta } from "./message-view"
@@ -72,12 +73,17 @@ const formatRelativeTime = (value: number): string => {
 }
 
 export function AssistantPanel(): React.JSX.Element {
-  const [sessionId, setSessionId] = useState<string>(() => crypto.randomUUID())
+  const [sessionId, setSessionIdState] = useState<string>(() => getAgentSessionId())
   const [messagesBySessionId, setMessagesBySessionId] = useState<Record<string, UIMessage[]>>({})
   const messagesBySessionIdRef = useRef(messagesBySessionId)
   const chatsBySessionIdRef = useRef<Record<string, Chat<UIMessage>>>({})
   const selectedSessionIdRef = useRef(sessionId)
   const [sessions, setSessions] = useState<SessionMeta[]>([])
+
+  const setSessionId = (id: string): void => {
+    setAgentSessionId(id)
+    setSessionIdState(id)
+  }
 
   useEffect(() => {
     messagesBySessionIdRef.current = messagesBySessionId

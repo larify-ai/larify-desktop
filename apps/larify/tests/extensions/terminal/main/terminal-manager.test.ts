@@ -155,6 +155,25 @@ describe("TerminalManager", () => {
     expect(onChange).toHaveBeenCalledTimes(1)
   })
 
+  it("reorders terminals", async () => {
+    const { TerminalManager } = await importManager()
+    const manager = new TerminalManager("session-1")
+    const onChange = vi.fn()
+    manager.bindChange(onChange)
+    const first = manager.create()
+    const second = manager.create()
+    const third = manager.create()
+    onChange.mockClear()
+
+    manager.reorder(third, 0)
+    manager.reorder(first, 99)
+    manager.reorder(999, 0)
+
+    expect(manager.state().terminals.map((terminal) => terminal.id)).toEqual([third, second, first])
+    expect(manager.state().activeId).toBe(third)
+    expect(onChange).toHaveBeenCalledTimes(2)
+  })
+
   it("returns snapshots and closes terminals while selecting the next active terminal", async () => {
     const { TerminalManager } = await importManager()
     const manager = new TerminalManager("session-1")

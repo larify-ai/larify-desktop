@@ -1,6 +1,6 @@
 import { addListener, type Listener } from "../../../main/utils/listener"
 import { Terminal } from "./terminal"
-import type { SessionTerminalsState, TerminalCreateOptions } from "./types"
+import type { SessionTerminalsState, TerminalCreateOptions, TerminalSnapshot } from "./types"
 
 export class TerminalManager {
   private terminals = new Map<number, Terminal>()
@@ -53,8 +53,8 @@ export class TerminalManager {
     this.emit()
   }
 
-  snapshot(id: number): string {
-    return this.terminals.get(id)?.snapshot() ?? ""
+  snapshot(id: number): Promise<TerminalSnapshot | null> {
+    return this.terminals.get(id)?.snapshot() ?? Promise.resolve(null)
   }
 
   close(id: number): void {

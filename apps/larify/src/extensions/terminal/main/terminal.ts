@@ -1,11 +1,13 @@
 import { existsSync } from "node:fs"
 import { basename } from "node:path"
+import { SerializeAddon } from "@xterm/addon-serialize"
+import { Terminal as HeadlessTerminal } from "@xterm/headless"
 import { spawn, type IPty } from "node-pty"
 import { addListener, type Listener } from "../../../main/utils/listener"
-import type { TerminalCreateOptions, TerminalState } from "./types"
+import type { TerminalCreateOptions, TerminalSnapshot, TerminalState } from "./types"
 
 const EXIT_FLUSH_MS = 250
-const SNAPSHOT_CAP = 1024 * 1024
+const SCROLLBACK = 5000
 
 export class Terminal {
   readonly id: number
@@ -14,8 +16,13 @@ export class Terminal {
   readonly title: string
 
   private readonly pty: IPty
-  private snapshotChunks: string[] = []
-  private snapshotSize = 0
+  private readonly headless: HeadlessTerminal
+  private readonly serializeAddon = new SerializeAddon()
+  private cols: number
+  private rows: number
+  private headlessWriteSequence = 0
+  private completedHeadlessWriteSequence = 0
+  private headlessWriteWaiters: Array<{ sequence: number; resolve: () => void }> = []
   private exitCode: number | null = null
   private exited = false
   private pendingExit: number | null = null
@@ -31,16 +38,25 @@ export class Terminal {
     this.shell = opts.shell
     this.cwd = opts.cwd
     this.title = opts.title ?? basename(this.shell, process.platform === "win32" ? ".exe" : undefined)
+    this.cols = opts.cols ?? 80
+    this.rows = opts.rows ?? 24
+    this.headless = new HeadlessTerminal({
+      cols: this.cols,
+      rows: this.rows,
+      scrollback: SCROLLBACK,
+      allowProposedApi: true,
+    })
+    this.headless.loadAddon(this.serializeAddon)
     this.pty = spawn(this.shell, [], {
       name: "xterm-256color",
-      cols: opts.cols ?? 80,
-      rows: opts.rows ?? 24,
+      cols: this.cols,
+      rows: this.rows,
       cwd: this.cwd,
       env: process.env,
     })
 
     this.pty.onData((data) => {
-      this.pushSnapshot(data)
+      this.writeHeadless(data)
       if (this.pendingExit !== null) this.scheduleExit()
       for (const listener of this.dataListeners) listener(data)
     })
@@ -58,8 +74,13 @@ export class Terminal {
     return addListener(this.exitListeners, callback)
   }
 
-  snapshot(): string {
-    return this.snapshotChunks.join("")
+  async snapshot(): Promise<TerminalSnapshot> {
+    await this.flushHeadlessWrites()
+    return {
+      data: this.serializeAddon.serialize(),
+      cols: this.cols,
+      rows: this.rows,
+    }
   }
 
   write(data: string): void {
@@ -68,8 +89,13 @@ export class Terminal {
 
   resize(cols: number, rows: number): void {
     if (this.exited) return
+    const nextCols = Math.max(cols, 1)
+    const nextRows = Math.max(rows, 1)
     try {
-      this.pty.resize(Math.max(cols, 1), Math.max(rows, 1))
+      this.pty.resize(nextCols, nextRows)
+      this.headless.resize(nextCols, nextRows)
+      this.cols = nextCols
+      this.rows = nextRows
     } catch {
     }
   }
@@ -113,26 +139,22 @@ export class Terminal {
     }
   }
 
-  private pushSnapshot(data: string): void {
-    if (data.length >= SNAPSHOT_CAP) {
-      this.snapshotChunks = [data.slice(-SNAPSHOT_CAP)]
-      this.snapshotSize = this.snapshotChunks[0].length
-      return
-    }
+  private writeHeadless(data: string): void {
+    const sequence = ++this.headlessWriteSequence
+    this.headless.write(data, () => {
+      this.completedHeadlessWriteSequence = sequence
+      const ready = this.headlessWriteWaiters.filter((waiter) => waiter.sequence <= sequence)
+      this.headlessWriteWaiters = this.headlessWriteWaiters.filter(
+        (waiter) => waiter.sequence > sequence,
+      )
+      for (const waiter of ready) waiter.resolve()
+    })
+  }
 
-    this.snapshotChunks.push(data)
-    this.snapshotSize += data.length
-    while (this.snapshotSize > SNAPSHOT_CAP) {
-      const overflow = this.snapshotSize - SNAPSHOT_CAP
-      const first = this.snapshotChunks[0]
-      if (first.length <= overflow) {
-        this.snapshotChunks.shift()
-        this.snapshotSize -= first.length
-      } else {
-        this.snapshotChunks[0] = first.slice(overflow)
-        this.snapshotSize -= overflow
-      }
-    }
+  private flushHeadlessWrites(): Promise<void> {
+    const sequence = this.headlessWriteSequence
+    if (this.completedHeadlessWriteSequence >= sequence) return Promise.resolve()
+    return new Promise((resolve) => this.headlessWriteWaiters.push({ sequence, resolve }))
   }
 
   private scheduleExit(): void {

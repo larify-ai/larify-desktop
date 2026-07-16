@@ -37,7 +37,9 @@ describe.skipIf(!process.env.LIVE_TERMINAL)("Terminal live", () => {
     terminal.write(markerCommand())
 
     expect(await exit).toBe(0)
-    expect(terminal.snapshot()).toContain(marker)
+    const snapshot = await terminal.snapshot()
+    expect(snapshot.data).toContain(marker)
+    expect(snapshot).toMatchObject({ cols: 80, rows: 24 })
     expect(terminal.state().exitCode).toBe(0)
   }, 15_000)
 })

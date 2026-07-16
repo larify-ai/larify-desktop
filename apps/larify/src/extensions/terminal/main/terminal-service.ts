@@ -3,7 +3,11 @@ import which from "which"
 import { larifyWorkspacePath } from "../../../main/utils/app-paths"
 import { addListener, type Listener } from "../../../main/utils/listener"
 import { TerminalManager } from "./terminal-manager"
-import type { SessionTerminalsState, TerminalCreateOptions } from "./types"
+import type {
+  SessionTerminalsState,
+  TerminalCreateOptions,
+  TerminalSnapshot,
+} from "./types"
 
 const DEFAULT_WORKSPACE = larifyWorkspacePath()
 
@@ -76,7 +80,7 @@ export class TerminalService {
     this.manager(sessionId).setActive(terminalId)
   }
 
-  snapshot(sessionId: string, terminalId: number): string {
+  snapshot(sessionId: string, terminalId: number): Promise<TerminalSnapshot | null> {
     return this.manager(sessionId).snapshot(terminalId)
   }
 

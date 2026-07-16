@@ -43,7 +43,7 @@ class FakeTerminalService {
   resize = vi.fn()
   close = vi.fn()
   setActive = vi.fn()
-  snapshot = vi.fn(() => "snapshot")
+  snapshot = vi.fn(async () => ({ data: "snapshot", cols: 80, rows: 24 }))
   state = vi.fn((sessionId: string): SessionTerminalsState => ({ sessionId, terminals: [], activeId: null }))
   destroySession = vi.fn()
   unbindChange = vi.fn()
@@ -109,7 +109,11 @@ describe("registerTerminalIpc", () => {
     electronMock.handlers.get("terminal:write")?.({}, "session-1", 7, "echo hi\r")
     electronMock.handlers.get("terminal:resize")?.({}, "session-1", 7, 120, 30)
     electronMock.handlers.get("terminal:setActive")?.({}, "session-1", 7)
-    expect(electronMock.handlers.get("terminal:snapshot")?.({}, "session-1", 7)).toBe("snapshot")
+    await expect(electronMock.handlers.get("terminal:snapshot")?.({}, "session-1", 7)).resolves.toEqual({
+      data: "snapshot",
+      cols: 80,
+      rows: 24,
+    })
     electronMock.handlers.get("terminal:destroySession")?.({}, "session-1")
 
     expect(service.create).toHaveBeenCalledWith("session-1", { title: "Shell" })

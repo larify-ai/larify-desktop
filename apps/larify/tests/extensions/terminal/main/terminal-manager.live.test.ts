@@ -39,7 +39,8 @@ describe.skipIf(!process.env.LIVE_TERMINAL)("TerminalManager live", () => {
     manager.write(id, markerCommand())
 
     expect(await data).toContain(marker)
-    expect(manager.snapshot(id)).toContain(marker)
+    const snapshot = await manager.snapshot(id)
+    expect(snapshot?.data).toContain(marker)
     manager.destroy()
   }, 15_000)
 })

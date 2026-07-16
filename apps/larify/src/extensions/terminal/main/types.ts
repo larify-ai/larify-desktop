@@ -15,6 +15,12 @@ export interface TerminalState {
   exitCode: number | null
 }
 
+export interface TerminalSnapshot {
+  data: string
+  cols: number
+  rows: number
+}
+
 export interface SessionTerminalsState {
   sessionId: string
   terminals: TerminalState[]

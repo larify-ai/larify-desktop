@@ -105,35 +105,18 @@ describe("Terminal", () => {
     expect(terminal.state().title).toBe("Shell")
   })
 
-  it("captures output in a capped snapshot", async () => {
+  it("serializes the rendered terminal state instead of raw output", async () => {
     const fakePty = createFakePty()
     spawnMock.mockReturnValue(fakePty)
     const { Terminal } = await importTerminal()
     const terminal = new Terminal(1, { shell: "sh", cwd })
 
-    fakePty.emitData("first")
-    fakePty.emitData("second")
+    fakePty.emitData("first\rsecond")
 
-    expect(terminal.snapshot()).toBe("firstsecond")
-
-    fakePty.emitData("x".repeat(1024 * 1024 + 10))
-
-    expect(terminal.snapshot()).toHaveLength(1024 * 1024)
-    expect(terminal.snapshot()).toBe("x".repeat(1024 * 1024))
-  })
-
-  it("trims the oldest chunk when the snapshot exceeds the cap", async () => {
-    const fakePty = createFakePty()
-    spawnMock.mockReturnValue(fakePty)
-    const { Terminal } = await importTerminal()
-    const terminal = new Terminal(1, { shell: "sh", cwd })
-
-    fakePty.emitData("a".repeat(1024 * 1024 - 2))
-    fakePty.emitData("bcde")
-
-    expect(terminal.snapshot()).toHaveLength(1024 * 1024)
-    expect(terminal.snapshot().startsWith("a")).toBe(true)
-    expect(terminal.snapshot().endsWith("bcde")).toBe(true)
+    const snapshot = await terminal.snapshot()
+    expect(snapshot).toMatchObject({ cols: 80, rows: 24 })
+    expect(snapshot.data).toContain("second")
+    expect(snapshot.data).not.toContain("first")
   })
 
   it("forwards writes and clamps resize dimensions", async () => {
@@ -147,6 +130,7 @@ describe("Terminal", () => {
 
     expect(fakePty.write).toHaveBeenCalledWith("echo hello\r")
     expect(fakePty.resize).toHaveBeenCalledWith(1, 1)
+    expect(await terminal.snapshot()).toMatchObject({ cols: 1, rows: 1 })
   })
 
   it("delays exit until the final data flush window passes", async () => {

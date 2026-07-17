@@ -89,17 +89,23 @@ export function AssistantPanel(): React.JSX.Element {
     messagesBySessionIdRef.current = messagesBySessionId
   }, [messagesBySessionId])
 
+  const cacheSessionMessages = (id: string, messages: UIMessage[]): void => {
+    messagesBySessionIdRef.current = {
+      ...messagesBySessionIdRef.current,
+      [id]: messages,
+    }
+    setMessagesBySessionId(messagesBySessionIdRef.current)
+  }
+
   const saveSessionMessages = (id: string, messages: UIMessage[]): void => {
-    setMessagesBySessionId((prev) => ({ ...prev, [id]: messages }))
+    cacheSessionMessages(id, messages)
     void window.bridge
       .invoke("agent:session-save", id, messages)
       .then(() => window.dispatchEvent(new Event("agent:sessions-changed")))
       .catch((error) => console.error("[agent:session-save]", error))
   }
 
-  const ensureChat = (id: string, messages: UIMessage[] = []): Chat<UIMessage> => {
-    const existing = chatsBySessionIdRef.current[id]
-    if (existing) return existing
+  const createChat = (id: string, messages: UIMessage[]): Chat<UIMessage> => {
     const chat = new Chat<UIMessage>({
       id,
       messages,
@@ -108,6 +114,12 @@ export function AssistantPanel(): React.JSX.Element {
     })
     chatsBySessionIdRef.current[id] = chat
     return chat
+  }
+
+  const ensureChat = (id: string, messages: UIMessage[] = []): Chat<UIMessage> => {
+    const existing = chatsBySessionIdRef.current[id]
+    if (existing) return existing
+    return createChat(id, messages)
   }
 
   const refreshSessions = async (): Promise<void> => {
@@ -123,13 +135,13 @@ export function AssistantPanel(): React.JSX.Element {
     try {
       const loaded = await window.bridge.invoke("agent:session-load", id)
       const messages = (loaded as UIMessage[]) ?? []
-      setMessagesBySessionId((prev) => ({ ...prev, [id]: messages }))
-      ensureChat(id, messages)
+      cacheSessionMessages(id, messages)
+      createChat(id, messages)
       return messages
     } catch (error) {
       console.error("[agent:session-load]", error)
-      setMessagesBySessionId((prev) => ({ ...prev, [id]: [] }))
-      ensureChat(id, [])
+      cacheSessionMessages(id, [])
+      createChat(id, [])
       return []
     }
   }
@@ -140,13 +152,13 @@ export function AssistantPanel(): React.JSX.Element {
       selectedSessionIdRef.current = id
       ensureChat(id, [])
       setSessionId(id)
-      setMessagesBySessionId((prev) => ({ ...prev, [id]: [] }))
+      cacheSessionMessages(id, [])
     }
     const handleSelectSession = (event: Event): void => {
       const id = (event as CustomEvent<string>).detail
       if (!id) return
       selectedSessionIdRef.current = id
-      if (chatsBySessionIdRef.current[id]) {
+      if (Object.hasOwn(messagesBySessionIdRef.current, id)) {
         setSessionId(id)
         return
       }
@@ -159,6 +171,7 @@ export function AssistantPanel(): React.JSX.Element {
     window.addEventListener("agent:select-session", handleSelectSession)
     window.addEventListener("agent:sessions-changed", refreshSessions)
     void refreshSessions()
+    void loadSession(sessionId)
     return () => {
       window.removeEventListener("agent:new-session", handleNewSession)
       window.removeEventListener("agent:select-session", handleSelectSession)
@@ -170,6 +183,7 @@ export function AssistantPanel(): React.JSX.Element {
 
   return (
     <AssistantChat
+      key={sessionId}
       chat={chat}
       sessions={sessions}
     />

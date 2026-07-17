@@ -19,6 +19,7 @@ export interface TerminalSnapshot {
   data: string
   cols: number
   rows: number
+  seq: number
 }
 
 export interface TerminalAgentSnapshot {
@@ -41,6 +42,8 @@ export interface TerminalDataEvent {
   sessionId: string
   terminalId: number
   data: string
+  start: number
+  end: number
 }
 
 export interface TerminalExitEvent {

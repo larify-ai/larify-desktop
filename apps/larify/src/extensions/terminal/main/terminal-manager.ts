@@ -26,7 +26,7 @@ export class TerminalManager {
   private activeId: number | null = null
   private nextId = 1
   private changeListeners = new Set<Listener<[SessionTerminalsState]>>()
-  private dataListeners = new Set<Listener<[number, string]>>()
+  private dataListeners = new Set<Listener<[number, string, number, number]>>()
   private exitListeners = new Set<Listener<[number, number]>>()
 
   constructor(private readonly sessionId: string) {}
@@ -35,7 +35,7 @@ export class TerminalManager {
     return addListener(this.changeListeners, callback)
   }
 
-  bindData(callback: (terminalId: number, data: string) => void): () => void {
+  bindData(callback: (terminalId: number, data: string, start: number, end: number) => void): () => void {
     return addListener(this.dataListeners, callback)
   }
 
@@ -45,9 +45,9 @@ export class TerminalManager {
 
   create(opts?: TerminalCreateOptions): number {
     const terminal = new Terminal(this.nextId++, opts)
-    terminal.bindData((data) => {
+    terminal.bindData((data, start, end) => {
       void this.flushRunHistory(terminal.id)
-      for (const listener of this.dataListeners) listener(terminal.id, data)
+      for (const listener of this.dataListeners) listener(terminal.id, data, start, end)
     })
     terminal.bindExit((exitCode) => {
       for (const listener of this.exitListeners) listener(terminal.id, exitCode)

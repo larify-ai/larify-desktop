@@ -43,14 +43,16 @@ function resolveCwd(cwd?: string): string {
 export class TerminalService {
   private managers = new Map<string, TerminalManager>()
   private changeListeners = new Set<Listener<[SessionTerminalsState]>>()
-  private dataListeners = new Set<Listener<[string, number, string]>>()
+  private dataListeners = new Set<Listener<[string, number, string, number, number]>>()
   private exitListeners = new Set<Listener<[string, number, number]>>()
 
   bindChange(callback: (state: SessionTerminalsState) => void): () => void {
     return addListener(this.changeListeners, callback)
   }
 
-  bindData(callback: (sessionId: string, terminalId: number, data: string) => void): () => void {
+  bindData(
+    callback: (sessionId: string, terminalId: number, data: string, start: number, end: number) => void
+  ): () => void {
     return addListener(this.dataListeners, callback)
   }
 
@@ -133,8 +135,8 @@ export class TerminalService {
       manager.bindChange((state) => {
         for (const listener of this.changeListeners) listener(state)
       })
-      manager.bindData((terminalId, data) => {
-        for (const listener of this.dataListeners) listener(sessionId, terminalId, data)
+      manager.bindData((terminalId, data, start, end) => {
+        for (const listener of this.dataListeners) listener(sessionId, terminalId, data, start, end)
       })
       manager.bindExit((terminalId, exitCode) => {
         for (const listener of this.exitListeners) listener(sessionId, terminalId, exitCode)

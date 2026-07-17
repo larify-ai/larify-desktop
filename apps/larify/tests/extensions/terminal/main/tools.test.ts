@@ -22,12 +22,12 @@ function tool(name: string, service: TerminalService) {
   return found
 }
 
-describe("terminal_close", () => {
+describe("close_terminal", () => {
   it("throws when the terminal does not exist", async () => {
     const service = createService()
     vi.mocked(service.terminalState).mockReturnValue(null)
 
-    await expect(tool("terminal_close", service).execute({ id: 1 }, ctx)).rejects.toThrow(
+    await expect(tool("close_terminal", service).execute({ id: 1 }, ctx)).rejects.toThrow(
       'Terminal "1" not found.',
     )
     expect(service.flushRunHistory).not.toHaveBeenCalled()
@@ -45,7 +45,7 @@ describe("terminal_close", () => {
       exitCode: null,
     })
 
-    await expect(tool("terminal_close", service).execute({ id: 1 }, ctx)).resolves.toBe(
+    await expect(tool("close_terminal", service).execute({ id: 1 }, ctx)).resolves.toBe(
       "Closed terminal 1.",
     )
     expect(service.flushRunHistory).not.toHaveBeenCalled()
@@ -53,7 +53,7 @@ describe("terminal_close", () => {
   })
 })
 
-describe("terminal_write", () => {
+describe("write_terminal", () => {
   it("returns the full terminal snapshot with run metadata", async () => {
     const service = createService()
     vi.mocked(service.startRun).mockResolvedValue({ runId: "run-1", path: "run-1.log" })
@@ -65,7 +65,7 @@ describe("terminal_write", () => {
     })
 
     await expect(
-      tool("terminal_write", service).execute({ id: 1, input: "echo done", submit: true, timeout: 0, idle: 0 }, ctx),
+      tool("write_terminal", service).execute({ id: 1, input: "echo done", submit: true, timeout: 0, idle: 0 }, ctx),
     ).resolves.toEqual({
       run_id: "run-1",
       reason: "timeout",
@@ -81,12 +81,12 @@ describe("terminal_write", () => {
   })
 })
 
-describe("terminal_read", () => {
+describe("read_terminal", () => {
   it("throws when the terminal does not exist", async () => {
     const service = createService()
     vi.mocked(service.terminalState).mockReturnValue(null)
 
-    await expect(tool("terminal_read", service).execute({ id: 1 }, ctx)).rejects.toThrow(
+    await expect(tool("read_terminal", service).execute({ id: 1 }, ctx)).rejects.toThrow(
       'Terminal "1" not found.',
     )
     expect(service.flushRunHistory).not.toHaveBeenCalled()

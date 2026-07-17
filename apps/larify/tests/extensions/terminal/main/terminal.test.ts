@@ -114,7 +114,7 @@ describe("Terminal", () => {
     fakePty.emitData("first\rsecond")
 
     const snapshot = await terminal.snapshot()
-    expect(snapshot).toMatchObject({ cols: 80, rows: 24 })
+    expect(snapshot).toMatchObject({ cols: 80, rows: 24, seq: 12 })
     expect(snapshot.data).toContain("second")
     expect(snapshot.data).not.toContain("first")
   })
@@ -167,7 +167,7 @@ describe("Terminal", () => {
 
     expect(first).toHaveBeenCalledTimes(2)
     expect(second).toHaveBeenCalledTimes(1)
-    expect(second).toHaveBeenCalledWith("before")
+    expect(second).toHaveBeenCalledWith("before", 0, 6)
   })
 
   it("ignores writes after exit is flushed", async () => {

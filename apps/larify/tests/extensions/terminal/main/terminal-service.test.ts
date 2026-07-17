@@ -33,7 +33,7 @@ class FakeManager {
   snapshot = vi.fn(() => "snapshot")
   destroy = vi.fn()
   private changeCallbacks = new Set<(state: SessionTerminalsState) => void>()
-  private dataCallbacks = new Set<(terminalId: number, data: string) => void>()
+  private dataCallbacks = new Set<(terminalId: number, data: string, start: number, end: number) => void>()
   private exitCallbacks = new Set<(terminalId: number, exitCode: number) => void>()
 
   constructor(sessionId: string) {
@@ -46,7 +46,7 @@ class FakeManager {
     return () => this.changeCallbacks.delete(callback)
   }
 
-  bindData(callback: (terminalId: number, data: string) => void): () => void {
+  bindData(callback: (terminalId: number, data: string, start: number, end: number) => void): () => void {
     this.dataCallbacks.add(callback)
     return () => this.dataCallbacks.delete(callback)
   }
@@ -64,8 +64,8 @@ class FakeManager {
     for (const callback of this.changeCallbacks) callback(this.state())
   }
 
-  emitData(terminalId: number, data: string): void {
-    for (const callback of this.dataCallbacks) callback(terminalId, data)
+  emitData(terminalId: number, data: string, start = 0, end = data.length): void {
+    for (const callback of this.dataCallbacks) callback(terminalId, data, start, end)
   }
 
   emitExit(terminalId: number, exitCode: number): void {
@@ -163,7 +163,7 @@ describe("TerminalService", () => {
     managers[0].emitExit(1, 2)
 
     expect(onChange).toHaveBeenCalledWith({ sessionId: "session-1", terminals: [], activeId: null })
-    expect(onData).toHaveBeenCalledWith("session-1", 1, "output")
+    expect(onData).toHaveBeenCalledWith("session-1", 1, "output", 0, 6)
     expect(onExit).toHaveBeenCalledWith("session-1", 1, 2)
   })
 
@@ -182,7 +182,7 @@ describe("TerminalService", () => {
 
     expect(first).toHaveBeenCalledTimes(2)
     expect(second).toHaveBeenCalledTimes(1)
-    expect(second).toHaveBeenCalledWith("session-1", 1, "before")
+    expect(second).toHaveBeenCalledWith("session-1", 1, "before", 0, 6)
   })
 
   it("destroys one session or all sessions", async () => {

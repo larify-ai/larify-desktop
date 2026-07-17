@@ -20,7 +20,7 @@ class FakeTerminal {
   private baseY = 0
   private endRow = 0
   private rendered = new Map<number, string>()
-  private dataCallbacks = new Set<(data: string) => void>()
+  private dataCallbacks = new Set<(data: string, start: number, end: number) => void>()
   private exitCallbacks = new Set<(exitCode: number) => void>()
 
   constructor(id: number, opts: { title?: string; shell?: string; cwd?: string } = {}) {
@@ -32,7 +32,7 @@ class FakeTerminal {
     terminals.push(this)
   }
 
-  bindData(callback: (data: string) => void): () => void {
+  bindData(callback: (data: string, start: number, end: number) => void): () => void {
     this.dataCallbacks.add(callback)
     return () => this.dataCallbacks.delete(callback)
   }
@@ -81,8 +81,8 @@ class FakeTerminal {
     }
   }
 
-  emitData(data: string): void {
-    for (const callback of this.dataCallbacks) callback(data)
+  emitData(data: string, start = 0, end = data.length): void {
+    for (const callback of this.dataCallbacks) callback(data, start, end)
   }
 
   emitExit(exitCode: number): void {
@@ -154,7 +154,7 @@ describe("TerminalManager", () => {
     terminals[0].emitData("output")
     terminals[0].emitExit(3)
 
-    expect(onData).toHaveBeenCalledWith(1, "output")
+    expect(onData).toHaveBeenCalledWith(1, "output", 0, 6)
     expect(onExit).toHaveBeenCalledWith(1, 3)
   })
 
@@ -173,7 +173,7 @@ describe("TerminalManager", () => {
 
     expect(first).toHaveBeenCalledTimes(2)
     expect(second).toHaveBeenCalledTimes(1)
-    expect(second).toHaveBeenCalledWith(1, "before")
+    expect(second).toHaveBeenCalledWith(1, "before", 0, 6)
   })
 
   it("sets active only for known terminals", async () => {

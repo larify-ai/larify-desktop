@@ -36,12 +36,13 @@ export class Terminal {
   private rows: number
   private headlessWriteSequence = 0
   private completedHeadlessWriteSequence = 0
+  private outputSeq = 0
   private headlessWriteWaiters: Array<{ sequence: number; resolve: () => void }> = []
   private exitCode: number | null = null
   private exited = false
   private pendingExit: number | null = null
   private exitTimer: NodeJS.Timeout | null = null
-  private dataListeners = new Set<Listener<[string]>>()
+  private dataListeners = new Set<Listener<[string, number, number]>>()
   private exitListeners = new Set<Listener<[number]>>()
 
   constructor(id: number, opts: TerminalCreateOptions = {}) {
@@ -71,9 +72,12 @@ export class Terminal {
     })
 
     this.pty.onData((data) => {
+      const start = this.outputSeq
+      const end = start + data.length
+      this.outputSeq = end
       this.writeHeadless(data)
       if (this.pendingExit !== null) this.scheduleExit()
-      for (const listener of this.dataListeners) listener(data)
+      for (const listener of this.dataListeners) listener(data, start, end)
     })
     this.pty.onExit(({ exitCode }) => {
       this.pendingExit = exitCode
@@ -81,7 +85,7 @@ export class Terminal {
     })
   }
 
-  bindData(callback: (data: string) => void): () => void {
+  bindData(callback: (data: string, start: number, end: number) => void): () => void {
     return addListener(this.dataListeners, callback)
   }
 
@@ -94,7 +98,8 @@ export class Terminal {
     return {
       data: this.serializeAddon.serialize(),
       cols: this.cols,
-      rows: this.rows
+      rows: this.rows,
+      seq: this.outputSeq
     }
   }
 

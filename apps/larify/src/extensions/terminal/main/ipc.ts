@@ -5,13 +5,13 @@ import type { TerminalCreateOptions, TerminalSnapshot } from "../shared/types"
 const BATCH_MS = 10
 
 class DataBatcher {
-  private chunks: string[] = []
+  private chunks: Array<{ data: string; start: number; end: number }> = []
   private timer: NodeJS.Timeout | null = null
 
-  constructor(private readonly send: (data: string) => void) {}
+  constructor(private readonly send: (event: { data: string; start: number; end: number }) => void) {}
 
-  push(chunk: string): void {
-    this.chunks.push(chunk)
+  push(data: string, start: number, end: number): void {
+    this.chunks.push({ data, start, end })
     if (!this.timer) this.timer = setTimeout(() => this.flush(), BATCH_MS)
   }
 
@@ -21,9 +21,11 @@ class DataBatcher {
       this.timer = null
     }
     if (this.chunks.length === 0) return
-    const data = this.chunks.join("")
+    const start = this.chunks[0].start
+    const end = this.chunks[this.chunks.length - 1].end
+    const data = this.chunks.map((chunk) => chunk.data).join("")
     this.chunks = []
-    this.send(data)
+    this.send({ data, start, end })
   }
 }
 
@@ -42,8 +44,8 @@ export function registerTerminalIpc(service: TerminalService): () => void {
     const key = batchKey(sessionId, terminalId)
     let batcher = batchers.get(key)
     if (!batcher) {
-      batcher = new DataBatcher((data) =>
-        send("terminal:data", { sessionId, terminalId, data }),
+      batcher = new DataBatcher((event) =>
+        send("terminal:data", { sessionId, terminalId, ...event }),
       )
       batchers.set(key, batcher)
     }
@@ -51,8 +53,8 @@ export function registerTerminalIpc(service: TerminalService): () => void {
   }
 
   const unbindChange = service.bindChange((state) => send("terminal:state", state))
-  const unbindData = service.bindData((sessionId, terminalId, data) =>
-    batcher(sessionId, terminalId).push(data),
+  const unbindData = service.bindData((sessionId, terminalId, data, start, end) =>
+    batcher(sessionId, terminalId).push(data, start, end),
   )
   const unbindExit = service.bindExit((sessionId, terminalId, exitCode) => {
     const key = batchKey(sessionId, terminalId)

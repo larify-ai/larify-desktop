@@ -121,7 +121,7 @@ describe("TerminalView", () => {
             return stateRequests[sessionId].promise
           }
           if (channel === "terminal:create") return Promise.resolve(1)
-          if (channel === "terminal:snapshot") return Promise.resolve({ data: "snapshot", cols: 80, rows: 24 })
+          if (channel === "terminal:snapshot") return Promise.resolve({ data: "snapshot", cols: 80, rows: 24, seq: 8 })
           return Promise.resolve()
         }),
         on: vi.fn((channel: string, callback: (payload: unknown) => void) => {
@@ -274,7 +274,7 @@ describe("TerminalView", () => {
     expect(fitMocks.some((fit) => fit.mock.calls.length > 0)).toBe(true)
   })
 
-  it("does not request a snapshot for a newly mounted terminal entry", async () => {
+  it("restores a snapshot before applying live terminal data", async () => {
     const { TerminalView } = await import("../../../../src/extensions/terminal/renderer/terminal-view")
 
     setAgentSessionId("session-live")
@@ -295,12 +295,59 @@ describe("TerminalView", () => {
         sessionId: "session-live",
         terminalId: 1,
         data: "live",
+        start: 8,
+        end: 12,
       })
     })
 
-    expect(window.bridge.invoke).not.toHaveBeenCalledWith("terminal:snapshot", "session-live", 1)
+    expect(window.bridge.invoke).toHaveBeenCalledWith("terminal:snapshot", "session-live", 1)
     expect(window.bridge.invoke).not.toHaveBeenCalledWith("terminal:attach", "session-live", 1)
-    expect(terminalMocks[0].write.mock.calls.map((call) => call[0])).toEqual(["live"])
+    expect(terminalMocks[0].write.mock.calls.map((call) => call[0])).toEqual(["snapshot", "live"])
+  })
+
+  it("deduplicates live data that overlaps a restored snapshot", async () => {
+    const snapshot = deferred<unknown>()
+    vi.mocked(window.bridge.invoke).mockImplementation((channel: string, sessionId: string) => {
+      if (channel === "terminal:getState") {
+        stateRequests[sessionId] = deferred()
+        return stateRequests[sessionId].promise
+      }
+      if (channel === "terminal:snapshot") return snapshot.promise
+      if (channel === "terminal:create") return Promise.resolve(1)
+      return Promise.resolve()
+    })
+    const { TerminalView } = await import("../../../../src/extensions/terminal/renderer/terminal-view")
+
+    setAgentSessionId("session-overlap")
+    await act(async () => {
+      root.render(createElement(TerminalView))
+    })
+
+    await act(async () => {
+      stateRequests["session-overlap"].resolve({
+        sessionId: "session-overlap",
+        activeId: 1,
+        terminals: [{ id: 1, pid: 10, title: "A", cwd: "/", shell: "sh", exitCode: null }],
+      })
+    })
+
+    await act(async () => {
+      listeners["terminal:data"]?.({
+        sessionId: "session-overlap",
+        terminalId: 1,
+        data: "otlive",
+        start: 6,
+        end: 12,
+      })
+    })
+
+    expect(terminalMocks[0].write).not.toHaveBeenCalled()
+
+    await act(async () => {
+      snapshot.resolve({ data: "snapshot", cols: 80, rows: 24, seq: 8 })
+    })
+
+    expect(terminalMocks[0].write.mock.calls.map((call) => call[0])).toEqual(["snapshot", "live"])
   })
 
   it("debounces backend resize and sends the latest dimensions", async () => {

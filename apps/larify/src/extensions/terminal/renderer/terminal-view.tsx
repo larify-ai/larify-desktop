@@ -45,6 +45,9 @@ interface TerminalEntry {
   fit: FitAddon
   host: HTMLDivElement
   exited: boolean
+  restoring: boolean
+  lastSeq: number
+  pendingData: TerminalDataEvent[]
   pendingResize: { cols: number; rows: number } | null
   resizeTimer: ReturnType<typeof setTimeout> | null
   lastSentCols: number | null
@@ -72,6 +75,16 @@ const pasteClipboard = (term: XTerm): void => {
       if (text) term.paste(text)
     })
     .catch((error) => console.error("[terminal:paste]", error))
+}
+
+const applyData = (entry: TerminalEntry, event: TerminalDataEvent): void => {
+  if (event.end <= entry.lastSeq) return
+  const data =
+    event.start < entry.lastSeq
+      ? event.data.slice(entry.lastSeq - event.start)
+      : event.data
+  entry.term.write(data)
+  entry.lastSeq = event.end
 }
 
 const disposeEntries = (entries: Map<number, TerminalEntry>): void => {
@@ -238,6 +251,9 @@ export function TerminalView(): React.JSX.Element {
         fit,
         host,
         exited: exitCode !== null,
+        restoring: false,
+        lastSeq: 0,
+        pendingData: [],
         pendingResize: null,
         resizeTimer: null,
         lastSentCols: null,
@@ -245,6 +261,25 @@ export function TerminalView(): React.JSX.Element {
         suppressResize: false,
       }
       entries.set(terminalId, entry)
+
+      entry.restoring = true
+      void window.bridge
+        .invoke("terminal:snapshot", sessionId, terminalId)
+        .then((snapshot) => {
+          if (!snapshot || !entries.get(terminalId)) return
+          const restore = snapshot as { data: string; seq: number }
+          entry.term.write(restore.data, () => {
+            entry.lastSeq = restore.seq
+            entry.restoring = false
+            const pending = entry.pendingData
+            entry.pendingData = []
+            for (const event of pending) applyData(entry, event)
+          })
+        })
+        .catch((error) => {
+          entry.restoring = false
+          console.error("[terminal:snapshot]", error)
+        })
 
       term.onData((data) => {
         if (entry.exited) return
@@ -288,7 +323,11 @@ export function TerminalView(): React.JSX.Element {
       const event = payload as TerminalDataEvent
       const entry = entriesForSession(event.sessionId).get(event.terminalId)
       if (!entry) return
-      entry.term.write(event.data)
+      if (entry.restoring) {
+        entry.pendingData.push(event)
+        return
+      }
+      applyData(entry, event)
     })
     const offExit = window.bridge.on("terminal:exit", (payload) => {
       const event = payload as TerminalExitEvent

@@ -8,6 +8,7 @@ const workspace = join(tmpdir(), "larify-terminal-service-workspace")
 const existingCwd = join(tmpdir(), "larify-terminal-service-existing")
 const managers: FakeManager[] = []
 const whichSync = vi.fn()
+const originalShell = process.env.SHELL
 
 vi.mock("which", () => ({
   default: {
@@ -18,11 +19,20 @@ vi.mock("which", () => ({
 vi.mock("electron", () => ({
   app: {
     isPackaged: false,
+    getPath: (name: string) => {
+      if (name === "temp") return tmpdir()
+      return tmpdir()
+    },
   },
 }))
 
 vi.mock("../../../../src/main/utils/app-paths", () => ({
   resourcePath: (...segments: string[]) => join(process.cwd(), "resources", ...segments),
+  larifyTempPath: (...segments: string[]) => {
+    const path = join(tmpdir(), "larify", ...segments)
+    mkdirSync(path, { recursive: true })
+    return path
+  },
   larifyWorkspacePath: () => {
     mkdirSync(workspace, { recursive: true })
     return workspace
@@ -101,11 +111,13 @@ async function importService(): Promise<
 beforeEach(() => {
   managers.length = 0
   whichSync.mockReset()
+  process.env.SHELL = originalShell
   rmSync(workspace, { force: true, recursive: true })
   mkdirSync(existingCwd, { recursive: true })
 })
 
 afterAll(() => {
+  process.env.SHELL = originalShell
   rmSync(workspace, { force: true, recursive: true })
   rmSync(existingCwd, { force: true, recursive: true })
 })
@@ -147,6 +159,57 @@ describe("TerminalService", () => {
       cwd: existingCwd,
       title: "Custom",
     })
+  })
+
+  it("does not use unsupported SHELL as a default candidate", async () => {
+    process.env.SHELL = "/bin/fish"
+    whichSync.mockImplementation((candidate: string) => (candidate === "pwsh.exe" ? "pwsh.exe" : null))
+    const { TerminalService } = await importService()
+    const service = new TerminalService()
+
+    service.create("session-1")
+
+    expect(whichSync).not.toHaveBeenCalledWith("/bin/fish", expect.anything())
+    expect(managers[0].create).toHaveBeenCalledWith(expect.objectContaining({
+      shell: "pwsh.exe",
+    }))
+  })
+
+  it("injects bash shell integration for bash", async () => {
+    const { TerminalService } = await importService()
+    const service = new TerminalService()
+
+    service.create("session-1", { shell: "/bin/bash", cwd: existingCwd })
+
+    expect(managers[0].create).toHaveBeenCalledWith(expect.objectContaining({
+      shell: "/bin/bash",
+      shellArgs: [
+        "--init-file",
+        expect.stringContaining(join(tmpdir(), "larify", "shell-integration", "bash")),
+      ],
+      shellEnv: expect.objectContaining({
+        VSCODE_INJECTION: "1",
+        VSCODE_NONCE: expect.any(String),
+      }),
+    }))
+  })
+
+  it("injects zsh shell integration through ZDOTDIR", async () => {
+    const { TerminalService } = await importService()
+    const service = new TerminalService()
+
+    service.create("session-1", { shell: "/bin/zsh", cwd: existingCwd })
+
+    expect(managers[0].create).toHaveBeenCalledWith(expect.objectContaining({
+      shell: "/bin/zsh",
+      shellArgs: ["-i"],
+      shellEnv: expect.objectContaining({
+        USER_ZDOTDIR: expect.any(String),
+        VSCODE_INJECTION: "1",
+        VSCODE_NONCE: expect.any(String),
+        ZDOTDIR: expect.stringContaining(join(tmpdir(), "larify", "shell-integration", "zsh")),
+      }),
+    }))
   })
 
   it("reuses managers per session and forwards operations", async () => {

@@ -1,8 +1,9 @@
-import { existsSync } from 'node:fs'
-import { basename } from 'node:path'
+import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { basename, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import which from 'which'
-import { larifyWorkspacePath, resourcePath } from '../../../main/utils/app-paths'
+import { larifyTempPath, larifyWorkspacePath, resourcePath } from '../../../main/utils/app-paths'
 import { addListener, type Listener } from '../../../main/utils/listener'
 import { TerminalManager } from './terminal-manager'
 import type { ShellCommandFinishedEvent } from './terminal'
@@ -17,17 +18,24 @@ import type {
 
 const DEFAULT_WORKSPACE = larifyWorkspacePath()
 const POWERSHELL_INTEGRATION_SCRIPT = 'shell-integration/shellIntegration.ps1'
+const BASH_INTEGRATION_SCRIPT = 'shell-integration/shellIntegration-bash.sh'
+const ZSH_INTEGRATION_SCRIPTS = [
+  ['shell-integration/shellIntegration-env.zsh', '.zshenv'],
+  ['shell-integration/shellIntegration-profile.zsh', '.zprofile'],
+  ['shell-integration/shellIntegration-rc.zsh', '.zshrc'],
+  ['shell-integration/shellIntegration-login.zsh', '.zlogin']
+] as const
 
 function shellCandidates(): string[] {
   if (process.platform === 'win32') {
-    return ['pwsh.exe', 'powershell.exe', process.env.COMSPEC, 'cmd.exe'].filter(
-      Boolean
-    ) as string[]
+    return ['pwsh.exe', 'powershell.exe']
   }
+  const envShell = process.env.SHELL
+  const supportedEnvShell = envShell && isShellIntegrationSupported(envShell) ? envShell : undefined
   if (process.platform === 'darwin') {
-    return [process.env.SHELL, '/bin/zsh', '/bin/bash', '/bin/sh'].filter(Boolean) as string[]
+    return [supportedEnvShell, '/bin/zsh', '/bin/bash'].filter(Boolean) as string[]
   }
-  return [process.env.SHELL, '/bin/bash', '/bin/sh'].filter(Boolean) as string[]
+  return [supportedEnvShell, '/bin/bash', '/bin/zsh', 'pwsh'].filter(Boolean) as string[]
 }
 
 function resolveShell(shell?: string): string {
@@ -50,23 +58,79 @@ function isPowerShell(shell: string): boolean {
   return name === 'powershell.exe' || name === 'pwsh.exe' || name === 'powershell' || name === 'pwsh'
 }
 
+function isBash(shell: string): boolean {
+  const name = basename(shell).toLowerCase()
+  return name === 'bash'
+}
+
+function isZsh(shell: string): boolean {
+  return basename(shell).toLowerCase() === 'zsh'
+}
+
+function isShellIntegrationSupported(shell: string): boolean {
+  return isPowerShell(shell) || isBash(shell) || isZsh(shell)
+}
+
+function writeIntegrationScript(source: string, target: string): void {
+  const content = readFileSync(resourcePath(source), 'utf8').replace(/\r\n?/g, '\n')
+  writeFileSync(target, content, 'utf8')
+}
+
+function bashIntegrationScript(): string {
+  const dir = larifyTempPath('shell-integration', 'bash', randomUUID())
+  const scriptPath = join(dir, 'shellIntegration-bash.sh')
+  writeIntegrationScript(BASH_INTEGRATION_SCRIPT, scriptPath)
+  return scriptPath
+}
+
+function zshIntegrationDir(): string {
+  const dir = larifyTempPath('shell-integration', 'zsh', randomUUID())
+  chmodSync(dir, 0o1700)
+  for (const [source, target] of ZSH_INTEGRATION_SCRIPTS) {
+    writeIntegrationScript(source, join(dir, target))
+  }
+  return dir
+}
+
 function shellIntegrationOptions(shell: string): Pick<TerminalCreateOptions, 'shellArgs' | 'shellEnv'> {
-  if (!isPowerShell(shell)) return {}
-  const integrationScript = resourcePath(POWERSHELL_INTEGRATION_SCRIPT)
-  return {
-    shellArgs: [
-      '-NoLogo',
-      '-ExecutionPolicy',
-      'Bypass',
-      '-NoExit',
-      '-Command',
-      `. "${integrationScript}"`
-    ],
-    shellEnv: {
-      VSCODE_NONCE: randomUUID(),
-      VSCODE_STABLE: '1'
+  if (isPowerShell(shell)) {
+    const integrationScript = resourcePath(POWERSHELL_INTEGRATION_SCRIPT)
+    return {
+      shellArgs: [
+        '-NoLogo',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-NoExit',
+        '-Command',
+        `. "${integrationScript}"`
+      ],
+      shellEnv: {
+        VSCODE_NONCE: randomUUID(),
+        VSCODE_STABLE: '1'
+      }
     }
   }
+  if (isBash(shell)) {
+    return {
+      shellArgs: ['--init-file', bashIntegrationScript()],
+      shellEnv: {
+        VSCODE_INJECTION: '1',
+        VSCODE_NONCE: randomUUID()
+      }
+    }
+  }
+  if (isZsh(shell)) {
+    return {
+      shellArgs: ['-i'],
+      shellEnv: {
+        USER_ZDOTDIR: process.env.ZDOTDIR || homedir(),
+        VSCODE_INJECTION: '1',
+        VSCODE_NONCE: randomUUID(),
+        ZDOTDIR: zshIntegrationDir()
+      }
+    }
+  }
+  return {}
 }
 
 export class TerminalService {

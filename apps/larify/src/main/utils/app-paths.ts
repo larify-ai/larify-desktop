@@ -1,5 +1,5 @@
 import { mkdirSync } from "node:fs"
-import { homedir } from "node:os"
+import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import { app } from "electron"
 
@@ -14,7 +14,14 @@ export const ensureLarifyPath = (...segments: string[]): string => {
 
 export const larifyWorkspacePath = (): string => ensureLarifyPath("workspace")
 
+export const larifyTempPath = (...segments: string[]): string => {
+  const root = app?.getPath?.("temp") ?? tmpdir()
+  const path = join(root, "larify", ...segments)
+  mkdirSync(path, { recursive: true })
+  return path
+}
+
 export const resourcePath = (...segments: string[]): string => {
-  const root = app.isPackaged ? process.resourcesPath : join(process.cwd(), "resources")
+  const root = app?.isPackaged ? process.resourcesPath : join(process.cwd(), "resources")
   return join(root, ...segments)
 }

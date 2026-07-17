@@ -2,42 +2,78 @@ import { z } from 'zod'
 import type { Toolkit } from '../../../shared/tool'
 import type { TerminalService } from './terminal-service'
 
-type WaitReason = 'idle' | 'timeout'
-
 function waitForIdle(
   service: TerminalService,
   sessionId: string,
   terminalId: number,
   idleSeconds: number,
   timeoutSeconds: number
-): Promise<WaitReason> {
+): Promise<void> {
   return new Promise((resolve) => {
     let settled = false
     let idleTimer: NodeJS.Timeout | null = null
     const idleMs = Math.max(0, idleSeconds * 1000)
     const timeoutMs = Math.max(0, timeoutSeconds * 1000)
 
-    const finish = (reason: WaitReason) => {
+    const finish = (): void => {
       if (settled) return
       settled = true
       if (idleTimer) clearTimeout(idleTimer)
-      clearTimeout(timeoutTimer)
+      if (timeoutTimer) clearTimeout(timeoutTimer)
       unbind()
-      resolve(reason)
+      resolve()
     }
 
-    const armIdleTimer = () => {
+    const armIdleTimer = (): void => {
       if (idleTimer) clearTimeout(idleTimer)
-      idleTimer = setTimeout(() => finish('idle'), idleMs)
+      idleTimer = setTimeout(finish, idleMs)
     }
 
     const unbind = service.bindData((eventSessionId, eventTerminalId) => {
       if (eventSessionId !== sessionId || eventTerminalId !== terminalId) return
       armIdleTimer()
     })
-    const timeoutTimer = setTimeout(() => finish('timeout'), timeoutMs)
+    const timeoutTimer = timeoutMs > 0 ? setTimeout(finish, timeoutMs) : null
     armIdleTimer()
   })
+}
+
+function waitForCommandFinished(
+  service: TerminalService,
+  sessionId: string,
+  terminalId: number,
+  timeoutSeconds: number
+): Promise<void> {
+  return new Promise((resolve) => {
+    let settled = false
+    const finish = (): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timeoutTimer)
+      unbind()
+      resolve()
+    }
+
+    const unbind = service.bindCommandFinished((eventSessionId, eventTerminalId) => {
+      if (eventSessionId !== sessionId || eventTerminalId !== terminalId) return
+      finish()
+    })
+    const timeoutTimer = setTimeout(finish, Math.max(0, timeoutSeconds * 1000))
+  })
+}
+
+function waitForTerminal(
+  service: TerminalService,
+  sessionId: string,
+  terminalId: number,
+  shellIntegration: boolean | undefined,
+  idleSeconds: number,
+  timeoutSeconds: number
+): Promise<void> {
+  if (shellIntegration && timeoutSeconds > 0) {
+    return waitForCommandFinished(service, sessionId, terminalId, timeoutSeconds)
+  }
+  return waitForIdle(service, sessionId, terminalId, idleSeconds, timeoutSeconds)
 }
 
 const terminalIdSchema = z
@@ -49,6 +85,56 @@ const terminalIdSchema = z
 const createSchema = z.object({
   cwd: z.string().optional().describe('Working directory')
 })
+
+const closeSchema = z.object({
+  id: terminalIdSchema
+})
+
+const writeSchema = z.object({
+  id: terminalIdSchema,
+  input: z
+    .string()
+    .describe('Raw input passed to node-pty write(). Use JSON unicode escapes for control characters.'),
+  submit: z.boolean().default(true).describe('Append Enter if input has no newline'),
+  timeout: z
+    .number()
+    .nonnegative()
+    .default(300)
+    .describe('Wait timeout in seconds, default 300'),
+  idle: z
+    .number()
+    .nonnegative()
+    .default(30)
+    .describe('Idle seconds before reading, default 30')
+})
+
+const readSchema = z.object({
+  id: terminalIdSchema,
+  timeout: z
+    .number()
+    .nonnegative()
+    .default(30)
+    .describe('Wait timeout in seconds, default 30'),
+  idle: z
+    .number()
+    .nonnegative()
+    .default(1)
+    .describe('Idle seconds before reading, default 1')
+})
+
+const terminalResult = (
+  snapshot: { screen: string },
+  log?: { path?: string }
+): { snapshot: { screen: string }; log_path?: string } => {
+  if (!log?.path) return { snapshot }
+  return {
+    snapshot: {
+      ...snapshot,
+      screen: `(Earlier output omitted; full output in log_path.)\n${snapshot.screen}`
+    },
+    log_path: log.path
+  }
+}
 
 export function createTerminalToolkit(service: TerminalService): Toolkit {
   return {
@@ -76,11 +162,9 @@ export function createTerminalToolkit(service: TerminalService): Toolkit {
         name: 'close_terminal',
         description: 'Close a terminal',
         metadata: { icon: 'terminal' },
-        inputSchema: z.object({
-          id: terminalIdSchema
-        }),
+        inputSchema: closeSchema,
         execute: async (args, ctx) => {
-          const { id } = args as { id: number }
+          const { id } = args as z.infer<typeof closeSchema>
           if (!service.terminalState(ctx.sessionId, id)) {
             throw new Error(`Terminal "${id}" not found.`)
           }
@@ -92,48 +176,32 @@ export function createTerminalToolkit(service: TerminalService): Toolkit {
         name: 'write_terminal',
         description: 'Write raw node-pty input to a terminal',
         metadata: { icon: 'terminal' },
-        inputSchema: z.object({
-          id: terminalIdSchema,
-          input: z
-            .string()
-            .describe('Raw input passed to node-pty write(). Use JSON unicode escapes for control characters.'),
-          submit: z.boolean().default(true).describe('Append Enter if input has no newline'),
-          timeout: z
-            .number()
-            .nonnegative()
-            .default(30)
-            .describe('Wait timeout in seconds'),
-          idle: z
-            .number()
-            .nonnegative()
-            .default(0.5)
-            .describe('Idle seconds before reading')
-        }),
+        inputSchema: writeSchema,
         execute: async (args, ctx) => {
-          const { id, input, submit, timeout, idle } = args as {
-            id: number
-            input: string
-            submit: boolean
-            timeout: number
-            idle: number
-          }
+          const { id, input, submit, timeout, idle } = args as z.infer<typeof writeSchema>
           return service.withWriterLock(ctx.sessionId, id, async () => {
+            const state = service.terminalState(ctx.sessionId, id)
+            if (!state) throw new Error(`Terminal "${id}" not found.`)
             const log = await service.startRun(ctx.sessionId, id)
             if (!log) throw new Error(`Terminal "${id}" not found.`)
             const data =
               input && submit && !input.endsWith('\r') && !input.endsWith('\n')
                 ? `${input}\r`
                 : input
+            const waitPromise = waitForTerminal(
+              service,
+              ctx.sessionId,
+              id,
+              Boolean(data) && state.shellIntegration,
+              idle,
+              timeout
+            )
             if (data) service.write(ctx.sessionId, id, data)
-            await waitForIdle(service, ctx.sessionId, id, idle, timeout)
+            await waitPromise
             await service.flushRunHistory(ctx.sessionId, id)
             const snapshot = await service.agentSnapshot(ctx.sessionId, id)
             if (!snapshot) throw new Error(`Terminal "${id}" not found.`)
-            return {
-              run_id: log.runId,
-              snapshot,
-              log_path: log.path
-            }
+            return terminalResult(snapshot, log)
           })
         }
       },
@@ -141,18 +209,18 @@ export function createTerminalToolkit(service: TerminalService): Toolkit {
         name: 'read_terminal',
         description: 'Read a terminal snapshot',
         metadata: { icon: 'terminal' },
-        inputSchema: z.object({
-          id: terminalIdSchema
-        }),
+        inputSchema: readSchema,
         execute: async (args, ctx) => {
-          const { id } = args as { id: number }
-          if (!service.terminalState(ctx.sessionId, id)) {
+          const { id, timeout, idle } = args as z.infer<typeof readSchema>
+          const state = service.terminalState(ctx.sessionId, id)
+          if (!state) {
             throw new Error(`Terminal "${id}" not found.`)
           }
-          await service.flushRunHistory(ctx.sessionId, id)
+          await waitForIdle(service, ctx.sessionId, id, idle, timeout)
+          const log = await service.flushRunHistory(ctx.sessionId, id)
           const snapshot = await service.agentSnapshot(ctx.sessionId, id)
           if (!snapshot) throw new Error(`Terminal "${id}" not found.`)
-          return snapshot
+          return terminalResult(snapshot, log ?? undefined)
         }
       }
     ]

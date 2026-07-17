@@ -22,6 +22,7 @@ class FakeTerminal {
   private rendered = new Map<number, string>()
   private dataCallbacks = new Set<(data: string, start: number, end: number) => void>()
   private exitCallbacks = new Set<(exitCode: number) => void>()
+  private commandFinishedCallbacks = new Set<(event: { exitCode?: number }) => void>()
 
   constructor(id: number, opts: { title?: string; shell?: string; cwd?: string } = {}) {
     this.id = id
@@ -42,15 +43,23 @@ class FakeTerminal {
     return () => this.exitCallbacks.delete(callback)
   }
 
+  bindCommandFinished(callback: (event: { exitCode?: number }) => void): () => void {
+    this.commandFinishedCallbacks.add(callback)
+    return () => this.commandFinishedCallbacks.delete(callback)
+  }
+
   snapshot(): string {
     return `snapshot:${this.id}`
   }
 
-  lastRenderedRow() {
+  lastRenderedRow(): number {
     return this.cursorRow
   }
 
-  flushRenderedRowsBeforeTail(flushedUntilRow: number, tailLines: number) {
+  flushRenderedRowsBeforeTail(
+    flushedUntilRow: number,
+    tailLines: number
+  ): { text: string; flushedUntilRow: number } | null {
     const safeEnd = Math.min(this.baseY - tailLines, this.endRow)
     const startRow = flushedUntilRow + 1
     if (safeEnd < startRow) return null
@@ -70,7 +79,14 @@ class FakeTerminal {
     this.baseY = baseY
   }
 
-  state() {
+  state(): {
+    id: number
+    pid: number
+    title: string
+    cwd: string
+    shell: string
+    exitCode: null
+  } {
     return {
       id: this.id,
       pid: this.pid,
@@ -98,7 +114,9 @@ vi.mock("../../../../src/main/utils/app-paths", () => ({
   larifyPath: (...segments: string[]) => join(logRoot, ...segments),
 }))
 
-async function importManager() {
+async function importManager(): Promise<
+  typeof import("../../../../src/extensions/terminal/main/terminal-manager")
+> {
   return import("../../../../src/extensions/terminal/main/terminal-manager")
 }
 
@@ -290,11 +308,12 @@ describe("TerminalManager", () => {
     terminals[0].setRendered(["prompt", "line 1", "line 2"], 0)
     await manager.flushRunHistory(id)
 
-    expect(log?.path).toContain("sessions")
+    expect(log?.path).toBeUndefined()
 
     terminals[0].setRendered(["old", "kept", "tail"], 2001)
     await manager.flushRunHistory(id)
 
+    expect(log?.path).toContain("sessions")
     await expect(readFile(log!.path, "utf8")).resolves.toContain("old\nkept")
   })
 
@@ -324,14 +343,15 @@ describe("TerminalManager", () => {
     terminals[0].setRendered(["prompt", "line 1"], 0)
     terminals[0].emitData("chunk")
     await new Promise((resolve) => setTimeout(resolve, 0))
-    await expect(readFile(log!.path, "utf8")).rejects.toMatchObject({ code: "ENOENT" })
+    expect(log?.path).toBeUndefined()
 
     terminals[0].setRendered(["old", "kept", "tail"], 2001)
     terminals[0].emitData("chunk")
     await expect
       .poll(async () => {
+        if (!log?.path) return ""
         try {
-          return await readFile(log!.path, "utf8")
+          return await readFile(log.path, "utf8")
         } catch {
           return ""
         }

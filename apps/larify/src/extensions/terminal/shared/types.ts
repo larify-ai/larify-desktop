@@ -1,6 +1,8 @@
 export interface TerminalCreateOptions {
   cwd?: string
   shell?: string
+  shellArgs?: string[]
+  shellEnv?: Record<string, string | undefined>
   title?: string
   cols?: number
   rows?: number
@@ -12,6 +14,7 @@ export interface TerminalState {
   title: string
   cwd: string
   shell: string
+  shellIntegration?: boolean
   exitCode: number | null
 }
 

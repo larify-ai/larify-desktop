@@ -36,4 +36,23 @@ describe.skipIf(!process.env.LIVE_TERMINAL)("TerminalService live", () => {
     expect(snapshot?.data).toContain(marker)
     await service.destroy()
   }, 15_000)
+
+  it("receives PowerShell shell integration command completion", async () => {
+    if (process.platform !== "win32") return
+    const service = new TerminalService()
+    const terminalId = service.create("shell-integration-live", { title: "Live" })
+    const completion = new Promise<{ exitCode?: number }>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("Timed out waiting for command completion")), 10_000)
+      service.bindCommandFinished((sessionId, eventTerminalId, event) => {
+        if (sessionId !== "shell-integration-live" || eventTerminalId !== terminalId) return
+        clearTimeout(timer)
+        resolve(event)
+      })
+    })
+
+    service.write("shell-integration-live", terminalId, `Write-Output "${marker}"\r`)
+
+    await expect(completion).resolves.toEqual({ exitCode: 0 })
+    await service.destroy()
+  }, 15_000)
 })

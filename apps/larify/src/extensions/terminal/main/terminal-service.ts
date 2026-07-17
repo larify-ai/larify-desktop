@@ -1,17 +1,22 @@
 import { existsSync } from 'node:fs'
+import { basename } from 'node:path'
+import { randomUUID } from 'node:crypto'
 import which from 'which'
-import { larifyWorkspacePath } from '../../../main/utils/app-paths'
+import { larifyWorkspacePath, resourcePath } from '../../../main/utils/app-paths'
 import { addListener, type Listener } from '../../../main/utils/listener'
 import { TerminalManager } from './terminal-manager'
+import type { ShellCommandFinishedEvent } from './terminal'
 import type { TerminalRunLog } from './terminal-run-log'
 import type {
   SessionTerminalsState,
   TerminalCreateOptions,
   TerminalAgentSnapshot,
-  TerminalSnapshot
+  TerminalSnapshot,
+  TerminalState
 } from '../shared/types'
 
 const DEFAULT_WORKSPACE = larifyWorkspacePath()
+const POWERSHELL_INTEGRATION_SCRIPT = 'shell-integration/shellIntegration.ps1'
 
 function shellCandidates(): string[] {
   if (process.platform === 'win32') {
@@ -40,11 +45,36 @@ function resolveCwd(cwd?: string): string {
   return DEFAULT_WORKSPACE
 }
 
+function isPowerShell(shell: string): boolean {
+  const name = basename(shell).toLowerCase()
+  return name === 'powershell.exe' || name === 'pwsh.exe' || name === 'powershell' || name === 'pwsh'
+}
+
+function shellIntegrationOptions(shell: string): Pick<TerminalCreateOptions, 'shellArgs' | 'shellEnv'> {
+  if (!isPowerShell(shell)) return {}
+  const integrationScript = resourcePath(POWERSHELL_INTEGRATION_SCRIPT)
+  return {
+    shellArgs: [
+      '-NoLogo',
+      '-ExecutionPolicy',
+      'Bypass',
+      '-NoExit',
+      '-Command',
+      `. "${integrationScript}"`
+    ],
+    shellEnv: {
+      VSCODE_NONCE: randomUUID(),
+      VSCODE_STABLE: '1'
+    }
+  }
+}
+
 export class TerminalService {
   private managers = new Map<string, TerminalManager>()
   private changeListeners = new Set<Listener<[SessionTerminalsState]>>()
   private dataListeners = new Set<Listener<[string, number, string, number, number]>>()
   private exitListeners = new Set<Listener<[string, number, number]>>()
+  private commandFinishedListeners = new Set<Listener<[string, number, ShellCommandFinishedEvent]>>()
 
   bindChange(callback: (state: SessionTerminalsState) => void): () => void {
     return addListener(this.changeListeners, callback)
@@ -62,10 +92,17 @@ export class TerminalService {
     return addListener(this.exitListeners, callback)
   }
 
+  bindCommandFinished(
+    callback: (sessionId: string, terminalId: number, event: ShellCommandFinishedEvent) => void
+  ): () => void {
+    return addListener(this.commandFinishedListeners, callback)
+  }
+
   create(sessionId: string, opts?: TerminalCreateOptions): number {
     const shell = resolveShell(opts?.shell)
     return this.manager(sessionId).create({
       ...opts,
+      ...shellIntegrationOptions(shell),
       cwd: resolveCwd(opts?.cwd),
       shell,
       title: opts?.title
@@ -112,7 +149,7 @@ export class TerminalService {
     return this.manager(sessionId).agentSnapshot(terminalId)
   }
 
-  terminalState(sessionId: string, terminalId: number) {
+  terminalState(sessionId: string, terminalId: number): TerminalState | null {
     return this.manager(sessionId).terminalState(terminalId)
   }
 
@@ -144,6 +181,9 @@ export class TerminalService {
       })
       manager.bindExit((terminalId, exitCode) => {
         for (const listener of this.exitListeners) listener(sessionId, terminalId, exitCode)
+      })
+      manager.bindCommandFinished((terminalId, event) => {
+        for (const listener of this.commandFinishedListeners) listener(sessionId, terminalId, event)
       })
       this.managers.set(sessionId, manager)
     }

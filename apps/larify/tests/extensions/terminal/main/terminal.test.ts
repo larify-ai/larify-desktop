@@ -54,7 +54,9 @@ afterAll(() => {
   rmSync(cwd, { force: true, recursive: true })
 })
 
-async function importTerminal() {
+async function importTerminal(): Promise<
+  typeof import("../../../../src/extensions/terminal/main/terminal")
+> {
   return import("../../../../src/extensions/terminal/main/terminal")
 }
 
@@ -103,6 +105,42 @@ describe("Terminal", () => {
     const terminal = new Terminal(1, { shell: "sh", cwd, title: "Shell" })
 
     expect(terminal.state().title).toBe("Shell")
+  })
+
+  it("passes shell integration args and env to the pty", async () => {
+    const fakePty = createFakePty()
+    spawnMock.mockReturnValue(fakePty)
+    const { Terminal } = await importTerminal()
+
+    const terminal = new Terminal(1, {
+      shell: "powershell.exe",
+      cwd,
+      shellArgs: ["-NoExit", "-Command", ". script.ps1"],
+      shellEnv: { VSCODE_STABLE: "1" },
+    })
+
+    expect(spawnMock).toHaveBeenCalledWith("powershell.exe", ["-NoExit", "-Command", ". script.ps1"], {
+      name: "xterm-256color",
+      cols: 80,
+      rows: 24,
+      cwd,
+      env: { ...process.env, VSCODE_STABLE: "1" },
+    })
+    expect(terminal.state().shellIntegration).toBe(true)
+  })
+
+  it("emits shell command completion from VS Code OSC 633 markers", async () => {
+    const fakePty = createFakePty()
+    spawnMock.mockReturnValue(fakePty)
+    const { Terminal } = await importTerminal()
+    const terminal = new Terminal(1, { shell: "sh", cwd })
+    const onCommandFinished = vi.fn()
+    terminal.bindCommandFinished(onCommandFinished)
+
+    fakePty.emitData("\x1b]633;D;0\x07")
+    await terminal.snapshot()
+
+    expect(onCommandFinished).toHaveBeenCalledWith({ exitCode: 0 })
   })
 
   it("serializes the rendered terminal state instead of raw output", async () => {

@@ -1,5 +1,5 @@
 import { addListener, type Listener } from '../../../main/utils/listener'
-import { Terminal } from './terminal'
+import { Terminal, type ShellCommandFinishedEvent } from './terminal'
 import {
   appendRunLog,
   createTerminalRunLog,
@@ -29,6 +29,7 @@ export class TerminalManager {
   private changeListeners = new Set<Listener<[SessionTerminalsState]>>()
   private dataListeners = new Set<Listener<[number, string, number, number]>>()
   private exitListeners = new Set<Listener<[number, number]>>()
+  private commandFinishedListeners = new Set<Listener<[number, ShellCommandFinishedEvent]>>()
 
   constructor(private readonly sessionId: string) {}
 
@@ -44,6 +45,12 @@ export class TerminalManager {
     return addListener(this.exitListeners, callback)
   }
 
+  bindCommandFinished(
+    callback: (terminalId: number, event: ShellCommandFinishedEvent) => void
+  ): () => void {
+    return addListener(this.commandFinishedListeners, callback)
+  }
+
   create(opts?: TerminalCreateOptions): number {
     const terminal = new Terminal(this.nextId++, opts)
     terminal.bindData((data, start, end) => {
@@ -53,6 +60,9 @@ export class TerminalManager {
     terminal.bindExit((exitCode) => {
       for (const listener of this.exitListeners) listener(terminal.id, exitCode)
       this.emit()
+    })
+    terminal.bindCommandFinished((event) => {
+      for (const listener of this.commandFinishedListeners) listener(terminal.id, event)
     })
     this.terminals.set(terminal.id, terminal)
     this.activeId = terminal.id

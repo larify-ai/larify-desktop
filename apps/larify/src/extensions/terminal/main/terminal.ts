@@ -17,16 +17,22 @@ import type {
 
 const EXIT_FLUSH_MS = 250
 const SCROLLBACK = 5000
+const VSCODE_SHELL_INTEGRATION_OSC = 633
 
 interface RenderedHistoryFlush {
   text: string
   flushedUntilRow: number
 }
 
+export interface ShellCommandFinishedEvent {
+  exitCode?: number
+}
+
 export class Terminal {
   readonly id: number
   readonly shell: string
   readonly cwd: string
+  readonly shellIntegration: boolean
   private readonly title: string
 
   private readonly pty: IPty
@@ -44,6 +50,7 @@ export class Terminal {
   private exitTimer: NodeJS.Timeout | null = null
   private dataListeners = new Set<Listener<[string, number, number]>>()
   private exitListeners = new Set<Listener<[number]>>()
+  private commandFinishedListeners = new Set<Listener<[ShellCommandFinishedEvent]>>()
 
   constructor(id: number, opts: TerminalCreateOptions = {}) {
     if (!opts.shell) throw new Error('Terminal shell is required')
@@ -52,6 +59,7 @@ export class Terminal {
     this.id = id
     this.shell = opts.shell
     this.cwd = opts.cwd
+    this.shellIntegration = Boolean(opts.shellArgs?.length)
     this.title =
       opts.title ?? basename(this.shell, process.platform === 'win32' ? '.exe' : undefined)
     this.cols = opts.cols ?? 80
@@ -63,12 +71,16 @@ export class Terminal {
       allowProposedApi: true
     })
     this.headless.loadAddon(this.serializeAddon)
-    this.pty = spawn(this.shell, [], {
+    this.headless.parser.registerOscHandler(VSCODE_SHELL_INTEGRATION_OSC, (data) => {
+      this.handleVSCodeShellIntegration(data)
+      return true
+    })
+    this.pty = spawn(this.shell, opts.shellArgs ?? [], {
       name: 'xterm-256color',
       cols: this.cols,
       rows: this.rows,
       cwd: this.cwd,
-      env: process.env
+      env: { ...process.env, ...opts.shellEnv }
     })
 
     this.pty.onData((data) => {
@@ -91,6 +103,10 @@ export class Terminal {
 
   bindExit(callback: (exitCode: number) => void): () => void {
     return addListener(this.exitListeners, callback)
+  }
+
+  bindCommandFinished(callback: (event: ShellCommandFinishedEvent) => void): () => void {
+    return addListener(this.commandFinishedListeners, callback)
   }
 
   async snapshot(): Promise<TerminalSnapshot> {
@@ -144,7 +160,9 @@ export class Terminal {
       this.headless.resize(nextCols, nextRows)
       this.cols = nextCols
       this.rows = nextRows
-    } catch {}
+    } catch {
+      // Ignore resize failures from terminals that are already exiting.
+    }
   }
 
   close(): void {
@@ -162,7 +180,9 @@ export class Terminal {
       try {
         process.kill(pid, 0)
         this.pty.kill('SIGKILL')
-      } catch {}
+      } catch {
+        // The process already exited.
+      }
     }, 500).unref()
   }
 
@@ -170,7 +190,9 @@ export class Terminal {
     if (this.exitTimer) clearTimeout(this.exitTimer)
     try {
       this.pty.kill()
-    } catch {}
+    } catch {
+      // The process may already be gone.
+    }
   }
 
   state(): TerminalState {
@@ -180,6 +202,7 @@ export class Terminal {
       title: this.title,
       cwd: this.cwd,
       shell: this.shell,
+      shellIntegration: this.shellIntegration || undefined,
       exitCode: this.exitCode
     }
   }
@@ -200,6 +223,17 @@ export class Terminal {
     const sequence = this.headlessWriteSequence
     if (this.completedHeadlessWriteSequence >= sequence) return Promise.resolve()
     return new Promise((resolve) => this.headlessWriteWaiters.push({ sequence, resolve }))
+  }
+
+  private handleVSCodeShellIntegration(data: string): void {
+    const [command, ...args] = data.split(';')
+    if (command !== 'D') return
+    const rawExitCode = args[0]
+    const exitCode = rawExitCode === undefined || rawExitCode === '' ? undefined : Number(rawExitCode)
+    const event = {
+      ...(Number.isFinite(exitCode) && { exitCode })
+    }
+    for (const listener of this.commandFinishedListeners) listener(event)
   }
 
   private scheduleExit(): void {

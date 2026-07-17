@@ -15,7 +15,14 @@ vi.mock("which", () => ({
   },
 }))
 
+vi.mock("electron", () => ({
+  app: {
+    isPackaged: false,
+  },
+}))
+
 vi.mock("../../../../src/main/utils/app-paths", () => ({
+  resourcePath: (...segments: string[]) => join(process.cwd(), "resources", ...segments),
   larifyWorkspacePath: () => {
     mkdirSync(workspace, { recursive: true })
     return workspace
@@ -36,6 +43,7 @@ class FakeManager {
   private changeCallbacks = new Set<(state: SessionTerminalsState) => void>()
   private dataCallbacks = new Set<(terminalId: number, data: string, start: number, end: number) => void>()
   private exitCallbacks = new Set<(terminalId: number, exitCode: number) => void>()
+  private commandFinishedCallbacks = new Set<(terminalId: number, event: { exitCode?: number }) => void>()
 
   constructor(sessionId: string) {
     this.sessionId = sessionId
@@ -55,6 +63,11 @@ class FakeManager {
   bindExit(callback: (terminalId: number, exitCode: number) => void): () => void {
     this.exitCallbacks.add(callback)
     return () => this.exitCallbacks.delete(callback)
+  }
+
+  bindCommandFinished(callback: (terminalId: number, event: { exitCode?: number }) => void): () => void {
+    this.commandFinishedCallbacks.add(callback)
+    return () => this.commandFinishedCallbacks.delete(callback)
   }
 
   state(): SessionTerminalsState {
@@ -78,7 +91,9 @@ vi.mock("../../../../src/extensions/terminal/main/terminal-manager", () => ({
   TerminalManager: FakeManager,
 }))
 
-async function importService() {
+async function importService(): Promise<
+  typeof import("../../../../src/extensions/terminal/main/terminal-service")
+> {
   vi.resetModules()
   return import("../../../../src/extensions/terminal/main/terminal-service")
 }
@@ -105,11 +120,18 @@ describe("TerminalService", () => {
 
     expect(service.create("session-1")).toBe(1)
 
-    expect(managers[0].create).toHaveBeenCalledWith({
+    expect(managers[0].create).toHaveBeenCalledWith(expect.objectContaining({
       cwd: workspace,
       shell: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
       title: undefined,
-    })
+      shellArgs: expect.arrayContaining([
+        "-ExecutionPolicy",
+        "Bypass",
+        "-NoExit",
+        expect.stringContaining("resources\\shell-integration\\shellIntegration.ps1"),
+      ]),
+      shellEnv: expect.objectContaining({ VSCODE_STABLE: "1" }),
+    }))
   })
 
   it("keeps provided shell, title, and existing cwd", async () => {

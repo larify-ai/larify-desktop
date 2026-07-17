@@ -1,10 +1,12 @@
 import { describe, expect, it, vi } from "vitest"
 import { createTerminalToolkit } from "../../../../src/extensions/terminal/main/tools"
 import type { TerminalService } from "../../../../src/extensions/terminal/main/terminal-service"
+import type { Toolkit } from "../../../../src/shared/tool"
 
 const ctx = { sessionId: "session-1" }
+type TerminalTool = Toolkit["tools"][number]
 
-function createService() {
+function createService(): TerminalService {
   return {
     terminalState: vi.fn(),
     startRun: vi.fn(),
@@ -13,11 +15,12 @@ function createService() {
     agentSnapshot: vi.fn(),
     close: vi.fn(),
     bindData: vi.fn(() => () => {}),
+    bindCommandFinished: vi.fn(() => () => {}),
     withWriterLock: vi.fn((_sessionId, _terminalId, fn) => fn()),
   } as unknown as TerminalService
 }
 
-function tool(name: string, service: TerminalService) {
+function tool(name: string, service: TerminalService): TerminalTool {
   const found = createTerminalToolkit(service).tools.find((item) => item.name === name)
   if (!found) throw new Error(`Tool ${name} not found`)
   return found
@@ -57,7 +60,15 @@ describe("close_terminal", () => {
 describe("write_terminal", () => {
   it("returns the full terminal snapshot with run metadata", async () => {
     const service = createService()
-    vi.mocked(service.startRun).mockResolvedValue({ runId: "run-1", path: "run-1.log" })
+    vi.mocked(service.terminalState).mockReturnValue({
+      id: 1,
+      pid: 100,
+      title: "powershell",
+      cwd: "D:\\Workspace",
+      shell: "powershell.exe",
+      exitCode: null,
+    })
+    vi.mocked(service.startRun).mockResolvedValue({ runId: "run-1", sessionId: "session-1" })
     vi.mocked(service.agentSnapshot).mockResolvedValue({
       screen: "done",
     })
@@ -65,19 +76,53 @@ describe("write_terminal", () => {
     await expect(
       tool("write_terminal", service).execute({ id: 1, input: "echo done", submit: true, timeout: 0, idle: 0 }, ctx),
     ).resolves.toEqual({
-      run_id: "run-1",
       snapshot: {
         screen: "done",
       },
-      log_path: "run-1.log",
     })
     expect(service.withWriterLock).toHaveBeenCalledWith("session-1", 1, expect.any(Function))
     expect(service.write).toHaveBeenCalledWith("session-1", 1, "echo done\r")
   })
 
+  it("returns log_path only after history is written", async () => {
+    const service = createService()
+    const log = { runId: "run-1", sessionId: "session-1", path: undefined as string | undefined }
+    vi.mocked(service.terminalState).mockReturnValue({
+      id: 1,
+      pid: 100,
+      title: "powershell",
+      cwd: "D:\\Workspace",
+      shell: "powershell.exe",
+      exitCode: null,
+    })
+    vi.mocked(service.startRun).mockResolvedValue(log)
+    vi.mocked(service.flushRunHistory).mockImplementation(async () => {
+      log.path = "run-1.log"
+      return log
+    })
+    vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: "done" })
+
+    await expect(
+      tool("write_terminal", service).execute({ id: 1, input: "echo done", submit: true, timeout: 0, idle: 0 }, ctx),
+    ).resolves.toMatchObject({
+      snapshot: {
+        screen: "(Earlier output omitted; full output in log_path.)\ndone",
+      },
+      log_path: "run-1.log",
+    })
+  })
+
   it("runs terminal writes inside the terminal queue", async () => {
     const service = createService()
     const order: string[] = []
+    vi.mocked(service.terminalState).mockReturnValue({
+      id: 1,
+      pid: 100,
+      title: "powershell",
+      cwd: "D:\\Workspace",
+      shell: "powershell.exe",
+      exitCode: null,
+    })
     vi.mocked(service.withWriterLock).mockImplementation(async (_sessionId, _terminalId, fn) => {
       order.push("lock")
       const result = await fn()
@@ -86,7 +131,7 @@ describe("write_terminal", () => {
     })
     vi.mocked(service.startRun).mockImplementation(async () => {
       order.push("start")
-      return { runId: "run-1", path: "run-1.log" }
+      return { runId: "run-1", sessionId: "session-1" }
     })
     vi.mocked(service.write).mockImplementation(() => {
       order.push("write")
@@ -97,22 +142,62 @@ describe("write_terminal", () => {
 
     await expect(
       tool("write_terminal", service).execute({ id: 1, input: "echo done", submit: true, timeout: 0, idle: 0 }, ctx),
-    ).resolves.toMatchObject({ run_id: "run-1" })
+    ).resolves.toMatchObject({ snapshot: { screen: "done" } })
 
     expect(order).toEqual(["lock", "start", "write", "unlock"])
   })
 
   it("waits without writing when input is empty", async () => {
     const service = createService()
-    vi.mocked(service.startRun).mockResolvedValue({ runId: "run-1", path: "run-1.log" })
+    vi.mocked(service.terminalState).mockReturnValue({
+      id: 1,
+      pid: 100,
+      title: "powershell",
+      cwd: "D:\\Workspace",
+      shell: "powershell.exe",
+      shellIntegration: true,
+      exitCode: null,
+    })
+    vi.mocked(service.startRun).mockResolvedValue({ runId: "run-1", sessionId: "session-1" })
     vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: "done" })
 
     await expect(
       tool("write_terminal", service).execute({ id: 1, input: "", submit: true, timeout: 0, idle: 0 }, ctx),
-    ).resolves.toMatchObject({ run_id: "run-1", snapshot: { screen: "done" } })
+    ).resolves.toMatchObject({ snapshot: { screen: "done" } })
 
     expect(service.write).not.toHaveBeenCalled()
+    expect(service.bindCommandFinished).not.toHaveBeenCalled()
   })
+
+  it("waits for shell integration completion when available", async () => {
+    const service = createService()
+    let commandFinished: ((sessionId: string, terminalId: number) => void) | undefined
+    vi.mocked(service.terminalState).mockReturnValue({
+      id: 1,
+      pid: 100,
+      title: "powershell",
+      cwd: "D:\\Workspace",
+      shell: "powershell.exe",
+      shellIntegration: true,
+      exitCode: null,
+    })
+    vi.mocked(service.bindCommandFinished).mockImplementation((callback) => {
+      commandFinished = callback
+      return () => {}
+    })
+    vi.mocked(service.write).mockImplementation(() => {
+      commandFinished?.("session-1", 1)
+    })
+    vi.mocked(service.startRun).mockResolvedValue({ runId: "run-1", sessionId: "session-1" })
+    vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: "done" })
+
+    await expect(
+      tool("write_terminal", service).execute({ id: 1, input: "echo done", submit: true, timeout: 30, idle: 0 }, ctx),
+    ).resolves.toMatchObject({ snapshot: { screen: "done" } })
+
+    expect(service.bindCommandFinished).toHaveBeenCalled()
+  })
+
 })
 
 describe("read_terminal", () => {
@@ -125,5 +210,84 @@ describe("read_terminal", () => {
     )
     expect(service.flushRunHistory).not.toHaveBeenCalled()
     expect(service.agentSnapshot).not.toHaveBeenCalled()
+  })
+
+  it("waits before reading when wait options are provided", async () => {
+    const service = createService()
+    vi.mocked(service.terminalState).mockReturnValue({
+      id: 1,
+      pid: 100,
+      title: "powershell",
+      cwd: "D:\\Workspace",
+      shell: "powershell.exe",
+      exitCode: null,
+    })
+    vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: "done" })
+    vi.mocked(service.write).mockImplementation(() => {})
+    vi.mocked(service.bindData).mockImplementation((callback) => {
+      callback("session-1", 1, "done", 0, 4)
+      return () => {}
+    })
+
+    await expect(tool("read_terminal", service).execute({ id: 1, timeout: 1, idle: 0 }, ctx)).resolves.toEqual({
+      snapshot: {
+        screen: "done",
+      },
+    })
+
+    expect(service.flushRunHistory).toHaveBeenCalledWith("session-1", 1)
+    expect(service.agentSnapshot).toHaveBeenCalledWith("session-1", 1)
+  })
+
+  it("uses idle wait for shell integration terminals when timeout is zero", async () => {
+    const service = createService()
+    vi.mocked(service.terminalState).mockReturnValue({
+      id: 1,
+      pid: 100,
+      title: "powershell",
+      cwd: "D:\\Workspace",
+      shell: "powershell.exe",
+      shellIntegration: true,
+      exitCode: null,
+    })
+    vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: "done" })
+    vi.mocked(service.bindData).mockImplementation((callback) => {
+      callback("session-1", 1, "done", 0, 4)
+      return () => {}
+    })
+
+    await expect(tool("read_terminal", service).execute({ id: 1, timeout: 0, idle: 0.001 }, ctx)).resolves.toEqual({
+      snapshot: {
+        screen: "done",
+      },
+    })
+
+    expect(service.bindData).toHaveBeenCalled()
+    expect(service.bindCommandFinished).not.toHaveBeenCalled()
+  })
+
+  it("returns log_path when terminal history was written", async () => {
+    const service = createService()
+    vi.mocked(service.terminalState).mockReturnValue({
+      id: 1,
+      pid: 100,
+      title: "powershell",
+      cwd: "D:\\Workspace",
+      shell: "powershell.exe",
+      exitCode: null,
+    })
+    vi.mocked(service.flushRunHistory).mockResolvedValue({
+      runId: "run-1",
+      sessionId: "session-1",
+      path: "run-1.log",
+    })
+    vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: "done" })
+
+    await expect(tool("read_terminal", service).execute({ id: 1, timeout: 0, idle: 0 }, ctx)).resolves.toEqual({
+      snapshot: {
+        screen: "(Earlier output omitted; full output in log_path.)\ndone",
+      },
+      log_path: "run-1.log",
+    })
   })
 })

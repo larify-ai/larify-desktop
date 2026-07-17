@@ -8,7 +8,7 @@ function waitForIdle(
   terminalId: number,
   idleSeconds: number,
   timeoutSeconds: number
-): Promise<void> {
+): Promise<boolean> {
   return new Promise((resolve) => {
     let settled = false
     let idleTimer: NodeJS.Timeout | null = null
@@ -21,7 +21,7 @@ function waitForIdle(
       if (idleTimer) clearTimeout(idleTimer)
       if (timeoutTimer) clearTimeout(timeoutTimer)
       unbind()
-      resolve()
+      resolve(false)
     }
 
     const armIdleTimer = (): void => {
@@ -43,37 +43,23 @@ function waitForCommandFinished(
   sessionId: string,
   terminalId: number,
   timeoutSeconds: number
-): Promise<void> {
+): Promise<boolean> {
   return new Promise((resolve) => {
     let settled = false
-    const finish = (): void => {
+    const finish = (completed: boolean): void => {
       if (settled) return
       settled = true
       clearTimeout(timeoutTimer)
       unbind()
-      resolve()
+      resolve(completed)
     }
 
     const unbind = service.bindCommandFinished((eventSessionId, eventTerminalId) => {
       if (eventSessionId !== sessionId || eventTerminalId !== terminalId) return
-      finish()
+      finish(true)
     })
-    const timeoutTimer = setTimeout(finish, Math.max(0, timeoutSeconds * 1000))
+    const timeoutTimer = setTimeout(() => finish(false), Math.max(0, timeoutSeconds * 1000))
   })
-}
-
-function waitForTerminal(
-  service: TerminalService,
-  sessionId: string,
-  terminalId: number,
-  shellIntegration: boolean | undefined,
-  idleSeconds: number,
-  timeoutSeconds: number
-): Promise<void> {
-  if (shellIntegration && timeoutSeconds > 0) {
-    return waitForCommandFinished(service, sessionId, terminalId, timeoutSeconds)
-  }
-  return waitForIdle(service, sessionId, terminalId, idleSeconds, timeoutSeconds)
 }
 
 const terminalIdSchema = z
@@ -113,21 +99,23 @@ const readSchema = z.object({
   timeout: z
     .number()
     .nonnegative()
-    .default(30)
-    .describe('Wait timeout in seconds, default 30'),
+    .default(300)
+    .describe('Wait timeout in seconds, default 300'),
   idle: z
     .number()
     .nonnegative()
-    .default(1)
-    .describe('Idle seconds before reading, default 1')
+    .default(30)
+    .describe('Idle seconds before reading, default 30')
 })
 
 const terminalResult = (
   snapshot: { screen: string },
+  completed: boolean,
   log?: { path?: string }
-): { snapshot: { screen: string }; log_path?: string } => {
-  if (!log?.path) return { snapshot }
+): { completed: boolean; snapshot: { screen: string }; log_path?: string } => {
+  if (!log?.path) return { completed, snapshot }
   return {
+    completed,
     snapshot: {
       ...snapshot,
       screen: `(Earlier output omitted; full output in log_path.)\n${snapshot.screen}`
@@ -188,20 +176,16 @@ export function createTerminalToolkit(service: TerminalService): Toolkit {
               input && submit && !input.endsWith('\r') && !input.endsWith('\n')
                 ? `${input}\r`
                 : input
-            const waitPromise = waitForTerminal(
-              service,
-              ctx.sessionId,
-              id,
-              Boolean(data) && state.shellIntegration,
-              idle,
-              timeout
-            )
+            const shouldWaitForCommand = (Boolean(data) || state.commandRunning) && state.shellIntegration
+            const waitPromise = shouldWaitForCommand
+              ? waitForCommandFinished(service, ctx.sessionId, id, timeout)
+              : waitForIdle(service, ctx.sessionId, id, idle, timeout)
             if (data) service.write(ctx.sessionId, id, data)
-            await waitPromise
+            const completed = shouldWaitForCommand ? await waitPromise : !data
             await service.flushRunHistory(ctx.sessionId, id)
             const snapshot = await service.agentSnapshot(ctx.sessionId, id)
             if (!snapshot) throw new Error(`Terminal "${id}" not found.`)
-            return terminalResult(snapshot, log)
+            return terminalResult(snapshot, completed, log)
           })
         }
       },
@@ -216,11 +200,17 @@ export function createTerminalToolkit(service: TerminalService): Toolkit {
           if (!state) {
             throw new Error(`Terminal "${id}" not found.`)
           }
-          await waitForIdle(service, ctx.sessionId, id, idle, timeout)
+          const completed =
+            state.shellIntegration && state.commandRunning && timeout > 0
+              ? await waitForCommandFinished(service, ctx.sessionId, id, timeout)
+              : true
+          if (!(state.shellIntegration && state.commandRunning && timeout > 0)) {
+            await waitForIdle(service, ctx.sessionId, id, idle, timeout)
+          }
           const log = await service.flushRunHistory(ctx.sessionId, id)
           const snapshot = await service.agentSnapshot(ctx.sessionId, id)
           if (!snapshot) throw new Error(`Terminal "${id}" not found.`)
-          return terminalResult(snapshot, log ?? undefined)
+          return terminalResult(snapshot, completed, log ?? undefined)
         }
       }
     ]

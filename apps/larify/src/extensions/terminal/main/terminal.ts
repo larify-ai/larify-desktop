@@ -44,6 +44,7 @@ export class Terminal {
   private completedHeadlessWriteSequence = 0
   private outputSeq = 0
   private headlessWriteWaiters: Array<{ sequence: number; resolve: () => void }> = []
+  private commandRunning = false
   private exitCode: number | null = null
   private exited = false
   private pendingExit: number | null = null
@@ -203,6 +204,7 @@ export class Terminal {
       cwd: this.cwd,
       shell: this.shell,
       shellIntegration: this.shellIntegration || undefined,
+      commandRunning: this.commandRunning || undefined,
       exitCode: this.exitCode
     }
   }
@@ -227,7 +229,12 @@ export class Terminal {
 
   private handleVSCodeShellIntegration(data: string): void {
     const [command, ...args] = data.split(';')
+    if (command === 'C' || command === 'E') {
+      this.commandRunning = true
+      return
+    }
     if (command !== 'D') return
+    this.commandRunning = false
     const rawExitCode = args[0]
     const exitCode = rawExitCode === undefined || rawExitCode === '' ? undefined : Number(rawExitCode)
     const event = {

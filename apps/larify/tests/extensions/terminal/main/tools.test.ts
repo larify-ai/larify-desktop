@@ -76,6 +76,7 @@ describe("write_terminal", () => {
     await expect(
       tool("write_terminal", service).execute({ id: 1, input: "echo done", submit: true, timeout: 0, idle: 0 }, ctx),
     ).resolves.toEqual({
+      completed: false,
       snapshot: {
         screen: "done",
       },
@@ -105,6 +106,7 @@ describe("write_terminal", () => {
     await expect(
       tool("write_terminal", service).execute({ id: 1, input: "echo done", submit: true, timeout: 0, idle: 0 }, ctx),
     ).resolves.toMatchObject({
+      completed: false,
       snapshot: {
         screen: "(Earlier output omitted; full output in log_path.)\ndone",
       },
@@ -142,7 +144,7 @@ describe("write_terminal", () => {
 
     await expect(
       tool("write_terminal", service).execute({ id: 1, input: "echo done", submit: true, timeout: 0, idle: 0 }, ctx),
-    ).resolves.toMatchObject({ snapshot: { screen: "done" } })
+    ).resolves.toMatchObject({ completed: false, snapshot: { screen: "done" } })
 
     expect(order).toEqual(["lock", "start", "write", "unlock"])
   })
@@ -163,7 +165,7 @@ describe("write_terminal", () => {
 
     await expect(
       tool("write_terminal", service).execute({ id: 1, input: "", submit: true, timeout: 0, idle: 0 }, ctx),
-    ).resolves.toMatchObject({ snapshot: { screen: "done" } })
+    ).resolves.toMatchObject({ completed: true, snapshot: { screen: "done" } })
 
     expect(service.write).not.toHaveBeenCalled()
     expect(service.bindCommandFinished).not.toHaveBeenCalled()
@@ -193,7 +195,7 @@ describe("write_terminal", () => {
 
     await expect(
       tool("write_terminal", service).execute({ id: 1, input: "echo done", submit: true, timeout: 30, idle: 0 }, ctx),
-    ).resolves.toMatchObject({ snapshot: { screen: "done" } })
+    ).resolves.toMatchObject({ completed: true, snapshot: { screen: "done" } })
 
     expect(service.bindCommandFinished).toHaveBeenCalled()
   })
@@ -230,6 +232,7 @@ describe("read_terminal", () => {
     })
 
     await expect(tool("read_terminal", service).execute({ id: 1, timeout: 1, idle: 0 }, ctx)).resolves.toEqual({
+      completed: true,
       snapshot: {
         screen: "done",
       },
@@ -257,6 +260,7 @@ describe("read_terminal", () => {
     })
 
     await expect(tool("read_terminal", service).execute({ id: 1, timeout: 0, idle: 0.001 }, ctx)).resolves.toEqual({
+      completed: true,
       snapshot: {
         screen: "done",
       },
@@ -284,10 +288,44 @@ describe("read_terminal", () => {
     vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: "done" })
 
     await expect(tool("read_terminal", service).execute({ id: 1, timeout: 0, idle: 0 }, ctx)).resolves.toEqual({
+      completed: true,
       snapshot: {
         screen: "(Earlier output omitted; full output in log_path.)\ndone",
       },
       log_path: "run-1.log",
     })
+  })
+
+  it("waits for a running shell integration command before reading", async () => {
+    const service = createService()
+    let commandFinished: ((sessionId: string, terminalId: number) => void) | undefined
+    vi.mocked(service.terminalState).mockReturnValue({
+      id: 1,
+      pid: 100,
+      title: "powershell",
+      cwd: "D:\\Workspace",
+      shell: "powershell.exe",
+      shellIntegration: true,
+      commandRunning: true,
+      exitCode: null,
+    })
+    vi.mocked(service.bindCommandFinished).mockImplementation((callback) => {
+      commandFinished = callback
+      return () => {}
+    })
+    vi.mocked(service.flushRunHistory).mockImplementation(async () => {
+      commandFinished?.("session-1", 1)
+      return null
+    })
+    vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: "done" })
+
+    const promise = tool("read_terminal", service).execute({ id: 1, timeout: 30, idle: 0 }, ctx)
+    commandFinished?.("session-1", 1)
+
+    await expect(promise).resolves.toEqual({
+      completed: true,
+      snapshot: { screen: "done" },
+    })
+    expect(service.bindCommandFinished).toHaveBeenCalled()
   })
 })

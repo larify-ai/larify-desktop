@@ -143,6 +143,21 @@ describe("Terminal", () => {
     expect(onCommandFinished).toHaveBeenCalledWith({ exitCode: 0 })
   })
 
+  it("tracks command running state from VS Code OSC 633 markers", async () => {
+    const fakePty = createFakePty()
+    spawnMock.mockReturnValue(fakePty)
+    const { Terminal } = await importTerminal()
+    const terminal = new Terminal(1, { shell: "sh", cwd })
+
+    fakePty.emitData("\x1b]633;C\x07")
+    await terminal.snapshot()
+    expect(terminal.state().commandRunning).toBe(true)
+
+    fakePty.emitData("\x1b]633;D\x07")
+    await terminal.snapshot()
+    expect(terminal.state().commandRunning).toBeUndefined()
+  })
+
   it("serializes the rendered terminal state instead of raw output", async () => {
     const fakePty = createFakePty()
     spawnMock.mockReturnValue(fakePty)

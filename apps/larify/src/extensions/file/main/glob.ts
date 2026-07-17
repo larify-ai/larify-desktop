@@ -26,7 +26,18 @@ export const globFilesTool: Tool = {
     if (!stats.isDirectory()) throw new Error(`Path is not a directory: ${root}`)
 
     const results = await runRipgrep(
-      ["--no-config", "--files", "--glob", pattern, "--sort=modified", "--hidden", "--no-ignore", "--glob", "!**/.git/**"],
+      [
+        "--no-config",
+        "--files",
+        "--glob",
+        pattern,
+        "--sort=modified",
+        "--hidden",
+        "--no-ignore",
+        "--no-messages",
+        "--glob",
+        "!**/.git/**",
+      ],
       root,
     )
     const end = Math.min(results.length, offset + limit)

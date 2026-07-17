@@ -75,6 +75,15 @@ function unwrapToolDisplay(
   }
 }
 
+function isInvalidToolCallError(errorText: string | undefined): boolean {
+  if (!errorText) return false
+  return (
+    errorText.includes("AI_NoSuchToolError") ||
+    errorText.includes("AI_InvalidToolInputError") ||
+    errorText.includes("AI_JSONParseError")
+  )
+}
+
 function FileGroup({
   files,
   messageId,
@@ -133,6 +142,9 @@ export function MessageView({
           if (part.type === "data-tool-meta") return null
           if (isToolUIPart(part))
             {
+              if (part.state === "output-error" && isInvalidToolCallError(part.errorText)) {
+                return null
+              }
               const display = unwrapToolDisplay(getToolName(part), part.input)
               if (!display) return null
               const toolMeta = toolMetaById.get(part.toolCallId)

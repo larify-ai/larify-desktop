@@ -15,6 +15,7 @@ export interface TerminalState {
   cwd: string
   shell: string
   shellIntegration?: boolean
+  commandRunning?: boolean
   exitCode: number | null
 }
 

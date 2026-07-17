@@ -76,6 +76,10 @@ export class TerminalService {
     this.manager(sessionId).write(terminalId, data)
   }
 
+  withWriterLock<T>(sessionId: string, terminalId: number, fn: () => Promise<T>): Promise<T> {
+    return this.manager(sessionId).withWriterLock(terminalId, fn)
+  }
+
   startRun(sessionId: string, terminalId: number): Promise<TerminalRunLog | null> {
     return this.manager(sessionId).startRun(terminalId)
   }

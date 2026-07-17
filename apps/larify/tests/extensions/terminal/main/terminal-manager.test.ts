@@ -142,6 +142,57 @@ describe("TerminalManager", () => {
     expect(terminals[0].resize).toHaveBeenCalledWith(120, 30)
   })
 
+  it("queues writers per terminal", async () => {
+    const { TerminalManager } = await importManager()
+    const manager = new TerminalManager("session-1")
+    const id = manager.create()
+    let release!: () => void
+    const calls: string[] = []
+    const first = manager.withWriterLock(
+      id,
+      () =>
+        new Promise<string>((resolve) => {
+          calls.push("first")
+          release = () => resolve("done")
+        }),
+    )
+    const second = manager.withWriterLock(id, async () => {
+      calls.push("second")
+      return "second"
+    })
+
+    await vi.waitFor(() => expect(calls).toEqual(["first"]))
+
+    release()
+    await expect(first).resolves.toBe("done")
+    await expect(second).resolves.toBe("second")
+    expect(calls).toEqual(["first", "second"])
+  })
+
+  it("queues close behind terminal writers", async () => {
+    const { TerminalManager } = await importManager()
+    const manager = new TerminalManager("session-1")
+    const id = manager.create()
+    let release!: () => void
+    const run = manager.withWriterLock(
+      id,
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve
+        }),
+    )
+
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"))
+    const close = manager.close(id)
+    await Promise.resolve()
+    expect(terminals[0].close).not.toHaveBeenCalled()
+
+    release()
+    await run
+    await expect(close).resolves.toBeUndefined()
+    expect(terminals[0].close).toHaveBeenCalled()
+  })
+
   it("emits data and exit events with terminal ids", async () => {
     const { TerminalManager } = await importManager()
     const manager = new TerminalManager("session-1")

@@ -4,7 +4,7 @@ import type { Extension } from "kernel"
 import type { Toolkit } from "../../../shared/tool"
 import { runAgent } from "./agent"
 import { createToolRegistry } from "./registry"
-import { buildMetaTools, buildRepairToolCall } from "./meta-tools"
+import { buildMetaTools } from "./meta-tools"
 import { buildSystemPrompt } from "./system-prompt"
 import { createSessionStore } from "./session-store"
 
@@ -72,7 +72,6 @@ const extension: Extension = {
         const reader = runAgent({
           messages: modelMessages,
           buildTools: (writer) => buildMetaTools(registry, { sessionId }, writer),
-          repairToolCall: buildRepairToolCall(registry),
           abortSignal: controller.signal,
           system: buildSystemPrompt(registry),
         }).getReader()

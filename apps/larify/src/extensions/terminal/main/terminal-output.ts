@@ -13,11 +13,11 @@ export function readRenderedLinesRange(
 
 export function readAgentSnapshot(terminal: HeadlessTerminal): TerminalAgentSnapshot {
   const buffer = terminal.buffer.active
+  const isFullscreen = buffer.type === 'alternate'
   const cursorLine = buffer
     .getLine(buffer.baseY + buffer.cursorY)
     ?.translateToString(true)
     .trimEnd()
-  const isFullscreen = buffer.type === 'alternate'
   const startRow = isFullscreen
     ? buffer.viewportY
     : Math.max(0, buffer.baseY + terminal.rows - NORMAL_SCREEN_TAIL_LINES)
@@ -25,9 +25,8 @@ export function readAgentSnapshot(terminal: HeadlessTerminal): TerminalAgentSnap
 
   return {
     screen: readRenderedLines(terminal, startRow, endRow).join('\n'),
-    isFullscreen,
-    ...(cursorLine && { cursorLine }),
-    visualHints: []
+    ...(isFullscreen && { isFullscreen }),
+    ...(isFullscreen && cursorLine && { cursorLine })
   }
 }
 

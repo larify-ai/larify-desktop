@@ -24,9 +24,9 @@ export interface TerminalSnapshot {
 
 export interface TerminalAgentSnapshot {
   screen: string
-  isFullscreen: boolean
+  isFullscreen?: boolean
   cursorLine?: string
-  visualHints: Array<{
+  visualHints?: Array<{
     text: string
     attrs: string[]
   }>

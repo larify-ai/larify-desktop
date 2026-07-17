@@ -8,7 +8,6 @@ import {
   type ToolSet,
   type UIMessageChunk,
   type UIMessageStreamWriter,
-  type ToolCallRepairFunction,
 } from "ai"
 import { createModel, deepseekProviderOptions } from "./model"
 
@@ -18,9 +17,8 @@ export function runAgent(opts: {
   model?: LanguageModel
   abortSignal?: AbortSignal
   system?: string
-  repairToolCall?: ToolCallRepairFunction<ToolSet>
 }): ReadableStream<UIMessageChunk> {
-  const { messages, buildTools, model = createModel(), abortSignal, system, repairToolCall } = opts
+  const { messages, buildTools, model = createModel(), abortSignal, system } = opts
   return createUIMessageStream({
     execute: ({ writer }) => {
       const tools = buildTools(writer)
@@ -34,7 +32,6 @@ export function runAgent(opts: {
         },
         stopWhen: isLoopFinished(),
         abortSignal,
-        repairToolCall,
       })
       writer.merge(
         toUIMessageStream({

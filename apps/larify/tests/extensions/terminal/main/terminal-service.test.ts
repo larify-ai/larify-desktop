@@ -26,6 +26,7 @@ class FakeManager {
   readonly sessionId: string
   create = vi.fn(() => 1)
   write = vi.fn()
+  withWriterLock = vi.fn((_terminalId: number, fn: () => Promise<unknown>) => fn())
   resize = vi.fn()
   close = vi.fn()
   setActive = vi.fn()
@@ -132,6 +133,7 @@ describe("TerminalService", () => {
 
     service.create("session-1", { shell: "sh", cwd: existingCwd })
     service.write("session-1", 1, "data")
+    await expect(service.withWriterLock("session-1", 1, async () => "locked")).resolves.toBe("locked")
     service.resize("session-1", 1, 80, 24)
     service.setActive("session-1", 1)
     service.reorder("session-1", 1, 0)
@@ -140,6 +142,7 @@ describe("TerminalService", () => {
 
     expect(managers).toHaveLength(1)
     expect(managers[0].write).toHaveBeenCalledWith(1, "data")
+    expect(managers[0].withWriterLock).toHaveBeenCalledWith(1, expect.any(Function))
     expect(managers[0].resize).toHaveBeenCalledWith(1, 80, 24)
     expect(managers[0].setActive).toHaveBeenCalledWith(1)
     expect(managers[0].reorder).toHaveBeenCalledWith(1, 0)

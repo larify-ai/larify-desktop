@@ -132,16 +132,26 @@ export function AssistantPanel(): React.JSX.Element {
   }
 
   const loadSession = async (id: string): Promise<UIMessage[]> => {
+    const existing = chatsBySessionIdRef.current[id]
+    const messageCount = existing?.messages.length ?? 0
+    const applyLoadedMessages = (messages: UIMessage[]): void => {
+      cacheSessionMessages(id, messages)
+      const current = chatsBySessionIdRef.current[id]
+      if (current) {
+        if (current !== existing || current.messages.length !== messageCount) return
+        current.messages = messages
+        return
+      }
+      createChat(id, messages)
+    }
     try {
       const loaded = await window.bridge.invoke("agent:session-load", id)
       const messages = (loaded as UIMessage[]) ?? []
-      cacheSessionMessages(id, messages)
-      createChat(id, messages)
+      applyLoadedMessages(messages)
       return messages
     } catch (error) {
       console.error("[agent:session-load]", error)
-      cacheSessionMessages(id, [])
-      createChat(id, [])
+      applyLoadedMessages([])
       return []
     }
   }

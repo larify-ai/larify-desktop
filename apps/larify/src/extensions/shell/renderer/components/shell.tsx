@@ -25,8 +25,9 @@ const dragRegion = { WebkitAppRegion: "drag" } as CSSProperties
 
 const NEW_TASK_LABEL = "新建"
 
-const DEFAULT_WORKBENCH_SIZE = 68
+const DEFAULT_WORKBENCH_SIZE = 55
 const MIN_WORKBENCH_SIZE = 20
+const MIN_ASSISTANT_SIZE = 35
 
 const sidebarItemClass =
   "grid size-10 place-items-center gap-0 p-0 text-center [&>svg]:size-6! [&>svg]:shrink-0"
@@ -178,7 +179,7 @@ function ShellBody({ app }: { app: App }): React.JSX.Element {
               key="handle"
               className={workbench ? undefined : "pointer-events-none opacity-0"}
             />
-            <ResizablePanel key="assistant" id="assistant" order={2} minSize={25}>
+            <ResizablePanel key="assistant" id="assistant" order={2} minSize={MIN_ASSISTANT_SIZE}>
               {app.get<View>("view", "assistant")?.render()}
             </ResizablePanel>
           </ResizablePanelGroup>

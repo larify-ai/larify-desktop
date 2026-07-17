@@ -1,10 +1,8 @@
 import {
   asSchema,
   tool,
-  NoSuchToolError,
   type ToolSet,
   type UIMessageStreamWriter,
-  type ToolCallRepairFunction,
 } from "ai"
 import { z } from "zod"
 import type { ToolContext } from "../../../shared/tool"
@@ -12,28 +10,6 @@ import { callToolInvocationSchema, type ToolRegistry } from "./registry"
 
 function isStructured(value: unknown): value is { output: unknown; metadata: unknown } {
   return typeof value === "object" && value !== null && "output" in value && "metadata" in value
-}
-
-export function buildRepairToolCall(registry: ToolRegistry): ToolCallRepairFunction<ToolSet> {
-  return async ({ toolCall, error }) => {
-    if (!NoSuchToolError.isInstance(error)) return null
-    if (!registry.get(toolCall.toolName)) return null
-    let args: unknown
-    try {
-      args = JSON.parse(toolCall.input)
-    } catch {
-      return null
-    }
-    return {
-      ...toolCall,
-      toolName: "call_tool",
-      input: JSON.stringify({
-        title: "采取行动",
-        tool_name: toolCall.toolName,
-        tool_args: args,
-      }),
-    }
-  }
 }
 
 async function* invokeTool(

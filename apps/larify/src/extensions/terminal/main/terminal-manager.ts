@@ -23,6 +23,7 @@ export class TerminalManager {
   private terminals = new Map<number, Terminal>()
   private activeRuns = new Map<number, ActiveRun>()
   private flushing = new Set<number>()
+  private writerQueues = new Map<number, Promise<unknown>>()
   private activeId: number | null = null
   private nextId = 1
   private changeListeners = new Set<Listener<[SessionTerminalsState]>>()
@@ -61,6 +62,25 @@ export class TerminalManager {
 
   write(id: number, data: string): void {
     this.terminals.get(id)?.write(data)
+  }
+
+  async withWriterLock<T>(id: number, fn: () => Promise<T>): Promise<T> {
+    if (!this.terminals.has(id)) throw new Error(`Terminal "${id}" not found.`)
+    const previous = this.writerQueues.get(id) ?? Promise.resolve()
+    let release!: () => void
+    const current = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const queued = previous.then(() => current, () => current)
+    this.writerQueues.set(id, queued)
+    await previous.catch(() => {})
+    if (!this.terminals.has(id)) throw new Error(`Terminal "${id}" not found.`)
+    try {
+      return await fn()
+    } finally {
+      release()
+      if (this.writerQueues.get(id) === queued) this.writerQueues.delete(id)
+    }
   }
 
   async startRun(id: number): Promise<TerminalRunLog | null> {
@@ -137,20 +157,23 @@ export class TerminalManager {
   }
 
   async close(id: number): Promise<void> {
-    const terminal = this.terminals.get(id)
-    if (!terminal) return
+    await this.withWriterLock(id, async () => {
+      const terminal = this.terminals.get(id)
+      if (!terminal) return
 
-    const order = [...this.terminals.keys()]
-    const index = order.indexOf(id)
-    await this.flushRunHistory(id)
-    terminal.close()
-    this.terminals.delete(id)
-    this.activeRuns.delete(id)
-    if (this.activeId === id) {
-      const remaining = [...this.terminals.keys()]
-      this.activeId = remaining[index] ?? remaining[index - 1] ?? null
-    }
-    this.emit()
+      const order = [...this.terminals.keys()]
+      const index = order.indexOf(id)
+      await this.flushRunHistory(id)
+      terminal.close()
+      this.terminals.delete(id)
+      this.activeRuns.delete(id)
+      this.writerQueues.delete(id)
+      if (this.activeId === id) {
+        const remaining = [...this.terminals.keys()]
+        this.activeId = remaining[index] ?? remaining[index - 1] ?? null
+      }
+      this.emit()
+    })
   }
 
   state(): SessionTerminalsState {
@@ -166,6 +189,7 @@ export class TerminalManager {
     for (const terminal of this.terminals.values()) terminal.kill()
     this.terminals.clear()
     this.activeRuns.clear()
+    this.writerQueues.clear()
     this.activeId = null
     this.emit()
   }

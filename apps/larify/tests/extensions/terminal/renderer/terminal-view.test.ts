@@ -274,6 +274,35 @@ describe("TerminalView", () => {
     expect(fitMocks.some((fit) => fit.mock.calls.length > 0)).toBe(true)
   })
 
+  it("syncs the initial fitted terminal size to the backend", async () => {
+    const { TerminalView } = await import("../../../../src/extensions/terminal/renderer/terminal-view")
+
+    setAgentSessionId("session-initial-resize")
+    await act(async () => {
+      root.render(createElement(TerminalView))
+    })
+
+    await act(async () => {
+      stateRequests["session-initial-resize"].resolve({
+        sessionId: "session-initial-resize",
+        activeId: 1,
+        terminals: [{ id: 1, pid: 10, title: "A", cwd: "/", shell: "sh", exitCode: null }],
+      })
+    })
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    })
+
+    expect(window.bridge.invoke).toHaveBeenCalledWith(
+      "terminal:resize",
+      "session-initial-resize",
+      1,
+      80,
+      24,
+    )
+  })
+
   it("restores a snapshot before applying live terminal data", async () => {
     const { TerminalView } = await import("../../../../src/extensions/terminal/renderer/terminal-view")
 

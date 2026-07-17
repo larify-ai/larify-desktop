@@ -58,14 +58,14 @@ export function createTerminalToolkit(service: TerminalService): Toolkit {
       {
         name: 'list_terminals',
         description: 'List all terminals',
-        metadata: { icon: 'execute' },
+        metadata: { icon: 'terminal' },
         inputSchema: z.object({}),
         execute: async (_args, ctx) => service.state(ctx.sessionId).terminals
       },
       {
         name: 'create_terminal',
         description: 'Create a terminal',
-        metadata: { icon: 'execute' },
+        metadata: { icon: 'terminal' },
         inputSchema: createSchema,
         execute: async (args, ctx) => {
           const terminalId = service.create(ctx.sessionId, args as z.infer<typeof createSchema>)
@@ -75,7 +75,7 @@ export function createTerminalToolkit(service: TerminalService): Toolkit {
       {
         name: 'close_terminal',
         description: 'Close a terminal',
-        metadata: { icon: 'execute' },
+        metadata: { icon: 'terminal' },
         inputSchema: z.object({
           id: terminalIdSchema
         }),
@@ -91,10 +91,12 @@ export function createTerminalToolkit(service: TerminalService): Toolkit {
       {
         name: 'write_terminal',
         description: 'Write raw node-pty input to a terminal',
-        metadata: { icon: 'execute' },
+        metadata: { icon: 'terminal' },
         inputSchema: z.object({
           id: terminalIdSchema,
-          input: z.string().describe('Raw input passed to node-pty write()'),
+          input: z
+            .string()
+            .describe('Raw input passed to node-pty write(). Use JSON unicode escapes for control characters.'),
           submit: z.boolean().default(true).describe('Append Enter if input has no newline'),
           timeout: z
             .number()
@@ -115,26 +117,30 @@ export function createTerminalToolkit(service: TerminalService): Toolkit {
             timeout: number
             idle: number
           }
-          const log = await service.startRun(ctx.sessionId, id)
-          if (!log) throw new Error(`Terminal "${id}" not found.`)
-          const data = submit && !input.endsWith('\r') && !input.endsWith('\n') ? `${input}\r` : input
-          service.write(ctx.sessionId, id, data)
-          const reason = await waitForIdle(service, ctx.sessionId, id, idle, timeout)
-          await service.flushRunHistory(ctx.sessionId, id)
-          const snapshot = await service.agentSnapshot(ctx.sessionId, id)
-          if (!snapshot) throw new Error(`Terminal "${id}" not found.`)
-          return {
-            run_id: log.runId,
-            reason,
-            snapshot,
-            log_path: log.path
-          }
+          return service.withWriterLock(ctx.sessionId, id, async () => {
+            const log = await service.startRun(ctx.sessionId, id)
+            if (!log) throw new Error(`Terminal "${id}" not found.`)
+            const data =
+              input && submit && !input.endsWith('\r') && !input.endsWith('\n')
+                ? `${input}\r`
+                : input
+            if (data) service.write(ctx.sessionId, id, data)
+            await waitForIdle(service, ctx.sessionId, id, idle, timeout)
+            await service.flushRunHistory(ctx.sessionId, id)
+            const snapshot = await service.agentSnapshot(ctx.sessionId, id)
+            if (!snapshot) throw new Error(`Terminal "${id}" not found.`)
+            return {
+              run_id: log.runId,
+              snapshot,
+              log_path: log.path
+            }
+          })
         }
       },
       {
         name: 'read_terminal',
         description: 'Read a terminal snapshot',
-        metadata: { icon: 'read' },
+        metadata: { icon: 'terminal' },
         inputSchema: z.object({
           id: terminalIdSchema
         }),

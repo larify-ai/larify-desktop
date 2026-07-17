@@ -16,6 +16,7 @@ import {
   FileTextIcon,
   type LucideIcon,
   SearchIcon,
+  SquareTerminalIcon,
   SquarePenIcon,
   TerminalIcon,
   WrenchIcon,
@@ -50,6 +51,7 @@ export type ToolPart = ToolUIPart | DynamicToolUIPart;
 const kindIcons: Record<string, LucideIcon> = {
   search: SearchIcon,
   execute: TerminalIcon,
+  terminal: SquareTerminalIcon,
   read: FileTextIcon,
   edit: SquarePenIcon,
   other: WrenchIcon,

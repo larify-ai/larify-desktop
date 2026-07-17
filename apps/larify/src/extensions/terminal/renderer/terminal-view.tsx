@@ -226,6 +226,10 @@ export function TerminalView(): React.JSX.Element {
       term.loadAddon(fit)
       term.loadAddon(new Unicode11Addon())
       term.unicode.activeVersion = "11"
+      term.onResize(({ cols, rows }) => {
+        const entry = entries.get(terminalId)
+        if (entry) scheduleResize(terminalId, entry, cols, rows)
+      })
       term.attachCustomKeyEventHandler((event) => {
         if (event.type !== "keydown") return true
         const mod = event.ctrlKey || event.metaKey
@@ -289,13 +293,14 @@ export function TerminalView(): React.JSX.Element {
         event.preventDefault()
         if (!copySelection(term)) pasteClipboard(term)
       })
-      term.onResize(({ cols, rows }) => {
-        scheduleResize(terminalId, entry, cols, rows)
-      })
       requestAnimationFrame(fitActive)
-      requestAnimationFrame(() => flushResize(terminalId, entry))
+      requestAnimationFrame(() => {
+        fitActive()
+        sendResize(terminalId, entry, term.cols, term.rows)
+        flushResize(terminalId, entry)
+      })
     },
-    [currentEntries, fitActive, flushResize, scheduleResize, sessionId, theme],
+    [currentEntries, fitActive, flushResize, scheduleResize, sendResize, sessionId, theme],
   )
 
   useEffect(() => {

@@ -10,8 +10,8 @@ import { z } from "zod"
 import type { ToolContext } from "../../../shared/tool"
 import { callToolInvocationSchema, type ToolRegistry } from "./registry"
 
-function isStructured(value: unknown): value is { output: unknown; metadata?: unknown } {
-  return typeof value === "object" && value !== null && "output" in value
+function isStructured(value: unknown): value is { output: unknown; metadata: unknown } {
+  return typeof value === "object" && value !== null && "output" in value && "metadata" in value
 }
 
 export function buildRepairToolCall(registry: ToolRegistry): ToolCallRepairFunction<ToolSet> {
@@ -55,12 +55,11 @@ async function* invokeTool(
   }
   const value = await result
   if (isStructured(value)) {
-    if (value.metadata !== undefined)
-      writer?.write({
-        type: "data-tool-meta",
-        id: toolCallId,
-        data: value.metadata,
-      })
+    writer?.write({
+      type: "data-tool-meta",
+      id: toolCallId,
+      data: value.metadata,
+    })
     yield value.output
   } else {
     yield value

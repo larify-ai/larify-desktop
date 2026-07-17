@@ -135,7 +135,7 @@ describe("TerminalService", () => {
     service.resize("session-1", 1, 80, 24)
     service.setActive("session-1", 1)
     service.reorder("session-1", 1, 0)
-    service.close("session-1", 1)
+    await service.close("session-1", 1)
     expect(service.snapshot("session-1", 1)).toBe("snapshot")
 
     expect(managers).toHaveLength(1)
@@ -191,11 +191,11 @@ describe("TerminalService", () => {
     service.create("session-1", { shell: "sh", cwd: existingCwd })
     service.create("session-2", { shell: "sh", cwd: existingCwd })
 
-    service.destroySession("session-1")
+    await service.destroySession("session-1")
     expect(managers[0].destroy).toHaveBeenCalled()
     expect(managers[1].destroy).not.toHaveBeenCalled()
 
-    service.destroy()
+    await service.destroy()
     expect(managers[1].destroy).toHaveBeenCalled()
   })
 })

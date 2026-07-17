@@ -14,7 +14,7 @@ const inputSchema = z.object({
 })
 
 export const editFileTool: Tool = {
-  name: "edit",
+  name: "edit_file",
   description: "Replace exact text in a file.",
   metadata: { icon: "edit" },
   inputSchema,

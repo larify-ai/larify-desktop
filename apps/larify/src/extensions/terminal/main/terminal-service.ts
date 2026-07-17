@@ -1,24 +1,28 @@
-import { existsSync } from "node:fs"
-import which from "which"
-import { larifyWorkspacePath } from "../../../main/utils/app-paths"
-import { addListener, type Listener } from "../../../main/utils/listener"
-import { TerminalManager } from "./terminal-manager"
+import { existsSync } from 'node:fs'
+import which from 'which'
+import { larifyWorkspacePath } from '../../../main/utils/app-paths'
+import { addListener, type Listener } from '../../../main/utils/listener'
+import { TerminalManager } from './terminal-manager'
+import type { TerminalRunLog } from './terminal-run-log'
 import type {
   SessionTerminalsState,
   TerminalCreateOptions,
-  TerminalSnapshot,
-} from "../shared/types"
+  TerminalAgentSnapshot,
+  TerminalSnapshot
+} from '../shared/types'
 
 const DEFAULT_WORKSPACE = larifyWorkspacePath()
 
 function shellCandidates(): string[] {
-  if (process.platform === "win32") {
-    return ["pwsh.exe", "powershell.exe", process.env.COMSPEC, "cmd.exe"].filter(Boolean) as string[]
+  if (process.platform === 'win32') {
+    return ['pwsh.exe', 'powershell.exe', process.env.COMSPEC, 'cmd.exe'].filter(
+      Boolean
+    ) as string[]
   }
-  if (process.platform === "darwin") {
-    return [process.env.SHELL, "/bin/zsh", "/bin/bash", "/bin/sh"].filter(Boolean) as string[]
+  if (process.platform === 'darwin') {
+    return [process.env.SHELL, '/bin/zsh', '/bin/bash', '/bin/sh'].filter(Boolean) as string[]
   }
-  return [process.env.SHELL, "/bin/bash", "/bin/sh"].filter(Boolean) as string[]
+  return [process.env.SHELL, '/bin/bash', '/bin/sh'].filter(Boolean) as string[]
 }
 
 function resolveShell(shell?: string): string {
@@ -50,7 +54,9 @@ export class TerminalService {
     return addListener(this.dataListeners, callback)
   }
 
-  bindExit(callback: (sessionId: string, terminalId: number, exitCode: number) => void): () => void {
+  bindExit(
+    callback: (sessionId: string, terminalId: number, exitCode: number) => void
+  ): () => void {
     return addListener(this.exitListeners, callback)
   }
 
@@ -60,7 +66,7 @@ export class TerminalService {
       ...opts,
       cwd: resolveCwd(opts?.cwd),
       shell,
-      title: opts?.title,
+      title: opts?.title
     })
   }
 
@@ -68,12 +74,20 @@ export class TerminalService {
     this.manager(sessionId).write(terminalId, data)
   }
 
+  startRun(sessionId: string, terminalId: number): Promise<TerminalRunLog | null> {
+    return this.manager(sessionId).startRun(terminalId)
+  }
+
+  flushRunHistory(sessionId: string, terminalId: number): Promise<TerminalRunLog | null> {
+    return this.manager(sessionId).flushRunHistory(terminalId)
+  }
+
   resize(sessionId: string, terminalId: number, cols: number, rows: number): void {
     this.manager(sessionId).resize(terminalId, cols, rows)
   }
 
-  close(sessionId: string, terminalId: number): void {
-    this.manager(sessionId).close(terminalId)
+  close(sessionId: string, terminalId: number): Promise<void> {
+    return this.manager(sessionId).close(terminalId)
   }
 
   setActive(sessionId: string, terminalId: number): void {
@@ -88,19 +102,27 @@ export class TerminalService {
     return this.manager(sessionId).snapshot(terminalId)
   }
 
+  agentSnapshot(sessionId: string, terminalId: number): Promise<TerminalAgentSnapshot | null> {
+    return this.manager(sessionId).agentSnapshot(terminalId)
+  }
+
+  terminalState(sessionId: string, terminalId: number) {
+    return this.manager(sessionId).terminalState(terminalId)
+  }
+
   state(sessionId: string): SessionTerminalsState {
     return this.manager(sessionId).state()
   }
 
-  destroySession(sessionId: string): void {
+  async destroySession(sessionId: string): Promise<void> {
     const manager = this.managers.get(sessionId)
     if (!manager) return
-    manager.destroy()
+    await manager.destroy()
     this.managers.delete(sessionId)
   }
 
-  destroy(): void {
-    for (const manager of this.managers.values()) manager.destroy()
+  async destroy(): Promise<void> {
+    await Promise.all([...this.managers.values()].map((manager) => manager.destroy()))
     this.managers.clear()
   }
 

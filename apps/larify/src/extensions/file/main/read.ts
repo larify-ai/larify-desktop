@@ -13,7 +13,7 @@ const inputSchema = z.object({
 })
 
 export const readFileTool: Tool = {
-  name: "read",
+  name: "read_file",
   description: "Read a text file.",
   metadata: { icon: "read" },
   inputSchema,

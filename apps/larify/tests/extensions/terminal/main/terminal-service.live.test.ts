@@ -34,6 +34,6 @@ describe.skipIf(!process.env.LIVE_TERMINAL)("TerminalService live", () => {
     expect(await output).toContain(marker)
     const snapshot = await service.snapshot("service-live", terminalId)
     expect(snapshot?.data).toContain(marker)
-    service.destroy()
+    await service.destroy()
   }, 15_000)
 })

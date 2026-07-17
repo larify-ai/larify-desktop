@@ -172,7 +172,7 @@ describe("registerTerminalIpc", () => {
     ])
 
     service.emitData("session-1", 7, "closing")
-    electronMock.handlers.get("terminal:close")?.({}, "session-1", 7)
+    await electronMock.handlers.get("terminal:close")?.({}, "session-1", 7)
 
     expect(electronMock.sends.at(-1)).toEqual({
       channel: "terminal:data",

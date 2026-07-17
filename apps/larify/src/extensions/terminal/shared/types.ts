@@ -21,6 +21,16 @@ export interface TerminalSnapshot {
   rows: number
 }
 
+export interface TerminalAgentSnapshot {
+  screen: string
+  isFullscreen: boolean
+  cursorLine?: string
+  visualHints: Array<{
+    text: string
+    attrs: string[]
+  }>
+}
+
 export interface SessionTerminalsState {
   sessionId: string
   terminals: TerminalState[]

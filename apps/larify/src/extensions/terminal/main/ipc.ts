@@ -72,11 +72,11 @@ export function registerTerminalIpc(service: TerminalService): () => void {
     (_event, sessionId: string, terminalId: number, cols: number, rows: number) =>
       service.resize(sessionId, terminalId, cols, rows),
   )
-  ipcMain.handle("terminal:close", (_event, sessionId: string, terminalId: number) => {
+  ipcMain.handle("terminal:close", async (_event, sessionId: string, terminalId: number) => {
     const key = batchKey(sessionId, terminalId)
     batchers.get(key)?.flush()
     batchers.delete(key)
-    service.close(sessionId, terminalId)
+    await service.close(sessionId, terminalId)
   })
   ipcMain.handle("terminal:setActive", (_event, sessionId: string, terminalId: number) =>
     service.setActive(sessionId, terminalId),

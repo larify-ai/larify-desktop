@@ -1,19 +1,33 @@
-import { existsSync } from "node:fs"
-import { basename } from "node:path"
-import { SerializeAddon } from "@xterm/addon-serialize"
-import { Terminal as HeadlessTerminal } from "@xterm/headless"
-import { spawn, type IPty } from "node-pty"
-import { addListener, type Listener } from "../../../main/utils/listener"
-import type { TerminalCreateOptions, TerminalSnapshot, TerminalState } from "../shared/types"
+import { existsSync } from 'node:fs'
+import { basename } from 'node:path'
+import { SerializeAddon } from '@xterm/addon-serialize'
+import { Terminal as HeadlessTerminal } from '@xterm/headless'
+import { spawn, type IPty } from 'node-pty'
+import { addListener, type Listener } from '../../../main/utils/listener'
+import {
+  readAgentSnapshot,
+  readRenderedLinesRange,
+} from './terminal-output'
+import type {
+  TerminalAgentSnapshot,
+  TerminalCreateOptions,
+  TerminalSnapshot,
+  TerminalState
+} from '../shared/types'
 
 const EXIT_FLUSH_MS = 250
 const SCROLLBACK = 5000
+
+interface RenderedHistoryFlush {
+  text: string
+  flushedUntilRow: number
+}
 
 export class Terminal {
   readonly id: number
   readonly shell: string
   readonly cwd: string
-  readonly title: string
+  private readonly title: string
 
   private readonly pty: IPty
   private readonly headless: HeadlessTerminal
@@ -31,28 +45,29 @@ export class Terminal {
   private exitListeners = new Set<Listener<[number]>>()
 
   constructor(id: number, opts: TerminalCreateOptions = {}) {
-    if (!opts.shell) throw new Error("Terminal shell is required")
-    if (!opts.cwd) throw new Error("Terminal cwd is required")
+    if (!opts.shell) throw new Error('Terminal shell is required')
+    if (!opts.cwd) throw new Error('Terminal cwd is required')
     if (!existsSync(opts.cwd)) throw new Error(`Terminal cwd does not exist: ${opts.cwd}`)
     this.id = id
     this.shell = opts.shell
     this.cwd = opts.cwd
-    this.title = opts.title ?? basename(this.shell, process.platform === "win32" ? ".exe" : undefined)
+    this.title =
+      opts.title ?? basename(this.shell, process.platform === 'win32' ? '.exe' : undefined)
     this.cols = opts.cols ?? 80
     this.rows = opts.rows ?? 24
     this.headless = new HeadlessTerminal({
       cols: this.cols,
       rows: this.rows,
       scrollback: SCROLLBACK,
-      allowProposedApi: true,
+      allowProposedApi: true
     })
     this.headless.loadAddon(this.serializeAddon)
     this.pty = spawn(this.shell, [], {
-      name: "xterm-256color",
+      name: 'xterm-256color',
       cols: this.cols,
       rows: this.rows,
       cwd: this.cwd,
-      env: process.env,
+      env: process.env
     })
 
     this.pty.onData((data) => {
@@ -79,7 +94,34 @@ export class Terminal {
     return {
       data: this.serializeAddon.serialize(),
       cols: this.cols,
-      rows: this.rows,
+      rows: this.rows
+    }
+  }
+
+  async agentSnapshot(): Promise<TerminalAgentSnapshot> {
+    await this.flushHeadlessWrites()
+    return readAgentSnapshot(this.headless)
+  }
+
+  async lastRenderedRow(): Promise<number> {
+    await this.flushHeadlessWrites()
+    const buffer = this.headless.buffer.active
+    return buffer.baseY + this.rows - 1
+  }
+
+  async flushRenderedRowsBeforeTail(
+    flushedUntilRow: number,
+    tailLines: number
+  ): Promise<RenderedHistoryFlush | null> {
+    await this.flushHeadlessWrites()
+    const buffer = this.headless.buffer.active
+    if (buffer.type === 'alternate') return null
+    const safeEnd = Math.min(buffer.baseY - tailLines, buffer.baseY + this.rows - 1)
+    const startRow = flushedUntilRow + 1
+    if (safeEnd < startRow) return null
+    return {
+      text: readRenderedLinesRange(this.headless, startRow, safeEnd),
+      flushedUntilRow: safeEnd
     }
   }
 
@@ -97,27 +139,25 @@ export class Terminal {
       this.headless.resize(nextCols, nextRows)
       this.cols = nextCols
       this.rows = nextRows
-    } catch {
-    }
+    } catch {}
   }
 
   close(): void {
-    if (process.platform === "win32") {
+    if (process.platform === 'win32') {
       this.kill()
       return
     }
     const pid = this.pty.pid
     try {
-      this.pty.kill("SIGTERM")
+      this.pty.kill('SIGTERM')
     } catch {
       return
     }
     setTimeout(() => {
       try {
         process.kill(pid, 0)
-        this.pty.kill("SIGKILL")
-      } catch {
-      }
+        this.pty.kill('SIGKILL')
+      } catch {}
     }, 500).unref()
   }
 
@@ -125,8 +165,7 @@ export class Terminal {
     if (this.exitTimer) clearTimeout(this.exitTimer)
     try {
       this.pty.kill()
-    } catch {
-    }
+    } catch {}
   }
 
   state(): TerminalState {
@@ -136,7 +175,7 @@ export class Terminal {
       title: this.title,
       cwd: this.cwd,
       shell: this.shell,
-      exitCode: this.exitCode,
+      exitCode: this.exitCode
     }
   }
 
@@ -146,7 +185,7 @@ export class Terminal {
       this.completedHeadlessWriteSequence = sequence
       const ready = this.headlessWriteWaiters.filter((waiter) => waiter.sequence <= sequence)
       this.headlessWriteWaiters = this.headlessWriteWaiters.filter(
-        (waiter) => waiter.sequence > sequence,
+        (waiter) => waiter.sequence > sequence
       )
       for (const waiter of ready) waiter.resolve()
     })

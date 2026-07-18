@@ -26,7 +26,7 @@ function formatToolFailure(error: unknown): string | null {
   return null
 }
 
-function shouldThrowToolFailures(): boolean {
+export function shouldThrowToolFailures(): boolean {
   return process.env.LARIFY_DEBUG_TOOL_ERRORS === "1"
 }
 

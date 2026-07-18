@@ -6,6 +6,7 @@ import { spawn, type IPty } from 'node-pty'
 import { addListener, type Listener } from '../../../main/utils/listener'
 import {
   readAgentSnapshot,
+  readAgentOutputSince,
   readRenderedLinesRange,
 } from './terminal-output'
 import type {
@@ -125,10 +126,15 @@ export class Terminal {
     return readAgentSnapshot(this.headless)
   }
 
-  async lastRenderedRow(): Promise<number> {
+  async agentOutputSince(startRow: number): Promise<TerminalAgentSnapshot & { endRow: number }> {
+    await this.flushHeadlessWrites()
+    return readAgentOutputSince(this.headless, startRow)
+  }
+
+  async currentRenderedRow(): Promise<number> {
     await this.flushHeadlessWrites()
     const buffer = this.headless.buffer.active
-    return buffer.baseY + this.rows - 1
+    return buffer.baseY + buffer.cursorY
   }
 
   async flushRenderedRowsBeforeTail(

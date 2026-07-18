@@ -127,7 +127,7 @@ const terminalResult = (
 export function createTerminalToolkit(service: TerminalService): Toolkit {
   return {
     name: 'terminal',
-    description: 'Create terminals, send input, and read terminal screens',
+    description: 'Create terminals, run commands, operate interactive TUIs, and read terminal snapshots',
     tools: [
       {
         name: 'list_terminals',
@@ -162,7 +162,7 @@ export function createTerminalToolkit(service: TerminalService): Toolkit {
       },
       {
         name: 'write_terminal',
-        description: 'Write raw node-pty input to a terminal',
+        description: 'Write text or control sequences to a terminal, including interactive TUI input',
         metadata: { icon: 'terminal' },
         inputSchema: writeSchema,
         execute: async (args, ctx) => {
@@ -191,7 +191,7 @@ export function createTerminalToolkit(service: TerminalService): Toolkit {
       },
       {
         name: 'read_terminal',
-        description: 'Read a terminal snapshot',
+        description: 'Read a terminal snapshot, including interactive TUI screens',
         metadata: { icon: 'terminal' },
         inputSchema: readSchema,
         execute: async (args, ctx) => {

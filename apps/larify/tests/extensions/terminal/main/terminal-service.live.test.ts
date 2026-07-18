@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest"
+import { createTerminalToolkit } from "../../../../src/extensions/terminal/main/tools"
 import { TerminalService } from "../../../../src/extensions/terminal/main/terminal-service"
 
 const marker = "__LARIFY_TERMINAL_SERVICE_LIVE__"
 const startMarker = "__LARIFY_TERMINAL_START__"
 const doneMarker = "__LARIFY_TERMINAL_DONE__"
+const oldMarker = "__LARIFY_TERMINAL_OLD__"
+const newMarker = "__LARIFY_TERMINAL_NEW__"
+const longStartMarker = "__LARIFY_TERMINAL_LONG_START__"
+const longEndMarker = "__LARIFY_TERMINAL_LONG_END__"
 
 function markerCommand(shell: string): string {
   if (process.platform === "win32" || shell.toLowerCase().endsWith("powershell.exe")) {
@@ -117,6 +122,85 @@ describe("TerminalService live", () => {
     await expect(completion).resolves.toEqual({ exitCode: 0 })
     await service.destroy()
   }, 15_000)
+
+  it("terminal tools return only new output for an active run", async () => {
+    if (!process.env.LIVE_TERMINAL || process.platform !== "win32") return
+    const service = new TerminalService()
+    const toolkit = createTerminalToolkit(service)
+    const ctx = { sessionId: "terminal-tools-live" }
+    const tool = (name: string) => {
+      const found = toolkit.tools.find((candidate) => candidate.name === name)
+      if (!found) throw new Error(`Tool ${name} not found`)
+      return found
+    }
+
+    try {
+      const terminal = await tool("create_terminal").execute({}, ctx) as { id: number }
+      await tool("write_terminal").execute(
+        { id: terminal.id, input: `Write-Output "${oldMarker}"`, submit: true, timeout: 10, idle: 1 },
+        ctx,
+      )
+
+      const second = await tool("write_terminal").execute(
+        { id: terminal.id, input: `Write-Output "${newMarker}"`, submit: true, timeout: 10, idle: 1 },
+        ctx,
+      ) as { snapshot: { screen: string } }
+
+      expect(second.snapshot.screen).toContain(newMarker)
+      expect(second.snapshot.screen).not.toContain(oldMarker)
+
+      const read = await tool("read_terminal").execute(
+        { id: terminal.id, timeout: 0, idle: 0 },
+        ctx,
+      ) as { snapshot: { screen: string } }
+
+      expect(read.snapshot.screen).not.toContain(oldMarker)
+      expect(read.snapshot.screen).not.toContain(newMarker)
+    } finally {
+      await service.destroy()
+    }
+  }, 20_000)
+
+  it("terminal tools write long output to a log path without repeating logged history", async () => {
+    if (!process.env.LIVE_TERMINAL || process.platform !== "win32") return
+    const service = new TerminalService()
+    const toolkit = createTerminalToolkit(service)
+    const ctx = { sessionId: "terminal-long-output-live" }
+    const tool = (name: string) => {
+      const found = toolkit.tools.find((candidate) => candidate.name === name)
+      if (!found) throw new Error(`Tool ${name} not found`)
+      return found
+    }
+
+    try {
+      const terminal = await tool("create_terminal").execute({}, ctx) as { id: number }
+      const result = await tool("write_terminal").execute(
+        {
+          id: terminal.id,
+          input: `Write-Output "${longStartMarker}"; 1..2300 | ForEach-Object { "LONG_OUTPUT_LINE_$_" }; Write-Output "${longEndMarker}"`,
+          submit: true,
+          timeout: 30,
+          idle: 1,
+        },
+        ctx,
+      ) as { snapshot: { screen: string }; log_path?: string }
+
+      expect(result.log_path).toBeTruthy()
+      expect(result.snapshot.screen).toContain("Earlier output omitted")
+      expect(result.snapshot.screen).toContain(longEndMarker)
+      expect(result.snapshot.screen).not.toContain(longStartMarker)
+
+      const read = await tool("read_terminal").execute(
+        { id: terminal.id, timeout: 0, idle: 0 },
+        ctx,
+      ) as { snapshot: { screen: string }; log_path?: string }
+
+      expect(read.snapshot.screen).not.toContain(longStartMarker)
+      expect(read.snapshot.screen).not.toContain(longEndMarker)
+    } finally {
+      await service.destroy()
+    }
+  }, 40_000)
 
   describe.skipIf(!process.env.LIVE_TERMINAL_BASH)("bash shell integration", () => {
     commandCompletionCase("/bin/bash")

@@ -10,9 +10,10 @@ import {
   type UIMessageStreamWriter,
 } from "ai"
 import { createModel, deepseekProviderOptions } from "./model"
-import { ToolInputError } from "./meta-tools"
+import { shouldThrowToolFailures, ToolInputError } from "./meta-tools"
 
 function isRecoverableToolError(error: unknown): boolean {
+  if (shouldThrowToolFailures()) return false
   if (error instanceof ToolInputError) return true
 
   const message =
@@ -40,8 +41,7 @@ function isRecoverableToolError(error: unknown): boolean {
     message.includes("AI_NoSuchToolError") ||
     message.includes("NoSuchToolError") ||
     message.includes("AI_InvalidToolInputError") ||
-    message.includes("AI_JSONParseError") ||
-    message.includes("Invalid arguments:")
+    message.includes("AI_JSONParseError")
   )
 }
 

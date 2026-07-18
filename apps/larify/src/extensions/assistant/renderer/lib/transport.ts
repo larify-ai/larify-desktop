@@ -4,6 +4,7 @@ const topLevelTools = new Set(["list_tools", "read_tools", "call_tool"])
 
 interface ToolChunkFilterState {
   pending: Map<string, UIMessageChunk[]>
+  waitingForReady: Set<string>
   released: Set<string>
   suppressed: Set<string>
 }
@@ -11,12 +12,17 @@ interface ToolChunkFilterState {
 export function createToolChunkFilterState(): ToolChunkFilterState {
   return {
     pending: new Map(),
+    waitingForReady: new Set(),
     released: new Set(),
     suppressed: new Set(),
   }
 }
 
 function chunkToolCallId(chunk: UIMessageChunk): string | null {
+  if (chunk.type === "data-tool-ready") {
+    const id = (chunk as { id?: unknown }).id
+    return typeof id === "string" ? id : null
+  }
   if (
     chunk.type === "tool-input-start" ||
     chunk.type === "tool-input-delta" ||
@@ -60,6 +66,7 @@ export function filterToolChunk(
   if (chunk.type === "tool-input-error") {
     state.suppressed.add(toolCallId)
     state.pending.delete(toolCallId)
+    state.waitingForReady.delete(toolCallId)
     return []
   }
 
@@ -67,10 +74,35 @@ export function filterToolChunk(
     if (!topLevelTools.has(chunk.toolName)) {
       state.suppressed.add(toolCallId)
       state.pending.delete(toolCallId)
+      state.waitingForReady.delete(toolCallId)
+      return []
+    }
+    const chunks = state.pending.get(toolCallId) ?? []
+    chunks.push(chunk)
+    state.pending.set(toolCallId, chunks)
+    if (chunk.toolName === "call_tool") {
+      state.waitingForReady.add(toolCallId)
       return []
     }
     state.released.add(toolCallId)
-    return [...flushPending(state, toolCallId), chunk]
+    return flushPending(state, toolCallId)
+  }
+
+  if (chunk.type === "data-tool-ready") {
+    if (!state.waitingForReady.has(toolCallId)) return []
+    state.waitingForReady.delete(toolCallId)
+    state.released.add(toolCallId)
+    return flushPending(state, toolCallId)
+  }
+
+  if (state.waitingForReady.has(toolCallId)) {
+    if (chunk.type === "tool-output-error") {
+      state.waitingForReady.delete(toolCallId)
+      state.suppressed.add(toolCallId)
+      state.pending.delete(toolCallId)
+      return []
+    }
+    return []
   }
 
   if (!state.released.has(toolCallId)) return []

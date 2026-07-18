@@ -8,6 +8,13 @@ import { z } from "zod"
 import type { ToolContext } from "../../../shared/tool"
 import { callToolInvocationSchema, type ToolRegistry } from "./registry"
 
+export class ToolInputError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "ToolInputError"
+  }
+}
+
 function isStructured(value: unknown): value is { output: unknown; metadata: unknown } {
   return typeof value === "object" && value !== null && "output" in value && "metadata" in value
 }
@@ -21,9 +28,14 @@ async function* invokeTool(
   toolCallId: string,
 ): AsyncIterable<unknown> {
   const found = registry.get(name)
-  if (!found) throw new Error(`Tool "${name}" not found`)
+  if (!found) throw new ToolInputError(`Tool "${name}" not found`)
   const parsed = found.inputSchema.safeParse(args)
-  if (!parsed.success) throw new Error(`Invalid arguments: ${parsed.error.message}`)
+  if (!parsed.success) throw new ToolInputError(`Invalid arguments: ${parsed.error.message}`)
+  writer?.write({
+    type: "data-tool-ready",
+    id: toolCallId,
+    data: { toolName: name },
+  })
   const result = found.execute(parsed.data, ctx)
   if (Symbol.asyncIterator in Object(result)) {
     yield* result as AsyncIterable<unknown>
@@ -56,7 +68,7 @@ export function buildMetaTools(
       }),
       execute: async ({ toolkit_name }) => {
         const tools = registry.listTools(toolkit_name)
-        if (!tools) throw new Error(`Toolkit "${toolkit_name}" not found`)
+        if (!tools) throw new ToolInputError(`Toolkit "${toolkit_name}" not found`)
         return tools.map((tool) => `- **${tool.name}** - ${tool.description}`).join("\n")
       },
     }),
@@ -69,7 +81,7 @@ export function buildMetaTools(
       execute: async ({ tool_names }) => {
         const definitions = tool_names.map((name) => {
           const found = registry.get(name)
-          if (!found) throw new Error(`Tool "${name}" not found`)
+          if (!found) throw new ToolInputError(`Tool "${name}" not found`)
           return {
             name: "call_tool",
             description: `Invoke ${found.name} with args matching its schema.`,

@@ -10,6 +10,7 @@ import {
   type UIMessageStreamWriter,
 } from "ai"
 import { createModel, deepseekProviderOptions } from "./model"
+import { ToolInputError } from "./meta-tools"
 
 export function runAgent(opts: {
   messages: ModelMessage[]
@@ -38,7 +39,7 @@ export function runAgent(opts: {
           stream: result.stream,
           tools,
           onError: (e) => {
-            console.error("[agent tool error]", e)
+            if (!(e instanceof ToolInputError)) console.error("[agent tool error]", e)
             return e instanceof Error ? e.message : String(e)
           },
         }),

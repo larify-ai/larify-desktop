@@ -34,8 +34,21 @@ const kit: Toolkit = {
   ],
 }
 
+const terminalKit: Toolkit = {
+  name: "terminal",
+  description: "Terminal operations",
+  tools: [
+    {
+      name: "write_terminal",
+      description: "Write terminal input",
+      inputSchema: z.object({ input: z.string() }),
+      execute: async () => "ok",
+    },
+  ],
+}
+
 function meta() {
-  const tools = buildMetaTools(createToolRegistry([kit]), { sessionId: "test" })
+  const tools = buildMetaTools(createToolRegistry([kit, terminalKit]), { sessionId: "test" })
   return (name: string, input: unknown) => {
     const found = tools[name]
     if (!found) return undefined
@@ -62,20 +75,27 @@ const metaTool = (name: string, input: unknown) =>
 
 describe("list_tools", () => {
   it("lists a group's tools as markdown bullets through call_tool", async () => {
-    const result = await drain(metaTool("list_tools", { title: "List file tools", group: "file" }))
+    const result = await drain(metaTool("list_tools", { title: "List file tools", groups: ["file"] }))
     expect(result).toEqual([
       "- **read_file** - Read a file\n- **ticker** - Emit ticks\n- **fails** - Fail predictably",
     ])
   })
 
+  it("lists multiple groups as sections", async () => {
+    const result = await drain(metaTool("list_tools", { title: "List tools", groups: ["file", "terminal"] }))
+    expect(result).toEqual([
+      "## file\n- **read_file** - Read a file\n- **ticker** - Emit ticks\n- **fails** - Fail predictably\n\n## terminal\n- **write_terminal** - Write terminal input",
+    ])
+  })
+
   it("throws on unknown group", async () => {
-    await expect(drain(metaTool("list_tools", { title: "List tools", group: "nope" }))).rejects.toThrow(
+    await expect(drain(metaTool("list_tools", { title: "List tools", groups: ["nope"] }))).rejects.toThrow(
       'Group "nope" not found',
     )
   })
 
   it("lists agent meta tools separately", async () => {
-    await expect(drain(metaTool("list_tools", { title: "List agent tools", group: "agent" }))).rejects.toThrow(
+    await expect(drain(metaTool("list_tools", { title: "List agent tools", groups: ["agent"] }))).rejects.toThrow(
       'Group "agent" not found',
     )
   })

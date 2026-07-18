@@ -82,15 +82,20 @@ export function buildMetaTools(
 ): ToolSet {
   const tools: ToolSet = {
     list_tools: tool({
-      description: "List tools in a group.",
+      description: "List tools in one or more groups.",
       inputSchema: z.object({
         title: z.string().min(1).describe("Short user-facing phrase describing the step"),
-        group: z.string().describe("The group name"),
+        groups: z.array(z.string()).min(1).describe("The group names"),
       }).strict(),
-      execute: async ({ group }) => {
-        const tools = registry.listTools(group)
-        if (!tools) throw new ToolInputError(`Group "${group}" not found`)
-        return tools.map((tool) => `- **${tool.name}** - ${tool.description}`).join("\n")
+      execute: async ({ groups }) => {
+        const sections = groups.map((group) => {
+          const tools = registry.listTools(group)
+          if (!tools) throw new ToolInputError(`Group "${group}" not found`)
+          const body = tools.map((tool) => `- **${tool.name}** - ${tool.description}`).join("\n")
+          return { group, body }
+        })
+        if (sections.length === 1) return sections[0].body
+        return sections.map(({ group, body }) => `## ${group}\n${body}`).join("\n\n")
       },
     }),
     read_tools: tool({

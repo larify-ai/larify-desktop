@@ -19,6 +19,17 @@ function isStructured(value: unknown): value is { output: unknown; metadata: unk
   return typeof value === "object" && value !== null && "output" in value && "metadata" in value
 }
 
+function formatToolFailure(error: unknown): string | null {
+  if (error instanceof ToolInputError) return error.message
+  if (error instanceof Error) return error.message
+  if (typeof error === "string") return error
+  return null
+}
+
+function shouldThrowToolFailures(): boolean {
+  return process.env.LARIFY_DEBUG_TOOL_ERRORS === "1"
+}
+
 async function* invokeTool(
   registry: ToolRegistry,
   ctx: ToolContext,
@@ -36,21 +47,31 @@ async function* invokeTool(
     id: toolCallId,
     data: { toolName: name },
   })
-  const result = found.execute(parsed.data, ctx)
-  if (Symbol.asyncIterator in Object(result)) {
-    yield* result as AsyncIterable<unknown>
-    return
-  }
-  const value = await result
-  if (isStructured(value)) {
-    writer?.write({
-      type: "data-tool-meta",
-      id: toolCallId,
-      data: value.metadata,
-    })
-    yield value.output
-  } else {
-    yield value
+  try {
+    const result = found.execute(parsed.data, ctx)
+    if (Symbol.asyncIterator in Object(result)) {
+      yield* result as AsyncIterable<unknown>
+      return
+    }
+    const value = await result
+    if (isStructured(value)) {
+      writer?.write({
+        type: "data-tool-meta",
+        id: toolCallId,
+        data: value.metadata,
+      })
+      yield value.output
+    } else {
+      yield value
+    }
+  } catch (error) {
+    if (shouldThrowToolFailures()) throw error
+    const message = formatToolFailure(error)
+    if (message !== null) {
+      yield message
+      return
+    }
+    throw error
   }
 }
 
@@ -61,14 +82,14 @@ export function buildMetaTools(
 ): ToolSet {
   const tools: ToolSet = {
     list_tools: tool({
-      description: "List tools in a toolkit.",
+      description: "List tools in a group.",
       inputSchema: z.object({
         title: z.string().min(1).describe("Short user-facing phrase describing the step"),
-        toolkit_name: z.string().describe("The toolkit name"),
+        group: z.string().describe("The group name"),
       }),
-      execute: async ({ toolkit_name }) => {
-        const tools = registry.listTools(toolkit_name)
-        if (!tools) throw new ToolInputError(`Toolkit "${toolkit_name}" not found`)
+      execute: async ({ group }) => {
+        const tools = registry.listTools(group)
+        if (!tools) throw new ToolInputError(`Group "${group}" not found`)
         return tools.map((tool) => `- **${tool.name}** - ${tool.description}`).join("\n")
       },
     }),

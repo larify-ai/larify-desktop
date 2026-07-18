@@ -1,8 +1,7 @@
 import { describe, it, expect } from "vitest"
-import { NoSuchToolError } from "ai"
 import { z } from "zod"
-import { buildMetaTools, buildRepairToolCall } from "../../../../src/extensions/agent/main/meta-tools"
-import { createToolRegistry, ToolRegistry } from "../../../../src/extensions/agent/main/registry"
+import { buildMetaTools } from "../../../../src/extensions/agent/main/meta-tools"
+import { createToolRegistry } from "../../../../src/extensions/agent/main/registry"
 import type { Toolkit } from "../../../../src/shared/tool"
 
 const kit: Toolkit = {
@@ -22,6 +21,14 @@ const kit: Toolkit = {
       inputSchema: z.object({ n: z.number() }),
       execute: async function* (args) {
         for (let i = 1; i <= (args as { n: number }).n; i++) yield `tick${i}`
+      },
+    },
+    {
+      name: "fails",
+      description: "Fail predictably",
+      inputSchema: z.object({}),
+      execute: async () => {
+        throw new Error("Predictable tool failure")
       },
     },
   ],
@@ -54,20 +61,22 @@ const metaTool = (name: string, input: unknown) =>
   meta()(name, input) as AsyncIterable<unknown> | Promise<unknown>
 
 describe("list_tools", () => {
-  it("lists a toolkit's tools as markdown bullets through call_tool", async () => {
-    const result = await drain(metaTool("list_tools", { title: "List file tools", toolkit_name: "file" }))
-    expect(result).toEqual(["- **read_file** - Read a file\n- **ticker** - Emit ticks"])
+  it("lists a group's tools as markdown bullets through call_tool", async () => {
+    const result = await drain(metaTool("list_tools", { title: "List file tools", group: "file" }))
+    expect(result).toEqual([
+      "- **read_file** - Read a file\n- **ticker** - Emit ticks\n- **fails** - Fail predictably",
+    ])
   })
 
-  it("throws on unknown toolkit", async () => {
-    await expect(drain(metaTool("list_tools", { title: "List tools", toolkit_name: "nope" }))).rejects.toThrow(
-      'Toolkit "nope" not found',
+  it("throws on unknown group", async () => {
+    await expect(drain(metaTool("list_tools", { title: "List tools", group: "nope" }))).rejects.toThrow(
+      'Group "nope" not found',
     )
   })
 
   it("lists agent meta tools separately", async () => {
-    await expect(drain(metaTool("list_tools", { title: "List agent tools", toolkit_name: "agent" }))).rejects.toThrow(
-      'Toolkit "agent" not found',
+    await expect(drain(metaTool("list_tools", { title: "List agent tools", group: "agent" }))).rejects.toThrow(
+      'Group "agent" not found',
     )
   })
 })
@@ -122,6 +131,26 @@ describe("call_tool", () => {
       "Invalid arguments",
     )
   })
+
+  it("returns execution failures as tool output", async () => {
+    await expect(drain(callTool("fails", {}, "Run failing tool"))).resolves.toEqual([
+      "Predictable tool failure",
+    ])
+  })
+
+  it("throws execution failures when debug tool errors is enabled", async () => {
+    const previous = process.env.LARIFY_DEBUG_TOOL_ERRORS
+    process.env.LARIFY_DEBUG_TOOL_ERRORS = "1"
+    try {
+      await expect(drain(callTool("fails", {}, "Run failing tool"))).rejects.toThrow("Predictable tool failure")
+    } finally {
+      if (previous === undefined) {
+        delete process.env.LARIFY_DEBUG_TOOL_ERRORS
+      } else {
+        process.env.LARIFY_DEBUG_TOOL_ERRORS = previous
+      }
+    }
+  })
 })
 
 describe("eager tools", () => {
@@ -139,38 +168,5 @@ describe("ToolRegistry", () => {
     expect(createToolRegistry([kit]).listToolDisplays()).toEqual({
       read_file: { title: "Read file", icon: "read" },
     })
-  })
-})
-
-describe("buildRepairToolCall", () => {
-  const repair = buildRepairToolCall(new ToolRegistry([kit]))
-  const invoke = (toolName: string, input: string, error: unknown) =>
-    repair({
-      toolCall: { type: "tool-call", toolCallId: "c1", toolName, input },
-      error,
-    } as Parameters<typeof repair>[0])
-
-  it("rewrites a direct call to a registered tool into a call_tool call", async () => {
-    const result = await invoke(
-      "read_file",
-      '{"path":"a.txt"}',
-      new NoSuchToolError({ toolName: "read_file" }),
-    )
-    expect(result).toMatchObject({ toolCallId: "c1", toolName: "call_tool" })
-    expect(JSON.parse(result!.input)).toEqual({
-      title: "采取行动",
-      tool_name: "read_file",
-      tool_args: { path: "a.txt" },
-    })
-  })
-
-  it("returns null when the error is not a NoSuchToolError", async () => {
-    const result = await invoke("read_file", "{}", new Error("some other failure"))
-    expect(result).toBeNull()
-  })
-
-  it("returns null for a tool name not in the registry", async () => {
-    const result = await invoke("made_up", "{}", new NoSuchToolError({ toolName: "made_up" }))
-    expect(result).toBeNull()
   })
 })

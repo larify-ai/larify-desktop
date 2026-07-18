@@ -12,6 +12,39 @@ import {
 import { createModel, deepseekProviderOptions } from "./model"
 import { ToolInputError } from "./meta-tools"
 
+function isRecoverableToolError(error: unknown): boolean {
+  if (error instanceof ToolInputError) return true
+
+  const message =
+    typeof error === "string"
+      ? error
+      : error instanceof Error
+        ? error.message
+        : typeof error === "object" && error !== null && typeof (error as { message?: unknown }).message === "string"
+          ? (error as { message: string }).message
+          : ""
+
+  if (typeof error === "object" && error !== null) {
+    const record = error as { name?: unknown; toolName?: unknown }
+    if (
+      record.name === "AI_NoSuchToolError" ||
+      record.name === "AI_InvalidToolInputError" ||
+      record.name === "AI_JSONParseError" ||
+      typeof record.toolName === "string"
+    ) {
+      return true
+    }
+  }
+
+  return (
+    message.includes("AI_NoSuchToolError") ||
+    message.includes("NoSuchToolError") ||
+    message.includes("AI_InvalidToolInputError") ||
+    message.includes("AI_JSONParseError") ||
+    message.includes("Invalid arguments:")
+  )
+}
+
 export function runAgent(opts: {
   messages: ModelMessage[]
   buildTools: (writer: UIMessageStreamWriter) => ToolSet
@@ -39,7 +72,7 @@ export function runAgent(opts: {
           stream: result.stream,
           tools,
           onError: (e) => {
-            if (!(e instanceof ToolInputError)) console.error("[agent tool error]", e)
+            if (!isRecoverableToolError(e)) console.error("[agent tool error]", e)
             return e instanceof Error ? e.message : String(e)
           },
         }),

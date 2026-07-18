@@ -13,7 +13,7 @@
     "start": "electron-vite preview",
     "dev": "electron-vite dev",
     "dev:preview": "electron-vite build && electron-vite preview",
-    "dev:debug": "electron-vite dev -- --remote-debugging-port=9222",
+    "dev:debug": "set LARIFY_DEBUG_TOOL_ERRORS=1&& electron-vite dev -- --remote-debugging-port=9222",
     "build": "npm run typecheck && electron-vite build",
     "postinstall": "electron-builder install-app-deps",
     "build:unpack": "npm run build && electron-builder --dir",

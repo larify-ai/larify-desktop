@@ -44,7 +44,7 @@ describe("assistant transport tool chunk filtering", () => {
       type: "tool-input-available",
       toolCallId: "tool-1",
       toolName: "list_tools",
-      input: { title: "查看工具", toolkit_name: "filesystem" },
+      input: { title: "查看工具", group: "filesystem" },
     }
 
     expect(filter([available])).toEqual([available])
@@ -135,7 +135,7 @@ describe("assistant transport tool chunk filtering", () => {
       type: "tool-input-available",
       toolCallId: "tool-1",
       toolName: "list_tools",
-      input: { title: "查看工具", toolkit_name: "missing" },
+      input: { title: "查看工具", group: "missing" },
     }
     const outputError: UIMessageChunk = {
       type: "tool-output-error",

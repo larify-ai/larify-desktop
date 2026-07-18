@@ -26,13 +26,20 @@ export const readFileTool: Tool = {
     fileStateFor(ctx.sessionId).set(file_path, Math.floor(stats.mtimeMs))
 
     const lines = splitLines(iconv.decode(buffer, detect(buffer) ?? "utf-8"))
-    const anchor = Math.min(offset ?? (scroll === "up" ? lines.length : 1), lines.length)
-    const start = scroll === "up" ? Math.max(1, anchor - limit + 1) : Math.max(1, anchor)
-    const end = scroll === "up" ? Math.min(lines.length, anchor) : Math.min(lines.length, start + limit - 1)
+    const lastLine = lines.length
+    const anchor = Math.min(offset ?? (scroll === "up" ? lastLine : 1), lastLine)
+    const start = Math.min(
+      lastLine + 1,
+      scroll === "up" ? Math.max(1, anchor - limit + 1) : Math.max(1, anchor),
+    )
+    const end = Math.max(
+      0,
+      scroll === "up" ? Math.min(lastLine, anchor) : Math.min(lastLine, start + limit - 1),
+    )
 
     let body = lines.slice(start - 1, end).join("\n")
     if (start > 1) body = `(Lines 1-${start - 1} omitted.)\n${body}`
-    if (end < lines.length) body += `\n(Lines ${end + 1}-${lines.length} omitted.)`
+    if (end < lastLine) body += `\n(Lines ${end + 1}-${lastLine} omitted.)`
     return body
   },
 }

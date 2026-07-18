@@ -6,10 +6,17 @@ import { readFileTool } from "../../../../src/extensions/file/main/read"
 import { fileStateFor } from "../../../../src/extensions/file/main/state"
 
 const filePath = join(tmpdir(), "larify-read-test.txt")
+const emptyFilePath = join(tmpdir(), "larify-read-empty-test.txt")
 const content = Array.from({ length: 10 }, (_, i) => `line${i + 1}`).join("\n")
 
-beforeAll(() => writeFileSync(filePath, content))
-afterAll(() => rmSync(filePath, { force: true }))
+beforeAll(() => {
+  writeFileSync(filePath, content)
+  writeFileSync(emptyFilePath, "")
+})
+afterAll(() => {
+  rmSync(filePath, { force: true })
+  rmSync(emptyFilePath, { force: true })
+})
 
 function run(args: Record<string, unknown>): Promise<string> {
   return readFileTool.execute(readFileTool.inputSchema.parse(args), { sessionId: "test" }) as Promise<string>
@@ -34,6 +41,10 @@ describe("read", () => {
     expect(await run({ file_path: filePath, offset: 8 })).toBe("(Lines 1-7 omitted.)\nline8\nline9\nline10")
   })
 
+  it("clamps downward reads beyond the end of the file", async () => {
+    expect(await run({ file_path: filePath, offset: 100, limit: 3 })).toBe("(Lines 1-9 omitted.)\nline10")
+  })
+
   it("reads upward from an offset", async () => {
     expect(await run({ file_path: filePath, offset: 8, limit: 3, scroll: "up" })).toBe(
       "(Lines 1-5 omitted.)\nline6\nline7\nline8\n(Lines 9-10 omitted.)",
@@ -50,6 +61,10 @@ describe("read", () => {
     expect(await run({ file_path: filePath, offset: 100, limit: 3, scroll: "up" })).toBe(
       "(Lines 1-7 omitted.)\nline8\nline9\nline10",
     )
+  })
+
+  it("reads empty files without omission notes", async () => {
+    expect(await run({ file_path: emptyFilePath, limit: 3, scroll: "up" })).toBe("")
   })
 
   it("records the file's mtime in the session state", async () => {

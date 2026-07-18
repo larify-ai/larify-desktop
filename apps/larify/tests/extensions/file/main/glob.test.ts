@@ -47,8 +47,8 @@ describe("glob", () => {
       { sessionId: "test" },
     )
 
-    expect(result).toMatch(/^\(Matching files 1-1 omitted\.\)\n/)
-    expect(result).toMatch(/\n\(Matching files 3-\d+ omitted\.\)$/)
+    expect(result).not.toContain("Matching files 1-1 omitted")
+    expect(result).toMatch(/\n\(More results omitted; use offset 2 to continue or narrow the search\.\)$/)
   })
 
   it("throws when path is not a directory", async () => {

@@ -1,8 +1,9 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { grepFilesTool } from "../../../../src/extensions/file/main/grep"
+import * as ripgrep from "../../../../src/extensions/file/main/ripgrep"
 
 const tempDirs: string[] = []
 
@@ -64,9 +65,26 @@ describe("grep", () => {
       { sessionId: "test" },
     )
 
-    expect(result).toMatch(/^\(Matching files 1-1 omitted\.\)\n\n/)
     expect(result).toMatch(new RegExp(`${root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}.*\n\\d+: foo`))
-    expect(result).toMatch(/\n\n\(Matching files 3-3 omitted\.\)$/)
+    expect(result).toMatch(/\n\n\(More results omitted; use offset 2 to continue or narrow the search\.\)$/)
+  })
+
+  it("counts offset by file, not by matching line", async () => {
+    const root = await makeFixture()
+
+    const firstPage = await grepFilesTool.execute(
+      { pattern: "foo", path: root, limit: 1, offset: 0 },
+      { sessionId: "test" },
+    )
+    const firstFile = firstPage.split("\n")[0]
+
+    const secondPage = await grepFilesTool.execute(
+      { pattern: "foo", path: root, limit: 1, offset: 1 },
+      { sessionId: "test" },
+    )
+
+    expect(secondPage).not.toContain(firstFile)
+    expect(secondPage.match(new RegExp(root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"))).toHaveLength(1)
   })
 
   it("returns a clear message when no files match", async () => {
@@ -75,5 +93,33 @@ describe("grep", () => {
     const result = await grepFilesTool.execute({ pattern: "missing", path: root }, { sessionId: "test" })
 
     expect(result).toBe("No matches found.")
+  })
+
+  it("returns partial results when ripgrep fails after producing matches", async () => {
+    const root = await makeFixture()
+    const filePath = path.join(root, "src", "a.ts")
+    const spy = vi.spyOn(ripgrep, "runRipgrepStream").mockImplementation(async (_args, _target, _signal, onLines) => {
+      onLines([
+        JSON.stringify({
+          type: "match",
+          data: {
+            path: { text: path.relative(root, filePath) },
+            lines: { text: "foo one\n" },
+            line_number: 2,
+          },
+        }),
+      ])
+      throw new Error("partial ripgrep failure")
+    })
+
+    try {
+      const result = await grepFilesTool.execute({ pattern: "foo", path: root }, { sessionId: "test" })
+
+      expect(result).toContain(filePath)
+      expect(result).toContain("2: foo one")
+      expect(result).toContain("More results omitted")
+    } finally {
+      spy.mockRestore()
+    }
   })
 })

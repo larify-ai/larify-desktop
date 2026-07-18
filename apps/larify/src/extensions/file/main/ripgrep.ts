@@ -1,33 +1,119 @@
-import { execFile } from "node:child_process"
+import { spawn } from "node:child_process"
 import path from "node:path"
 import { rgPath } from "@vscode/ripgrep"
 import { splitLines } from "../../../main/utils/text"
 
-const MAX_BUFFER = 128 * 1024 * 1024
-const DEFAULT_TIMEOUT_MS = 60_000
+const DEFAULT_TIMEOUT_MS = 10 * 60_000
 
-const parseRipgrepLines = (stdout: string): string[] =>
-  splitLines(stdout.trim()).filter(Boolean)
+interface RunRipgrepOptions {
+  offset?: number
+  limit?: number
+}
 
-export function runRipgrep(args: string[], target: string): Promise<string[]> {
+interface RunRipgrepResult {
+  lines: string[]
+  truncated: boolean
+}
+
+export function runRipgrepStream(
+  args: string[],
+  target: string,
+  signal: AbortSignal,
+  onLines: (lines: string[]) => void,
+): Promise<void> {
   return new Promise((resolve, reject) => {
-    execFile(
-      rgPath,
-      [...args, target],
-      {
-        maxBuffer: MAX_BUFFER,
-        timeout: DEFAULT_TIMEOUT_MS,
-        windowsHide: true,
-      },
-      (error, stdout) => {
-        if (!error || error.code === 1) {
-          resolve(parseRipgrepLines(stdout))
+    let remainder = ""
+    let settled = false
+
+    const child = spawn(rgPath, [...args, target], {
+      signal,
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "ignore"],
+    })
+
+    const settle = (callback: () => void): void => {
+      if (settled) return
+      settled = true
+      callback()
+    }
+    const onAbort = (): void => settle(resolve)
+    signal.addEventListener("abort", onAbort, { once: true })
+
+    child.stdout?.on("data", (chunk: Buffer) => {
+      const data = remainder + chunk.toString()
+      const parts = splitLines(data)
+      remainder = parts.pop() ?? ""
+      const lines = parts.filter(Boolean)
+      if (lines.length) onLines(lines)
+    })
+
+    child.on("error", (error) => {
+      signal.removeEventListener("abort", onAbort)
+      if (signal.aborted) {
+        settle(resolve)
+        return
+      }
+      settle(() => reject(error))
+    })
+
+    child.on("close", (code) => {
+      signal.removeEventListener("abort", onAbort)
+      settle(() => {
+        if (remainder) {
+          const lines = splitLines(remainder).filter(Boolean)
+          if (lines.length) onLines(lines)
+        }
+        if (code === 0 || code === 1) {
+          resolve()
           return
         }
-        reject(error)
-      },
-    )
+        reject(new Error(`ripgrep exited with code ${code}`))
+      })
+    })
   })
+}
+
+export async function runRipgrepLimited(
+  args: string[],
+  target: string,
+  options: RunRipgrepOptions = {},
+): Promise<RunRipgrepResult> {
+  const offset = options.offset ?? 0
+  const limit = options.limit
+  const lines: string[] = []
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS)
+  let seen = 0
+  let truncated = false
+
+  try {
+    await runRipgrepStream(args, target, controller.signal, (chunkLines) => {
+      for (const line of chunkLines) {
+        if (seen < offset) {
+          seen += 1
+          continue
+        }
+        if (limit !== undefined && lines.length >= limit) {
+          truncated = true
+          controller.abort()
+          return
+        }
+        lines.push(line)
+        seen += 1
+      }
+    })
+  } catch (error) {
+    if (!controller.signal.aborted && lines.length === 0) throw error
+  } finally {
+    clearTimeout(timeout)
+  }
+
+  return { lines, truncated: truncated || controller.signal.aborted }
+}
+
+export async function runRipgrep(args: string[], target: string): Promise<string[]> {
+  const { lines } = await runRipgrepLimited(args, target)
+  return lines
 }
 
 export const toAbsolutePath = (basePath: string, value: string): string =>

@@ -1,8 +1,11 @@
 import { stat } from "node:fs/promises"
 import path from "node:path"
 import { z } from "zod"
+import { trimTrailingLineBreak } from "../../../main/utils/text"
 import type { Tool } from "../../../shared/tool"
-import { runRipgrep, toAbsolutePath } from "./ripgrep"
+import { runRipgrepStream, toAbsolutePath } from "./ripgrep"
+
+const DEFAULT_TIMEOUT_MS = 10 * 60_000
 
 const inputSchema = z.object({
   pattern: z.string().describe("The regex pattern to search for in file contents"),
@@ -44,24 +47,21 @@ const isRipgrepMatch = (value: unknown): value is RipgrepMatch => {
 }
 
 const parseMatch = (root: string, line: string): Match | null => {
-  const json = JSON.parse(line) as unknown
+  let json: unknown
+  try {
+    json = JSON.parse(line)
+  } catch {
+    return null
+  }
   if (!isRipgrepMatch(json)) return null
   return {
     filePath: toAbsolutePath(root, json.data.path.text),
     lineNumber: json.data.line_number,
-    text: json.data.lines.text.replace(/\r?\n$/, ""),
+    text: trimTrailingLineBreak(json.data.lines.text),
   }
 }
 
-const groupMatchesByFile = (matches: Match[]): FileMatches[] => {
-  const byFile = new Map<string, Match[]>()
-  for (const match of matches) {
-    byFile.set(match.filePath, [...(byFile.get(match.filePath) ?? []), match])
-  }
-  return [...byFile].map(([filePath, fileMatches]) => ({ filePath, matches: fileMatches }))
-}
-
-const formatFileMatches = (groups: FileMatches[], offset: number, end: number, total: number): string => {
+const formatFileMatches = (groups: FileMatches[], offset: number, truncated: boolean): string => {
   const body = groups
     .map((group) => {
       const lines = group.matches.map((match) => `${match.lineNumber}: ${match.text}`)
@@ -70,9 +70,63 @@ const formatFileMatches = (groups: FileMatches[], offset: number, end: number, t
     .join("\n\n")
 
   let output = body
-  if (offset > 0) output = `(Matching files 1-${offset} omitted.)\n\n${output}`
-  if (end < total) output += `\n\n(Matching files ${end + 1}-${total} omitted.)`
+  if (truncated) {
+    output += `\n\n(More results omitted; use offset ${offset + groups.length} to continue or narrow the search.)`
+  }
   return output
+}
+
+const readMatchGroups = async (
+  rgArgs: string[],
+  root: string,
+  offset: number,
+  limit: number,
+): Promise<{ groups: FileMatches[]; truncated: boolean }> => {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS)
+  const groups: FileMatches[] = []
+  const byFile = new Map<string, FileMatches>()
+  const seenFiles = new Set<string>()
+  let skipped = 0
+  let truncated = false
+
+  try {
+    await runRipgrepStream(rgArgs, root, controller.signal, (lines) => {
+      for (const line of lines) {
+        const match = parseMatch(root, line)
+        if (!match) continue
+
+        let group = byFile.get(match.filePath)
+        if (!group) {
+          if (!seenFiles.has(match.filePath)) {
+            seenFiles.add(match.filePath)
+            if (skipped < offset) {
+              skipped += 1
+              continue
+            }
+          } else {
+            continue
+          }
+          if (groups.length >= limit) {
+            truncated = true
+            controller.abort()
+            return
+          }
+          group = { filePath: match.filePath, matches: [] }
+          byFile.set(match.filePath, group)
+          groups.push(group)
+        }
+        group.matches.push(match)
+      }
+    })
+  } catch (error) {
+    if (groups.length === 0) throw error
+    truncated = true
+  } finally {
+    clearTimeout(timeout)
+  }
+
+  return { groups, truncated: truncated || controller.signal.aborted }
 }
 
 export const grepFilesTool: Tool = {
@@ -90,13 +144,9 @@ export const grepFilesTool: Tool = {
     if (pattern.startsWith("-")) rgArgs.push("-e", pattern)
     else rgArgs.push(pattern)
 
-    const lines = await runRipgrep(rgArgs, root)
-    const matches = lines.map((line) => parseMatch(root, line)).filter((match): match is Match => match !== null)
-    const groups = groupMatchesByFile(matches)
-
+    const { groups, truncated } = await readMatchGroups(rgArgs, root, offset, limit)
     if (groups.length === 0) return "No matches found."
 
-    const end = Math.min(groups.length, offset + limit)
-    return formatFileMatches(groups.slice(offset, end), offset, end, groups.length)
+    return formatFileMatches(groups, offset, truncated)
   },
 }

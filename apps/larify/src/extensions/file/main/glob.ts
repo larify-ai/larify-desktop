@@ -2,7 +2,7 @@ import { stat } from "node:fs/promises"
 import path from "node:path"
 import { z } from "zod"
 import type { Tool } from "../../../shared/tool"
-import { runRipgrep, toAbsolutePath } from "./ripgrep"
+import { runRipgrepLimited, toAbsolutePath } from "./ripgrep"
 
 const inputSchema = z.object({
   pattern: z.string().describe("The glob pattern to match files against"),
@@ -25,7 +25,7 @@ export const globFilesTool: Tool = {
     const stats = await stat(root)
     if (!stats.isDirectory()) throw new Error(`Path is not a directory: ${root}`)
 
-    const results = await runRipgrep(
+    const result = await runRipgrepLimited(
       [
         "--no-config",
         "--files",
@@ -39,14 +39,15 @@ export const globFilesTool: Tool = {
         "!**/.git/**",
       ],
       root,
+      { offset, limit: limit + 1 },
     )
-    const end = Math.min(results.length, offset + limit)
-    const files = results.slice(offset, end).map((filePath) => toAbsolutePath(root, filePath))
+    const files = result.lines.slice(0, limit).map((filePath) => toAbsolutePath(root, filePath))
 
     if (files.length === 0) return "No files found."
     let output = files.join("\n")
-    if (offset > 0) output = `(Matching files 1-${offset} omitted.)\n${output}`
-    if (end < results.length) output += `\n(Matching files ${end + 1}-${results.length} omitted.)`
+    if (result.truncated || result.lines.length > limit) {
+      output += `\n(More results omitted; use offset ${offset + files.length} to continue or narrow the search.)`
+    }
     return output
   },
 }

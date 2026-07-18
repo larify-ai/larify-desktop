@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
-import { runRipgrep } from "../../../../src/extensions/file/main/ripgrep"
+import { runRipgrep, runRipgrepLimited } from "../../../../src/extensions/file/main/ripgrep"
 
 const tempDirs: string[] = []
 
@@ -46,6 +46,15 @@ describe("runRipgrep", () => {
     const root = await makeFixture()
 
     await expect(runRipgrep(["missing"], root)).resolves.toEqual([])
+  })
+
+  it("streams results with offset and limit", async () => {
+    const root = await makeFixture()
+
+    const result = await runRipgrepLimited(["--files"], root, { offset: 1, limit: 1 })
+
+    expect(result.lines).toHaveLength(1)
+    expect(result.truncated).toBe(true)
   })
 
   it("rejects ripgrep errors", async () => {

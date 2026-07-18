@@ -13,7 +13,7 @@ const inputSchema = z.object({
   glob: z.string().optional().describe("The glob pattern to filter files"),
   limit: z.number().int().positive().default(50).describe("Maximum number of matching files to return"),
   offset: z.number().int().nonnegative().default(0).describe("Skip the first N matching files"),
-})
+}).strict()
 
 interface Match {
   filePath: string

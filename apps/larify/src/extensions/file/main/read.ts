@@ -11,7 +11,7 @@ const inputSchema = z.object({
   offset: z.number().int().positive().optional().describe("Start line (1-based)"),
   limit: z.number().int().positive().default(2000).describe("Number of lines to read"),
   scroll: z.enum(["down", "up"]).default("down").describe("Read down or up from offset"),
-})
+}).strict()
 
 export const readFileTool: Tool = {
   name: "read_file",

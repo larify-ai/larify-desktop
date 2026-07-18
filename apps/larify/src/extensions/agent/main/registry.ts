@@ -6,7 +6,7 @@ export const callToolInvocationSchema = (tool: Tool) =>
     title: z.string().min(1).describe("Short user-facing phrase describing the step"),
     tool_name: z.literal(tool.name).describe("The tool name to invoke through call_tool"),
     tool_args: tool.inputSchema,
-  })
+  }).strict()
 
 export const createToolRegistry = (kits: Toolkit[]): ToolRegistry => {
   return new ToolRegistry(kits)

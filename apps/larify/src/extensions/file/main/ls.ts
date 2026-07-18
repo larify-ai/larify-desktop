@@ -7,7 +7,7 @@ const inputSchema = z.object({
   path: z.string().optional().describe("The directory to list. If omitted, the session working directory is used."),
   limit: z.number().int().positive().default(200).describe("Maximum number of items to return"),
   offset: z.number().int().nonnegative().default(0).describe("Skip the first N items"),
-})
+}).strict()
 
 interface Item {
   name: string

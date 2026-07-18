@@ -120,9 +120,9 @@ export class Terminal {
     }
   }
 
-  async agentSnapshot(): Promise<TerminalAgentSnapshot> {
+  async agentSnapshot(opts: { startRow?: number } = {}): Promise<TerminalAgentSnapshot> {
     await this.flushHeadlessWrites()
-    return readAgentSnapshot(this.headless)
+    return readAgentSnapshot(this.headless, opts)
   }
 
   async currentRenderedRow(): Promise<number> {

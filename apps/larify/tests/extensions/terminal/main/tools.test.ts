@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
+import { z } from "zod"
 import { createTerminalToolkit } from "../../../../src/extensions/terminal/main/tools"
 import type { TerminalService } from "../../../../src/extensions/terminal/main/terminal-service"
 import type { Toolkit } from "../../../../src/shared/tool"
@@ -25,6 +26,20 @@ function tool(name: string, service: TerminalService): TerminalTool {
   if (!found) throw new Error(`Tool ${name} not found`)
   return found
 }
+
+function parseToolInput(name: string, input: unknown, service = createService()) {
+  return (tool(name, service).inputSchema as z.ZodTypeAny).safeParse(input)
+}
+
+describe("terminal schemas", () => {
+  it("rejects unknown fields", () => {
+    expect(parseToolInput("list_terminals", { shell: "cmd.exe" }).success).toBe(false)
+    expect(parseToolInput("create_terminal", { cwd: "D:\\Workspace", shell: "cmd.exe" }).success).toBe(false)
+    expect(parseToolInput("close_terminal", { id: 1, shell: "cmd.exe" }).success).toBe(false)
+    expect(parseToolInput("write_terminal", { id: 1, input: "echo hi", shell: "cmd.exe" }).success).toBe(false)
+    expect(parseToolInput("read_terminal", { id: 1, shell: "cmd.exe" }).success).toBe(false)
+  })
+})
 
 describe("close_terminal", () => {
   it("throws when the terminal does not exist", async () => {
@@ -76,7 +91,7 @@ describe("write_terminal", () => {
     await expect(
       tool("write_terminal", service).execute({ id: 1, input: "echo done", submit: true, timeout: 0, idle: 0 }, ctx),
     ).resolves.toEqual({
-      status: "shell integration command finish event not received",
+      status: "command may still be running or waiting for input",
       snapshot: {
         screen: "done",
       },
@@ -106,7 +121,7 @@ describe("write_terminal", () => {
     await expect(
       tool("write_terminal", service).execute({ id: 1, input: "echo done", submit: true, timeout: 0, idle: 0 }, ctx),
     ).resolves.toMatchObject({
-      status: "shell integration command finish event not received",
+      status: "command may still be running or waiting for input",
       snapshot: {
         screen: "(Earlier output omitted; full output in log_path.)\ndone",
       },
@@ -144,9 +159,51 @@ describe("write_terminal", () => {
 
     await expect(
       tool("write_terminal", service).execute({ id: 1, input: "echo done", submit: true, timeout: 0, idle: 0 }, ctx),
-    ).resolves.toMatchObject({ status: "shell integration command finish event not received", snapshot: { screen: "done" } })
+    ).resolves.toMatchObject({ status: "command may still be running or waiting for input", snapshot: { screen: "done" } })
 
     expect(order).toEqual(["lock", "start", "write", "unlock"])
+  })
+
+  it("normalizes trailing newlines to carriage return when submitting", async () => {
+    const service = createService()
+    vi.mocked(service.terminalState).mockReturnValue({
+      id: 1,
+      pid: 100,
+      title: "powershell",
+      cwd: "D:\\Workspace",
+      shell: "powershell.exe",
+      exitCode: null,
+    })
+    vi.mocked(service.startRun).mockResolvedValue({ runId: "run-1", sessionId: "session-1" })
+    vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: "done" })
+
+    await tool("write_terminal", service).execute(
+      { id: 1, input: "idf.py menuconfig\r\n\n", submit: true, timeout: 0, idle: 0 },
+      ctx,
+    )
+
+    expect(service.write).toHaveBeenCalledWith("session-1", 1, "idf.py menuconfig\r")
+  })
+
+  it("normalizes line breaks for raw terminal input", async () => {
+    const service = createService()
+    vi.mocked(service.terminalState).mockReturnValue({
+      id: 1,
+      pid: 100,
+      title: "powershell",
+      cwd: "D:\\Workspace",
+      shell: "powershell.exe",
+      exitCode: null,
+    })
+    vi.mocked(service.startRun).mockResolvedValue({ runId: "run-1", sessionId: "session-1" })
+    vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: "done" })
+
+    await tool("write_terminal", service).execute(
+      { id: 1, input: "first\nsecond\n\rthird\r\n", submit: false, timeout: 0, idle: 0 },
+      ctx,
+    )
+
+    expect(service.write).toHaveBeenCalledWith("session-1", 1, "first\rsecond\rthird\r")
   })
 
   it("waits without writing when input is empty", async () => {
@@ -165,7 +222,7 @@ describe("write_terminal", () => {
 
     await expect(
       tool("write_terminal", service).execute({ id: 1, input: "", submit: true, timeout: 0, idle: 0 }, ctx),
-    ).resolves.toMatchObject({ status: "shell integration command finish event not received", snapshot: { screen: "done" } })
+    ).resolves.toMatchObject({ status: "command may still be running or waiting for input", snapshot: { screen: "done" } })
 
     expect(service.write).not.toHaveBeenCalled()
     expect(service.bindCommandFinished).not.toHaveBeenCalled()
@@ -232,7 +289,7 @@ describe("read_terminal", () => {
     })
 
     await expect(tool("read_terminal", service).execute({ id: 1, timeout: 1, idle: 0 }, ctx)).resolves.toEqual({
-      status: "shell integration command finish event not received",
+      status: "shell integration command finish event received",
       snapshot: {
         screen: "done",
       },
@@ -260,7 +317,7 @@ describe("read_terminal", () => {
     })
 
     await expect(tool("read_terminal", service).execute({ id: 1, timeout: 0, idle: 0.001 }, ctx)).resolves.toEqual({
-      status: "shell integration command finish event not received",
+      status: "shell integration command finish event received",
       snapshot: {
         screen: "done",
       },
@@ -288,7 +345,7 @@ describe("read_terminal", () => {
     vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: "done" })
 
     await expect(tool("read_terminal", service).execute({ id: 1, timeout: 0, idle: 0 }, ctx)).resolves.toEqual({
-      status: "shell integration command finish event not received",
+      status: "shell integration command finish event received",
       snapshot: {
         screen: "(Earlier output omitted; full output in log_path.)\ndone",
       },
@@ -299,7 +356,7 @@ describe("read_terminal", () => {
   it("waits for a running shell integration command before reading", async () => {
     const service = createService()
     let commandFinished: ((sessionId: string, terminalId: number) => void) | undefined
-    vi.mocked(service.terminalState).mockReturnValue({
+    vi.mocked(service.terminalState).mockReturnValueOnce({
       id: 1,
       pid: 100,
       title: "powershell",
@@ -307,6 +364,14 @@ describe("read_terminal", () => {
       shell: "powershell.exe",
       shellIntegration: true,
       commandRunning: true,
+      exitCode: null,
+    }).mockReturnValue({
+      id: 1,
+      pid: 100,
+      title: "powershell",
+      cwd: "D:\\Workspace",
+      shell: "powershell.exe",
+      shellIntegration: true,
       exitCode: null,
     })
     vi.mocked(service.bindCommandFinished).mockImplementation((callback) => {

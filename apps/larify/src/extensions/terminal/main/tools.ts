@@ -1,4 +1,8 @@
 import { z } from 'zod'
+import {
+  normalizeTerminalInputLineBreaks,
+  trimTrailingLineBreak
+} from '../../../main/utils/text'
 import type { Toolkit } from '../../../shared/tool'
 import type { TerminalService } from './terminal-service'
 import type { TerminalAgentSnapshot } from '../shared/types'
@@ -71,18 +75,18 @@ const terminalIdSchema = z
 
 const createSchema = z.object({
   cwd: z.string().optional().describe('Working directory')
-})
+}).strict()
 
 const closeSchema = z.object({
   id: terminalIdSchema
-})
+}).strict()
 
 const writeSchema = z.object({
   id: terminalIdSchema,
   input: z
     .string()
     .describe('Raw input passed to node-pty write(). Use JSON unicode escapes for control characters.'),
-  submit: z.boolean().default(true).describe('Append Enter if input has no newline'),
+  submit: z.boolean().default(true).describe('Append \r if input has no newline'),
   timeout: z
     .number()
     .nonnegative()
@@ -93,7 +97,7 @@ const writeSchema = z.object({
     .nonnegative()
     .default(30)
     .describe('Idle seconds before reading, default 30')
-})
+}).strict()
 
 const readSchema = z.object({
   id: terminalIdSchema,
@@ -107,7 +111,7 @@ const readSchema = z.object({
     .nonnegative()
     .default(30)
     .describe('Idle seconds before reading, default 30')
-})
+}).strict()
 
 const terminalResult = (
   snapshot: TerminalAgentSnapshot,
@@ -116,7 +120,7 @@ const terminalResult = (
 ): { status: string; snapshot: TerminalAgentSnapshot; log_path?: string } => {
   const status = commandFinishEventReceived
     ? 'shell integration command finish event received'
-    : 'shell integration command finish event not received'
+    : 'command may still be running or waiting for input'
   if (!log?.path) return { status, snapshot }
   return {
     status,
@@ -137,7 +141,7 @@ export function createTerminalToolkit(service: TerminalService): Toolkit {
         name: 'list_terminals',
         description: 'List all terminals',
         metadata: { icon: 'terminal' },
-        inputSchema: z.object({}),
+        inputSchema: z.object({}).strict(),
         execute: async (_args, ctx) => service.state(ctx.sessionId).terminals
       },
       {
@@ -176,10 +180,9 @@ export function createTerminalToolkit(service: TerminalService): Toolkit {
             if (!state) throw new Error(`Terminal "${id}" not found.`)
             const log = await service.startRun(ctx.sessionId, id)
             if (!log) throw new Error(`Terminal "${id}" not found.`)
-            const data =
-              input && submit && !input.endsWith('\r') && !input.endsWith('\n')
-                ? `${input}\r`
-                : input
+            const data = input
+              ? normalizeTerminalInputLineBreaks(submit ? `${trimTrailingLineBreak(input)}\r` : input)
+              : input
             const shouldWaitForCommand = (Boolean(data) || state.commandRunning) && state.shellIntegration
             const waitPromise = shouldWaitForCommand
               ? waitForCommandFinished(service, ctx.sessionId, id, timeout)
@@ -214,9 +217,10 @@ export function createTerminalToolkit(service: TerminalService): Toolkit {
           const log = await service.flushRunHistory(ctx.sessionId, id)
           const snapshot = await service.agentSnapshot(ctx.sessionId, id)
           if (!snapshot) throw new Error(`Terminal "${id}" not found.`)
+          const latestState = service.terminalState(ctx.sessionId, id)
           return terminalResult(
             snapshot,
-            Boolean(state.shellIntegration && state.commandRunning && completed),
+            Boolean(completed && !latestState?.commandRunning),
             log ?? undefined
           )
         }

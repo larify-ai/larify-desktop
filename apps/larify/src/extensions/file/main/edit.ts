@@ -11,7 +11,7 @@ const inputSchema = z.object({
   old_string: z.string().describe("The exact text to replace"),
   new_string: z.string().describe("The text to replace it with"),
   replace_all: z.boolean().default(false).describe("Replace all occurrences (default false)"),
-})
+}).strict()
 
 export const editFileTool: Tool = {
   name: "edit_file",

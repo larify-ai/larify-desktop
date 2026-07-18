@@ -10,6 +10,8 @@ const newMarker = "__LARIFY_TERMINAL_NEW__"
 const longStartMarker = "__LARIFY_TERMINAL_LONG_START__"
 const longEndMarker = "__LARIFY_TERMINAL_LONG_END__"
 const menuMarker = "__LARIFY_TERMINAL_MENU__"
+const newlineMarker = "__LARIFY_TERMINAL_NEWLINE_SUBMIT__"
+const rawNewlineMarker = "__LARIFY_TERMINAL_RAW_NEWLINE__"
 
 function markerCommand(shell: string): string {
   if (process.platform === "win32" || shell.toLowerCase().endsWith("powershell.exe")) {
@@ -160,6 +162,70 @@ describe("TerminalService live", () => {
     }
   }, 20_000)
 
+  it("terminal tools submit commands with trailing newlines", async () => {
+    if (!process.env.LIVE_TERMINAL || process.platform !== "win32") return
+    const service = new TerminalService()
+    const toolkit = createTerminalToolkit(service)
+    const ctx = { sessionId: "terminal-newline-submit-live" }
+    const tool = (name: string) => {
+      const found = toolkit.tools.find((candidate) => candidate.name === name)
+      if (!found) throw new Error(`Tool ${name} not found`)
+      return found
+    }
+
+    try {
+      const terminal = await tool("create_terminal").execute({}, ctx) as { id: number }
+      const result = await tool("write_terminal").execute(
+        {
+          id: terminal.id,
+          input: `Write-Output "${newlineMarker}"\n`,
+          submit: true,
+          timeout: 10,
+          idle: 1,
+        },
+        ctx,
+      ) as { status: string; snapshot: { screen: string } }
+
+      expect(result.status).toBe("shell integration command finish event received")
+      expect(result.snapshot.screen).toContain(newlineMarker)
+      expect(result.snapshot.screen).not.toContain(">>")
+    } finally {
+      await service.destroy()
+    }
+  }, 20_000)
+
+  it("terminal tools treat raw newlines as terminal enter", async () => {
+    if (!process.env.LIVE_TERMINAL || process.platform !== "win32") return
+    const service = new TerminalService()
+    const toolkit = createTerminalToolkit(service)
+    const ctx = { sessionId: "terminal-raw-newline-live" }
+    const tool = (name: string) => {
+      const found = toolkit.tools.find((candidate) => candidate.name === name)
+      if (!found) throw new Error(`Tool ${name} not found`)
+      return found
+    }
+
+    try {
+      const terminal = await tool("create_terminal").execute({}, ctx) as { id: number }
+      const result = await tool("write_terminal").execute(
+        {
+          id: terminal.id,
+          input: `Write-Output "${rawNewlineMarker}"\n`,
+          submit: false,
+          timeout: 10,
+          idle: 1,
+        },
+        ctx,
+      ) as { status: string; snapshot: { screen: string } }
+
+      expect(result.status).toBe("shell integration command finish event received")
+      expect(result.snapshot.screen).toContain(rawNewlineMarker)
+      expect(result.snapshot.screen).not.toContain(">>")
+    } finally {
+      await service.destroy()
+    }
+  }, 20_000)
+
   it("terminal tools write long output to a log path without repeating logged history", async () => {
     if (!process.env.LIVE_TERMINAL || process.platform !== "win32") return
     const service = new TerminalService()
@@ -188,6 +254,7 @@ describe("TerminalService live", () => {
       expect(result.snapshot.screen).toContain("Earlier output omitted")
       expect(result.snapshot.screen).toContain(longEndMarker)
       expect(result.snapshot.screen).not.toContain(longStartMarker)
+      expect(result.snapshot.screen.split("\n").length).toBeLessThan(350)
 
       const read = await tool("read_terminal").execute(
         { id: terminal.id, timeout: 0, idle: 0 },
@@ -196,6 +263,7 @@ describe("TerminalService live", () => {
 
       expect(read.snapshot.screen).not.toContain(longStartMarker)
       expect(read.snapshot.screen).toContain(longEndMarker)
+      expect(read.snapshot.screen.split("\n").length).toBeLessThan(350)
     } finally {
       await service.destroy()
     }
@@ -225,7 +293,7 @@ describe("TerminalService live", () => {
         ctx,
       ) as { status: string; snapshot: { screen: string } }
 
-      expect(result.status).toBe("shell integration command finish event not received")
+      expect(result.status).toBe("command may still be running or waiting for input")
       expect(result.snapshot.screen).toContain(menuMarker)
       expect(result.snapshot.screen).toContain("[1] First")
       expect(result.snapshot.screen).toContain("[Q] Quit")

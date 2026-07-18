@@ -12,7 +12,7 @@ const inputSchema = z.object({
     .describe("The directory to search in. If omitted, the session working directory is used."),
   limit: z.number().int().positive().default(100).describe("Maximum number of file paths to return"),
   offset: z.number().int().nonnegative().default(0).describe("Skip the first N matching file paths"),
-})
+}).strict()
 
 export const globFilesTool: Tool = {
   name: "glob",

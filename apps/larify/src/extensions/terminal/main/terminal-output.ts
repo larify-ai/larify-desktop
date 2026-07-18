@@ -6,6 +6,10 @@ const RED_COLORS = new Set([1, 9])
 const GREEN_COLORS = new Set([2, 10])
 const YELLOW_COLORS = new Set([3, 11])
 
+interface AgentSnapshotOptions {
+  startRow?: number
+}
+
 export function readRenderedLinesRange(
   terminal: HeadlessTerminal,
   startRow: number,
@@ -14,13 +18,17 @@ export function readRenderedLinesRange(
   return readRenderedLines(terminal, startRow, endRow).join('\n')
 }
 
-export function readAgentSnapshot(terminal: HeadlessTerminal): TerminalAgentSnapshot {
+export function readAgentSnapshot(
+  terminal: HeadlessTerminal,
+  opts: AgentSnapshotOptions = {}
+): TerminalAgentSnapshot {
   const buffer = terminal.buffer.active
   const isFullscreen = buffer.type === 'alternate'
+  const endRow = isFullscreen ? buffer.viewportY + terminal.rows - 1 : buffer.baseY + terminal.rows - 1
+  const defaultStartRow = Math.max(0, buffer.baseY + terminal.rows - NORMAL_SCREEN_TAIL_LINES)
   const startRow = isFullscreen
     ? buffer.viewportY
-    : Math.max(0, buffer.baseY + terminal.rows - NORMAL_SCREEN_TAIL_LINES)
-  const endRow = isFullscreen ? buffer.viewportY + terminal.rows - 1 : buffer.baseY + terminal.rows - 1
+    : Math.max(0, Math.min(opts.startRow ?? defaultStartRow, endRow))
   const lines = readRenderedLinesWithAttrs(terminal, startRow, endRow)
   const visualHints = isFullscreen
     ? lines.filter((line) => line.text && line.attrs.length > 0).map(({ text, attrs }) => ({ text, attrs }))

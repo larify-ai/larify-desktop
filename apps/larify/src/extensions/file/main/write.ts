@@ -10,7 +10,7 @@ import { fileStateFor, withFileLock } from "./state"
 const inputSchema = z.object({
   file_path: z.string().describe("Absolute path to the file"),
   content: z.string().describe("The content to write to the file"),
-})
+}).strict()
 
 export const writeFileTool: Tool = {
   name: "write_file",

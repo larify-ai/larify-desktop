@@ -86,7 +86,7 @@ export function buildMetaTools(
       inputSchema: z.object({
         title: z.string().min(1).describe("Short user-facing phrase describing the step"),
         group: z.string().describe("The group name"),
-      }),
+      }).strict(),
       execute: async ({ group }) => {
         const tools = registry.listTools(group)
         if (!tools) throw new ToolInputError(`Group "${group}" not found`)
@@ -98,7 +98,7 @@ export function buildMetaTools(
       inputSchema: z.object({
         title: z.string().min(1).describe("Short user-facing phrase describing the step"),
         tool_names: z.array(z.string()).min(1).describe("The tool names"),
-      }),
+      }).strict(),
       execute: async ({ tool_names }) => {
         const definitions = tool_names.map((name) => {
           const found = registry.get(name)
@@ -118,7 +118,7 @@ export function buildMetaTools(
         title: z.string().min(1).describe("Short user-facing phrase describing the step"),
         tool_name: z.string().describe("The tool name"),
         tool_args: z.unknown().describe("Arguments matching the tool's schema"),
-      }),
+      }).strict(),
       execute: async function* ({ tool_name, tool_args }, { toolCallId }) {
         yield* invokeTool(registry, ctx, tool_name, tool_args, writer, toolCallId)
       },

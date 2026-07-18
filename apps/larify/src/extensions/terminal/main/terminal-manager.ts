@@ -12,7 +12,7 @@ import type {
   TerminalSnapshot
 } from '../shared/types'
 
-const HISTORY_SAFETY_MARGIN = 2000
+const HISTORY_SAFETY_MARGIN = 200
 
 interface ActiveRun {
   log: TerminalRunLog
@@ -135,7 +135,8 @@ export class TerminalManager {
     const terminal = this.terminals.get(id)
     if (!terminal) return null
     await this.flushRunHistory(id)
-    return terminal.agentSnapshot()
+    const run = this.activeRuns.get(id)
+    return terminal.agentSnapshot(run ? { startRow: run.flushedUntilRow + 1 } : undefined)
   }
 
   async flushRunHistory(id: number): Promise<TerminalRunLog | null> {

@@ -52,8 +52,11 @@ class FakeTerminal {
     return `snapshot:${this.id}`
   }
 
-  agentSnapshot(): { screen: string } {
-    return { screen: [...this.rendered.values()].join("\n") }
+  agentSnapshot(opts: { startRow?: number } = {}): { screen: string } {
+    const startRow = opts.startRow ?? 0
+    const lines: string[] = []
+    for (let row = startRow; row <= this.endRow; row++) lines.push(this.rendered.get(row) ?? "")
+    return { screen: lines.join("\n") }
   }
 
   currentRenderedRow(): number {
@@ -314,7 +317,7 @@ describe("TerminalManager", () => {
 
     expect(log?.path).toBeUndefined()
 
-    terminals[0].setRendered(["old", "kept", "tail"], 2001)
+    terminals[0].setRendered(["old", "kept", "tail"], 201)
     await manager.flushRunHistory(id)
 
     expect(log?.path).toContain("sessions")
@@ -337,6 +340,20 @@ describe("TerminalManager", () => {
     terminals[0].setRendered(["old prompt", "new line 1", "new line 2", "new line 3"])
     await expect(manager.agentSnapshot(id)).resolves.toEqual({
       screen: "old prompt\nnew line 1\nnew line 2\nnew line 3",
+    })
+  })
+
+  it("does not include flushed active run history in agent snapshots", async () => {
+    const { TerminalManager } = await importManager()
+    const manager = new TerminalManager("session-1")
+    const id = manager.create()
+    terminals[0].setRendered(["prompt"])
+
+    await manager.startRun(id)
+    terminals[0].setRendered(["old", "kept", "tail"], 201)
+
+    await expect(manager.agentSnapshot(id)).resolves.toEqual({
+      screen: "tail",
     })
   })
 

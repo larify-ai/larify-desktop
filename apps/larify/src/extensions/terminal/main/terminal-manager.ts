@@ -17,7 +17,6 @@ const HISTORY_SAFETY_MARGIN = 2000
 interface ActiveRun {
   log: TerminalRunLog
   flushedUntilRow: number
-  returnedUntilRow: number
 }
 
 export class TerminalManager {
@@ -102,8 +101,7 @@ export class TerminalManager {
     const log = createTerminalRunLog(this.sessionId)
     this.activeRuns.set(id, {
       log,
-      flushedUntilRow: currentRenderedRow - 1,
-      returnedUntilRow: currentRenderedRow
+      flushedUntilRow: currentRenderedRow - 1
     })
     return log
   }
@@ -136,14 +134,8 @@ export class TerminalManager {
   async agentSnapshot(id: number): Promise<TerminalAgentSnapshot | null> {
     const terminal = this.terminals.get(id)
     if (!terminal) return null
-    const activeRun = this.activeRuns.get(id)
-    if (!activeRun) return terminal.agentSnapshot()
     await this.flushRunHistory(id)
-    activeRun.returnedUntilRow = Math.max(activeRun.returnedUntilRow, activeRun.flushedUntilRow)
-    const output = await terminal.agentOutputSince(activeRun.returnedUntilRow + 1)
-    activeRun.returnedUntilRow = output.endRow
-    const { endRow: _endRow, ...snapshot } = output
-    return snapshot
+    return terminal.agentSnapshot()
   }
 
   async flushRunHistory(id: number): Promise<TerminalRunLog | null> {

@@ -34,6 +34,24 @@ describe("read", () => {
     expect(await run({ file_path: filePath, offset: 8 })).toBe("(Lines 1-7 omitted.)\nline8\nline9\nline10")
   })
 
+  it("reads upward from an offset", async () => {
+    expect(await run({ file_path: filePath, offset: 8, limit: 3, scroll: "up" })).toBe(
+      "(Lines 1-5 omitted.)\nline6\nline7\nline8\n(Lines 9-10 omitted.)",
+    )
+  })
+
+  it("reads upward from the end when offset is omitted", async () => {
+    expect(await run({ file_path: filePath, limit: 3, scroll: "up" })).toBe(
+      "(Lines 1-7 omitted.)\nline8\nline9\nline10",
+    )
+  })
+
+  it("clamps upward reads beyond the end of the file", async () => {
+    expect(await run({ file_path: filePath, offset: 100, limit: 3, scroll: "up" })).toBe(
+      "(Lines 1-7 omitted.)\nline8\nline9\nline10",
+    )
+  })
+
   it("records the file's mtime in the session state", async () => {
     await run({ file_path: filePath })
     expect(fileStateFor("test").has(filePath)).toBe(true)

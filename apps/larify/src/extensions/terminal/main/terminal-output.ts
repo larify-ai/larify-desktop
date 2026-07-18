@@ -1,7 +1,7 @@
 import type { Terminal as HeadlessTerminal } from '@xterm/headless'
 import type { TerminalAgentSnapshot } from '../shared/types'
 
-const NORMAL_SCREEN_TAIL_LINES = 2000
+const NORMAL_SCREEN_TAIL_LINES = 500
 
 export function readRenderedLinesRange(
   terminal: HeadlessTerminal,
@@ -22,26 +22,6 @@ export function readAgentSnapshot(terminal: HeadlessTerminal): TerminalAgentSnap
   return {
     screen: readRenderedLines(terminal, startRow, endRow).join('\n'),
     ...(isFullscreen && { isFullscreen })
-  }
-}
-
-export function readAgentOutputSince(
-  terminal: HeadlessTerminal,
-  startRow: number
-): TerminalAgentSnapshot & { endRow: number } {
-  const buffer = terminal.buffer.active
-  if (buffer.type === 'alternate') {
-    const snapshot = readAgentSnapshot(terminal)
-    return {
-      ...snapshot,
-      endRow: buffer.viewportY + terminal.rows - 1
-    }
-  }
-
-  const endRow = buffer.baseY + terminal.rows - 1
-  return {
-    screen: readRenderedLines(terminal, startRow, endRow).join('\n'),
-    endRow
   }
 }
 

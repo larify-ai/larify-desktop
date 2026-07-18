@@ -9,6 +9,7 @@ const oldMarker = "__LARIFY_TERMINAL_OLD__"
 const newMarker = "__LARIFY_TERMINAL_NEW__"
 const longStartMarker = "__LARIFY_TERMINAL_LONG_START__"
 const longEndMarker = "__LARIFY_TERMINAL_LONG_END__"
+const menuMarker = "__LARIFY_TERMINAL_MENU__"
 
 function markerCommand(shell: string): string {
   if (process.platform === "win32" || shell.toLowerCase().endsWith("powershell.exe")) {
@@ -123,7 +124,7 @@ describe("TerminalService live", () => {
     await service.destroy()
   }, 15_000)
 
-  it("terminal tools return only new output for an active run", async () => {
+  it("terminal tools return recent terminal output for an active run", async () => {
     if (!process.env.LIVE_TERMINAL || process.platform !== "win32") return
     const service = new TerminalService()
     const toolkit = createTerminalToolkit(service)
@@ -147,15 +148,13 @@ describe("TerminalService live", () => {
       ) as { snapshot: { screen: string } }
 
       expect(second.snapshot.screen).toContain(newMarker)
-      expect(second.snapshot.screen).not.toContain(oldMarker)
 
       const read = await tool("read_terminal").execute(
         { id: terminal.id, timeout: 0, idle: 0 },
         ctx,
       ) as { snapshot: { screen: string } }
 
-      expect(read.snapshot.screen).not.toContain(oldMarker)
-      expect(read.snapshot.screen).not.toContain(newMarker)
+      expect(read.snapshot.screen).toContain(newMarker)
     } finally {
       await service.destroy()
     }
@@ -196,7 +195,45 @@ describe("TerminalService live", () => {
       ) as { snapshot: { screen: string }; log_path?: string }
 
       expect(read.snapshot.screen).not.toContain(longStartMarker)
-      expect(read.snapshot.screen).not.toContain(longEndMarker)
+      expect(read.snapshot.screen).toContain(longEndMarker)
+    } finally {
+      await service.destroy()
+    }
+  }, 40_000)
+
+  it("terminal tools read the current screen after clear-screen interactive prompts", async () => {
+    if (!process.env.LIVE_TERMINAL || process.platform !== "win32") return
+    const service = new TerminalService()
+    const toolkit = createTerminalToolkit(service)
+    const ctx = { sessionId: "terminal-clear-screen-live" }
+    const tool = (name: string) => {
+      const found = toolkit.tools.find((candidate) => candidate.name === name)
+      if (!found) throw new Error(`Tool ${name} not found`)
+      return found
+    }
+
+    try {
+      const terminal = await tool("create_terminal").execute({}, ctx) as { id: number }
+      const result = await tool("write_terminal").execute(
+        {
+          id: terminal.id,
+          input: `cls; Write-Host "${menuMarker}"; Write-Host "[1] First"; Write-Host "[Q] Quit"; Read-Host "Choice"`,
+          submit: true,
+          timeout: 3,
+          idle: 1,
+        },
+        ctx,
+      ) as { completed: boolean; snapshot: { screen: string } }
+
+      expect(result.completed).toBe(false)
+      expect(result.snapshot.screen).toContain(menuMarker)
+      expect(result.snapshot.screen).toContain("[1] First")
+      expect(result.snapshot.screen).toContain("[Q] Quit")
+
+      await tool("write_terminal").execute(
+        { id: terminal.id, input: "\u0003", submit: false, timeout: 5, idle: 1 },
+        ctx,
+      )
     } finally {
       await service.destroy()
     }

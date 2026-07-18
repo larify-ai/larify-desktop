@@ -37,6 +37,7 @@ describe("terminal schemas", () => {
     expect(parseToolInput("create_terminal", { cwd: "D:\\Workspace", shell: "cmd.exe" }).success).toBe(false)
     expect(parseToolInput("close_terminal", { id: 1, shell: "cmd.exe" }).success).toBe(false)
     expect(parseToolInput("write_terminal", { id: 1, input: "echo hi", shell: "cmd.exe" }).success).toBe(false)
+    expect(parseToolInput("write_terminal", { id: 1, input: "\u001b[B", shell: "cmd.exe" }).success).toBe(false)
     expect(parseToolInput("read_terminal", { id: 1, shell: "cmd.exe" }).success).toBe(false)
   })
 })
@@ -199,11 +200,78 @@ describe("write_terminal", () => {
     vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: "done" })
 
     await tool("write_terminal", service).execute(
-      { id: 1, input: "first\nsecond\n\rthird\r\n", submit: false, timeout: 0, idle: 0 },
+      { id: 1, input: "first\nsecond\n\rthird\r\n", timeout: 0, idle: 0 },
       ctx,
     )
 
     expect(service.write).toHaveBeenCalledWith("session-1", 1, "first\rsecond\rthird\r")
+  })
+
+  it("does not append enter for raw TUI input", async () => {
+    const service = createService()
+    vi.mocked(service.terminalState).mockReturnValue({
+      id: 1,
+      pid: 100,
+      title: "powershell",
+      cwd: "D:\\Workspace",
+      shell: "powershell.exe",
+      exitCode: null,
+    })
+    vi.mocked(service.startRun).mockResolvedValue({ runId: "run-1", sessionId: "session-1" })
+    vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: "done" })
+
+    await tool("write_terminal", service).execute(
+      { id: 1, input: "\u001b[B", timeout: 0, idle: 0 },
+      ctx,
+    )
+
+    expect(service.write).toHaveBeenCalledWith("session-1", 1, "\u001b[B")
+  })
+
+  it("uses idle wait for raw TUI input even with shell integration", async () => {
+    const service = createService()
+    vi.mocked(service.terminalState).mockReturnValue({
+      id: 1,
+      pid: 100,
+      title: "powershell",
+      cwd: "D:\\Workspace",
+      shell: "powershell.exe",
+      shellIntegration: true,
+      exitCode: null,
+    })
+    vi.mocked(service.startRun).mockResolvedValue({ runId: "run-1", sessionId: "session-1" })
+    vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: "menu" })
+
+    await tool("write_terminal", service).execute(
+      { id: 1, input: "\u001b[B", timeout: 0, idle: 0 },
+      ctx,
+    )
+
+    expect(service.write).toHaveBeenCalledWith("session-1", 1, "\u001b[B")
+    expect(service.bindCommandFinished).not.toHaveBeenCalled()
+  })
+
+  it("only waits for shell command completion when input ends with enter", async () => {
+    const service = createService()
+    vi.mocked(service.terminalState).mockReturnValue({
+      id: 1,
+      pid: 100,
+      title: "powershell",
+      cwd: "D:\\Workspace",
+      shell: "powershell.exe",
+      shellIntegration: true,
+      exitCode: null,
+    })
+    vi.mocked(service.startRun).mockResolvedValue({ runId: "run-1", sessionId: "session-1" })
+    vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: "done" })
+
+    await tool("write_terminal", service).execute(
+      { id: 1, input: "first\nsecond", timeout: 0, idle: 0 },
+      ctx,
+    )
+
+    expect(service.write).toHaveBeenCalledWith("session-1", 1, "first\rsecond")
+    expect(service.bindCommandFinished).not.toHaveBeenCalled()
   })
 
   it("waits without writing when input is empty", async () => {
@@ -221,7 +289,7 @@ describe("write_terminal", () => {
     vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: "done" })
 
     await expect(
-      tool("write_terminal", service).execute({ id: 1, input: "", submit: true, timeout: 0, idle: 0 }, ctx),
+      tool("write_terminal", service).execute({ id: 1, input: "", timeout: 0, idle: 0 }, ctx),
     ).resolves.toMatchObject({ status: "command may still be running or waiting for input", snapshot: { screen: "done" } })
 
     expect(service.write).not.toHaveBeenCalled()
@@ -251,7 +319,7 @@ describe("write_terminal", () => {
     vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: "done" })
 
     await expect(
-      tool("write_terminal", service).execute({ id: 1, input: "echo done", submit: true, timeout: 30, idle: 0 }, ctx),
+      tool("write_terminal", service).execute({ id: 1, input: "echo done", submit: true, timeout: 30 }, ctx),
     ).resolves.toMatchObject({ status: "shell integration command finish event received", snapshot: { screen: "done" } })
 
     expect(service.bindCommandFinished).toHaveBeenCalled()

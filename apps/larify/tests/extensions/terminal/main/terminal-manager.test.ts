@@ -52,8 +52,8 @@ class FakeTerminal {
     return `snapshot:${this.id}`
   }
 
-  agentSnapshot(opts: { startRow?: number } = {}): { screen: string } {
-    const startRow = opts.startRow ?? 0
+  agentSnapshot(): { screen: string } {
+    const startRow = 0
     const lines: string[] = []
     for (let row = startRow; row <= this.endRow; row++) lines.push(this.rendered.get(row) ?? "")
     return { screen: lines.join("\n") }
@@ -63,11 +63,8 @@ class FakeTerminal {
     return this.cursorRow
   }
 
-  flushRenderedRowsBeforeTail(
-    flushedUntilRow: number,
-    tailLines: number
-  ): { text: string; flushedUntilRow: number } | null {
-    const safeEnd = Math.min(this.baseY - tailLines, this.endRow)
+  flushRenderedRowsBeforeSnapshot(flushedUntilRow: number): { text: string; flushedUntilRow: number } | null {
+    const safeEnd = this.baseY - 1
     const startRow = flushedUntilRow + 1
     if (safeEnd < startRow) return null
     const lines: string[] = []
@@ -343,7 +340,7 @@ describe("TerminalManager", () => {
     })
   })
 
-  it("does not include flushed active run history in agent snapshots", async () => {
+  it("returns the current screen even after flushing active run history", async () => {
     const { TerminalManager } = await importManager()
     const manager = new TerminalManager("session-1")
     const id = manager.create()
@@ -353,7 +350,7 @@ describe("TerminalManager", () => {
     terminals[0].setRendered(["old", "kept", "tail"], 201)
 
     await expect(manager.agentSnapshot(id)).resolves.toEqual({
-      screen: "tail",
+      screen: "old\nkept\ntail",
     })
   })
 
@@ -372,7 +369,7 @@ describe("TerminalManager", () => {
     await expect(readFile(log!.path, "utf8")).resolves.toContain("old\nkept")
   })
 
-  it("auto-checks active run output and only writes history past the tail window", async () => {
+  it("auto-checks active run output and writes history before the current screen", async () => {
     const { readFile } = await import("node:fs/promises")
     const { TerminalManager } = await importManager()
     const manager = new TerminalManager("session-1")

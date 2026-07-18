@@ -18,7 +18,7 @@ export const writeFileTool: Tool = {
   metadata: { icon: "edit" },
   inputSchema,
   execute: async (args, ctx) => {
-    const { file_path, content } = args as z.infer<typeof inputSchema>
+    const { file_path, content } = inputSchema.parse(args)
 
     return withFileLock(file_path, async () => {
       const fileState = fileStateFor(ctx.sessionId)

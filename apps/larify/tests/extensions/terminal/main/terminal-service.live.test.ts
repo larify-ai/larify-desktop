@@ -140,12 +140,12 @@ describe("TerminalService live", () => {
     try {
       const terminal = await tool("create_terminal").execute({}, ctx) as { id: number }
       await tool("write_terminal").execute(
-        { id: terminal.id, input: `Write-Output "${oldMarker}"`, submit: true, timeout: 10, idle: 1 },
+        { id: terminal.id, input: `Write-Output "${oldMarker}"`, submit: true, timeout: 10 },
         ctx,
       )
 
       const second = await tool("write_terminal").execute(
-        { id: terminal.id, input: `Write-Output "${newMarker}"`, submit: true, timeout: 10, idle: 1 },
+        { id: terminal.id, input: `Write-Output "${newMarker}"`, submit: true, timeout: 10 },
         ctx,
       ) as { snapshot: { screen: string } }
 
@@ -181,7 +181,6 @@ describe("TerminalService live", () => {
           input: `Write-Output "${newlineMarker}"\n`,
           submit: true,
           timeout: 10,
-          idle: 1,
         },
         ctx,
       ) as { status: string; snapshot: { screen: string } }
@@ -211,7 +210,6 @@ describe("TerminalService live", () => {
         {
           id: terminal.id,
           input: `Write-Output "${rawNewlineMarker}"\n`,
-          submit: false,
           timeout: 10,
           idle: 1,
         },
@@ -245,7 +243,6 @@ describe("TerminalService live", () => {
           input: `Write-Output "${longStartMarker}"; 1..2300 | ForEach-Object { "LONG_OUTPUT_LINE_$_" }; Write-Output "${longEndMarker}"`,
           submit: true,
           timeout: 30,
-          idle: 1,
         },
         ctx,
       ) as { snapshot: { screen: string }; log_path?: string }
@@ -288,7 +285,6 @@ describe("TerminalService live", () => {
           input: `cls; Write-Host "${menuMarker}"; Write-Host "[1] First"; Write-Host "[Q] Quit"; Read-Host "Choice"`,
           submit: true,
           timeout: 3,
-          idle: 1,
         },
         ctx,
       ) as { status: string; snapshot: { screen: string } }
@@ -299,7 +295,7 @@ describe("TerminalService live", () => {
       expect(result.snapshot.screen).toContain("[Q] Quit")
 
       await tool("write_terminal").execute(
-        { id: terminal.id, input: "\u0003", submit: false, timeout: 5, idle: 1 },
+        { id: terminal.id, input: "\u0003", timeout: 5, idle: 1 },
         ctx,
       )
     } finally {

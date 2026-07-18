@@ -19,7 +19,7 @@ export const editFileTool: Tool = {
   metadata: { icon: "edit" },
   inputSchema,
   execute: async (args, ctx) => {
-    const { file_path, old_string, new_string, replace_all } = args as z.infer<typeof inputSchema>
+    const { file_path, old_string, new_string, replace_all } = inputSchema.parse(args)
 
     if (old_string === new_string) {
       throw new Error("old_string and new_string are identical.")

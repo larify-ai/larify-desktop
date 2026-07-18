@@ -19,7 +19,7 @@ export const readFileTool: Tool = {
   metadata: { icon: "read" },
   inputSchema,
   execute: async (args, ctx) => {
-    const { file_path, offset, limit, scroll } = args as z.infer<typeof inputSchema>
+    const { file_path, offset, limit, scroll } = inputSchema.parse(args)
 
     const stats = await stat(file_path)
     const buffer = await readFile(file_path)

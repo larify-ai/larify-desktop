@@ -16,25 +16,23 @@ describe("terminal output", () => {
     })
   })
 
-  it("omits visual hints for regular terminal output", async () => {
+  it("omits visual hint fields from agent snapshots", async () => {
     const terminal = new HeadlessTerminal({ cols: 80, rows: 24, allowProposedApi: true })
-    await write(terminal, "\x1b[31;1merror\x1b[0m")
+    await write(terminal, "plain")
 
-    expect(readAgentSnapshot(terminal).visualHints).toBeUndefined()
+    expect(readAgentSnapshot(terminal)).toEqual({
+      screen: "plain",
+      cursorLine: "plain",
+    })
   })
 
-  it("extracts visual hints from fullscreen terminal cells", async () => {
+  it("reads fullscreen terminal text without visual hint metadata", async () => {
     const terminal = new HeadlessTerminal({ cols: 80, rows: 24, allowProposedApi: true })
     await write(terminal, "\x1b[?1049h\x1b[31;1merror\x1b[0m\r\n\x1b[7mselected\x1b[0m")
 
     expect(readAgentSnapshot(terminal)).toMatchObject({
       screen: "error\nselected",
-      isFullscreen: true,
       cursorLine: "selected",
-      visualHints: [
-        { text: "error", attrs: ["red", "bold"] },
-        { text: "selected", attrs: ["inverse"] },
-      ],
     })
   })
 })

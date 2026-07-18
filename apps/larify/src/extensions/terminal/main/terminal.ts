@@ -120,9 +120,9 @@ export class Terminal {
     }
   }
 
-  async agentSnapshot(opts: { startRow?: number } = {}): Promise<TerminalAgentSnapshot> {
+  async agentSnapshot(): Promise<TerminalAgentSnapshot> {
     await this.flushHeadlessWrites()
-    return readAgentSnapshot(this.headless, opts)
+    return readAgentSnapshot(this.headless)
   }
 
   async currentRenderedRow(): Promise<number> {
@@ -131,14 +131,11 @@ export class Terminal {
     return buffer.baseY + buffer.cursorY
   }
 
-  async flushRenderedRowsBeforeTail(
-    flushedUntilRow: number,
-    tailLines: number
-  ): Promise<RenderedHistoryFlush | null> {
+  async flushRenderedRowsBeforeSnapshot(flushedUntilRow: number): Promise<RenderedHistoryFlush | null> {
     await this.flushHeadlessWrites()
     const buffer = this.headless.buffer.active
     if (buffer.type === 'alternate') return null
-    const safeEnd = Math.min(buffer.baseY - tailLines, buffer.baseY + this.rows - 1)
+    const safeEnd = buffer.viewportY - 1
     const startRow = flushedUntilRow + 1
     if (safeEnd < startRow) return null
     return {

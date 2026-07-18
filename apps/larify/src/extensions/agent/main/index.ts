@@ -7,6 +7,7 @@ import { createToolRegistry } from "./registry"
 import { buildMetaTools } from "./meta-tools"
 import { buildSystemPrompt } from "./system-prompt"
 import { createSessionStore } from "./session-store"
+import { sanitizeAndValidateMessages } from "./message-sanitizer"
 
 const metaToolDisplays = {
   list_tools: { title: "搜索工具", icon: "search" },
@@ -52,11 +53,11 @@ const extension: Extension = {
     })
 
     ipcMain.handle("agent:session-load", (_event, sessionId: string) => {
-      return sessions.loadSession(sessionId)
+      return sessions.loadSession(sessionId).then(sanitizeAndValidateMessages)
     })
 
-    ipcMain.handle("agent:session-save", (_event, sessionId: string, messages: UIMessage[]) => {
-      return sessions.saveSession(sessionId, messages)
+    ipcMain.handle("agent:session-save", async (_event, sessionId: string, messages: UIMessage[]) => {
+      return sessions.saveSession(sessionId, await sanitizeAndValidateMessages(messages))
     })
 
     ipcMain.handle("agent:session-list", () => {
@@ -68,7 +69,8 @@ const extension: Extension = {
       controllers.set(runId, controller)
       try {
         const registry = createToolRegistry(app.getAll<Toolkit>("tool"))
-        const modelMessages = await convertToModelMessages(prepareMessagesForModel(messages))
+        const validMessages = await sanitizeAndValidateMessages(messages)
+        const modelMessages = await convertToModelMessages(prepareMessagesForModel(validMessages))
         const reader = runAgent({
           messages: modelMessages,
           buildTools: (writer) => buildMetaTools(registry, { sessionId }, writer),

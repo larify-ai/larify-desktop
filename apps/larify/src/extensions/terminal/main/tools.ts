@@ -14,6 +14,7 @@ function waitForIdle(
   idleSeconds: number,
   timeoutSeconds: number
 ): Promise<boolean> {
+  if (timeoutSeconds <= 0 && idleSeconds <= 0) return Promise.resolve(false)
   return new Promise((resolve) => {
     let settled = false
     let idleTimer: NodeJS.Timeout | null = null
@@ -86,7 +87,10 @@ const writeSchema = z.object({
   input: z
     .string()
     .describe('Raw input passed to node-pty write(). Use JSON unicode escapes for control characters.'),
-  submit: z.boolean().default(true).describe('Append \r if input has no newline'),
+  submit: z
+    .boolean()
+    .default(false)
+    .describe('Append \\r if input has no newline'),
   timeout: z
     .number()
     .nonnegative()
@@ -150,7 +154,7 @@ export function createTerminalToolkit(service: TerminalService): Toolkit {
         metadata: { icon: 'terminal' },
         inputSchema: createSchema,
         execute: async (args, ctx) => {
-          const terminalId = service.create(ctx.sessionId, args as z.infer<typeof createSchema>)
+          const terminalId = service.create(ctx.sessionId, createSchema.parse(args))
           return service.terminalState(ctx.sessionId, terminalId)
         }
       },
@@ -160,7 +164,7 @@ export function createTerminalToolkit(service: TerminalService): Toolkit {
         metadata: { icon: 'terminal' },
         inputSchema: closeSchema,
         execute: async (args, ctx) => {
-          const { id } = args as z.infer<typeof closeSchema>
+          const { id } = closeSchema.parse(args)
           if (!service.terminalState(ctx.sessionId, id)) {
             throw new Error(`Terminal "${id}" not found.`)
           }
@@ -170,11 +174,11 @@ export function createTerminalToolkit(service: TerminalService): Toolkit {
       },
       {
         name: 'write_terminal',
-        description: 'Write text or control sequences to a terminal, including interactive TUI input',
+        description: 'Write raw node-pty input to a terminal',
         metadata: { icon: 'terminal' },
         inputSchema: writeSchema,
         execute: async (args, ctx) => {
-          const { id, input, submit, timeout, idle } = args as z.infer<typeof writeSchema>
+          const { id, input, submit, timeout, idle } = writeSchema.parse(args)
           return service.withWriterLock(ctx.sessionId, id, async () => {
             const state = service.terminalState(ctx.sessionId, id)
             if (!state) throw new Error(`Terminal "${id}" not found.`)
@@ -183,12 +187,15 @@ export function createTerminalToolkit(service: TerminalService): Toolkit {
             const data = input
               ? normalizeTerminalInputLineBreaks(submit ? `${trimTrailingLineBreak(input)}\r` : input)
               : input
-            const shouldWaitForCommand = (Boolean(data) || state.commandRunning) && state.shellIntegration
+            const submittedInput = Boolean(data?.endsWith('\r'))
+            const shouldWaitForCommand =
+              (submittedInput || state.commandRunning) && state.shellIntegration
             const waitPromise = shouldWaitForCommand
               ? waitForCommandFinished(service, ctx.sessionId, id, timeout)
               : waitForIdle(service, ctx.sessionId, id, idle, timeout)
             if (data) service.write(ctx.sessionId, id, data)
-            const completed = shouldWaitForCommand ? await waitPromise : !data
+            const waitCompleted = await waitPromise
+            const completed = shouldWaitForCommand ? waitCompleted : false
             await service.flushRunHistory(ctx.sessionId, id)
             const snapshot = await service.agentSnapshot(ctx.sessionId, id)
             if (!snapshot) throw new Error(`Terminal "${id}" not found.`)
@@ -202,7 +209,7 @@ export function createTerminalToolkit(service: TerminalService): Toolkit {
         metadata: { icon: 'terminal' },
         inputSchema: readSchema,
         execute: async (args, ctx) => {
-          const { id, timeout, idle } = args as z.infer<typeof readSchema>
+          const { id, timeout, idle } = readSchema.parse(args)
           const state = service.terminalState(ctx.sessionId, id)
           if (!state) {
             throw new Error(`Terminal "${id}" not found.`)

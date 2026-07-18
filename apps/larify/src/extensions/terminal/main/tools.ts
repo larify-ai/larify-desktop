@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import type { Toolkit } from '../../../shared/tool'
 import type { TerminalService } from './terminal-service'
+import type { TerminalAgentSnapshot } from '../shared/types'
 
 function waitForIdle(
   service: TerminalService,
@@ -109,13 +110,16 @@ const readSchema = z.object({
 })
 
 const terminalResult = (
-  snapshot: { screen: string },
-  completed: boolean,
+  snapshot: TerminalAgentSnapshot,
+  commandFinishEventReceived: boolean,
   log?: { path?: string }
-): { completed: boolean; snapshot: { screen: string }; log_path?: string } => {
-  if (!log?.path) return { completed, snapshot }
+): { status: string; snapshot: TerminalAgentSnapshot; log_path?: string } => {
+  const status = commandFinishEventReceived
+    ? 'shell integration command finish event received'
+    : 'shell integration command finish event not received'
+  if (!log?.path) return { status, snapshot }
   return {
-    completed,
+    status,
     snapshot: {
       ...snapshot,
       screen: `(Earlier output omitted; full output in log_path.)\n${snapshot.screen}`
@@ -185,7 +189,7 @@ export function createTerminalToolkit(service: TerminalService): Toolkit {
             await service.flushRunHistory(ctx.sessionId, id)
             const snapshot = await service.agentSnapshot(ctx.sessionId, id)
             if (!snapshot) throw new Error(`Terminal "${id}" not found.`)
-            return terminalResult(snapshot, completed, log)
+            return terminalResult(snapshot, Boolean(shouldWaitForCommand && completed), log)
           })
         }
       },
@@ -210,7 +214,11 @@ export function createTerminalToolkit(service: TerminalService): Toolkit {
           const log = await service.flushRunHistory(ctx.sessionId, id)
           const snapshot = await service.agentSnapshot(ctx.sessionId, id)
           if (!snapshot) throw new Error(`Terminal "${id}" not found.`)
-          return terminalResult(snapshot, completed, log ?? undefined)
+          return terminalResult(
+            snapshot,
+            Boolean(state.shellIntegration && state.commandRunning && completed),
+            log ?? undefined
+          )
         }
       }
     ]

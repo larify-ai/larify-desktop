@@ -223,9 +223,9 @@ describe("TerminalService live", () => {
           idle: 1,
         },
         ctx,
-      ) as { completed: boolean; snapshot: { screen: string } }
+      ) as { status: string; snapshot: { screen: string } }
 
-      expect(result.completed).toBe(false)
+      expect(result.status).toBe("shell integration command finish event not received")
       expect(result.snapshot.screen).toContain(menuMarker)
       expect(result.snapshot.screen).toContain("[1] First")
       expect(result.snapshot.screen).toContain("[Q] Quit")

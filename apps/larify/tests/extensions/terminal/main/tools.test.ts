@@ -76,7 +76,7 @@ describe("write_terminal", () => {
     await expect(
       tool("write_terminal", service).execute({ id: 1, input: "echo done", submit: true, timeout: 0, idle: 0 }, ctx),
     ).resolves.toEqual({
-      completed: false,
+      status: "shell integration command finish event not received",
       snapshot: {
         screen: "done",
       },
@@ -106,7 +106,7 @@ describe("write_terminal", () => {
     await expect(
       tool("write_terminal", service).execute({ id: 1, input: "echo done", submit: true, timeout: 0, idle: 0 }, ctx),
     ).resolves.toMatchObject({
-      completed: false,
+      status: "shell integration command finish event not received",
       snapshot: {
         screen: "(Earlier output omitted; full output in log_path.)\ndone",
       },
@@ -144,7 +144,7 @@ describe("write_terminal", () => {
 
     await expect(
       tool("write_terminal", service).execute({ id: 1, input: "echo done", submit: true, timeout: 0, idle: 0 }, ctx),
-    ).resolves.toMatchObject({ completed: false, snapshot: { screen: "done" } })
+    ).resolves.toMatchObject({ status: "shell integration command finish event not received", snapshot: { screen: "done" } })
 
     expect(order).toEqual(["lock", "start", "write", "unlock"])
   })
@@ -165,7 +165,7 @@ describe("write_terminal", () => {
 
     await expect(
       tool("write_terminal", service).execute({ id: 1, input: "", submit: true, timeout: 0, idle: 0 }, ctx),
-    ).resolves.toMatchObject({ completed: true, snapshot: { screen: "done" } })
+    ).resolves.toMatchObject({ status: "shell integration command finish event not received", snapshot: { screen: "done" } })
 
     expect(service.write).not.toHaveBeenCalled()
     expect(service.bindCommandFinished).not.toHaveBeenCalled()
@@ -195,7 +195,7 @@ describe("write_terminal", () => {
 
     await expect(
       tool("write_terminal", service).execute({ id: 1, input: "echo done", submit: true, timeout: 30, idle: 0 }, ctx),
-    ).resolves.toMatchObject({ completed: true, snapshot: { screen: "done" } })
+    ).resolves.toMatchObject({ status: "shell integration command finish event received", snapshot: { screen: "done" } })
 
     expect(service.bindCommandFinished).toHaveBeenCalled()
   })
@@ -232,7 +232,7 @@ describe("read_terminal", () => {
     })
 
     await expect(tool("read_terminal", service).execute({ id: 1, timeout: 1, idle: 0 }, ctx)).resolves.toEqual({
-      completed: true,
+      status: "shell integration command finish event not received",
       snapshot: {
         screen: "done",
       },
@@ -260,7 +260,7 @@ describe("read_terminal", () => {
     })
 
     await expect(tool("read_terminal", service).execute({ id: 1, timeout: 0, idle: 0.001 }, ctx)).resolves.toEqual({
-      completed: true,
+      status: "shell integration command finish event not received",
       snapshot: {
         screen: "done",
       },
@@ -288,7 +288,7 @@ describe("read_terminal", () => {
     vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: "done" })
 
     await expect(tool("read_terminal", service).execute({ id: 1, timeout: 0, idle: 0 }, ctx)).resolves.toEqual({
-      completed: true,
+      status: "shell integration command finish event not received",
       snapshot: {
         screen: "(Earlier output omitted; full output in log_path.)\ndone",
       },
@@ -323,7 +323,7 @@ describe("read_terminal", () => {
     commandFinished?.("session-1", 1)
 
     await expect(promise).resolves.toEqual({
-      completed: true,
+      status: "shell integration command finish event received",
       snapshot: { screen: "done" },
     })
     expect(service.bindCommandFinished).toHaveBeenCalled()

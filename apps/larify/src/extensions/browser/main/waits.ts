@@ -1,0 +1,116 @@
+import type { CdpSend } from './snapshotCapture'
+
+const DEFAULT_TIMEOUT = 25_000
+const POLL_INTERVAL = 100
+
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+
+export type WaitState = 'visible' | 'attached' | 'detached' | 'hidden'
+
+async function evalBool(send: CdpSend, expression: string): Promise<boolean> {
+  const res = (await send('Runtime.evaluate', {
+    expression,
+    returnByValue: true,
+    awaitPromise: true
+  })) as { result?: { value?: unknown } }
+  return res.result?.value === true
+}
+
+async function poll(
+  check: () => Promise<boolean>,
+  timeoutMs: number,
+  label: string
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    if (await check()) return
+    if (Date.now() >= deadline) throw new Error(`${label} timed out after ${timeoutMs}ms`)
+    await sleep(POLL_INTERVAL)
+  }
+}
+
+function selectorExpr(selector: string, state: WaitState): string {
+  const sel = JSON.stringify(selector)
+  switch (state) {
+    case 'attached':
+      return `!!document.querySelector(${sel})`
+    case 'detached':
+      return `!document.querySelector(${sel})`
+    case 'hidden':
+      return `(() => { const el = document.querySelector(${sel}); if (!el) return true; const s = getComputedStyle(el); return s.display === 'none' || s.visibility === 'hidden' || parseFloat(s.opacity) === 0; })()`
+    default:
+      return `(() => { const el = document.querySelector(${sel}); if (!el) return false; const s = getComputedStyle(el); const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none'; })()`
+  }
+}
+
+export function urlMatches(pattern: string, url: string): boolean {
+  if (pattern === '*') return true
+  if (!pattern.includes('*')) return url.includes(pattern)
+  const parts = pattern.replace(/\*+/g, '*').split('*')
+  let idx = 0
+  for (let i = 0; i < parts.length; i++) {
+    const seg = parts[i]
+    if (seg === '') continue
+    if (i === 0) {
+      if (!url.startsWith(seg)) return false
+      idx = seg.length
+    } else if (i === parts.length - 1) {
+      if (!url.endsWith(seg) || url.length - seg.length < idx) return false
+    } else {
+      const found = url.indexOf(seg, idx)
+      if (found === -1) return false
+      idx = found + seg.length
+    }
+  }
+  return true
+}
+
+export function waitMs(ms: number): Promise<void> {
+  return sleep(ms)
+}
+
+export async function waitForSelector(
+  send: CdpSend,
+  selector: string,
+  state: WaitState = 'visible',
+  timeoutMs: number = DEFAULT_TIMEOUT
+): Promise<void> {
+  const expr = selectorExpr(selector, state)
+  await poll(() => evalBool(send, expr), timeoutMs, `wait_for_selector ${selector} (${state})`)
+}
+
+export async function waitForText(
+  send: CdpSend,
+  text: string,
+  timeoutMs: number = DEFAULT_TIMEOUT
+): Promise<void> {
+  const expr = `((document.body && document.body.innerText) || '').includes(${JSON.stringify(text)})`
+  await poll(() => evalBool(send, expr), timeoutMs, `wait_for_text ${JSON.stringify(text)}`)
+}
+
+export async function waitForFunction(
+  send: CdpSend,
+  expression: string,
+  timeoutMs: number = DEFAULT_TIMEOUT
+): Promise<void> {
+  const expr = `!!(${expression})`
+  await poll(() => evalBool(send, expr), timeoutMs, 'wait_for_function')
+}
+
+export async function waitForUrl(
+  send: CdpSend,
+  pattern: string,
+  timeoutMs: number = DEFAULT_TIMEOUT
+): Promise<void> {
+  await poll(
+    async () => {
+      const res = (await send('Runtime.evaluate', {
+        expression: 'location.href',
+        returnByValue: true
+      })) as { result?: { value?: unknown } }
+      return urlMatches(pattern, String(res.result?.value ?? ''))
+    },
+    timeoutMs,
+    `wait_for_url ${pattern}`
+  )
+}

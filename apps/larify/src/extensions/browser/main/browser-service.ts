@@ -3,6 +3,7 @@ import { addListener, type Listener } from "../../../main/utils/listener"
 import { SessionScopedManagers } from "../../../main/utils/session-scoped-managers"
 import type { BrowserState } from "../shared/types"
 import { BrowserTabManager } from "./tab-manager"
+import type { BrowserTab } from "./tab"
 
 export class BrowserService {
   private readonly managers = new SessionScopedManagers(
@@ -19,6 +20,10 @@ export class BrowserService {
 
   state(sessionId: string): BrowserState {
     return this.manager(sessionId).state()
+  }
+
+  tab(sessionId: string, id: number): BrowserTab | undefined {
+    return this.manager(sessionId).get(id)
   }
 
   createTab(sessionId: string, url?: string): number {
@@ -51,6 +56,18 @@ export class BrowserService {
 
   reload(sessionId: string, id: number): void {
     this.manager(sessionId).reload(id)
+  }
+
+  recordStart(sessionId: string, tab: BrowserTab, path: string): Promise<void> {
+    return this.manager(sessionId).recordStart(tab, path)
+  }
+
+  recordStop(sessionId: string): Promise<{ path: string; data: Buffer }> {
+    return this.manager(sessionId).recordStop()
+  }
+
+  recordRestart(sessionId: string, tab: BrowserTab, path: string): Promise<void> {
+    return this.manager(sessionId).recordRestart(tab, path)
   }
 
   setBounds(sessionId: string, bounds: Rectangle): void {

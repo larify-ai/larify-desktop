@@ -6,7 +6,10 @@ import tailwindcss from '@tailwindcss/vite'
 export default defineConfig({
   main: {
     build: {
-      externalizeDeps: { exclude: ['kernel'] }
+      externalizeDeps: { exclude: ['kernel', 'defuddle'] },
+      rollupOptions: {
+        external: ['canvas']
+      }
     }
   },
   preload: {

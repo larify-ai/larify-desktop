@@ -2,6 +2,7 @@ import type { BrowserWindow } from "electron"
 import type { Extension } from "kernel"
 import { BrowserService } from "./browser-service"
 import { registerBrowserIpc } from "./ipc"
+import { createBrowserToolkit } from "./tools"
 
 interface MainWindowService {
   get(): BrowserWindow
@@ -19,6 +20,7 @@ const extension: Extension = {
     }
 
     const unregisterIpc = registerBrowserIpc(getService)
+    context.subscriptions.push(app.register("tool", "browser", createBrowserToolkit(getService)))
     context.subscriptions.push({
       dispose: () => {
         unregisterIpc()

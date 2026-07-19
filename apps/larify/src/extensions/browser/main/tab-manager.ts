@@ -2,6 +2,7 @@ import { BrowserWindow } from "electron"
 import type { Rectangle } from "electron"
 import type { BrowserState } from "../shared/types"
 import { BrowserTab } from "./tab"
+import { Recorder } from "./recorder"
 
 const PARTITION = "persist:larify-browser"
 const HOST_POSITION = { x: -3000, y: -3000 }
@@ -15,6 +16,7 @@ export class BrowserTabManager {
   private onChange?: (state: BrowserState) => void
   private readonly host: BrowserWindow
   private readonly viewParent = new Map<number, BrowserWindow>()
+  private readonly recorder = new Recorder()
 
   constructor(private readonly window: BrowserWindow) {
     this.host = new BrowserWindow({
@@ -35,6 +37,10 @@ export class BrowserTabManager {
 
   bindChange(cb: (state: BrowserState) => void): void {
     this.onChange = cb
+  }
+
+  get(id: number): BrowserTab | undefined {
+    return this.tabs.get(id)
   }
 
   createTab(url?: string): number {
@@ -107,6 +113,18 @@ export class BrowserTabManager {
     this.tabs.get(id)?.reload()
   }
 
+  recordStart(tab: BrowserTab, path: string): Promise<void> {
+    return this.recorder.start(tab, path)
+  }
+
+  recordStop(): Promise<{ path: string; data: Buffer }> {
+    return this.recorder.stop()
+  }
+
+  recordRestart(tab: BrowserTab, path: string): Promise<void> {
+    return this.recorder.restart(tab, path)
+  }
+
   setBounds(bounds: Rectangle): void {
     this.bounds = bounds
     this.applyLayout()
@@ -132,6 +150,7 @@ export class BrowserTabManager {
     this.tabs.clear()
     this.viewParent.clear()
     this.activeId = null
+    this.recorder.destroy()
     if (!this.host.isDestroyed()) this.host.destroy()
   }
 

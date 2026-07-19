@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { ArrowLeftIcon, ArrowRightIcon, RotateCwIcon } from "lucide-react"
 import { Button } from "@renderer/components/ui/button"
 import { Input } from "@renderer/components/ui/input"
@@ -46,10 +46,17 @@ export function BrowserToolbar({
   onReload,
 }: BrowserToolbarProps): React.JSX.Element {
   const [editing, setEditing] = useState<string | null>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
   const fullUrl = tab ? decodeForDisplay(tab.url) : ""
   const displayUrl = simplifyForDisplay(fullUrl)
   const editUrl = fullUrl.startsWith("file://") ? displayUrl : fullUrl
   const value = editing ?? displayUrl
+
+  useEffect(() => {
+    if (editing === null) return
+    inputRef.current?.focus()
+    inputRef.current?.select()
+  }, [editing])
 
   useEffect(() => {
     setEditing(null)
@@ -67,30 +74,43 @@ export function BrowserToolbar({
         <RotateCwIcon className={cn(tab?.loading && "animate-spin")} />
       </Button>
       <div className="relative min-w-0 flex-1">
-        <Input
-          autoCapitalize="off"
-          autoComplete="off"
-          autoCorrect="off"
-          className="h-8 select-text bg-muted/40 shadow-none focus-visible:ring-0"
-          disabled={!tab}
-          placeholder="输入 URL"
-          spellCheck={false}
-          value={value}
-          onBlur={() => setEditing(null)}
-          onChange={(event) => setEditing(event.target.value)}
-          onFocus={(event) => {
-            setEditing(editUrl)
-            event.currentTarget.select()
-          }}
-          onKeyDown={(event) => {
-            if (event.key !== "Enter") return
-            const next = event.currentTarget.value
-            void onNavigate(next).then((navigated) => {
-              if (navigated) event.currentTarget.blur()
-              else setEditing(next)
-            })
-          }}
-        />
+        {editing === null ? (
+          <button
+            className={cn(
+              "flex h-8 w-full min-w-0 items-center rounded-md bg-muted/40 px-3 text-left text-sm shadow-none",
+              "focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] focus-visible:outline-none",
+              !tab && "cursor-not-allowed opacity-50",
+              !value && "text-muted-foreground",
+            )}
+            disabled={!tab}
+            type="button"
+            onClick={() => setEditing(editUrl)}
+          >
+            <span className="truncate">{value || "输入 URL"}</span>
+          </button>
+        ) : (
+          <Input
+            ref={inputRef}
+            autoCapitalize="off"
+            autoComplete="off"
+            autoCorrect="off"
+            className="h-8 select-text bg-muted/40 shadow-none focus-visible:ring-0"
+            disabled={!tab}
+            placeholder="输入 URL"
+            spellCheck={false}
+            value={value}
+            onBlur={() => setEditing(null)}
+            onChange={(event) => setEditing(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter") return
+              const next = event.currentTarget.value
+              void onNavigate(next).then((navigated) => {
+                if (navigated) event.currentTarget.blur()
+                else setEditing(next)
+              })
+            }}
+          />
+        )}
       </div>
     </div>
   )

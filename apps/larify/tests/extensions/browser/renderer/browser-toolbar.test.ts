@@ -48,6 +48,12 @@ describe("BrowserToolbar", () => {
       )
     })
 
+    await act(async () => {
+      container.querySelector("button:not([aria-label])")!.dispatchEvent(
+        new MouseEvent("click", { bubbles: true }),
+      )
+    })
+
     const input = container.querySelector("input")!
     await act(async () => {
       input.focus()

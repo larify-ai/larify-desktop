@@ -20,6 +20,8 @@ import {
 } from "@renderer/components/ai-elements/tool"
 import { FileDiff, type DiffMeta } from "./file-diff"
 
+const debugToolCardsOpen = import.meta.env.VITE_LARIFY_DEBUG_TOOL_CARDS_OPEN === "1"
+
 export type ToolDisplayMeta = {
   title?: string
   icon?: string
@@ -139,7 +141,7 @@ export function MessageView({
               const toolDisplay = toolDisplays[display.toolName]
               const showRawToolDetails = Boolean(part.errorText) || !toolMeta
               return (
-                <Tool key={i} defaultOpen={Boolean(toolMeta)}>
+                <Tool key={i} defaultOpen={debugToolCardsOpen || Boolean(toolMeta)}>
                   <ToolHeader
                     type="dynamic-tool"
                     toolName={display.toolName}

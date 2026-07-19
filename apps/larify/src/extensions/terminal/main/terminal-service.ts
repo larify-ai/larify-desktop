@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto'
 import which from 'which'
 import { larifyTempPath, larifyWorkspacePath, resourcePath } from '../../../main/utils/app-paths'
 import { addListener, type Listener } from '../../../main/utils/listener'
+import { SessionScopedManagers } from '../../../main/utils/session-scoped-managers'
 import { TerminalManager } from './terminal-manager'
 import type { ShellCommandFinishedEvent } from './terminal'
 import type { TerminalRunLog } from './terminal-run-log'
@@ -134,7 +135,10 @@ function shellIntegrationOptions(shell: string): Pick<TerminalCreateOptions, 'sh
 }
 
 export class TerminalService {
-  private managers = new Map<string, TerminalManager>()
+  private readonly managers = new SessionScopedManagers(
+    (sessionId) => this.createManager(sessionId),
+    (manager: TerminalManager) => manager.destroy()
+  )
   private changeListeners = new Set<Listener<[SessionTerminalsState]>>()
   private dataListeners = new Set<Listener<[string, number, string, number, number]>>()
   private exitListeners = new Set<Listener<[string, number, number]>>()
@@ -222,35 +226,31 @@ export class TerminalService {
   }
 
   async destroySession(sessionId: string): Promise<void> {
-    const manager = this.managers.get(sessionId)
-    if (!manager) return
-    await manager.destroy()
-    this.managers.delete(sessionId)
+    await this.managers.destroySession(sessionId)
   }
 
   async destroy(): Promise<void> {
-    await Promise.all([...this.managers.values()].map((manager) => manager.destroy()))
-    this.managers.clear()
+    await this.managers.destroyAll()
   }
 
   private manager(sessionId: string): TerminalManager {
-    let manager = this.managers.get(sessionId)
-    if (!manager) {
-      manager = new TerminalManager(sessionId)
-      manager.bindChange((state) => {
-        for (const listener of this.changeListeners) listener(state)
-      })
-      manager.bindData((terminalId, data, start, end) => {
-        for (const listener of this.dataListeners) listener(sessionId, terminalId, data, start, end)
-      })
-      manager.bindExit((terminalId, exitCode) => {
-        for (const listener of this.exitListeners) listener(sessionId, terminalId, exitCode)
-      })
-      manager.bindCommandFinished((terminalId, event) => {
-        for (const listener of this.commandFinishedListeners) listener(sessionId, terminalId, event)
-      })
-      this.managers.set(sessionId, manager)
-    }
+    return this.managers.get(sessionId)
+  }
+
+  private createManager(sessionId: string): TerminalManager {
+    const manager = new TerminalManager(sessionId)
+    manager.bindChange((state) => {
+      for (const listener of this.changeListeners) listener(state)
+    })
+    manager.bindData((terminalId, data, start, end) => {
+      for (const listener of this.dataListeners) listener(sessionId, terminalId, data, start, end)
+    })
+    manager.bindExit((terminalId, exitCode) => {
+      for (const listener of this.exitListeners) listener(sessionId, terminalId, exitCode)
+    })
+    manager.bindCommandFinished((terminalId, event) => {
+      for (const listener of this.commandFinishedListeners) listener(sessionId, terminalId, event)
+    })
     return manager
   }
 }

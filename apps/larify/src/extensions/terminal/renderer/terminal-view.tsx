@@ -3,7 +3,7 @@ import { useTheme } from "next-themes"
 import { FitAddon } from "@xterm/addon-fit"
 import { Unicode11Addon } from "@xterm/addon-unicode11"
 import { Terminal as XTerm, type ITheme } from "@xterm/xterm"
-import { TerminalIcon } from "lucide-react"
+import { SquareTerminalIcon } from "lucide-react"
 import { WorkbenchTabsLayout, type WorkbenchTab } from "@renderer/components/workbench"
 import { useAgentSessionId } from "@renderer/lib/agent-session"
 import type {
@@ -14,7 +14,7 @@ import type {
 import "@xterm/xterm/css/xterm.css"
 import "./terminal-view.css"
 
-const TERMINAL_ICON = <TerminalIcon aria-hidden="true" />
+const TERMINAL_ICON = <SquareTerminalIcon aria-hidden="true" />
 
 const RESIZE_DEBOUNCE_MS = 100
 
@@ -104,7 +104,10 @@ export function TerminalView(): React.JSX.Element {
   const activeIdRef = useRef<number | null>(null)
   const entriesBySessionRef = useRef(new Map<string, Map<number, TerminalEntry>>())
   const loadingSessionRef = useRef<string | null>(null)
+  const suppressAutoCreateRef = useRef(false)
   const [theme, setTheme] = useState<ITheme>(() => terminalTheme())
+  const [loadedSessionId, setLoadedSessionId] = useState<string | null>(null)
+  const [workbenchVisible, setWorkbenchVisible] = useState(false)
 
   const entriesForSession = useCallback((id: string): Map<number, TerminalEntry> => {
     let entries = entriesBySessionRef.current.get(id)
@@ -166,14 +169,19 @@ export function TerminalView(): React.JSX.Element {
   const closeTerminal = useCallback(
     async (id: number): Promise<void> => {
       const entries = currentEntries()
+      const closingLastTerminal = state.terminals.length <= 1
+      if (closingLastTerminal) suppressAutoCreateRef.current = true
       const entry = entries.get(id)
       if (entry?.resizeTimer) clearTimeout(entry.resizeTimer)
       entry?.term.dispose()
       entry?.host.remove()
       entries.delete(id)
       await window.bridge.invoke("terminal:close", sessionId, id)
+      if (closingLastTerminal) {
+        window.dispatchEvent(new CustomEvent("larify:workbench-close", { detail: "terminal" }))
+      }
     },
-    [currentEntries, sessionId],
+    [currentEntries, sessionId, state.terminals.length],
   )
 
   const setActive = useCallback(
@@ -306,6 +314,7 @@ export function TerminalView(): React.JSX.Element {
   useEffect(() => {
     let cancelled = false
     loadingSessionRef.current = sessionId
+    setLoadedSessionId(null)
     setState(EMPTY_STATE(sessionId))
     void window.bridge
       .invoke("terminal:getState", sessionId)
@@ -313,8 +322,8 @@ export function TerminalView(): React.JSX.Element {
         if (cancelled) return
         const next = asState(value, sessionId)
         if (loadingSessionRef.current === sessionId) loadingSessionRef.current = null
+        setLoadedSessionId(sessionId)
         setState(next)
-        if (next.terminals.length === 0) void createTerminal()
       })
       .catch((error) => console.error("[terminal:getState]", error))
 
@@ -322,6 +331,7 @@ export function TerminalView(): React.JSX.Element {
         const next = payload as SessionTerminalsState
         if (next.sessionId !== sessionId) return
         if (loadingSessionRef.current === sessionId) loadingSessionRef.current = null
+        setLoadedSessionId(sessionId)
         setState(next)
       })
     const offData = window.bridge.on("terminal:data", (payload) => {
@@ -347,7 +357,26 @@ export function TerminalView(): React.JSX.Element {
       offData()
       offExit()
     }
-  }, [createTerminal, entriesForSession, sessionId])
+  }, [entriesForSession, sessionId])
+
+  useEffect(() => {
+    const onActive = (event: Event): void => {
+      const visible = (event as CustomEvent<string | null>).detail === "terminal"
+      setWorkbenchVisible(visible)
+      if (!visible) suppressAutoCreateRef.current = false
+    }
+    window.addEventListener("larify:workbench-active", onActive)
+    window.dispatchEvent(new Event("larify:workbench-active-request"))
+    return () => window.removeEventListener("larify:workbench-active", onActive)
+  }, [])
+
+  useEffect(() => {
+    if (!workbenchVisible) return
+    if (loadedSessionId !== sessionId) return
+    if (state.terminals.length > 0) return
+    if (suppressAutoCreateRef.current) return
+    void createTerminal()
+  }, [createTerminal, loadedSessionId, sessionId, state.terminals.length, workbenchVisible])
 
   useEffect(() => {
     const entries = currentEntries()
@@ -418,10 +447,9 @@ export function TerminalView(): React.JSX.Element {
     }
   }, [])
 
-  const canCloseTabs = state.terminals.length > 1
   const tabs = state.terminals.map<WorkbenchTab>((terminal) => ({
     active: terminal.id === state.activeId,
-    closable: canCloseTabs,
+    closable: true,
     icon: TERMINAL_ICON,
     id: String(terminal.id),
     title:

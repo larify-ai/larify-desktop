@@ -1,38 +1,47 @@
 import { BrowserWindow, ipcMain, type IpcMainInvokeEvent, type Rectangle } from "electron"
-import type { BrowserTabManager } from "./tab-manager"
+import type { BrowserService } from "./browser-service"
 
-export function registerBrowserIpc(getManager: () => BrowserTabManager): () => void {
+export function registerBrowserIpc(getService: () => BrowserService): () => void {
   let bound = false
-  const manager = (): BrowserTabManager => {
-    const browser = getManager()
+  let unbindChange: (() => void) | null = null
+  const service = (): BrowserService => {
+    const browser = getService()
     if (!bound) {
-      browser.bindChange(sendState)
+      unbindChange = browser.bindChange(sendState)
       bound = true
     }
     return browser
   }
 
-  const sendState = (): void => {
-    const state = manager().state()
+  const sendState = (sessionId: string, state: unknown): void => {
     for (const window of BrowserWindow.getAllWindows()) {
-      if (!window.isDestroyed()) window.webContents.send("browser:state", state)
+      if (!window.isDestroyed()) window.webContents.send("browser:state", { sessionId, state })
     }
   }
 
   const handlers = {
-    "browser:getState": () => manager().state(),
-    "browser:create": (_event: IpcMainInvokeEvent, url?: string) => manager().createTab(url),
-    "browser:setActive": (_event: IpcMainInvokeEvent, id: number) => manager().setActive(id),
-    "browser:reorder": (_event: IpcMainInvokeEvent, id: number, toIndex: number) =>
-      manager().reorder(id, toIndex),
-    "browser:close": (_event: IpcMainInvokeEvent, id: number) => manager().close(id),
-    "browser:navigate": (_event: IpcMainInvokeEvent, id: number, url: string) =>
-      manager().navigate(id, url),
-    "browser:back": (_event: IpcMainInvokeEvent, id: number) => manager().goBack(id),
-    "browser:forward": (_event: IpcMainInvokeEvent, id: number) => manager().goForward(id),
-    "browser:reload": (_event: IpcMainInvokeEvent, id: number) => manager().reload(id),
-    "browser:setBounds": (_event: IpcMainInvokeEvent, bounds: Rectangle) => manager().setBounds(bounds),
-    "browser:setVisible": (_event: IpcMainInvokeEvent, visible: boolean) => manager().setVisible(visible),
+    "browser:getState": (_event: IpcMainInvokeEvent, sessionId: string) =>
+      service().state(sessionId),
+    "browser:create": (_event: IpcMainInvokeEvent, sessionId: string, url?: string) =>
+      service().createTab(sessionId, url),
+    "browser:setActive": (_event: IpcMainInvokeEvent, sessionId: string, id: number) =>
+      service().setActive(sessionId, id),
+    "browser:reorder": (_event: IpcMainInvokeEvent, sessionId: string, id: number, toIndex: number) =>
+      service().reorder(sessionId, id, toIndex),
+    "browser:close": (_event: IpcMainInvokeEvent, sessionId: string, id: number) =>
+      service().close(sessionId, id),
+    "browser:navigate": (_event: IpcMainInvokeEvent, sessionId: string, id: number, url: string) =>
+      service().navigate(sessionId, id, url),
+    "browser:back": (_event: IpcMainInvokeEvent, sessionId: string, id: number) =>
+      service().goBack(sessionId, id),
+    "browser:forward": (_event: IpcMainInvokeEvent, sessionId: string, id: number) =>
+      service().goForward(sessionId, id),
+    "browser:reload": (_event: IpcMainInvokeEvent, sessionId: string, id: number) =>
+      service().reload(sessionId, id),
+    "browser:setBounds": (_event: IpcMainInvokeEvent, sessionId: string, bounds: Rectangle) =>
+      service().setBounds(sessionId, bounds),
+    "browser:setVisible": (_event: IpcMainInvokeEvent, sessionId: string, visible: boolean) =>
+      service().setVisible(sessionId, visible),
   }
 
   for (const [channel, handler] of Object.entries(handlers)) {
@@ -41,6 +50,8 @@ export function registerBrowserIpc(getManager: () => BrowserTabManager): () => v
   }
 
   return () => {
+    unbindChange?.()
+    unbindChange = null
     for (const channel of Object.keys(handlers)) ipcMain.removeHandler(channel)
   }
 }

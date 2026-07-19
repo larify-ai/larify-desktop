@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type ReactNode } from "react"
+import { getAgentSessionId, useAgentSessionId } from "@renderer/lib/agent-session"
 
 if (import.meta.hot) {
   import.meta.hot.dispose(() => {
-    void window.bridge.invoke("browser:setVisible", false)
+    void window.bridge.invoke("browser:setVisible", getAgentSessionId(), false)
   })
 }
 
@@ -12,6 +13,7 @@ interface BrowserViewportProps {
 }
 
 export function BrowserViewport({ children, visible }: BrowserViewportProps): React.JSX.Element {
+  const sessionId = useAgentSessionId()
   const ref = useRef<HTMLDivElement>(null)
   const [workbenchVisible, setWorkbenchVisible] = useState(false)
   const [workbenchKnown, setWorkbenchKnown] = useState(false)
@@ -20,12 +22,12 @@ export function BrowserViewport({ children, visible }: BrowserViewportProps): Re
   useEffect(() => {
     const element = ref.current
     if (!element) return
-    void window.bridge.invoke("browser:setVisible", false)
+    void window.bridge.invoke("browser:setVisible", sessionId, false)
 
     const report = (): void => {
       const rect = element.getBoundingClientRect()
       setViewportHasSize(rect.width > 0 && rect.height > 0)
-      void window.bridge.invoke("browser:setBounds", {
+      void window.bridge.invoke("browser:setBounds", sessionId, {
         x: Math.round(rect.x),
         y: Math.round(rect.y),
         width: Math.round(rect.width),
@@ -40,9 +42,9 @@ export function BrowserViewport({ children, visible }: BrowserViewportProps): Re
     return () => {
       observer.disconnect()
       window.removeEventListener("resize", report)
-      void window.bridge.invoke("browser:setVisible", false)
+      void window.bridge.invoke("browser:setVisible", sessionId, false)
     }
-  }, [])
+  }, [sessionId])
 
   useEffect(() => {
     const onActive = (event: Event): void => {
@@ -53,16 +55,17 @@ export function BrowserViewport({ children, visible }: BrowserViewportProps): Re
     window.dispatchEvent(new Event("larify:workbench-active-request"))
     return () => {
       window.removeEventListener("larify:workbench-active", onActive)
-      void window.bridge.invoke("browser:setVisible", false)
+      void window.bridge.invoke("browser:setVisible", sessionId, false)
     }
-  }, [])
+  }, [sessionId])
 
   useEffect(() => {
     void window.bridge.invoke(
       "browser:setVisible",
+      sessionId,
       visible && workbenchKnown && workbenchVisible && viewportHasSize,
     )
-  }, [visible, viewportHasSize, workbenchKnown, workbenchVisible])
+  }, [sessionId, visible, viewportHasSize, workbenchKnown, workbenchVisible])
 
   return (
     <div ref={ref} className="relative min-h-0 flex-1 overflow-hidden bg-background">

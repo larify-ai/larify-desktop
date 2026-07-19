@@ -63,11 +63,31 @@ vi.mock("@xterm/xterm", () => ({
 }))
 
 vi.mock("@renderer/components/workbench", () => ({
-  WorkbenchTabsLayout: ({ children, tabs }: { children: ReactNode; tabs: Array<{ title: string }> }) =>
+  WorkbenchTabsLayout: ({
+    children,
+    onClose,
+    tabs,
+  }: {
+    children: ReactNode
+    onClose?: (id: string) => void
+    tabs: Array<{ closable: boolean; id: string; title: string }>
+  }) =>
     createElement(
       "div",
       { "data-testid": "terminal-layout" },
       createElement("div", { "data-testid": "tabs" }, tabs.map((tab) => tab.title).join(",")),
+      createElement(
+        "div",
+        { "data-testid": "closable" },
+        tabs.map((tab) => String(tab.closable)).join(","),
+      ),
+      ...tabs.map((tab) =>
+        createElement(
+          "button",
+          { key: tab.id, "data-testid": `close-${tab.id}`, onClick: () => onClose?.(tab.id) },
+          "close",
+        ),
+      ),
       children,
     ),
 }))
@@ -248,6 +268,74 @@ describe("TerminalView", () => {
 
     expect(firstTerminal.dispose).toHaveBeenCalledTimes(1)
     expect(window.bridge.invoke).not.toHaveBeenCalledWith("terminal:create", "session-empty")
+  })
+
+  it("auto-creates an empty terminal only when the terminal workbench is visible", async () => {
+    const { TerminalView } = await import("../../../../src/extensions/terminal/renderer/terminal-view")
+
+    setAgentSessionId("session-auto-create")
+    await act(async () => {
+      root.render(createElement(TerminalView))
+    })
+
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent("larify:workbench-active", { detail: "terminal" }))
+    })
+
+    expect(window.bridge.invoke).not.toHaveBeenCalledWith("terminal:create", "session-auto-create")
+
+    await act(async () => {
+      stateRequests["session-auto-create"].resolve({
+        sessionId: "session-auto-create",
+        activeId: null,
+        terminals: [],
+      })
+    })
+
+    expect(window.bridge.invoke).toHaveBeenCalledWith("terminal:create", "session-auto-create")
+  })
+
+  it("closes the workbench instead of recreating a terminal when the last tab closes", async () => {
+    const closeEvents: Array<string | null> = []
+    const onCloseWorkbench = (event: Event): void => {
+      closeEvents.push((event as CustomEvent<string | null>).detail)
+    }
+    window.addEventListener("larify:workbench-close", onCloseWorkbench)
+    const { TerminalView } = await import("../../../../src/extensions/terminal/renderer/terminal-view")
+
+    setAgentSessionId("session-close-last")
+    await act(async () => {
+      root.render(createElement(TerminalView))
+    })
+
+    await act(async () => {
+      stateRequests["session-close-last"].resolve({
+        sessionId: "session-close-last",
+        activeId: 1,
+        terminals: [{ id: 1, pid: 10, title: "A", cwd: "/", shell: "sh", exitCode: null }],
+      })
+      window.dispatchEvent(new CustomEvent("larify:workbench-active", { detail: "terminal" }))
+    })
+
+    expect(container.querySelector('[data-testid="closable"]')?.textContent).toBe("true")
+
+    await act(async () => {
+      const closeButton = container.querySelector('[data-testid="close-1"]') as HTMLButtonElement
+      closeButton.click()
+    })
+
+    await act(async () => {
+      listeners["terminal:state"]?.({
+        sessionId: "session-close-last",
+        activeId: null,
+        terminals: [],
+      })
+    })
+
+    expect(window.bridge.invoke).toHaveBeenCalledWith("terminal:close", "session-close-last", 1)
+    expect(closeEvents).toEqual(["terminal"])
+    expect(window.bridge.invoke).not.toHaveBeenCalledWith("terminal:create", "session-close-last")
+    window.removeEventListener("larify:workbench-close", onCloseWorkbench)
   })
 
   it("fits terminals when the workbench is small", async () => {

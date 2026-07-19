@@ -1,27 +1,22 @@
+import { useState } from "react"
 import { WorkbenchTabsLayout, type WorkbenchTab } from "@renderer/components/workbench"
+import { GlobeIcon } from "lucide-react"
 import { BrowserToolbar } from "./browser-toolbar"
 import { BrowserViewport } from "./browser-viewport"
 import { EmptyState } from "./empty-state"
 import { LoadingBar } from "./loading-bar"
 import { useBrowser } from "./use-browser"
 
-const DEFAULT_FAVICON =
-  "data:image/svg+xml," +
-  encodeURIComponent(
-    '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#888" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>',
-  )
-
-const tabIcon = (favicon: string): React.ReactNode => {
+function BrowserTabIcon({ favicon }: { favicon: string }): React.JSX.Element {
+  const [failed, setFailed] = useState(false)
+  if (!favicon || failed) return <GlobeIcon aria-hidden className="size-4" />
   return (
     <img
       alt=""
       className="size-4"
       draggable={false}
-      src={favicon || DEFAULT_FAVICON}
-      onError={(event) => {
-        if (event.currentTarget.src === DEFAULT_FAVICON) return
-        event.currentTarget.src = DEFAULT_FAVICON
-      }}
+      src={favicon}
+      onError={() => setFailed(true)}
     />
   )
 }
@@ -31,7 +26,7 @@ export function BrowserView(): React.JSX.Element {
   const { active, state } = browser
   const tabs = state.tabs.map<WorkbenchTab>((tab) => ({
     active: tab.id === state.activeId,
-    icon: tabIcon(tab.favIconUrl),
+    icon: <BrowserTabIcon key={tab.favIconUrl || "fallback"} favicon={tab.favIconUrl} />,
     id: String(tab.id),
     title: tab.title || tab.url || "新标签页",
   }))

@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { useAgentSessionId } from "@renderer/lib/agent-session"
 import type { BrowserState, BrowserTabState } from "../shared/types"
 
 const EMPTY: BrowserState = { tabs: [], activeId: null }
@@ -17,39 +18,74 @@ export interface UseBrowser {
 }
 
 export function useBrowser(): UseBrowser {
+  const sessionId = useAgentSessionId()
   const [state, setState] = useState<BrowserState>(EMPTY)
+  const suppressAutoCreateRef = useRef(false)
+  const [loadedSessionId, setLoadedSessionId] = useState<string | null>(null)
+  const [workbenchVisible, setWorkbenchVisible] = useState(false)
 
   useEffect(() => {
     let alive = true
-    void window.bridge.invoke("browser:getState").then((value) => {
+    setLoadedSessionId(null)
+    setState(EMPTY)
+    void window.bridge.invoke("browser:getState", sessionId).then((value) => {
       if (!alive) return
       const next = (value as BrowserState | null) ?? EMPTY
+      setLoadedSessionId(sessionId)
       setState(next)
-      if (next.tabs.length === 0) void window.bridge.invoke("browser:create")
     })
     const off = window.bridge.on("browser:state", (value) => {
-      setState(value as BrowserState)
+      const event = value as { sessionId?: string; state?: BrowserState }
+      if (event.sessionId !== sessionId || !event.state) return
+      setLoadedSessionId(sessionId)
+      setState(event.state)
     })
     return () => {
       alive = false
       off()
     }
+  }, [sessionId])
+
+  useEffect(() => {
+    const onActive = (event: Event): void => {
+      const visible = (event as CustomEvent<string | null>).detail === "browser"
+      setWorkbenchVisible(visible)
+      if (!visible) suppressAutoCreateRef.current = false
+    }
+    window.addEventListener("larify:workbench-active", onActive)
+    window.dispatchEvent(new Event("larify:workbench-active-request"))
+    return () => window.removeEventListener("larify:workbench-active", onActive)
   }, [])
+
+  useEffect(() => {
+    if (!workbenchVisible) return
+    if (loadedSessionId !== sessionId) return
+    if (state.tabs.length > 0) return
+    if (suppressAutoCreateRef.current) return
+    void window.bridge.invoke("browser:create", sessionId)
+  }, [loadedSessionId, sessionId, state.tabs.length, workbenchVisible])
 
   const actions = useMemo(
     () => ({
-      back: (id: number) => window.bridge.invoke("browser:back", id) as Promise<void>,
-      close: (id: number) => window.bridge.invoke("browser:close", id) as Promise<void>,
-      create: (url?: string) => window.bridge.invoke("browser:create", url) as Promise<number>,
-      forward: (id: number) => window.bridge.invoke("browser:forward", id) as Promise<void>,
+      back: (id: number) => window.bridge.invoke("browser:back", sessionId, id) as Promise<void>,
+      close: async (id: number) => {
+        const closingLastTab = state.tabs.length <= 1
+        if (closingLastTab) suppressAutoCreateRef.current = true
+        await window.bridge.invoke("browser:close", sessionId, id)
+        if (closingLastTab) {
+          window.dispatchEvent(new CustomEvent("larify:workbench-close", { detail: "browser" }))
+        }
+      },
+      create: (url?: string) => window.bridge.invoke("browser:create", sessionId, url) as Promise<number>,
+      forward: (id: number) => window.bridge.invoke("browser:forward", sessionId, id) as Promise<void>,
       navigate: (id: number, url: string) =>
-        window.bridge.invoke("browser:navigate", id, url) as Promise<boolean>,
-      reload: (id: number) => window.bridge.invoke("browser:reload", id) as Promise<void>,
+        window.bridge.invoke("browser:navigate", sessionId, id, url) as Promise<boolean>,
+      reload: (id: number) => window.bridge.invoke("browser:reload", sessionId, id) as Promise<void>,
       reorder: (id: number, toIndex: number) =>
-        window.bridge.invoke("browser:reorder", id, toIndex) as Promise<void>,
-      setActive: (id: number) => window.bridge.invoke("browser:setActive", id) as Promise<void>,
+        window.bridge.invoke("browser:reorder", sessionId, id, toIndex) as Promise<void>,
+      setActive: (id: number) => window.bridge.invoke("browser:setActive", sessionId, id) as Promise<void>,
     }),
-    [],
+    [sessionId, state.tabs.length],
   )
 
   const active = useMemo(() => state.tabs.find((tab) => tab.id === state.activeId) ?? null, [state])

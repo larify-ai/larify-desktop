@@ -92,6 +92,19 @@ function ShellBody({ app }: { app: App }): React.JSX.Element {
     return () => window.removeEventListener("larify:workbench-active-request", sendActiveWorkbench)
   }, [workbench])
 
+  useEffect(() => {
+    const closeWorkbench = (event: Event): void => {
+      const id = (event as CustomEvent<string | null | undefined>).detail
+      setWorkbench((current) => {
+        if (id && current !== id) return current
+        closingWorkbenchRef.current = true
+        return null
+      })
+    }
+    window.addEventListener("larify:workbench-close", closeWorkbench)
+    return () => window.removeEventListener("larify:workbench-close", closeWorkbench)
+  }, [])
+
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground">
       <div

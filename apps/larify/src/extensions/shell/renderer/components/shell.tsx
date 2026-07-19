@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, type CSSProperties } from "react"
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react"
 import { MessageCirclePlusIcon } from "lucide-react"
 import { ThemeProvider } from "next-themes"
 import type { ImperativePanelHandle } from "react-resizable-panels"
@@ -31,7 +31,7 @@ const MIN_ASSISTANT_SIZE = 35
 
 const sidebarItemClass =
   "grid size-10 place-items-center gap-0 p-0 text-center [&>svg]:size-6! [&>svg]:shrink-0"
-const sidebarMenuClass = "w-full items-center gap-2 px-1"
+const sidebarMenuClass = "w-full items-center gap-0 px-1"
 
 export function Shell({ app }: { app: App }): React.JSX.Element {
   return (
@@ -67,9 +67,7 @@ function ShellBody({ app }: { app: App }): React.JSX.Element {
       closingWorkbenchRef.current = current === id
       return current === id ? null : id
     })
-    setMountedWorkbenches((current) =>
-      current.includes(id) ? current : [...current, id],
-    )
+    setMountedWorkbenches((current) => (current.includes(id) ? current : [...current, id]))
   }
 
   useLayoutEffect(() => {
@@ -80,6 +78,18 @@ function ShellBody({ app }: { app: App }): React.JSX.Element {
       closingWorkbenchRef.current = true
       panel.collapse()
     }
+  }, [workbench])
+
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent("larify:workbench-active", { detail: workbench }))
+  }, [workbench])
+
+  useEffect(() => {
+    const sendActiveWorkbench = (): void => {
+      window.dispatchEvent(new CustomEvent("larify:workbench-active", { detail: workbench }))
+    }
+    window.addEventListener("larify:workbench-active-request", sendActiveWorkbench)
+    return () => window.removeEventListener("larify:workbench-active-request", sendActiveWorkbench)
   }, [workbench])
 
   return (
@@ -165,10 +175,7 @@ function ShellBody({ app }: { app: App }): React.JSX.Element {
                   .map((view) => {
                     const id = view.sidebar!.id
                     return (
-                      <div
-                        key={id}
-                        className={workbench === id ? "absolute inset-0" : "hidden"}
-                      >
+                      <div key={id} className={workbench === id ? "absolute inset-0" : "hidden"}>
                         {view.render()}
                       </div>
                     )

@@ -45,8 +45,9 @@ function createWindow(): BrowserWindow {
 }
 
 const extension: Extension = {
-  activate(_app, context) {
+  activate(appHost, context) {
     const win = createWindow()
+    context.subscriptions.push(appHost.register("service", "main-window", { get: () => win }))
     context.subscriptions.push({ dispose: () => win.destroy() })
 
     ipcMain.handle("theme:set", (_e, theme) => {

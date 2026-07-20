@@ -108,6 +108,8 @@ export class BrowserTab {
   readonly id: number
   readonly view: WebContentsView
   private currentUrl = ""
+  private pendingUrl = ""
+  private navigationTask: Promise<void> | null = null
   private favIconUrl = ""
   private favIconRequest = 0
   private error: BrowserTabError | null = null
@@ -139,7 +141,7 @@ export class BrowserTab {
   navigate(url: string): boolean {
     const target = normalizeUrl(url)
     if (!target) return false
-    void this.cdpReady.then(() => this.view.webContents.loadURL(target).catch(() => {}))
+    void this.startNavigation(target)
     return true
   }
 
@@ -162,14 +164,34 @@ export class BrowserTab {
   async navigateAndWait(url: string): Promise<void> {
     const target = normalizeUrl(url)
     if (!target) throw new Error(`invalid url: ${url}`)
-    await this.cdpReady
-    const loaded = waitForWebContentsLoad(this.view.webContents)
-    try {
-      await this.view.webContents.loadURL(target)
-    } catch {
-      // load failure is captured in state via did-fail-load
-    }
-    await loaded
+    await this.startNavigation(target)
+  }
+
+  async waitForNavigation(): Promise<void> {
+    await this.navigationTask
+  }
+
+  private startNavigation(target: string): Promise<void> {
+    this.pendingUrl = target
+    this.onChange?.()
+    const task = this.cdpReady.then(async () => {
+      const loaded = waitForWebContentsLoad(this.view.webContents)
+      try {
+        await this.view.webContents.loadURL(target)
+      } catch {
+        // load failure is captured in state via did-fail-load
+      }
+      await loaded
+      if (this.pendingUrl === target) {
+        this.pendingUrl = ""
+        this.onChange?.()
+      }
+    })
+    const navigationTask = task.finally(() => {
+      if (this.navigationTask === navigationTask) this.navigationTask = null
+    })
+    this.navigationTask = navigationTask
+    return navigationTask
   }
 
   async goBackAndWait(): Promise<void> {
@@ -199,12 +221,13 @@ export class BrowserTab {
     const wc = this.view.webContents
     const url = wc.getURL()
     const isBlank = !url || url === "about:blank"
+    const displayUrl = isBlank ? this.pendingUrl : url
     return {
       id: this.id,
-      url: isBlank ? "" : url,
+      url: displayUrl,
       title: isBlank ? "" : wc.getTitle(),
       favIconUrl: this.favIconUrl,
-      loading: wc.isLoading(),
+      loading: wc.isLoading() || Boolean(this.pendingUrl),
       canGoBack: wc.navigationHistory.canGoBack(),
       canGoForward: wc.navigationHistory.canGoForward(),
       error: this.error,
@@ -506,6 +529,7 @@ export class BrowserTab {
     const emit = (): void => this.onChange?.()
     const syncUrl = (): void => {
       this.currentUrl = wc.getURL()
+      this.pendingUrl = ""
       emit()
     }
 
@@ -528,6 +552,7 @@ export class BrowserTab {
     wc.on("did-stop-loading", emit)
     wc.on("did-fail-load", (_event, errorCode, errorDescription, _url, isMainFrame) => {
       if (!isMainFrame || errorCode === -3) return
+      this.pendingUrl = ""
       this.error = { code: errorCode, description: errorDescription }
       emit()
     })

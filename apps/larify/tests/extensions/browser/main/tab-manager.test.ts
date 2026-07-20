@@ -109,6 +109,17 @@ describe("BrowserTabManager", () => {
     for (const view of h.views) expect(view.parent).toBe(h.hostWin)
   })
 
+  it("exposes a requested URL immediately when creating a tab with a URL", () => {
+    const manager = new BrowserTabManager(fakeWindow())
+    expect(manager.createTab("example.com")).toBe(1)
+
+    expect(manager.state().tabs[0]).toMatchObject({
+      id: 1,
+      url: "https://example.com",
+      loading: true,
+    })
+  })
+
   it("places only the active tab in the main window when visible", () => {
     const manager = new BrowserTabManager(fakeWindow())
     const first = manager.createTab()

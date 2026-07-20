@@ -28,6 +28,8 @@ vi.mock("electron", () => {
     title = "T"
     loading = false
     loadURLCalls: string[] = []
+    deferLoad = false
+    pendingLoads: Array<() => void> = []
     session = new FakeSession()
 
     on(event: string, cb: (...args: unknown[]) => void): void {
@@ -43,8 +45,16 @@ vi.mock("electron", () => {
     }
 
     loadURL(url: string): Promise<void> {
-      this.url = url
       this.loadURLCalls.push(url)
+      if (this.deferLoad) {
+        return new Promise((resolve) => {
+          this.pendingLoads.push(() => {
+            this.url = url
+            resolve()
+          })
+        })
+      }
+      this.url = url
       return Promise.resolve()
     }
 
@@ -109,6 +119,8 @@ function webContents(tab: BrowserTab): {
   emit: (event: string, ...args: unknown[]) => void
   loadURLCalls: string[]
   loading: boolean
+  deferLoad: boolean
+  pendingLoads: Array<() => void>
   session: {
     emit: (event: string, ...args: unknown[]) => void
   }
@@ -117,6 +129,8 @@ function webContents(tab: BrowserTab): {
     emit: (event: string, ...args: unknown[]) => void
     loadURLCalls: string[]
     loading: boolean
+    deferLoad: boolean
+    pendingLoads: Array<() => void>
     session: {
       emit: (event: string, ...args: unknown[]) => void
     }
@@ -150,6 +164,23 @@ describe("BrowserTab", () => {
     expect(tab.navigate("example.com")).toBe(true)
     await Promise.resolve()
     expect(webContents(tab).loadURLCalls).toContain("https://example.com")
+  })
+
+  it("exposes a pending navigation target before loadURL completes", async () => {
+    const tab = new BrowserTab(1, "p")
+    webContents(tab).deferLoad = true
+
+    expect(tab.navigate("example.com")).toBe(true)
+    await Promise.resolve()
+
+    expect(tab.state().url).toBe("https://example.com")
+    expect(tab.state().loading).toBe(true)
+
+    webContents(tab).pendingLoads.splice(0).forEach((resolve) => resolve())
+    webContents(tab).emit("did-navigate")
+
+    expect(tab.state().url).toBe("https://example.com")
+    expect(tab.state().loading).toBe(false)
   })
 
   it("does not navigate invalid address text", async () => {

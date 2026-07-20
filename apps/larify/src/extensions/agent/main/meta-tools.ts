@@ -30,6 +30,10 @@ export function shouldThrowToolFailures(): boolean {
   return process.env.LARIFY_DEBUG_TOOL_ERRORS === "1"
 }
 
+const TOOL_DISCOVERY_HINT = "First list tools with agent.list_toolkit_tools, then read schemas with agent.get_tool_schemas."
+const toolNotFoundMessage = (name: string) => `Tool "${name}" not found. ${TOOL_DISCOVERY_HINT}`
+const invalidArgumentsMessage = (details: string) => `Invalid arguments: ${details} ${TOOL_DISCOVERY_HINT}`
+
 async function* invokeTool(
   registry: Pick<ToolRegistry, "get">,
   ctx: ToolContext,
@@ -40,14 +44,14 @@ async function* invokeTool(
 ): AsyncIterable<unknown> {
   const found = registry.get(name)
   if (!found) {
-    const error = new ToolInputError(`Tool "${name}" not found`)
+    const error = new ToolInputError(toolNotFoundMessage(name))
     if (shouldThrowToolFailures()) throw error
     yield error.message
     return
   }
   const parsed = found.inputSchema.safeParse(args)
   if (!parsed.success) {
-    const error = new ToolInputError(`Invalid arguments: ${parsed.error.message}`)
+    const error = new ToolInputError(invalidArgumentsMessage(parsed.error.message))
     if (shouldThrowToolFailures()) throw error
     yield error.message
     return
@@ -100,7 +104,7 @@ export function buildMetaTools(
       const { toolkit_names } = listToolkitToolsTool.inputSchema.parse(args) as { toolkit_names: string[] }
       const sections = toolkit_names.map((toolkit) => {
         const tools = registry.listTools(toolkit)
-        if (!tools) throw new ToolInputError(`Toolkit "${toolkit}" not found`)
+        if (!tools) throw new ToolInputError(`Toolkit "${toolkit}" not found.`)
         return {
           toolkit_name: toolkit,
           tools: tools.map((tool) => ({
@@ -122,7 +126,7 @@ export function buildMetaTools(
       const { tool_names } = getToolSchemasTool.inputSchema.parse(args) as { tool_names: string[] }
       const definitions = tool_names.map((name) => {
         const resolved = registry.resolve(name)
-        if (!resolved) throw new ToolInputError(`Tool "${name}" not found`)
+        if (!resolved) throw new ToolInputError(toolNotFoundMessage(name))
         return {
           name: "call_tool",
           description: `Invoke ${resolved.tool_name} with args matching its schema.`,

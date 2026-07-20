@@ -4,6 +4,10 @@ import { buildMetaTools } from "../../../../src/extensions/agent/main/meta-tools
 import { createToolRegistry } from "../../../../src/extensions/agent/main/registry"
 import type { Toolkit } from "../../../../src/shared/tool"
 
+const TOOL_DISCOVERY_HINT =
+  "First list tools with agent.list_toolkit_tools, then read schemas with agent.get_tool_schemas."
+const toolNotFound = (name: string) => `Tool "${name}" not found. ${TOOL_DISCOVERY_HINT}`
+
 const toolkit: Toolkit = {
   name: "file",
   description: "File operations",
@@ -47,8 +51,8 @@ const terminalToolkit: Toolkit = {
   ],
 }
 
-function meta() {
-  const tools = buildMetaTools(createToolRegistry([toolkit, terminalToolkit]), { sessionId: "test" })
+function meta(sessionId = "test") {
+  const tools = buildMetaTools(createToolRegistry([toolkit, terminalToolkit]), { sessionId })
   return (name: string, input: unknown) => {
     const found = tools[name]
     if (!found) return undefined
@@ -69,6 +73,12 @@ async function drain(iter: AsyncIterable<unknown> | Promise<unknown>): Promise<u
 
 const callTool = (name: string, args: unknown, title = "Call tool") =>
   meta()("call_tool", { title, name, args })
+
+const sessionCallTool = (sessionId: string) => {
+  const call = meta(sessionId)
+  return (name: string, args: unknown, title = "Call tool") =>
+    call("call_tool", { title, name, args })
+}
 
 const metaTool = (name: string, input: unknown) =>
   meta()(name, input) as AsyncIterable<unknown> | Promise<unknown>
@@ -120,7 +130,7 @@ describe("list_toolkit_tools", () => {
     await expect(
       drain(callTool("agent.list_toolkit_tools", { toolkit_names: ["nope"] })),
     ).resolves.toEqual([
-      'Toolkit "nope" not found',
+      'Toolkit "nope" not found.',
     ])
   })
 
@@ -128,15 +138,16 @@ describe("list_toolkit_tools", () => {
     await expect(
       drain(callTool("agent.list_toolkit_tools", { toolkit_names: ["agent"] })),
     ).resolves.toEqual([
-      'Toolkit "agent" not found',
+      'Toolkit "agent" not found.',
     ])
   })
 })
 
 describe("get_tool_schemas", () => {
   it("returns the tool schema wrapped as call_tool parameters", async () => {
+    const call = sessionCallTool("schema-single")
     const result = await drain(
-      callTool("agent.get_tool_schemas", { tool_names: ["file.read"] }),
+      call("agent.get_tool_schemas", { tool_names: ["file.read"] }),
     )
     const schemas = JSON.parse(result[0] as string)
     const schema = schemas[0]
@@ -149,14 +160,16 @@ describe("get_tool_schemas", () => {
   })
 
   it("throws on unknown tool", async () => {
-    await expect(drain(callTool("agent.get_tool_schemas", { tool_names: ["nope"] }))).resolves.toEqual([
-      'Tool "nope" not found',
+    const call = sessionCallTool("schema-unknown")
+    await expect(drain(call("agent.get_tool_schemas", { tool_names: ["file.nope"] }))).resolves.toEqual([
+      toolNotFound("file.nope"),
     ])
   })
 
   it("returns multiple tool schemas at once", async () => {
+    const call = sessionCallTool("schema-multiple")
     const result = await drain(
-      callTool("agent.get_tool_schemas", { tool_names: ["file.read", "file.ticker"] }),
+      call("agent.get_tool_schemas", { tool_names: ["file.read", "file.ticker"] }),
     )
     const schemas = JSON.parse(result[0] as string)
     expect(schemas.map((schema: { parameters: { properties: { name: { const: string } } } }) =>
@@ -167,27 +180,45 @@ describe("get_tool_schemas", () => {
 
 describe("call_tool", () => {
   it("runs a normal tool and yields its result", async () => {
-    const out = await drain(callTool("file.read", { path: "a.txt" }, "Read a file"))
+    const call = sessionCallTool("normal-tool")
+    await drain(call("agent.get_tool_schemas", { tool_names: ["file.read"] }))
+    const out = await drain(call("file.read", { path: "a.txt" }, "Read a file"))
     expect(out).toEqual(["content:a.txt"])
   })
 
   it("passes a streaming tool's chunks through", async () => {
-    const out = await drain(callTool("file.ticker", { n: 3 }, "Run ticker"))
+    const call = sessionCallTool("streaming-tool")
+    await drain(call("agent.get_tool_schemas", { tool_names: ["file.ticker"] }))
+    const out = await drain(call("file.ticker", { n: 3 }, "Run ticker"))
     expect(out).toEqual(["tick1", "tick2", "tick3"])
   })
 
+  it("allows invoking a real tool without tracking whether its schema was read", async () => {
+    const call = sessionCallTool("schema-required")
+    await expect(drain(call("file.read", { path: "a.txt" }, "Read a file"))).resolves.toEqual([
+      "content:a.txt",
+    ])
+  })
+
   it("returns unknown tool errors as tool output", async () => {
-    await expect(drain(callTool("nope", {}))).resolves.toEqual(['Tool "nope" not found'])
+    await expect(drain(callTool("file.nope", {}))).resolves.toEqual([
+      toolNotFound("file.nope"),
+    ])
   })
 
   it("returns schema-invalid args as tool output", async () => {
-    const out = await drain(callTool("file.read", { path: 123 }, "Read a file"))
+    const call = sessionCallTool("invalid-args")
+    await drain(call("agent.get_tool_schemas", { tool_names: ["file.read"] }))
+    const out = await drain(call("file.read", { path: 123 }, "Read a file"))
     expect(out).toHaveLength(1)
-    expect(out[0]).toContain("Invalid arguments")
+    expect(out[0]).toContain("Invalid arguments:")
+    expect(out[0]).toContain(TOOL_DISCOVERY_HINT)
   })
 
   it("returns execution failures as tool output", async () => {
-    await expect(drain(callTool("file.fails", {}, "Run failing tool"))).resolves.toEqual([
+    const call = sessionCallTool("failing-tool")
+    await drain(call("agent.get_tool_schemas", { tool_names: ["file.fails"] }))
+    await expect(drain(call("file.fails", {}, "Run failing tool"))).resolves.toEqual([
       "Predictable tool failure",
     ])
   })
@@ -196,7 +227,9 @@ describe("call_tool", () => {
     const previous = process.env.LARIFY_DEBUG_TOOL_ERRORS
     process.env.LARIFY_DEBUG_TOOL_ERRORS = "1"
     try {
-      await expect(drain(callTool("file.fails", {}, "Run failing tool"))).rejects.toThrow("Predictable tool failure")
+      const call = sessionCallTool("debug-failing-tool")
+      await drain(call("agent.get_tool_schemas", { tool_names: ["file.fails"] }))
+      await expect(drain(call("file.fails", {}, "Run failing tool"))).rejects.toThrow("Predictable tool failure")
     } finally {
       if (previous === undefined) {
         delete process.env.LARIFY_DEBUG_TOOL_ERRORS
@@ -210,9 +243,9 @@ describe("call_tool", () => {
     const previous = process.env.LARIFY_DEBUG_TOOL_ERRORS
     process.env.LARIFY_DEBUG_TOOL_ERRORS = "1"
     try {
-      await expect(drain(callTool("file.read", { path: 123 }, "Read a file"))).rejects.toThrow(
-        "Invalid arguments",
-      )
+      const call = sessionCallTool("debug-invalid-args")
+      await drain(call("agent.get_tool_schemas", { tool_names: ["file.read"] }))
+      await expect(drain(call("file.read", { path: 123 }, "Read a file"))).rejects.toThrow("Invalid arguments:")
     } finally {
       if (previous === undefined) {
         delete process.env.LARIFY_DEBUG_TOOL_ERRORS

@@ -13,7 +13,7 @@ const inputSchema = z.object({
 }).strict()
 
 export const writeFileTool: Tool = {
-  name: "write_file",
+  name: "write",
   description: "Create or overwrite a text file.",
   metadata: { icon: "edit" },
   inputSchema,

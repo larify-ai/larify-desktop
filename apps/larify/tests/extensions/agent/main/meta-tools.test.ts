@@ -9,7 +9,7 @@ const toolkit: Toolkit = {
   description: "File operations",
   tools: [
     {
-      name: "read_file",
+      name: "read",
       description: "Read a file",
       metadata: { title: "Read file", icon: "read", defaultOpen: true, hideRawDetails: true, lazy: false },
       inputSchema: z.object({ path: z.string() }),
@@ -39,7 +39,7 @@ const terminalToolkit: Toolkit = {
   description: "Terminal operations",
   tools: [
     {
-      name: "write_terminal",
+      name: "write",
       description: "Write terminal input",
       inputSchema: z.object({ input: z.string() }),
       execute: async () => "ok",
@@ -83,7 +83,7 @@ describe("list_toolkit_tools", () => {
         {
           toolkit_name: "file",
           tools: [
-            { tool_name: "file.read_file", description: "Read a file" },
+            { tool_name: "file.read", description: "Read a file" },
             { tool_name: "file.ticker", description: "Emit ticks" },
             { tool_name: "file.fails", description: "Fail predictably" },
           ],
@@ -101,7 +101,7 @@ describe("list_toolkit_tools", () => {
         {
           toolkit_name: "file",
           tools: [
-            { tool_name: "file.read_file", description: "Read a file" },
+            { tool_name: "file.read", description: "Read a file" },
             { tool_name: "file.ticker", description: "Emit ticks" },
             { tool_name: "file.fails", description: "Fail predictably" },
           ],
@@ -109,7 +109,7 @@ describe("list_toolkit_tools", () => {
         {
           toolkit_name: "terminal",
           tools: [
-            { tool_name: "terminal.write_terminal", description: "Write terminal input" },
+            { tool_name: "terminal.write", description: "Write terminal input" },
           ],
         },
       ],
@@ -136,7 +136,7 @@ describe("list_toolkit_tools", () => {
 describe("get_tool_schemas", () => {
   it("returns the tool schema wrapped as call_tool parameters", async () => {
     const result = await drain(
-      callTool("agent.get_tool_schemas", { tool_names: ["file.read_file"] }),
+      callTool("agent.get_tool_schemas", { tool_names: ["file.read"] }),
     )
     const schemas = JSON.parse(result[0] as string)
     const schema = schemas[0]
@@ -144,7 +144,7 @@ describe("get_tool_schemas", () => {
     expect(schema.parameters.type).toBe("object")
     expect(schema.parameters.required).toEqual(["title", "name", "args"])
     expect(schema.parameters.properties).toHaveProperty("title")
-    expect(schema.parameters.properties.name.const).toBe("file.read_file")
+    expect(schema.parameters.properties.name.const).toBe("file.read")
     expect(schema.parameters.properties.args.properties).toHaveProperty("path")
   })
 
@@ -156,18 +156,18 @@ describe("get_tool_schemas", () => {
 
   it("returns multiple tool schemas at once", async () => {
     const result = await drain(
-      callTool("agent.get_tool_schemas", { tool_names: ["file.read_file", "file.ticker"] }),
+      callTool("agent.get_tool_schemas", { tool_names: ["file.read", "file.ticker"] }),
     )
     const schemas = JSON.parse(result[0] as string)
     expect(schemas.map((schema: { parameters: { properties: { name: { const: string } } } }) =>
       schema.parameters.properties.name.const,
-    )).toEqual(["file.read_file", "file.ticker"])
+    )).toEqual(["file.read", "file.ticker"])
   })
 })
 
 describe("call_tool", () => {
   it("runs a normal tool and yields its result", async () => {
-    const out = await drain(callTool("file.read_file", { path: "a.txt" }, "Read a file"))
+    const out = await drain(callTool("file.read", { path: "a.txt" }, "Read a file"))
     expect(out).toEqual(["content:a.txt"])
   })
 
@@ -181,7 +181,7 @@ describe("call_tool", () => {
   })
 
   it("returns schema-invalid args as tool output", async () => {
-    const out = await drain(callTool("file.read_file", { path: 123 }, "Read a file"))
+    const out = await drain(callTool("file.read", { path: 123 }, "Read a file"))
     expect(out).toHaveLength(1)
     expect(out[0]).toContain("Invalid arguments")
   })
@@ -210,7 +210,7 @@ describe("call_tool", () => {
     const previous = process.env.LARIFY_DEBUG_TOOL_ERRORS
     process.env.LARIFY_DEBUG_TOOL_ERRORS = "1"
     try {
-      await expect(drain(callTool("file.read_file", { path: 123 }, "Read a file"))).rejects.toThrow(
+      await expect(drain(callTool("file.read", { path: 123 }, "Read a file"))).rejects.toThrow(
         "Invalid arguments",
       )
     } finally {
@@ -225,9 +225,9 @@ describe("call_tool", () => {
 
 describe("eager tools", () => {
   it("only exposes call_tool at the top level", () => {
-    expect(meta()("file.read_file", { title: "Read a file", args: { path: "a.txt" } })).toBeUndefined()
+    expect(meta()("file.read", { title: "Read a file", args: { path: "a.txt" } })).toBeUndefined()
     expect(metaTool("agent.list_toolkit_tools", { toolkit_names: ["file"] })).toBeUndefined()
-    expect(metaTool("agent.get_tool_schemas", { tool_names: ["file.read_file"] })).toBeUndefined()
+    expect(metaTool("agent.get_tool_schemas", { tool_names: ["file.read"] })).toBeUndefined()
   })
 })
 
@@ -240,7 +240,7 @@ describe("ToolRegistry", () => {
 
   it("lists display metadata without exposing executable tool fields", () => {
     expect(createToolRegistry([toolkit]).listToolDisplays()).toEqual({
-      "file.read_file": { title: "Read file", icon: "read" },
+      "file.read": { title: "Read file", icon: "read" },
     })
   })
 })

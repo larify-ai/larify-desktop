@@ -142,14 +142,14 @@ export function createTerminalToolkit(service: TerminalService): Toolkit {
     description: 'Create terminals, run commands, operate interactive TUIs, and read terminal snapshots',
     tools: [
       {
-        name: 'list_terminals',
+        name: 'list',
         description: 'List all terminals',
         metadata: { icon: 'terminal' },
         inputSchema: z.object({}).strict(),
         execute: async (_args, ctx) => service.state(ctx.sessionId).terminals
       },
       {
-        name: 'create_terminal',
+        name: 'create',
         description: 'Create a terminal',
         metadata: { icon: 'terminal' },
         inputSchema: createSchema,
@@ -159,7 +159,7 @@ export function createTerminalToolkit(service: TerminalService): Toolkit {
         }
       },
       {
-        name: 'close_terminal',
+        name: 'close',
         description: 'Close a terminal',
         metadata: { icon: 'terminal' },
         inputSchema: closeSchema,
@@ -173,7 +173,7 @@ export function createTerminalToolkit(service: TerminalService): Toolkit {
         }
       },
       {
-        name: 'write_terminal',
+        name: 'write',
         description: 'Write raw node-pty input to a terminal',
         metadata: { icon: 'terminal' },
         inputSchema: writeSchema,
@@ -204,7 +204,7 @@ export function createTerminalToolkit(service: TerminalService): Toolkit {
         }
       },
       {
-        name: 'read_terminal',
+        name: 'read',
         description: 'Read a terminal snapshot, including interactive TUI screens',
         metadata: { icon: 'terminal' },
         inputSchema: readSchema,

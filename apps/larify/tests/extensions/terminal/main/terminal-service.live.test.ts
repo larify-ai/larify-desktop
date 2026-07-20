@@ -138,20 +138,20 @@ describe("TerminalService live", () => {
     }
 
     try {
-      const terminal = await tool("create_terminal").execute({}, ctx) as { id: number }
-      await tool("write_terminal").execute(
+      const terminal = await tool("create").execute({}, ctx) as { id: number }
+      await tool("write").execute(
         { id: terminal.id, input: `Write-Output "${oldMarker}"`, submit: true, timeout: 10 },
         ctx,
       )
 
-      const second = await tool("write_terminal").execute(
+      const second = await tool("write").execute(
         { id: terminal.id, input: `Write-Output "${newMarker}"`, submit: true, timeout: 10 },
         ctx,
       ) as { snapshot: { screen: string } }
 
       expect(second.snapshot.screen).toContain(newMarker)
 
-      const read = await tool("read_terminal").execute(
+      const read = await tool("read").execute(
         { id: terminal.id, timeout: 0, idle: 0 },
         ctx,
       ) as { snapshot: { screen: string } }
@@ -174,8 +174,8 @@ describe("TerminalService live", () => {
     }
 
     try {
-      const terminal = await tool("create_terminal").execute({}, ctx) as { id: number }
-      const result = await tool("write_terminal").execute(
+      const terminal = await tool("create").execute({}, ctx) as { id: number }
+      const result = await tool("write").execute(
         {
           id: terminal.id,
           input: `Write-Output "${newlineMarker}"\n`,
@@ -205,8 +205,8 @@ describe("TerminalService live", () => {
     }
 
     try {
-      const terminal = await tool("create_terminal").execute({}, ctx) as { id: number }
-      const result = await tool("write_terminal").execute(
+      const terminal = await tool("create").execute({}, ctx) as { id: number }
+      const result = await tool("write").execute(
         {
           id: terminal.id,
           input: `Write-Output "${rawNewlineMarker}"\n`,
@@ -236,8 +236,8 @@ describe("TerminalService live", () => {
     }
 
     try {
-      const terminal = await tool("create_terminal").execute({}, ctx) as { id: number }
-      const result = await tool("write_terminal").execute(
+      const terminal = await tool("create").execute({}, ctx) as { id: number }
+      const result = await tool("write").execute(
         {
           id: terminal.id,
           input: `Write-Output "${longStartMarker}"; 1..2300 | ForEach-Object { "LONG_OUTPUT_LINE_$_" }; Write-Output "${longEndMarker}"`,
@@ -253,7 +253,7 @@ describe("TerminalService live", () => {
       expect(result.snapshot.screen).not.toContain(longStartMarker)
       expect(result.snapshot.screen.split("\n").length).toBeLessThan(350)
 
-      const read = await tool("read_terminal").execute(
+      const read = await tool("read").execute(
         { id: terminal.id, timeout: 0, idle: 0 },
         ctx,
       ) as { snapshot: { screen: string }; log_path?: string }
@@ -278,8 +278,8 @@ describe("TerminalService live", () => {
     }
 
     try {
-      const terminal = await tool("create_terminal").execute({}, ctx) as { id: number }
-      const result = await tool("write_terminal").execute(
+      const terminal = await tool("create").execute({}, ctx) as { id: number }
+      const result = await tool("write").execute(
         {
           id: terminal.id,
           input: `cls; Write-Host "${menuMarker}"; Write-Host "[1] First"; Write-Host "[Q] Quit"; Read-Host "Choice"`,
@@ -294,7 +294,7 @@ describe("TerminalService live", () => {
       expect(result.snapshot.screen).toContain("[1] First")
       expect(result.snapshot.screen).toContain("[Q] Quit")
 
-      await tool("write_terminal").execute(
+      await tool("write").execute(
         { id: terminal.id, input: "\u0003", timeout: 5, idle: 1 },
         ctx,
       )

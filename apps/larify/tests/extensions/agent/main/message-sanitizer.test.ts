@@ -22,7 +22,7 @@ describe("message sanitizer", () => {
             type: "tool-call_tool",
             toolCallId: "call-1",
             state: "input-available",
-            input: { title: "Check", name: "file.read_file", args: {} },
+            input: { title: "Check", name: "file.read", args: {} },
           },
         ],
       } as UIMessage,

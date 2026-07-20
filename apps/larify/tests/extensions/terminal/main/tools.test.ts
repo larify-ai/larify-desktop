@@ -33,21 +33,21 @@ function parseToolInput(name: string, input: unknown, service = createService())
 
 describe("terminal schemas", () => {
   it("rejects unknown fields", () => {
-    expect(parseToolInput("list_terminals", { shell: "cmd.exe" }).success).toBe(false)
-    expect(parseToolInput("create_terminal", { cwd: "D:\\Workspace", shell: "cmd.exe" }).success).toBe(false)
-    expect(parseToolInput("close_terminal", { id: 1, shell: "cmd.exe" }).success).toBe(false)
-    expect(parseToolInput("write_terminal", { id: 1, input: "echo hi", shell: "cmd.exe" }).success).toBe(false)
-    expect(parseToolInput("write_terminal", { id: 1, input: "\u001b[B", shell: "cmd.exe" }).success).toBe(false)
-    expect(parseToolInput("read_terminal", { id: 1, shell: "cmd.exe" }).success).toBe(false)
+    expect(parseToolInput("list", { shell: "cmd.exe" }).success).toBe(false)
+    expect(parseToolInput("create", { cwd: "D:\\Workspace", shell: "cmd.exe" }).success).toBe(false)
+    expect(parseToolInput("close", { id: 1, shell: "cmd.exe" }).success).toBe(false)
+    expect(parseToolInput("write", { id: 1, input: "echo hi", shell: "cmd.exe" }).success).toBe(false)
+    expect(parseToolInput("write", { id: 1, input: "\u001b[B", shell: "cmd.exe" }).success).toBe(false)
+    expect(parseToolInput("read", { id: 1, shell: "cmd.exe" }).success).toBe(false)
   })
 })
 
-describe("close_terminal", () => {
+describe("close", () => {
   it("throws when the terminal does not exist", async () => {
     const service = createService()
     vi.mocked(service.terminalState).mockReturnValue(null)
 
-    await expect(tool("close_terminal", service).execute({ id: 1 }, ctx)).rejects.toThrow(
+    await expect(tool("close", service).execute({ id: 1 }, ctx)).rejects.toThrow(
       'Terminal "1" not found.',
     )
     expect(service.flushRunHistory).not.toHaveBeenCalled()
@@ -65,7 +65,7 @@ describe("close_terminal", () => {
       exitCode: null,
     })
 
-    await expect(tool("close_terminal", service).execute({ id: 1 }, ctx)).resolves.toBe(
+    await expect(tool("close", service).execute({ id: 1 }, ctx)).resolves.toBe(
       "Closed terminal 1.",
     )
     expect(service.flushRunHistory).not.toHaveBeenCalled()
@@ -73,7 +73,7 @@ describe("close_terminal", () => {
   })
 })
 
-describe("write_terminal", () => {
+describe("write", () => {
   it("returns the full terminal snapshot with run metadata", async () => {
     const service = createService()
     vi.mocked(service.terminalState).mockReturnValue({
@@ -90,7 +90,7 @@ describe("write_terminal", () => {
     })
 
     await expect(
-      tool("write_terminal", service).execute({ id: 1, input: "echo done", submit: true, timeout: 0, idle: 0 }, ctx),
+      tool("write", service).execute({ id: 1, input: "echo done", submit: true, timeout: 0, idle: 0 }, ctx),
     ).resolves.toEqual({
       status: "command may still be running or waiting for input",
       snapshot: {
@@ -120,7 +120,7 @@ describe("write_terminal", () => {
     vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: "done" })
 
     await expect(
-      tool("write_terminal", service).execute({ id: 1, input: "echo done", submit: true, timeout: 0, idle: 0 }, ctx),
+      tool("write", service).execute({ id: 1, input: "echo done", submit: true, timeout: 0, idle: 0 }, ctx),
     ).resolves.toMatchObject({
       status: "command may still be running or waiting for input",
       snapshot: {
@@ -159,7 +159,7 @@ describe("write_terminal", () => {
     })
 
     await expect(
-      tool("write_terminal", service).execute({ id: 1, input: "echo done", submit: true, timeout: 0, idle: 0 }, ctx),
+      tool("write", service).execute({ id: 1, input: "echo done", submit: true, timeout: 0, idle: 0 }, ctx),
     ).resolves.toMatchObject({ status: "command may still be running or waiting for input", snapshot: { screen: "done" } })
 
     expect(order).toEqual(["lock", "start", "write", "unlock"])
@@ -178,7 +178,7 @@ describe("write_terminal", () => {
     vi.mocked(service.startRun).mockResolvedValue({ runId: "run-1", sessionId: "session-1" })
     vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: "done" })
 
-    await tool("write_terminal", service).execute(
+    await tool("write", service).execute(
       { id: 1, input: "idf.py menuconfig\r\n\n", submit: true, timeout: 0, idle: 0 },
       ctx,
     )
@@ -199,7 +199,7 @@ describe("write_terminal", () => {
     vi.mocked(service.startRun).mockResolvedValue({ runId: "run-1", sessionId: "session-1" })
     vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: "done" })
 
-    await tool("write_terminal", service).execute(
+    await tool("write", service).execute(
       { id: 1, input: "first\nsecond\n\rthird\r\n", timeout: 0, idle: 0 },
       ctx,
     )
@@ -220,7 +220,7 @@ describe("write_terminal", () => {
     vi.mocked(service.startRun).mockResolvedValue({ runId: "run-1", sessionId: "session-1" })
     vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: "done" })
 
-    await tool("write_terminal", service).execute(
+    await tool("write", service).execute(
       { id: 1, input: "\u001b[B", timeout: 0, idle: 0 },
       ctx,
     )
@@ -242,7 +242,7 @@ describe("write_terminal", () => {
     vi.mocked(service.startRun).mockResolvedValue({ runId: "run-1", sessionId: "session-1" })
     vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: "menu" })
 
-    await tool("write_terminal", service).execute(
+    await tool("write", service).execute(
       { id: 1, input: "\u001b[B", timeout: 0, idle: 0 },
       ctx,
     )
@@ -265,7 +265,7 @@ describe("write_terminal", () => {
     vi.mocked(service.startRun).mockResolvedValue({ runId: "run-1", sessionId: "session-1" })
     vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: "done" })
 
-    await tool("write_terminal", service).execute(
+    await tool("write", service).execute(
       { id: 1, input: "first\nsecond", timeout: 0, idle: 0 },
       ctx,
     )
@@ -289,7 +289,7 @@ describe("write_terminal", () => {
     vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: "done" })
 
     await expect(
-      tool("write_terminal", service).execute({ id: 1, input: "", timeout: 0, idle: 0 }, ctx),
+      tool("write", service).execute({ id: 1, input: "", timeout: 0, idle: 0 }, ctx),
     ).resolves.toMatchObject({ status: "command may still be running or waiting for input", snapshot: { screen: "done" } })
 
     expect(service.write).not.toHaveBeenCalled()
@@ -319,7 +319,7 @@ describe("write_terminal", () => {
     vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: "done" })
 
     await expect(
-      tool("write_terminal", service).execute({ id: 1, input: "echo done", submit: true, timeout: 30 }, ctx),
+      tool("write", service).execute({ id: 1, input: "echo done", submit: true, timeout: 30 }, ctx),
     ).resolves.toMatchObject({ status: "shell integration command finish event received", snapshot: { screen: "done" } })
 
     expect(service.bindCommandFinished).toHaveBeenCalled()
@@ -327,12 +327,12 @@ describe("write_terminal", () => {
 
 })
 
-describe("read_terminal", () => {
+describe("read", () => {
   it("throws when the terminal does not exist", async () => {
     const service = createService()
     vi.mocked(service.terminalState).mockReturnValue(null)
 
-    await expect(tool("read_terminal", service).execute({ id: 1 }, ctx)).rejects.toThrow(
+    await expect(tool("read", service).execute({ id: 1 }, ctx)).rejects.toThrow(
       'Terminal "1" not found.',
     )
     expect(service.flushRunHistory).not.toHaveBeenCalled()
@@ -356,7 +356,7 @@ describe("read_terminal", () => {
       return () => {}
     })
 
-    await expect(tool("read_terminal", service).execute({ id: 1, timeout: 1, idle: 0 }, ctx)).resolves.toEqual({
+    await expect(tool("read", service).execute({ id: 1, timeout: 1, idle: 0 }, ctx)).resolves.toEqual({
       status: "shell integration command finish event received",
       snapshot: {
         screen: "done",
@@ -384,7 +384,7 @@ describe("read_terminal", () => {
       return () => {}
     })
 
-    await expect(tool("read_terminal", service).execute({ id: 1, timeout: 0, idle: 0.001 }, ctx)).resolves.toEqual({
+    await expect(tool("read", service).execute({ id: 1, timeout: 0, idle: 0.001 }, ctx)).resolves.toEqual({
       status: "shell integration command finish event received",
       snapshot: {
         screen: "done",
@@ -412,7 +412,7 @@ describe("read_terminal", () => {
     })
     vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: "done" })
 
-    await expect(tool("read_terminal", service).execute({ id: 1, timeout: 0, idle: 0 }, ctx)).resolves.toEqual({
+    await expect(tool("read", service).execute({ id: 1, timeout: 0, idle: 0 }, ctx)).resolves.toEqual({
       status: "shell integration command finish event received",
       snapshot: {
         screen: "(Earlier output omitted; full output in log_path.)\ndone",
@@ -452,7 +452,7 @@ describe("read_terminal", () => {
     })
     vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: "done" })
 
-    const promise = tool("read_terminal", service).execute({ id: 1, timeout: 30, idle: 0 }, ctx)
+    const promise = tool("read", service).execute({ id: 1, timeout: 30, idle: 0 }, ctx)
     commandFinished?.("session-1", 1)
 
     await expect(promise).resolves.toEqual({

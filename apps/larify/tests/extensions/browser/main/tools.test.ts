@@ -29,6 +29,7 @@ function createService(): BrowserService {
     })),
     tab: vi.fn((_, id: number) => ({
       state: () => tabs.find((item) => item.id === id),
+      navigateAndWait: vi.fn(async () => undefined),
     })),
     createTab: vi.fn(() => 1),
     close: vi.fn(),
@@ -234,7 +235,7 @@ describe("browser toolkit", () => {
       canGoForward: false,
       error: null,
     })
-    expect(service.createTab).toHaveBeenCalledWith("session-1", "https://example.com")
+    expect(service.createTab).toHaveBeenCalledWith("session-1")
 
     await expect(tool("list_tabs", service).execute({}, ctx)).resolves.toEqual([
       {

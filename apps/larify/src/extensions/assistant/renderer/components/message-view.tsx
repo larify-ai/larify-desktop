@@ -120,10 +120,12 @@ function FileGroup({
   )
 }
 
+const emptyToolDisplays: Record<string, ToolDisplayMeta> = {}
+
 export function MessageView({
   message,
   streaming = false,
-  toolDisplays = {},
+  toolDisplays = emptyToolDisplays,
 }: {
   message: UIMessage
   streaming?: boolean

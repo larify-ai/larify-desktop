@@ -1,6 +1,7 @@
 import {
   streamText,
   isLoopFinished,
+  smoothStream,
   toUIMessageStream,
   createUIMessageStream,
   type LanguageModel,
@@ -64,6 +65,10 @@ export function runAgent(opts: {
         providerOptions: {
           deepseek: deepseekProviderOptions,
         },
+        experimental_transform: smoothStream({
+          delayInMs: 20,
+          chunking: new Intl.Segmenter("zh", { granularity: "word" }),
+        }),
         stopWhen: isLoopFinished(),
         abortSignal,
       })

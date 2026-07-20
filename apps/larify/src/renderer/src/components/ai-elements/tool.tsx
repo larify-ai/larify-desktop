@@ -23,26 +23,31 @@ import {
   XCircleIcon,
 } from "lucide-react";
 import type { ComponentProps, ReactNode } from "react";
-import { isValidElement, useEffect, useState } from "react";
+import { createContext, isValidElement, useContext, useEffect, useState } from "react";
 
 import { CodeBlock } from "./code-block";
 
 export type ToolProps = ComponentProps<typeof Collapsible>;
 
+const ToolOpenContext = createContext(false);
+
 export const Tool = ({ className, defaultOpen, open, onOpenChange, ...props }: ToolProps) => {
   const [internalOpen, setInternalOpen] = useState(Boolean(defaultOpen));
+  const currentOpen = open ?? internalOpen;
 
   useEffect(() => {
     if (defaultOpen) setInternalOpen(true);
   }, [defaultOpen]);
 
   return (
-    <Collapsible
-      className={cn("group not-prose w-full rounded-md border", className)}
-      open={open ?? internalOpen}
-      onOpenChange={onOpenChange ?? setInternalOpen}
-      {...props}
-    />
+    <ToolOpenContext.Provider value={currentOpen}>
+      <Collapsible
+        className={cn("group not-prose w-full rounded-md border", className)}
+        open={currentOpen}
+        onOpenChange={onOpenChange ?? setInternalOpen}
+        {...props}
+      />
+    </ToolOpenContext.Provider>
   );
 };
 
@@ -135,15 +140,21 @@ export const ToolHeader = ({
 
 export type ToolContentProps = ComponentProps<typeof CollapsibleContent>;
 
-export const ToolContent = ({ className, ...props }: ToolContentProps) => (
-  <CollapsibleContent
-    className={cn(
-      "data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 space-y-4 p-4 text-popover-foreground outline-none data-[state=closed]:animate-out data-[state=open]:animate-in",
-      className
-    )}
-    {...props}
-  />
-);
+export const ToolContent = ({ children, className, ...props }: ToolContentProps) => {
+  const open = useContext(ToolOpenContext);
+
+  return (
+    <CollapsibleContent
+      className={cn(
+        "data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 space-y-4 p-4 text-popover-foreground outline-none data-[state=closed]:animate-out data-[state=open]:animate-in",
+        className
+      )}
+      {...props}
+    >
+      {open ? children : null}
+    </CollapsibleContent>
+  );
+};
 
 export type ToolInputProps = ComponentProps<"div"> & {
   input: ToolPart["input"];

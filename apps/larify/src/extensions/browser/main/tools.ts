@@ -164,8 +164,10 @@ export function createBrowserToolkit(service: BrowserServiceProvider): Toolkit {
           const { url } = z.object({ url: z.string().optional() }).strict().parse(args)
           try {
             const resolved = resolveService(service)
-            const id = resolved.createTab(ctx.sessionId, url)
-            return tabState(getTab(service, ctx.sessionId, id))
+            const id = resolved.createTab(ctx.sessionId)
+            const tab = getTab(service, ctx.sessionId, id)
+            if (url) await tab.navigateAndWait(url)
+            return tabState(tab)
           } catch (error) {
             return errorResult(error)
           }

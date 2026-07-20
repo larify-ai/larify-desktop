@@ -14,6 +14,8 @@ Tool names use `toolkit_name.tool_name`. Use names exactly as returned.
 
 1. List tools in toolkits before calling `agent.get_tool_schemas`.
 
+Call `call_tool` with:
+
 ```json
 {
   "title": "<short action title>",
@@ -26,6 +28,8 @@ Tool names use `toolkit_name.tool_name`. Use names exactly as returned.
 
 2. Get tool schemas before invoking with the `call_tool` wrapper.
 
+Call `call_tool` with:
+
 ```json
 {
   "title": "<short action title>",
@@ -37,6 +41,8 @@ Tool names use `toolkit_name.tool_name`. Use names exactly as returned.
 ```
 
 3. Invoke tools with the `call_tool` wrapper and schema-valid args.
+
+Call `call_tool` with:
 
 ```json
 {

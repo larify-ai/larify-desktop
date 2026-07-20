@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react"
+import { memo, useEffect, useLayoutEffect, useRef, useState } from "react"
 import { ArrowUpIcon, FolderIcon, PlusIcon, SquareIcon } from "lucide-react"
 import { Chat, useChat } from "@ai-sdk/react"
 import type { FileUIPart, UIMessage } from "ai"
@@ -37,6 +37,8 @@ import { getAgentSessionId, setAgentSessionId } from "@renderer/lib/agent-sessio
 import { MessageView } from "./message-view"
 import { ipcTransport } from "../lib/transport"
 import type { ToolDisplayMeta } from "./message-view"
+
+const MemoizedMessageView = memo(MessageView)
 
 type LocalAttachment = FileUIPart & { id: string }
 
@@ -406,7 +408,7 @@ function AssistantChat({
       <Conversation className="min-w-0 flex-1">
         <ConversationContent className="mx-auto w-full max-w-3xl px-6">
           {messages.map((m, i) => (
-            <MessageView
+            <MemoizedMessageView
               key={m.id}
               message={m}
               streaming={isLive && i === messages.length - 1}

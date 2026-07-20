@@ -51,12 +51,13 @@ export function BrowserToolbar({
   const displayUrl = simplifyForDisplay(fullUrl)
   const editUrl = fullUrl.startsWith("file://") ? displayUrl : fullUrl
   const value = editing ?? displayUrl
+  const isEditing = editing !== null
 
   useEffect(() => {
-    if (editing === null) return
+    if (!isEditing) return
     inputRef.current?.focus()
     inputRef.current?.select()
-  }, [editing])
+  }, [isEditing])
 
   useEffect(() => {
     setEditing(null)

@@ -54,7 +54,7 @@ export class BrowserTabManager {
     this.activeId = tab.id
     if (url) tab.navigate(url)
     this.applyLayout()
-    if (!url) this.emit()
+    this.emit()
     return tab.id
   }
 

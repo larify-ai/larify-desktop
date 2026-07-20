@@ -1,6 +1,7 @@
 import { DiffView, DiffModeEnum } from "@git-diff-view/react"
 import "@git-diff-view/react/styles/diff-view.css"
 import { useTheme } from "next-themes"
+import { diffContentsForView } from "../lib/diff-content"
 
 export interface DiffMeta {
   kind: "diff"
@@ -15,6 +16,7 @@ export function FileDiff({ meta }: { meta: DiffMeta }): React.JSX.Element {
   const lang = meta.path.split(".").pop()?.toLowerCase() ?? ""
   const oldContent = meta.oldContent ?? ""
   const newContent = meta.newContent ?? ""
+  const contents = diffContentsForView({ oldContent, newContent, patch: meta.patch })
 
   return (
     <div className="larify-file-diff overflow-hidden rounded-md border border-border bg-muted/30 text-xs">
@@ -23,8 +25,8 @@ export function FileDiff({ meta }: { meta: DiffMeta }): React.JSX.Element {
       </div>
       <DiffView
         data={{
-          oldFile: { fileName: meta.path, fileLang: lang, content: oldContent },
-          newFile: { fileName: meta.path, fileLang: lang, content: newContent },
+          oldFile: { fileName: meta.path, fileLang: lang, content: contents?.oldContent },
+          newFile: { fileName: meta.path, fileLang: lang, content: contents?.newContent },
           hunks: [meta.patch],
         }}
         diffViewMode={DiffModeEnum.Unified}

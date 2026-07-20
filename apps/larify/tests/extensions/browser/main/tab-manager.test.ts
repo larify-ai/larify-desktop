@@ -120,6 +120,19 @@ describe("BrowserTabManager", () => {
     })
   })
 
+  it("emits state immediately when creating a tab with a URL", () => {
+    const manager = new BrowserTabManager(fakeWindow())
+    const changes: unknown[] = []
+    manager.bindChange((state) => changes.push(state))
+
+    manager.createTab("example.com")
+
+    expect(changes.at(-1)).toMatchObject({
+      activeId: 1,
+      tabs: [{ id: 1, url: "https://example.com" }],
+    })
+  })
+
   it("places only the active tab in the main window when visible", () => {
     const manager = new BrowserTabManager(fakeWindow())
     const first = manager.createTab()

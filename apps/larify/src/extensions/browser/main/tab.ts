@@ -505,6 +505,12 @@ export class BrowserTab {
   }
 
   async screenshot(opts: ScreenshotOptions): Promise<ScreenshotResult> {
+    if (!opts.selector && !opts.fullPage) {
+      const image = await this.view.webContents.capturePage()
+      const format = opts.format ?? "png"
+      const buffer = format === "jpeg" ? image.toJPEG(opts.quality ?? 80) : image.toPNG()
+      return { data: buffer.toString("base64"), mimeType: format === "jpeg" ? "image/jpeg" : "image/png" }
+    }
     return screenshot(this.interactCtx(), opts)
   }
 

@@ -43,6 +43,11 @@ export class BrowserTabManager {
     return this.tabs.get(id)
   }
 
+  ensureTab(): void {
+    if (this.tabs.size > 0) return
+    this.createTab()
+  }
+
   createTab(url?: string): number {
     const tab = new BrowserTab(this.nextId++, PARTITION)
     tab.bindChange(() => this.emit())
@@ -117,7 +122,7 @@ export class BrowserTabManager {
     return this.recorder.start(tab, path)
   }
 
-  recordStop(): Promise<{ path: string; data: Buffer }> {
+  recordStop(): Promise<{ path: string; bytes: number }> {
     return this.recorder.stop()
   }
 
@@ -181,7 +186,7 @@ export class BrowserTabManager {
       this.viewParent.set(tab.id, this.host)
     }
     tab.view.setBounds(this.hostBounds())
-    tab.view.setVisible(false)
+    tab.view.setVisible(true)
   }
 
   private applyLayout(): void {

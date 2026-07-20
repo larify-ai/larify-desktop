@@ -144,13 +144,13 @@ describe("BrowserTabManager", () => {
     expect(secondView.parent).toBe(h.mainWin)
     expect(secondView.visibleCalls.at(-1)).toBe(true)
     expect(firstView.parent).toBe(h.hostWin)
-    expect(firstView.visibleCalls.at(-1)).toBe(false)
+    expect(firstView.visibleCalls.at(-1)).toBe(true)
 
     manager.setActive(first)
     expect(firstView.parent).toBe(h.mainWin)
     expect(firstView.visibleCalls.at(-1)).toBe(true)
     expect(secondView.parent).toBe(h.hostWin)
-    expect(secondView.visibleCalls.at(-1)).toBe(false)
+    expect(secondView.visibleCalls.at(-1)).toBe(true)
   })
 
   it("moves the active tab off-screen when the viewport collapses", () => {
@@ -162,7 +162,7 @@ describe("BrowserTabManager", () => {
 
     manager.setBounds({ x: 0, y: 0, width: 0, height: 0 })
     expect(h.views[0].parent).toBe(h.hostWin)
-    expect(h.views[0].visibleCalls.at(-1)).toBe(false)
+    expect(h.views[0].visibleCalls.at(-1)).toBe(true)
   })
 
   it("reorders tabs and clamps the target index", () => {

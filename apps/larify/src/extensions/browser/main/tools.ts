@@ -659,6 +659,21 @@ const recordSchema = z
   })
   .strict()
 
+const recordStartSchema = z
+  .object({
+    id: idSchema,
+    path: z.string().min(1).describe("Local .webm file path."),
+    duration: z
+      .number()
+      .positive()
+      .max(600)
+      .optional()
+      .describe("Seconds to record before auto-stopping (max 600). Omit to record until record_stop."),
+  })
+  .strict()
+
+const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
+
 function captureTools(service: BrowserServiceProvider): Toolkit["tools"] {
   return [
     {
@@ -687,14 +702,17 @@ function captureTools(service: BrowserServiceProvider): Toolkit["tools"] {
     },
     {
       name: "record_start",
-      description: "Start recording a tab to a webm video file.",
+      description:
+        "Start recording a tab to a webm video file. Pass duration to record for that many seconds and auto-stop.",
       metadata: { icon: "browser" },
-      inputSchema: recordSchema,
+      inputSchema: recordStartSchema,
       execute: async (args, ctx) => {
-        const { id, path } = recordSchema.parse(args)
+        const { id, path, duration } = recordStartSchema.parse(args)
         return withTab(service, ctx.sessionId, id, async (tab) => {
           await resolveService(service).recordStart(ctx.sessionId, tab, path)
-          return { recording: true, path }
+          if (duration === undefined) return { recording: true, path }
+          await delay(duration * 1000)
+          return resolveService(service).recordStop(ctx.sessionId)
         })
       },
     },
@@ -705,8 +723,7 @@ function captureTools(service: BrowserServiceProvider): Toolkit["tools"] {
       inputSchema: z.object({}).strict(),
       execute: async (_args, ctx) => {
         try {
-          const { path, data } = await resolveService(service).recordStop(ctx.sessionId)
-          return await writeBytes(path, data)
+          return await resolveService(service).recordStop(ctx.sessionId)
         } catch (error) {
           return errorResult(error)
         }

@@ -25,7 +25,18 @@ export async function screenshot(
 
   if (opts.selector) {
     const box = await getBox(ctx, opts.selector)
-    params.clip = { x: box.x, y: box.y, width: box.width, height: box.height, scale: 1 }
+    const scroll = (await ctx.send('Runtime.evaluate', {
+      expression: '({ x: window.scrollX, y: window.scrollY })',
+      returnByValue: true,
+    })) as { result?: { value?: { x: number; y: number } } }
+    const offset = scroll.result?.value ?? { x: 0, y: 0 }
+    params.clip = {
+      x: box.x + offset.x,
+      y: box.y + offset.y,
+      width: box.width,
+      height: box.height,
+      scale: 1,
+    }
     params.captureBeyondViewport = true
   } else if (opts.fullPage) {
     const metrics = (await ctx.send('Page.getLayoutMetrics')) as {

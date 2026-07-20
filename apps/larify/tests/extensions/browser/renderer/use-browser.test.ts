@@ -79,19 +79,19 @@ describe("useBrowser", () => {
     await act(async () => root.render(createElement(Probe, { onState: vi.fn() })))
 
     expect(invoke).toHaveBeenCalledWith("browser:getState", "session-a")
-    expect(invoke).not.toHaveBeenCalledWith("browser:create", "session-a")
+    expect(invoke).not.toHaveBeenCalledWith("browser:ensureTab", "session-a")
 
     await act(async () => {
       window.dispatchEvent(new CustomEvent("larify:workbench-active", { detail: "browser" }))
     })
 
-    expect(invoke).not.toHaveBeenCalledWith("browser:create", "session-a")
+    expect(invoke).not.toHaveBeenCalledWith("browser:ensureTab", "session-a")
 
     await act(async () => {
       stateRequest.resolve({ tabs: [], activeId: null })
     })
 
-    expect(invoke).toHaveBeenCalledWith("browser:create", "session-a")
+    expect(invoke).toHaveBeenCalledWith("browser:ensureTab", "session-a")
   })
 
   it("closes the workbench instead of recreating a tab when the last tab closes", async () => {
@@ -136,7 +136,7 @@ describe("useBrowser", () => {
 
     expect(invoke).toHaveBeenCalledWith("browser:close", "session-a", 1)
     expect(closeEvents).toEqual(["browser"])
-    expect(invoke.mock.calls.filter((call) => call[0] === "browser:create")).toHaveLength(0)
+    expect(invoke.mock.calls.filter((call) => call[0] === "browser:ensureTab")).toHaveLength(0)
     window.removeEventListener("larify:workbench-close", onCloseWorkbench)
   })
 

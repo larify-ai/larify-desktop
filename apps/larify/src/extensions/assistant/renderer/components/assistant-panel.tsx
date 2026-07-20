@@ -260,7 +260,7 @@ function AssistantChat({
   onSaveSession: (id: string, messages: UIMessage[]) => void
   sessions: SessionMeta[]
 }): React.JSX.Element {
-  const { messages, sendMessage, status, stop } = useChat({ chat })
+  const { messages, sendMessage, status, stop } = useChat({ chat, throttle: 50 })
   const [toolDisplays, setToolDisplays] = useState<Record<string, ToolDisplayMeta>>({})
   const inputFrameRef = useRef<HTMLDivElement>(null)
   const menuTriggerRef = useRef<HTMLDivElement>(null)

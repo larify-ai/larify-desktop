@@ -24,6 +24,8 @@ export function registerBrowserIpc(getService: () => BrowserService): () => void
       service().state(sessionId),
     "browser:create": (_event: IpcMainInvokeEvent, sessionId: string, url?: string) =>
       service().createTab(sessionId, url),
+    "browser:ensureTab": (_event: IpcMainInvokeEvent, sessionId: string) =>
+      service().ensureTab(sessionId),
     "browser:setActive": (_event: IpcMainInvokeEvent, sessionId: string, id: number) =>
       service().setActive(sessionId, id),
     "browser:reorder": (_event: IpcMainInvokeEvent, sessionId: string, id: number, toIndex: number) =>

@@ -74,7 +74,7 @@ export function useBrowser(): UseBrowser {
     if (loadedSessionId !== sessionId) return
     if (state.tabs.length > 0) return
     if (suppressAutoCreateRef.current) return
-    void window.bridge.invoke("browser:create", sessionId)
+    void window.bridge.invoke("browser:ensureTab", sessionId)
   }, [loadedSessionId, sessionId, state.tabs.length, workbenchVisible])
 
   const actions = useMemo(

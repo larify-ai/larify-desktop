@@ -593,7 +593,7 @@ describe("browser toolkit", () => {
       ...createService(),
       tab: vi.fn(() => tab),
       recordStart: vi.fn(async () => undefined),
-      recordStop: vi.fn(async () => ({ path: recordPath, data: video })),
+      recordStop: vi.fn(async () => ({ path: recordPath, bytes: video.length })),
       recordRestart: vi.fn(async () => undefined),
     } as unknown as BrowserService
 
@@ -621,6 +621,30 @@ describe("browser toolkit", () => {
     expect(parseToolInput("screenshot", { id: 1, quality: -1 }).success).toBe(false)
     expect(parseToolInput("screenshot", { id: 1, quality: 101 }).success).toBe(false)
     expect(parseToolInput("screenshot", { id: 1, quality: 0 }).success).toBe(true)
+  })
+
+  it("auto-stops record_start when a duration is given and returns the finished recording", async () => {
+    const recordPath = join(tmpdir(), "larify-record-duration-test.webm")
+    const service = {
+      ...createService(),
+      tab: vi.fn(() => ({})),
+      recordStart: vi.fn(async () => undefined),
+      recordStop: vi.fn(async () => ({ path: recordPath, bytes: 42 })),
+    } as unknown as BrowserService
+
+    const result = await tool("record_start", service).execute(
+      { id: 1, path: recordPath, duration: 0.01 },
+      ctx,
+    )
+
+    expect(service.recordStart).toHaveBeenCalledTimes(1)
+    expect(service.recordStop).toHaveBeenCalledWith(ctx.sessionId)
+    expect(result).toEqual({ path: recordPath, bytes: 42 })
+  })
+
+  it("rejects a record duration over the 600s cap", () => {
+    expect(parseToolInput("record_start", { id: 1, path: "x.webm", duration: 601 }).success).toBe(false)
+    expect(parseToolInput("record_start", { id: 1, path: "x.webm", duration: 5 }).success).toBe(true)
   })
 
   it("returns capture errors without throwing", async () => {

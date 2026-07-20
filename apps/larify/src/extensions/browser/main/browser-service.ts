@@ -30,6 +30,10 @@ export class BrowserService {
     return this.manager(sessionId).createTab(url)
   }
 
+  ensureTab(sessionId: string): void {
+    this.manager(sessionId).ensureTab()
+  }
+
   setActive(sessionId: string, id: number): void {
     this.manager(sessionId).setActive(id)
   }
@@ -62,7 +66,7 @@ export class BrowserService {
     return this.manager(sessionId).recordStart(tab, path)
   }
 
-  recordStop(sessionId: string): Promise<{ path: string; data: Buffer }> {
+  recordStop(sessionId: string): Promise<{ path: string; bytes: number }> {
     return this.manager(sessionId).recordStop()
   }
 

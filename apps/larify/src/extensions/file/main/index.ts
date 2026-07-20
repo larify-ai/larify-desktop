@@ -7,15 +7,15 @@ import { grepFilesTool } from "./grep"
 import { lsTool } from "./ls"
 import { writeFileTool } from "./write"
 
-const fileKit: Toolkit = {
-  name: "filesystem",
+const fileToolkit: Toolkit = {
+  name: "fs",
   description: "Read, write, list, glob, and grep files",
   tools: [readFileTool, editFileTool, writeFileTool, lsTool, globFilesTool, grepFilesTool],
 }
 
 const extension: Extension = {
   activate(app, context) {
-    context.subscriptions.push(app.register("tool", "file", fileKit))
+    context.subscriptions.push(app.register("tool", "file", fileToolkit))
   },
 }
 

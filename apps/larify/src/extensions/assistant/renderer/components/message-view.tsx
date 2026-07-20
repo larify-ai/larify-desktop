@@ -40,18 +40,18 @@ function unwrapToolDisplay(
 ): { toolName: string; input: unknown; title?: string; inputIsOuterToolArgs?: boolean } | null {
   const maybeCallToolInput = input as {
     title?: unknown
-    tool_name?: unknown
-    tool_args?: unknown
+    name?: unknown
+    args?: unknown
   } | null
   if (
     toolName === "call_tool" &&
     maybeCallToolInput &&
     typeof maybeCallToolInput === "object" &&
-    typeof maybeCallToolInput.tool_name === "string"
+    typeof maybeCallToolInput.name === "string"
   ) {
     return {
-      toolName: maybeCallToolInput.tool_name,
-      input: maybeCallToolInput.tool_args,
+      toolName: maybeCallToolInput.name,
+      input: maybeCallToolInput.args,
       ...(typeof maybeCallToolInput.title === "string" && { title: maybeCallToolInput.title }),
     }
   }
@@ -82,8 +82,8 @@ function unwrapToolDisplay(
 
 function toolInputDisplay(toolName: string, input: unknown): Record<string, unknown> {
   return {
-    tool_name: toolName,
-    tool_args: input,
+    name: toolName,
+    args: input,
   }
 }
 
@@ -91,13 +91,13 @@ function outerToolInputDisplay(toolName: string, input: unknown): Record<string,
   if (input && typeof input === "object" && !Array.isArray(input) && "title" in input) {
     const { title: _title, ...toolArgs } = input as Record<string, unknown>
     return {
-      tool_name: toolName,
-      tool_args: toolArgs,
+      name: toolName,
+      args: toolArgs,
     }
   }
   return {
-    tool_name: toolName,
-    tool_args: input,
+    name: toolName,
+    args: input,
   }
 }
 

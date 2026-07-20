@@ -12,8 +12,10 @@ function platformName(): string {
 }
 
 export function buildSystemPrompt(registry: ToolRegistry): string {
+  const toolkits = registry.listToolkits()
   return liquid.parseAndRenderSync(template, {
-    kits: registry.listKits(),
+    toolkits,
+    toolkitsJson: JSON.stringify({ toolkits }, null, 2),
     platform: platformName(),
   }).trim()
 }

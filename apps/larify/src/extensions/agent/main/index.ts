@@ -10,8 +10,8 @@ import { createSessionStore } from "./session-store"
 import { sanitizeAndValidateMessages } from "./message-sanitizer"
 
 const metaToolDisplays = {
-  list_kits: { title: "搜索工具", icon: "search" },
-  read_tools: { title: "读取工具", icon: "search" },
+  "agent.list_toolkit_tools": { title: "搜索工具", icon: "search" },
+  "agent.get_tool_schemas": { title: "读取工具", icon: "search" },
   call_tool: { title: "调用工具", icon: "other" },
 }
 

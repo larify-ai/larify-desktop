@@ -19,6 +19,12 @@ import type {
 
 const DEFAULT_WORKSPACE = larifyWorkspacePath()
 const POWERSHELL_INTEGRATION_SCRIPT = 'shell-integration/shellIntegration.ps1'
+const POWERSHELL_UTF8_BOOTSTRAP = [
+  'chcp.com 65001 > $null',
+  '[Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)',
+  '[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)',
+  '$OutputEncoding = [System.Text.UTF8Encoding]::new($false)'
+].join('; ')
 const BASH_INTEGRATION_SCRIPT = 'shell-integration/shellIntegration-bash.sh'
 const ZSH_INTEGRATION_SCRIPTS = [
   ['shell-integration/shellIntegration-env.zsh', '.zshenv'],
@@ -77,6 +83,10 @@ function writeIntegrationScript(source: string, target: string): void {
   writeFileSync(target, content, 'utf8')
 }
 
+function powerShellLiteral(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`
+}
+
 function bashIntegrationScript(): string {
   const dir = larifyTempPath('shell-integration', 'bash', randomUUID())
   const scriptPath = join(dir, 'shellIntegration-bash.sh')
@@ -103,7 +113,7 @@ function shellIntegrationOptions(shell: string): Pick<TerminalCreateOptions, 'sh
         'Bypass',
         '-NoExit',
         '-Command',
-        `. "${integrationScript}"`
+        `${POWERSHELL_UTF8_BOOTSTRAP}; . ${powerShellLiteral(integrationScript)}`
       ],
       shellEnv: {
         VSCODE_NONCE: randomUUID(),

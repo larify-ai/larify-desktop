@@ -13,7 +13,7 @@ Use `agent.list_toolkit_tools` to inspect tools in a toolkit, then `agent.get_to
 
 ## Workflow
 
-1. List tools in toolkits before calling `agent.get_tool_schemas`.
+1. First, list tools in toolkits before calling `agent.get_tool_schemas`.
 
 Call `call_tool` with:
 
@@ -27,7 +27,7 @@ Call `call_tool` with:
 }
 ```
 
-2. Get tool schemas before invoking with the `call_tool` wrapper.
+2. Then, get tool schemas before invoking with the `call_tool` wrapper.
 
 Call `call_tool` with:
 
@@ -41,7 +41,7 @@ Call `call_tool` with:
 }
 ```
 
-3. Invoke tools with schema-valid args only after retrieving exact schemas.
+3. Finally, invoke tools with schema-valid args only after retrieving exact schemas.
 
 Call `call_tool` with:
 

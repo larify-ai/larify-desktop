@@ -104,6 +104,17 @@ async function waitForWebContentsLoad(wc: WebContents, timeoutMs = 30000): Promi
   await waitForWebContentsNotLoading(wc, timeoutMs)
 }
 
+function evalJsExpression(script: string): string {
+  const source = JSON.stringify(script)
+  return [
+    "(async () => {",
+    `const source = ${source}`,
+    "const value = eval('(' + source + ')')",
+    "return typeof value === 'function' ? await value() : value",
+    "})()",
+  ].join("\n")
+}
+
 export class BrowserTab {
   readonly id: number
   readonly view: WebContentsView
@@ -258,7 +269,11 @@ export class BrowserTab {
   async evalJs(script: string, sessionId?: string): Promise<unknown> {
     const res = (await this.sendCdp(
       "Runtime.evaluate",
-      { expression: `(${script})()`, returnByValue: true, awaitPromise: true },
+      {
+        expression: evalJsExpression(script),
+        returnByValue: true,
+        awaitPromise: true,
+      },
       sessionId,
     )) as {
       result?: { value?: unknown }

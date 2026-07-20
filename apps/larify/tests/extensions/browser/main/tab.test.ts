@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 const h = vi.hoisted(() => ({
   fetchMock: vi.fn(),
   clickMock: vi.fn(),
+  sendCommandMock: vi.fn(),
 }))
 
 vi.mock("electron", () => {
@@ -31,6 +32,12 @@ vi.mock("electron", () => {
     deferLoad = false
     pendingLoads: Array<() => void> = []
     session = new FakeSession()
+    debugger = {
+      isAttached: () => true,
+      attach: vi.fn(),
+      on: vi.fn(),
+      sendCommand: (...args: unknown[]) => h.sendCommandMock(...args),
+    }
 
     on(event: string, cb: (...args: unknown[]) => void): void {
       ;(this.handlers[event] ??= []).push(cb)
@@ -50,11 +57,17 @@ vi.mock("electron", () => {
         return new Promise((resolve) => {
           this.pendingLoads.push(() => {
             this.url = url
+            this.emit("did-finish-load")
+            this.emit("did-stop-loading")
             resolve()
           })
         })
       }
       this.url = url
+      queueMicrotask(() => {
+        this.emit("did-finish-load")
+        this.emit("did-stop-loading")
+      })
       return Promise.resolve()
     }
 
@@ -156,14 +169,15 @@ describe("BrowserTab", () => {
   beforeEach(() => {
     h.fetchMock.mockReset()
     h.clickMock.mockReset()
+    h.sendCommandMock.mockReset()
     h.clickMock.mockResolvedValue(undefined)
+    h.sendCommandMock.mockResolvedValue({})
   })
 
   it("normalizes navigation input before loading", async () => {
     const tab = new BrowserTab(1, "p")
     expect(tab.navigate("example.com")).toBe(true)
-    await Promise.resolve()
-    expect(webContents(tab).loadURLCalls).toContain("https://example.com")
+    await waitFor(() => expect(webContents(tab).loadURLCalls).toContain("https://example.com"))
   })
 
   it("exposes a pending navigation target before loadURL completes", async () => {
@@ -176,6 +190,7 @@ describe("BrowserTab", () => {
     expect(tab.state().url).toBe("https://example.com")
     expect(tab.state().loading).toBe(true)
 
+    await waitFor(() => expect(webContents(tab).pendingLoads.length).toBeGreaterThan(0))
     webContents(tab).pendingLoads.splice(0).forEach((resolve) => resolve())
     webContents(tab).emit("did-navigate")
 
@@ -321,6 +336,20 @@ describe("BrowserTab", () => {
 
     await assertion
     vi.useRealTimers()
+  })
+
+  it("evaluates JavaScript functions and expressions", async () => {
+    h.sendCommandMock.mockImplementation(async (method: string, params: { expression?: string }) => {
+      if (method !== "Runtime.evaluate") return {}
+      return { result: { value: await Function(`return ${params.expression}`)() } }
+    })
+    const tab = new BrowserTab(1, "p")
+
+    await expect(tab.evalJs("() => 1 + 1")).resolves.toBe(2)
+    await expect(tab.evalJs("async () => 1 + 1")).resolves.toBe(2)
+    await expect(tab.evalJs("function () { return 1 + 1 }")).resolves.toBe(2)
+    await expect(tab.evalJs("1 + 1")).resolves.toBe(2)
+    await expect(tab.evalJs("missingGlobal")).rejects.toThrow("missingGlobal is not defined")
   })
 
   it("ignores user abort and subframe load failures", () => {

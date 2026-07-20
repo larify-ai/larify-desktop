@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useAgentSessionId } from "@renderer/lib/agent-session"
 import type { BrowserState, BrowserTabState } from "../shared/types"
 
@@ -24,6 +24,13 @@ export function useBrowser(): UseBrowser {
   const [loadedSessionId, setLoadedSessionId] = useState<string | null>(null)
   const [workbenchVisible, setWorkbenchVisible] = useState(false)
 
+  const refreshState = useCallback(async (): Promise<void> => {
+    const value = await window.bridge.invoke("browser:getState", sessionId)
+    const next = (value as BrowserState | null) ?? EMPTY
+    setLoadedSessionId(sessionId)
+    setState(next)
+  }, [sessionId])
+
   useEffect(() => {
     let alive = true
     setLoadedSessionId(null)
@@ -45,6 +52,11 @@ export function useBrowser(): UseBrowser {
       off()
     }
   }, [sessionId])
+
+  useEffect(() => {
+    if (!workbenchVisible) return
+    void refreshState()
+  }, [refreshState, workbenchVisible])
 
   useEffect(() => {
     const onActive = (event: Event): void => {

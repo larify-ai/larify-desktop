@@ -39,4 +39,26 @@ describe("session store", () => {
       await rm(root, { recursive: true, force: true })
     }
   })
+
+  it("serializes concurrent saves for the same session", async () => {
+    const root = await mkdtemp(join(tmpdir(), "larify-sessions-"))
+    try {
+      const store = createSessionStore(root)
+      const first: UIMessage[] = [
+        { id: "user-1", role: "user", parts: [{ type: "text", text: "first" }] },
+      ]
+      const second: UIMessage[] = [
+        { id: "user-2", role: "user", parts: [{ type: "text", text: "second" }] },
+      ]
+
+      await Promise.all([
+        store.saveSession("chat/one", first),
+        store.saveSession("chat/one", second),
+      ])
+
+      expect(await store.loadSession("chat/one")).toEqual(second)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
 })

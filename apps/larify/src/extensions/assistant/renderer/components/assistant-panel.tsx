@@ -197,6 +197,7 @@ export function AssistantPanel(): React.JSX.Element {
     <AssistantChat
       key={sessionId}
       chat={chat}
+      onSaveSession={saveSessionMessages}
       sessions={sessions}
     />
   )
@@ -252,15 +253,21 @@ function DirectoryAttachmentMenuItem(): React.JSX.Element {
 
 function AssistantChat({
   chat,
+  onSaveSession,
   sessions,
 }: {
   chat: Chat<UIMessage>
+  onSaveSession: (id: string, messages: UIMessage[]) => void
   sessions: SessionMeta[]
 }): React.JSX.Element {
   const { messages, sendMessage, status, stop } = useChat({ chat })
   const [toolDisplays, setToolDisplays] = useState<Record<string, ToolDisplayMeta>>({})
   const inputFrameRef = useRef<HTMLDivElement>(null)
   const menuTriggerRef = useRef<HTMLDivElement>(null)
+  const pendingInitialSaveRef = useRef(false)
+  const submittingRef = useRef(false)
+  const stoppingRef = useRef(false)
+  const submittedMessageCountRef = useRef(0)
   const [menuMetrics, setMenuMetrics] = useState({
     alignOffset: -12,
     sideOffset: 0,
@@ -285,13 +292,37 @@ function AssistantChat({
     void refreshToolDisplays()
   }, [])
 
+  useEffect(() => {
+    if (isLive) return
+    submittingRef.current = false
+    stoppingRef.current = false
+  }, [isLive])
+
+  useEffect(() => {
+    if (!pendingInitialSaveRef.current) return
+    if (messages.length <= submittedMessageCountRef.current) return
+    pendingInitialSaveRef.current = false
+    onSaveSession(chat.id, messages)
+  }, [chat.id, messages, onSaveSession])
+
   const handleSubmit = (message: PromptInputMessage): void => {
+    if (isLive || submittingRef.current) return
     const text = message.text.trim()
     const files = message.files
     if (text || files.length > 0) {
+      submittingRef.current = true
       setInputText("")
+      pendingInitialSaveRef.current = true
+      submittedMessageCountRef.current = messages.length
       void refreshToolDisplays().finally(() => void sendMessage({ text, files }))
     }
+  }
+
+  const handleStop = (): void => {
+    if (stoppingRef.current) return
+    stoppingRef.current = true
+    if (messages.length > 0) onSaveSession(chat.id, messages)
+    void stop()
   }
 
   const selectSession = (id: string): void => {
@@ -391,7 +422,7 @@ function AssistantChat({
           </PromptInputTools>
           <PromptInputSubmit
             status={status}
-            onStop={() => void stop()}
+            onStop={handleStop}
             disabled={!canSubmit}
             className="rounded-full"
           >

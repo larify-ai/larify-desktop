@@ -124,6 +124,8 @@ describe("useBrowser", () => {
       })
     })
 
+    invoke.mockClear()
+
     await act(async () => {
       await browser?.close(1)
     })

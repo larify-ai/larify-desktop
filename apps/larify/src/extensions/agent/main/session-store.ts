@@ -60,6 +60,28 @@ export function createSessionStore(root = larifyPath("sessions")): SessionStore 
   const sessionDir = (id: string): string => join(root, safeSessionId(id))
   const messagesPath = (id: string): string => join(sessionDir(id), "messages.json")
   const metaPath = (id: string): string => join(sessionDir(id), "meta.json")
+  const saves = new Map<string, Promise<unknown>>()
+
+  const runSave = async (id: string, messages: UIMessage[]): Promise<StoredSession> => {
+    const now = Date.now()
+    const previous = await readJson<StoredSession>(messagesPath(id))
+    const stored: StoredSession = {
+      id,
+      createdAt: previous?.createdAt ?? now,
+      updatedAt: now,
+      messages,
+    }
+    const meta: SessionMeta = {
+      id,
+      createdAt: stored.createdAt,
+      updatedAt: stored.updatedAt,
+      title: previous ? (await readJson<SessionMeta>(metaPath(id)))?.title : createTitle(messages),
+    }
+
+    await writeJson(messagesPath(id), stored)
+    await writeJson(metaPath(id), meta)
+    return stored
+  }
 
   return {
     async loadSession(id) {
@@ -68,24 +90,12 @@ export function createSessionStore(root = larifyPath("sessions")): SessionStore 
     },
 
     async saveSession(id, messages) {
-      const now = Date.now()
-      const previous = await readJson<StoredSession>(messagesPath(id))
-      const stored: StoredSession = {
-        id,
-        createdAt: previous?.createdAt ?? now,
-        updatedAt: now,
-        messages,
-      }
-      const meta: SessionMeta = {
-        id,
-        createdAt: stored.createdAt,
-        updatedAt: stored.updatedAt,
-        title: previous ? (await readJson<SessionMeta>(metaPath(id)))?.title : createTitle(messages),
-      }
-
-      await writeJson(messagesPath(id), stored)
-      await writeJson(metaPath(id), meta)
-      return stored
+      const previous = saves.get(id) ?? Promise.resolve()
+      const next = previous.then(() => runSave(id, messages))
+      saves.set(id, next.finally(() => {
+        if (saves.get(id) === next) saves.delete(id)
+      }))
+      return next
     },
 
     async listSessions() {

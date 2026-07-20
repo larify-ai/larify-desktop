@@ -56,7 +56,7 @@ const snapshotSchema = z
 const evalSchema = z
   .object({
     id: idSchema,
-    script: z.string().describe("JavaScript function source"),
+    script: z.string().describe("JavaScript function, e.g. () => document.title"),
     sessionId: z.string().optional(),
   })
   .strict()

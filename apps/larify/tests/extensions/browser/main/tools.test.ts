@@ -49,66 +49,40 @@ describe("browser toolkit", () => {
   it("exposes the migrated browser tool surface without browser_ prefixes", () => {
     expect(createBrowserToolkit(createService()).tools.map((item) => item.name).sort()).toEqual(
       [
-        "back",
         "cdp_call",
         "cdp_events",
-        "check",
         "click",
         "close_tab",
         "console",
         "create_tab",
-        "dblclick",
         "download",
         "drag",
+        "element_action",
         "errors",
         "eval_js",
         "fill",
-        "focus",
-        "forward",
-        "get_attr",
-        "get_box",
-        "get_count",
-        "get_html",
-        "get_styles",
-        "get_text",
-        "get_value",
-        "highlight",
-        "hover",
-        "is_checked",
-        "is_enabled",
-        "is_visible",
-        "keydown",
+        "keyboard_key",
         "keyboard_insert_text",
         "keyboard_type",
-        "keyup",
         "list_tabs",
-        "mouse_down",
+        "mouse_button",
         "mouse_move",
-        "mouse_up",
         "mouse_wheel",
         "navigate",
         "pdf",
         "press",
+        "query_element",
         "read_page",
         "record_restart",
         "record_start",
         "record_stop",
-        "reload",
         "screenshot",
         "scroll",
-        "scroll_into_view",
         "select",
         "snapshot",
         "type",
-        "uncheck",
         "upload",
-        "wait_for_download",
-        "wait_for_function",
-        "wait_for_load",
-        "wait_for_selector",
-        "wait_for_text",
-        "wait_for_url",
-        "wait",
+        "wait_for",
       ].sort(),
     )
   })
@@ -120,11 +94,47 @@ describe("browser toolkit", () => {
     expect(parseToolInput("navigate", { id: 1, url: "https://example.com", tabId: 1 }).success).toBe(
       false,
     )
+    expect(parseToolInput("navigate", { id: 1 }).success).toBe(false)
+    expect(parseToolInput("navigate", { id: 1, action: "back" }).success).toBe(true)
     expect(parseToolInput("click", { id: 1, selector: "button", wait: true }).success).toBe(false)
+    expect(parseToolInput("query_element", { id: 1, selector: "button", query: "attr" }).success).toBe(false)
+    expect(
+      parseToolInput("query_element", { id: 1, selector: "button", query: "text", name: "href" }).success,
+    ).toBe(false)
+    expect(
+      parseToolInput("query_element", { id: 1, selector: "button", query: "text", properties: ["color"] }).success,
+    ).toBe(false)
+    expect(parseToolInput("query_element", { id: 1, selector: "button", query: "count" }).success).toBe(false)
+    expect(parseToolInput("element_action", { id: 1, selector: "button", action: "click" }).success).toBe(false)
+    expect(parseToolInput("drag", { id: 1, source: "", target: "#b" }).success).toBe(false)
+    expect(parseToolInput("drag", { id: 1, source: "#a", target: "" }).success).toBe(false)
+    expect(parseToolInput("upload", { id: 1, selector: "input", files: [] }).success).toBe(false)
+    expect(parseToolInput("upload", { id: 1, selector: "input", files: [""] }).success).toBe(false)
+    expect(parseToolInput("download", { id: 1, selector: "a", path: "" }).success).toBe(false)
+    expect(parseToolInput("download", { id: 1, selector: "a", path: "D:\\file.txt", timeoutMs: 1000 }).success).toBe(
+      false,
+    )
+    expect(parseToolInput("select", { id: 1, selector: "select", values: [] }).success).toBe(false)
+    expect(parseToolInput("select", { id: 1, selector: "select", values: [""] }).success).toBe(false)
+    expect(parseToolInput("scroll", { id: 1, direction: "down", amount: 0 }).success).toBe(false)
+    expect(parseToolInput("wait_for", { id: 1 }).success).toBe(false)
+    expect(parseToolInput("wait_for", { id: 1, selector: "button", text: "ready" }).success).toBe(false)
+    expect(parseToolInput("wait_for", { id: 1, selector: "button", state: "load" }).success).toBe(false)
+    expect(parseToolInput("wait_for", { id: 1, condition: "download", path: "D:\\file.txt" }).success).toBe(false)
+    expect(parseToolInput("type", { id: 1, selector: "input", text: "hello", delayMs: 100 }).success).toBe(false)
     expect(parseToolInput("cdp_call", { id: 1, method: "Runtime.evaluate", timeoutMs: 1000 }).success).toBe(
       false,
     )
     expect(parseToolInput("read_page", { id: 1, title: "Read page" }).success).toBe(false)
+  })
+
+  it("uses interaction-focused snapshot defaults", () => {
+    expect(parseToolInput("snapshot", { id: 1 }).data).toMatchObject({
+      id: 1,
+      interactive: true,
+      includeUrls: false,
+      compact: false,
+    })
   })
 
   it("returns runtime tab lookup errors without throwing", async () => {
@@ -139,12 +149,59 @@ describe("browser toolkit", () => {
     await expect(tool("snapshot", service).execute({ id: 99 }, ctx)).resolves.toEqual({
       error: 'Browser tab "99" not found.',
     })
-    await expect(tool("get_text", service).execute({ id: 99, selector: "body" }, ctx)).resolves.toEqual({
+    await expect(
+      tool("query_element", service).execute({ id: 99, selector: "body", query: "text" }, ctx),
+    ).resolves.toEqual({
       error: 'Browser tab "99" not found.',
     })
     await expect(tool("click", service).execute({ id: 99, selector: "button" }, ctx)).resolves.toEqual({
       error: 'Browser tab "99" not found.',
     })
+  })
+
+  it("navigates with goto, back, forward, and reload actions", async () => {
+    const tab = {
+      state: vi.fn(() => ({
+        id: 1,
+        url: "https://example.com",
+        title: "Example",
+        favIconUrl: "data:image/png;base64,abc",
+        loading: false,
+        canGoBack: true,
+        canGoForward: false,
+        error: null,
+      })),
+      navigateAndWait: vi.fn(async () => undefined),
+      goBackAndWait: vi.fn(async () => undefined),
+      goForwardAndWait: vi.fn(async () => undefined),
+      reloadAndWait: vi.fn(async () => undefined),
+    }
+    const service = {
+      ...createService(),
+      tab: vi.fn(() => tab),
+    } as unknown as BrowserService
+
+    const expected = {
+      id: 1,
+      url: "https://example.com",
+      title: "Example",
+      loading: false,
+      canGoBack: true,
+      canGoForward: false,
+      error: null,
+    }
+
+    await expect(tool("navigate", service).execute({ id: 1, url: "https://example.com" }, ctx)).resolves.toEqual(
+      expected,
+    )
+    await expect(tool("navigate", service).execute({ id: 1, action: "back" }, ctx)).resolves.toEqual(expected)
+    await expect(tool("navigate", service).execute({ id: 1, action: "forward" }, ctx)).resolves.toEqual(expected)
+    await expect(tool("navigate", service).execute({ id: 1, action: "reload" }, ctx)).resolves.toEqual(expected)
+
+    expect(tab.navigateAndWait).toHaveBeenCalledWith("https://example.com")
+    expect(tab.goBackAndWait).toHaveBeenCalledTimes(1)
+    expect(tab.goForwardAndWait).toHaveBeenCalledTimes(1)
+    expect(tab.reloadAndWait).toHaveBeenCalledTimes(1)
   })
 
   it("exposes runtime tool errors when debug tool errors are enabled", async () => {
@@ -193,63 +250,45 @@ describe("browser toolkit", () => {
   })
 
   it("converts public browser wait timeouts from seconds to milliseconds", async () => {
-    const waitForText = vi.fn()
+    const waitForSelector = vi.fn()
     const service = {
       ...createService(),
-      tab: vi.fn(() => ({ waitForText })),
+      tab: vi.fn(() => ({ waitForSelector })),
     } as unknown as BrowserService
 
     await expect(
-      tool("wait_for_text", service).execute({ id: 1, text: "ready", timeout: 1.5 }, ctx),
-    ).resolves.toEqual({ text: "ready" })
+      tool("wait_for", service).execute({ id: 1, selector: "button", timeout: 1.5 }, ctx),
+    ).resolves.toEqual({ selector: "button", state: "visible" })
 
-    expect(waitForText).toHaveBeenCalledWith("ready", 1500)
+    expect(waitForSelector).toHaveBeenCalledWith("button", "visible", 1500)
   })
 
-  it("returns wait tool results in the original browser tool shapes", async () => {
+  it("returns wait tool results in the browser tool shape", async () => {
     const tab = {
       waitForSelector: vi.fn(async () => undefined),
-      waitForText: vi.fn(async () => undefined),
-      waitForFunction: vi.fn(async () => undefined),
-      waitForUrl: vi.fn(async () => undefined),
-      waitForLoad: vi.fn(async () => undefined),
-      waitForDownload: vi.fn(async () => ({ path: "D:\\Downloads\\file.txt" })),
     }
     const service = {
       ...createService(),
       tab: vi.fn(() => tab),
     } as unknown as BrowserService
 
-    await expect(tool("wait_for_selector", service).execute({ id: 1, selector: "button" }, ctx)).resolves.toEqual({
+    await expect(tool("wait_for", service).execute({ id: 1, selector: "button" }, ctx)).resolves.toEqual({
       selector: "button",
       state: "visible",
     })
-    await expect(tool("wait_for_function", service).execute({ id: 1, expression: "window.ready" }, ctx)).resolves.toEqual({
-      expression: "window.ready",
-    })
-    await expect(tool("wait_for_url", service).execute({ id: 1, url: "**/dashboard" }, ctx)).resolves.toEqual({
-      url: "**/dashboard",
-    })
-    await expect(tool("wait_for_load", service).execute({ id: 1, state: "networkidle" }, ctx)).resolves.toEqual({
-      state: "networkidle",
-    })
-    await expect(tool("wait_for_download", service).execute({ id: 1, path: "D:\\Downloads\\file.txt" }, ctx)).resolves.toEqual({
-      path: "D:\\Downloads\\file.txt",
-    })
-    await expect(tool("wait", service).execute({ seconds: 1.5 }, ctx)).resolves.toEqual({ waited: 1.5 })
   })
 
   it("returns wait errors without throwing", async () => {
     const service = {
       ...createService(),
       tab: vi.fn(() => ({
-        waitForText: vi.fn(async () => {
+        waitForSelector: vi.fn(async () => {
           throw new Error("timed out")
         }),
       })),
     } as unknown as BrowserService
 
-    await expect(tool("wait_for_text", service).execute({ id: 1, text: "ready" }, ctx)).resolves.toEqual({
+    await expect(tool("wait_for", service).execute({ id: 1, selector: "button" }, ctx)).resolves.toEqual({
       error: "timed out",
     })
   })
@@ -385,7 +424,7 @@ describe("browser toolkit", () => {
     })
   })
 
-  it("returns query tool results in the original browser tool shapes", async () => {
+  it("returns query element results in the original browser tool shapes", async () => {
     const styles = { color: "red" }
     const tab = {
       getText: vi.fn(async () => "visible text"),
@@ -395,7 +434,6 @@ describe("browser toolkit", () => {
       isVisible: vi.fn(async () => true),
       isEnabled: vi.fn(async () => false),
       isChecked: vi.fn(async () => true),
-      getCount: vi.fn(async () => 2),
       getAttr: vi.fn(async () => "button"),
       getStyles: vi.fn(async () => styles),
     }
@@ -404,38 +442,37 @@ describe("browser toolkit", () => {
       tab: vi.fn(() => tab),
     } as unknown as BrowserService
 
-    await expect(tool("get_text", service).execute({ id: 1, selector: "button" }, ctx)).resolves.toEqual({
+    await expect(tool("query_element", service).execute({ id: 1, selector: "button", query: "text" }, ctx)).resolves.toEqual({
       content: "visible text",
     })
-    await expect(tool("get_html", service).execute({ id: 1, selector: "button" }, ctx)).resolves.toEqual({
+    await expect(tool("query_element", service).execute({ id: 1, selector: "button", query: "html" }, ctx)).resolves.toEqual({
       content: "<button>Submit</button>",
     })
-    await expect(tool("get_value", service).execute({ id: 1, selector: "input" }, ctx)).resolves.toEqual({
+    await expect(tool("query_element", service).execute({ id: 1, selector: "input", query: "value" }, ctx)).resolves.toEqual({
       value: "typed",
     })
-    await expect(tool("get_box", service).execute({ id: 1, selector: "button" }, ctx)).resolves.toEqual({
+    await expect(tool("query_element", service).execute({ id: 1, selector: "button", query: "box" }, ctx)).resolves.toEqual({
       x: 1,
       y: 2,
       width: 3,
       height: 4,
     })
-    await expect(tool("is_visible", service).execute({ id: 1, selector: "button" }, ctx)).resolves.toEqual({
+    await expect(tool("query_element", service).execute({ id: 1, selector: "button", query: "visible" }, ctx)).resolves.toEqual({
       visible: true,
     })
-    await expect(tool("is_enabled", service).execute({ id: 1, selector: "button" }, ctx)).resolves.toEqual({
+    await expect(tool("query_element", service).execute({ id: 1, selector: "button", query: "enabled" }, ctx)).resolves.toEqual({
       enabled: false,
     })
-    await expect(tool("is_checked", service).execute({ id: 1, selector: "input" }, ctx)).resolves.toEqual({
+    await expect(tool("query_element", service).execute({ id: 1, selector: "input", query: "checked" }, ctx)).resolves.toEqual({
       checked: true,
     })
-    await expect(tool("get_count", service).execute({ id: 1, selector: "button" }, ctx)).resolves.toEqual({
-      count: 2,
-    })
-    await expect(tool("get_attr", service).execute({ id: 1, selector: "button", name: "role" }, ctx)).resolves.toEqual({
+    await expect(
+      tool("query_element", service).execute({ id: 1, selector: "button", query: "attr", name: "role" }, ctx),
+    ).resolves.toEqual({
       name: "role",
       value: "button",
     })
-    await expect(tool("get_styles", service).execute({ id: 1, selector: "button" }, ctx)).resolves.toEqual({
+    await expect(tool("query_element", service).execute({ id: 1, selector: "button", query: "styles" }, ctx)).resolves.toEqual({
       content: JSON.stringify(styles, null, 2),
     })
   })
@@ -475,27 +512,23 @@ describe("browser toolkit", () => {
       id: 2,
       url: "https://example.com/next",
     })
-    await expect(tool("dblclick", service).execute({ id: 1, selector: "button" }, ctx)).resolves.toEqual({
-      clicked: "button",
-    })
-    await expect(tool("hover", service).execute({ id: 1, selector: "button" }, ctx)).resolves.toEqual({
-      hovered: "button",
-    })
-    await expect(tool("focus", service).execute({ id: 1, selector: "input" }, ctx)).resolves.toEqual({
-      focused: "input",
-    })
-    await expect(tool("check", service).execute({ id: 1, selector: "input" }, ctx)).resolves.toEqual({
-      checked: "input",
-    })
-    await expect(tool("uncheck", service).execute({ id: 1, selector: "input" }, ctx)).resolves.toEqual({
-      unchecked: "input",
-    })
+    for (const action of ["dblclick", "hover", "focus", "check", "uncheck", "scroll_into_view", "highlight"]) {
+      await expect(
+        tool("element_action", service).execute({ id: 1, selector: "button", action }, ctx),
+      ).resolves.toEqual({
+        action,
+        selector: "button",
+      })
+    }
     await expect(tool("fill", service).execute({ id: 1, selector: "input", text: "hello" }, ctx)).resolves.toEqual({
       filled: "input",
     })
-    await expect(tool("type", service).execute({ id: 1, selector: "input", text: "hello" }, ctx)).resolves.toEqual({
+    await expect(
+      tool("type", service).execute({ id: 1, selector: "input", text: "hello", delay: 0.25 }, ctx),
+    ).resolves.toEqual({
       typed: "hello",
     })
+    expect(tab.type).toHaveBeenCalledWith("input", "hello", false, 250)
     await expect(tool("press", service).execute({ id: 1, key: "Enter" }, ctx)).resolves.toEqual({
       pressed: "Enter",
     })
@@ -505,12 +538,6 @@ describe("browser toolkit", () => {
     await expect(tool("scroll", service).execute({ id: 1 }, ctx)).resolves.toEqual({
       scrolled: true,
     })
-    await expect(tool("scroll_into_view", service).execute({ id: 1, selector: "button" }, ctx)).resolves.toEqual({
-      scrolled: "button",
-    })
-    await expect(tool("highlight", service).execute({ id: 1, selector: "button" }, ctx)).resolves.toEqual({
-      highlighted: "button",
-    })
     await expect(tool("drag", service).execute({ id: 1, source: "#a", target: "#b" }, ctx)).resolves.toEqual({
       dragged: true,
       source: "#a",
@@ -519,12 +546,21 @@ describe("browser toolkit", () => {
     await expect(tool("upload", service).execute({ id: 1, selector: "input", files: ["D:\\a.txt"] }, ctx)).resolves.toEqual({
       uploaded: 1,
     })
-    await expect(tool("download", service).execute({ id: 1, selector: "a", path: "D:\\Downloads\\file.txt" }, ctx)).resolves.toEqual({
+    await expect(
+      tool("download", service).execute(
+        { id: 1, selector: "a", path: "D:\\Downloads\\file.txt", timeout: 45 },
+        ctx,
+      ),
+    ).resolves.toEqual({
       path: "D:\\Downloads\\file.txt",
     })
-
-    expect(parseToolInput("select", { id: 1, selector: "select", values: [] }).success).toBe(false)
-    expect(parseToolInput("upload", { id: 1, selector: "input", files: [] }).success).toBe(false)
+    expect(tab.download).toHaveBeenCalledWith("a", "D:\\Downloads\\file.txt", 45_000)
+    await expect(
+      tool("download", service).execute({ id: 1, selector: "a", path: "D:\\Downloads\\default.txt" }, ctx),
+    ).resolves.toEqual({
+      path: "D:\\Downloads\\file.txt",
+    })
+    expect(tab.download).toHaveBeenCalledWith("a", "D:\\Downloads\\default.txt", 1_800_000)
   })
 
   it("returns interaction errors without throwing", async () => {
@@ -616,11 +652,13 @@ describe("browser toolkit", () => {
       tab: vi.fn(() => tab),
     } as unknown as BrowserService
 
-    await expect(tool("keydown", service).execute({ id: 1, key: "Shift" }, ctx)).resolves.toEqual({
-      down: "Shift",
+    await expect(tool("keyboard_key", service).execute({ id: 1, action: "down", key: "Shift" }, ctx)).resolves.toEqual({
+      action: "down",
+      key: "Shift",
     })
-    await expect(tool("keyup", service).execute({ id: 1, key: "Shift" }, ctx)).resolves.toEqual({
-      up: "Shift",
+    await expect(tool("keyboard_key", service).execute({ id: 1, action: "up", key: "Shift" }, ctx)).resolves.toEqual({
+      action: "up",
+      key: "Shift",
     })
     await expect(tool("keyboard_type", service).execute({ id: 1, text: "hello" }, ctx)).resolves.toEqual({
       typed: "hello",
@@ -632,11 +670,13 @@ describe("browser toolkit", () => {
       x: 10,
       y: 20,
     })
-    await expect(tool("mouse_down", service).execute({ id: 1 }, ctx)).resolves.toEqual({
-      down: "left",
+    await expect(tool("mouse_button", service).execute({ id: 1, action: "down" }, ctx)).resolves.toEqual({
+      action: "down",
+      button: "left",
     })
-    await expect(tool("mouse_up", service).execute({ id: 1, button: "right" }, ctx)).resolves.toEqual({
-      up: "right",
+    await expect(tool("mouse_button", service).execute({ id: 1, action: "up", button: "right" }, ctx)).resolves.toEqual({
+      action: "up",
+      button: "right",
     })
     await expect(tool("mouse_wheel", service).execute({ id: 1, dy: 100 }, ctx)).resolves.toEqual({
       dx: 0,
@@ -654,7 +694,7 @@ describe("browser toolkit", () => {
       })),
     } as unknown as BrowserService
 
-    await expect(tool("keydown", service).execute({ id: 1, key: "Enter" }, ctx)).resolves.toEqual({
+    await expect(tool("keyboard_key", service).execute({ id: 1, action: "down", key: "Enter" }, ctx)).resolves.toEqual({
       error: "key failed",
     })
   })

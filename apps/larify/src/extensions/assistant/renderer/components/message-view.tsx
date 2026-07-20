@@ -21,6 +21,7 @@ import {
 import { FileDiff, type DiffMeta } from "./file-diff"
 
 const debugToolCardsOpen = import.meta.env.VITE_LARIFY_DEBUG_TOOL_CARDS_OPEN === "1"
+const debugToolErrors = import.meta.env.VITE_LARIFY_DEBUG_TOOL_ERRORS === "1"
 
 export type ToolDisplayMeta = {
   title?: string
@@ -36,7 +37,7 @@ function asDiffMeta(data: unknown): DiffMeta | null {
 function unwrapToolDisplay(
   toolName: string,
   input: unknown,
-): { toolName: string; input: unknown; title?: string } | null {
+): { toolName: string; input: unknown; title?: string; inputIsOuterToolArgs?: boolean } | null {
   const maybeCallToolInput = input as {
     title?: unknown
     tool_name?: unknown
@@ -58,6 +59,7 @@ function unwrapToolDisplay(
     return {
       toolName,
       input,
+      inputIsOuterToolArgs: true,
       ...(maybeCallToolInput &&
         typeof maybeCallToolInput === "object" &&
         typeof maybeCallToolInput.title === "string" && { title: maybeCallToolInput.title }),
@@ -71,9 +73,31 @@ function unwrapToolDisplay(
       "args" in maybeCallToolInput
         ? maybeCallToolInput.args
         : input,
+    inputIsOuterToolArgs: true,
     ...(maybeCallToolInput &&
       typeof maybeCallToolInput === "object" &&
       typeof maybeCallToolInput.title === "string" && { title: maybeCallToolInput.title }),
+  }
+}
+
+function toolInputDisplay(toolName: string, input: unknown): Record<string, unknown> {
+  return {
+    tool_name: toolName,
+    tool_args: input,
+  }
+}
+
+function outerToolInputDisplay(toolName: string, input: unknown): Record<string, unknown> {
+  if (input && typeof input === "object" && !Array.isArray(input) && "title" in input) {
+    const { title: _title, ...toolArgs } = input as Record<string, unknown>
+    return {
+      tool_name: toolName,
+      tool_args: toolArgs,
+    }
+  }
+  return {
+    tool_name: toolName,
+    tool_args: input,
   }
 }
 
@@ -139,7 +163,11 @@ export function MessageView({
               if (!display) return null
               const toolMeta = toolMetaById.get(part.toolCallId)
               const toolDisplay = toolDisplays[display.toolName]
-              const showRawToolDetails = Boolean(part.errorText) || !toolMeta
+              const showErrorAsOutput = part.state === "output-error" && !debugToolErrors
+              const state = showErrorAsOutput ? "output-available" : part.state
+              const output = showErrorAsOutput ? part.errorText : part.output
+              const errorText = showErrorAsOutput ? undefined : part.errorText
+              const showRawOutput = Boolean(errorText) || Boolean(output) || !toolMeta
               return (
                 <Tool key={i} defaultOpen={debugToolCardsOpen || Boolean(toolMeta)}>
                   <ToolHeader
@@ -147,16 +175,18 @@ export function MessageView({
                     toolName={display.toolName}
                     title={display.title ?? toolDisplay?.title}
                     icon={toolDisplay?.icon}
-                    state={part.state}
+                    state={state}
                   />
                   <ToolContent>
+                    <ToolInput
+                      input={
+                        display.inputIsOuterToolArgs
+                          ? outerToolInputDisplay(display.toolName, display.input)
+                          : toolInputDisplay(display.toolName, display.input)
+                      }
+                    />
                     {toolMeta ? <FileDiff meta={toolMeta} /> : null}
-                    {showRawToolDetails ? (
-                      <>
-                        <ToolInput input={display.input} />
-                        <ToolOutput output={part.output} errorText={part.errorText} />
-                      </>
-                    ) : null}
+                    {showRawOutput ? <ToolOutput output={output} errorText={errorText} /> : null}
                   </ToolContent>
                 </Tool>
               )

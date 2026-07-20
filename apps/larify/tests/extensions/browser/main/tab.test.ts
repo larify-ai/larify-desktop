@@ -2,18 +2,40 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const h = vi.hoisted(() => ({
   fetchMock: vi.fn(),
+  clickMock: vi.fn(),
 }))
 
 vi.mock("electron", () => {
+  class FakeSession {
+    handlers: Record<string, Array<(...args: unknown[]) => void>> = {}
+
+    on(event: string, cb: (...args: unknown[]) => void): void {
+      ;(this.handlers[event] ??= []).push(cb)
+    }
+
+    off(event: string, cb: (...args: unknown[]) => void): void {
+      this.handlers[event] = (this.handlers[event] ?? []).filter((handler) => handler !== cb)
+    }
+
+    emit(event: string, ...args: unknown[]): void {
+      for (const cb of this.handlers[event] ?? []) cb(...args)
+    }
+  }
+
   class FakeWebContents {
     handlers: Record<string, Array<(...args: unknown[]) => void>> = {}
     url = ""
     title = "T"
     loading = false
     loadURLCalls: string[] = []
+    session = new FakeSession()
 
     on(event: string, cb: (...args: unknown[]) => void): void {
       ;(this.handlers[event] ??= []).push(cb)
+    }
+
+    off(event: string, cb: (...args: unknown[]) => void): void {
+      this.handlers[event] = (this.handlers[event] ?? []).filter((handler) => handler !== cb)
     }
 
     emit(event: string, ...args: unknown[]): void {
@@ -62,6 +84,10 @@ vi.mock("electron", () => {
   }
 })
 
+vi.mock("../../../../src/extensions/browser/main/interactions", () => ({
+  click: (...args: unknown[]) => h.clickMock(...args),
+}))
+
 import { BrowserTab } from "../../../../src/extensions/browser/main/tab"
 
 async function waitFor(assertion: () => void): Promise<void> {
@@ -83,17 +109,40 @@ function webContents(tab: BrowserTab): {
   emit: (event: string, ...args: unknown[]) => void
   loadURLCalls: string[]
   loading: boolean
+  session: {
+    emit: (event: string, ...args: unknown[]) => void
+  }
 } {
   return tab.view.webContents as unknown as {
     emit: (event: string, ...args: unknown[]) => void
     loadURLCalls: string[]
     loading: boolean
+    session: {
+      emit: (event: string, ...args: unknown[]) => void
+    }
+  }
+}
+
+function downloadItem(path = "D:\\Downloads\\file.txt"): {
+  setSavePath: (nextPath: string) => void
+  once: (event: string, cb: (...args: unknown[]) => void) => void
+  getSavePath: () => string
+} {
+  let savePath = path
+  return {
+    setSavePath: vi.fn((nextPath: string) => {
+      savePath = nextPath
+    }),
+    once: vi.fn(),
+    getSavePath: vi.fn(() => savePath),
   }
 }
 
 describe("BrowserTab", () => {
   beforeEach(() => {
     h.fetchMock.mockReset()
+    h.clickMock.mockReset()
+    h.clickMock.mockResolvedValue(undefined)
   })
 
   it("normalizes navigation input before loading", async () => {
@@ -189,6 +238,58 @@ describe("BrowserTab", () => {
     webContents(tab).loading = false
     webContents(tab).emit("did-stop-loading")
     expect(tab.state().loading).toBe(false)
+  })
+
+  it("waits until webContents loading is stable before navigation returns", async () => {
+    vi.useFakeTimers()
+    const tab = new BrowserTab(1, "p")
+    webContents(tab).loading = true
+
+    let settled = false
+    const promise = tab.navigateAndWait("https://example.com").then(() => {
+      settled = true
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(settled).toBe(false)
+
+    webContents(tab).emit("did-finish-load")
+    await Promise.resolve()
+    expect(settled).toBe(false)
+
+    webContents(tab).loading = false
+    webContents(tab).emit("did-stop-loading")
+    await vi.advanceTimersByTimeAsync(99)
+    expect(settled).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    await promise
+    expect(settled).toBe(true)
+    expect(tab.state().loading).toBe(false)
+    vi.useRealTimers()
+  })
+
+  it("reports when a download does not start before timeout", async () => {
+    vi.useFakeTimers()
+    const tab = new BrowserTab(1, "p")
+    const promise = tab.download("a", "D:\\Downloads\\file.txt", 3000)
+    const assertion = expect(promise).rejects.toThrow("download did not start within 3s")
+
+    await vi.advanceTimersByTimeAsync(3000)
+    await assertion
+    vi.useRealTimers()
+  })
+
+  it("reports when a download starts but does not finish before timeout", async () => {
+    vi.useFakeTimers()
+    const tab = new BrowserTab(1, "p")
+    const promise = tab.download("a", "D:\\Downloads\\file.txt", 3000)
+    const assertion = expect(promise).rejects.toThrow("download did not finish within 3s")
+
+    webContents(tab).session.emit("will-download", {}, downloadItem())
+    await vi.advanceTimersByTimeAsync(3000)
+
+    await assertion
+    vi.useRealTimers()
   })
 
   it("ignores user abort and subframe load failures", () => {

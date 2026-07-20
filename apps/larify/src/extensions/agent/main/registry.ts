@@ -4,7 +4,7 @@ import type { Tool, Toolkit } from "../../../shared/tool"
 export const callToolInvocationSchema = (tool: Tool) =>
   z.object({
     title: z.string().min(1).describe("Short user-facing phrase describing the step"),
-    tool_name: z.literal(tool.name).describe("The tool name to invoke through call_tool"),
+    tool_name: z.literal(tool.name).describe("Returned tool name only, not kit_name.tool_name"),
     tool_args: tool.inputSchema,
   }).strict()
 

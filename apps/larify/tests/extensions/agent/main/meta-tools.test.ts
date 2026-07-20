@@ -73,30 +73,30 @@ const callTool = (name: string, args: unknown, title = "Call tool") =>
 const metaTool = (name: string, input: unknown) =>
   meta()(name, input) as AsyncIterable<unknown> | Promise<unknown>
 
-describe("list_tools", () => {
-  it("lists a group's tools as markdown bullets through call_tool", async () => {
-    const result = await drain(metaTool("list_tools", { title: "List file tools", groups: ["file"] }))
+describe("list_kits", () => {
+  it("lists a kit's tools as markdown bullets through call_tool", async () => {
+    const result = await drain(metaTool("list_kits", { title: "List file tools", kit_names: ["file"] }))
     expect(result).toEqual([
       "- **read_file** - Read a file\n- **ticker** - Emit ticks\n- **fails** - Fail predictably",
     ])
   })
 
-  it("lists multiple groups as sections", async () => {
-    const result = await drain(metaTool("list_tools", { title: "List tools", groups: ["file", "terminal"] }))
+  it("lists multiple kits as sections", async () => {
+    const result = await drain(metaTool("list_kits", { title: "List tools", kit_names: ["file", "terminal"] }))
     expect(result).toEqual([
       "## file\n- **read_file** - Read a file\n- **ticker** - Emit ticks\n- **fails** - Fail predictably\n\n## terminal\n- **write_terminal** - Write terminal input",
     ])
   })
 
-  it("throws on unknown group", async () => {
-    await expect(drain(metaTool("list_tools", { title: "List tools", groups: ["nope"] }))).rejects.toThrow(
-      'Group "nope" not found',
+  it("throws on unknown kit", async () => {
+    await expect(drain(metaTool("list_kits", { title: "List tools", kit_names: ["nope"] }))).rejects.toThrow(
+      'Kit "nope" not found',
     )
   })
 
   it("lists agent meta tools separately", async () => {
-    await expect(drain(metaTool("list_tools", { title: "List agent tools", groups: ["agent"] }))).rejects.toThrow(
-      'Group "agent" not found',
+    await expect(drain(metaTool("list_kits", { title: "List agent tools", kit_names: ["agent"] }))).rejects.toThrow(
+      'Kit "agent" not found',
     )
   })
 })
@@ -142,14 +142,14 @@ describe("call_tool", () => {
     expect(out).toEqual(["tick1", "tick2", "tick3"])
   })
 
-  it("throws on unknown tool", async () => {
-    await expect(drain(callTool("nope", {}))).rejects.toThrow('Tool "nope" not found')
+  it("returns unknown tool errors as tool output", async () => {
+    await expect(drain(callTool("nope", {}))).resolves.toEqual(['Tool "nope" not found'])
   })
 
-  it("throws on schema-invalid args", async () => {
-    await expect(drain(callTool("read_file", { path: 123 }, "Read a file"))).rejects.toThrow(
-      "Invalid arguments",
-    )
+  it("returns schema-invalid args as tool output", async () => {
+    const out = await drain(callTool("read_file", { path: 123 }, "Read a file"))
+    expect(out).toHaveLength(1)
+    expect(out[0]).toContain("Invalid arguments")
   })
 
   it("returns execution failures as tool output", async () => {
@@ -163,6 +163,22 @@ describe("call_tool", () => {
     process.env.LARIFY_DEBUG_TOOL_ERRORS = "1"
     try {
       await expect(drain(callTool("fails", {}, "Run failing tool"))).rejects.toThrow("Predictable tool failure")
+    } finally {
+      if (previous === undefined) {
+        delete process.env.LARIFY_DEBUG_TOOL_ERRORS
+      } else {
+        process.env.LARIFY_DEBUG_TOOL_ERRORS = previous
+      }
+    }
+  })
+
+  it("throws input failures when debug tool errors is enabled", async () => {
+    const previous = process.env.LARIFY_DEBUG_TOOL_ERRORS
+    process.env.LARIFY_DEBUG_TOOL_ERRORS = "1"
+    try {
+      await expect(drain(callTool("read_file", { path: 123 }, "Read a file"))).rejects.toThrow(
+        "Invalid arguments",
+      )
     } finally {
       if (previous === undefined) {
         delete process.env.LARIFY_DEBUG_TOOL_ERRORS

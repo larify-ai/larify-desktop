@@ -42,14 +42,14 @@ function withTimeout<T>(promise: Promise<T>, label: string, timeoutMs = 30000): 
   let timer: ReturnType<typeof setTimeout>
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(
-      () => reject(new Error(`CDP command timed out after ${timeoutMs}ms: ${label}`)),
+      () => reject(new Error(`CDP command timed out after ${waits.formatTimeout(timeoutMs)}: ${label}`)),
       timeoutMs,
     )
   })
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer))
 }
 
-function waitForWebContentsLoad(wc: WebContents, timeoutMs = 30000): Promise<void> {
+function waitForWebContentsLoadEvent(wc: WebContents, timeoutMs = 30000): Promise<void> {
   return new Promise((resolve) => {
     const finish = (): void => {
       clearTimeout(timer)
@@ -70,6 +70,38 @@ function waitForWebContentsLoad(wc: WebContents, timeoutMs = 30000): Promise<voi
     wc.on("did-finish-load", finish)
     wc.on("did-fail-load", onFail)
   })
+}
+
+function waitForWebContentsNotLoading(wc: WebContents, timeoutMs = 30000, stableMs = 100): Promise<void> {
+  return new Promise((resolve) => {
+    let stable: ReturnType<typeof setTimeout> | undefined
+    const cleanup = (): void => {
+      clearTimeout(deadline)
+      if (stable) clearTimeout(stable)
+      wc.off("did-start-loading", check)
+      wc.off("did-stop-loading", check)
+    }
+    const finish = (): void => {
+      cleanup()
+      resolve()
+    }
+    const check = (): void => {
+      if (stable) {
+        clearTimeout(stable)
+        stable = undefined
+      }
+      if (!wc.isLoading()) stable = setTimeout(finish, stableMs)
+    }
+    const deadline = setTimeout(finish, timeoutMs)
+    wc.on("did-start-loading", check)
+    wc.on("did-stop-loading", check)
+    check()
+  })
+}
+
+async function waitForWebContentsLoad(wc: WebContents, timeoutMs = 30000): Promise<void> {
+  await waitForWebContentsLoadEvent(wc, timeoutMs)
+  await waitForWebContentsNotLoading(wc, timeoutMs)
 }
 
 export class BrowserTab {
@@ -131,11 +163,13 @@ export class BrowserTab {
     const target = normalizeUrl(url)
     if (!target) throw new Error(`invalid url: ${url}`)
     await this.cdpReady
+    const loaded = waitForWebContentsLoad(this.view.webContents)
     try {
       await this.view.webContents.loadURL(target)
     } catch {
       // load failure is captured in state via did-fail-load
     }
+    await loaded
   }
 
   async goBackAndWait(): Promise<void> {
@@ -298,14 +332,22 @@ export class BrowserTab {
     await interactions.upload(this.interactCtx(), selector, files)
   }
 
-  async download(selector: string, path: string): Promise<string> {
+  async download(selector: string, path: string, timeoutMs = 1_800_000): Promise<string> {
     const wc = this.view.webContents
     const done = new Promise<string>((resolve, reject) => {
+      let started = false
       const timer = setTimeout(() => {
         wc.session.off("will-download", onWillDownload)
-        reject(new Error("download did not start within 30000ms"))
-      }, 30000)
+        reject(
+          new Error(
+            started
+              ? `download did not finish within ${waits.formatTimeout(timeoutMs)}`
+              : `download did not start within ${waits.formatTimeout(timeoutMs)}`,
+          ),
+        )
+      }, timeoutMs)
       const onWillDownload = (_event: unknown, item: DownloadItem): void => {
+        started = true
         wc.session.off("will-download", onWillDownload)
         item.setSavePath(normalize(path))
         item.once("done", (_doneEvent, state) => {
@@ -422,26 +464,6 @@ export class BrowserTab {
       else wc.once("did-finish-load", () => resolve())
     })
     await withTimeout(arrival, `wait_for_load ${state}`, timeoutMs)
-  }
-
-  async waitForDownload(savePath: string, timeoutMs = 25000): Promise<{ path: string }> {
-    const ses = this.view.webContents.session
-    return new Promise<{ path: string }>((resolve, reject) => {
-      const deadline = setTimeout(() => {
-        ses.off("will-download", onWill)
-        reject(new Error(`wait_for_download timed out after ${timeoutMs}ms`))
-      }, timeoutMs)
-      const onWill = (_event: unknown, item: DownloadItem): void => {
-        ses.off("will-download", onWill)
-        if (savePath) item.setSavePath(savePath)
-        item.once("done", (_doneEvent, doneState) => {
-          clearTimeout(deadline)
-          if (doneState === "completed") resolve({ path: item.getSavePath() })
-          else reject(new Error(`download ${doneState}`))
-        })
-      }
-      ses.on("will-download", onWill)
-    })
   }
 
   async screenshot(opts: ScreenshotOptions): Promise<ScreenshotResult> {
@@ -645,7 +667,7 @@ export class BrowserTab {
         if (settled) return
         settled = true
         cleanup()
-        reject(new Error(`wait_for_load networkidle timed out after ${timeoutMs}ms`))
+        reject(new Error(`wait_for_load networkidle timed out after ${waits.formatTimeout(timeoutMs)}`))
       }, timeoutMs)
       dbg
         .sendCommand("Network.enable")

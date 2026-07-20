@@ -1,6 +1,7 @@
 import { BrowserWindow, ipcMain } from 'electron'
 import type { Debugger } from 'electron'
 import type { BrowserTab } from './tab'
+import { formatTimeout } from './waits'
 
 const FPS = 20
 const READY_TIMEOUT = 10_000
@@ -48,7 +49,7 @@ function waitForIpc<T>(channel: string, timeoutMs: number, trigger: () => void):
     }
     const timer = setTimeout(() => {
       ipcMain.removeListener(channel, listener as never)
-      reject(new Error(`recorder: '${channel}' timed out after ${timeoutMs}ms`))
+      reject(new Error(`recorder: '${channel}' timed out after ${formatTimeout(timeoutMs)}`))
     }, timeoutMs)
     ipcMain.once(channel, listener as never)
     trigger()

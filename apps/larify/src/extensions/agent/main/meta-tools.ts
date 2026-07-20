@@ -39,9 +39,19 @@ async function* invokeTool(
   toolCallId: string,
 ): AsyncIterable<unknown> {
   const found = registry.get(name)
-  if (!found) throw new ToolInputError(`Tool "${name}" not found`)
+  if (!found) {
+    const error = new ToolInputError(`Tool "${name}" not found`)
+    if (shouldThrowToolFailures()) throw error
+    yield error.message
+    return
+  }
   const parsed = found.inputSchema.safeParse(args)
-  if (!parsed.success) throw new ToolInputError(`Invalid arguments: ${parsed.error.message}`)
+  if (!parsed.success) {
+    const error = new ToolInputError(`Invalid arguments: ${parsed.error.message}`)
+    if (shouldThrowToolFailures()) throw error
+    yield error.message
+    return
+  }
   writer?.write({
     type: "data-tool-ready",
     id: toolCallId,
@@ -81,21 +91,21 @@ export function buildMetaTools(
   writer?: UIMessageStreamWriter,
 ): ToolSet {
   const tools: ToolSet = {
-    list_tools: tool({
-      description: "List tools in one or more groups.",
+    list_kits: tool({
+      description: "List tools in kits. Returns tool_name: tool_description.",
       inputSchema: z.object({
         title: z.string().min(1).describe("Short user-facing phrase describing the step"),
-        groups: z.array(z.string()).min(1).describe("The group names"),
+        kit_names: z.array(z.string()).min(1).describe("The kit names"),
       }).strict(),
-      execute: async ({ groups }) => {
-        const sections = groups.map((group) => {
-          const tools = registry.listTools(group)
-          if (!tools) throw new ToolInputError(`Group "${group}" not found`)
+      execute: async ({ kit_names }) => {
+        const sections = kit_names.map((kit) => {
+          const tools = registry.listTools(kit)
+          if (!tools) throw new ToolInputError(`Kit "${kit}" not found`)
           const body = tools.map((tool) => `- **${tool.name}** - ${tool.description}`).join("\n")
-          return { group, body }
+          return { kit, body }
         })
         if (sections.length === 1) return sections[0].body
-        return sections.map(({ group, body }) => `## ${group}\n${body}`).join("\n\n")
+        return sections.map(({ kit, body }) => `## ${kit}\n${body}`).join("\n\n")
       },
     }),
     read_tools: tool({
@@ -121,7 +131,7 @@ export function buildMetaTools(
       description: "Invoke a tool with args matching its schema with call_tool wrapper.",
       inputSchema: z.object({
         title: z.string().min(1).describe("Short user-facing phrase describing the step"),
-        tool_name: z.string().describe("The tool name"),
+        tool_name: z.string().describe("Returned tool name only, not kit_name.tool_name"),
         tool_args: z.unknown().describe("Arguments matching the tool's schema"),
       }).strict(),
       execute: async function* ({ tool_name, tool_args }, { toolCallId }) {

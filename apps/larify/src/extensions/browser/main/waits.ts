@@ -5,6 +5,8 @@ const POLL_INTERVAL = 100
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
+export const formatTimeout = (timeoutMs: number): string => `${timeoutMs / 1000}s`
+
 export type WaitState = 'visible' | 'attached' | 'detached' | 'hidden'
 
 async function evalBool(send: CdpSend, expression: string): Promise<boolean> {
@@ -24,7 +26,7 @@ async function poll(
   const deadline = Date.now() + timeoutMs
   for (;;) {
     if (await check()) return
-    if (Date.now() >= deadline) throw new Error(`${label} timed out after ${timeoutMs}ms`)
+    if (Date.now() >= deadline) throw new Error(`${label} timed out after ${formatTimeout(timeoutMs)}`)
     await sleep(POLL_INTERVAL)
   }
 }

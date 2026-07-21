@@ -154,14 +154,19 @@ function downloadItem(path = "D:\\Downloads\\file.txt"): {
   setSavePath: (nextPath: string) => void
   once: (event: string, cb: (...args: unknown[]) => void) => void
   getSavePath: () => string
+  triggerDone: (state: string) => void
 } {
   let savePath = path
+  let doneCb: ((event: unknown, state: string) => void) | undefined
   return {
     setSavePath: vi.fn((nextPath: string) => {
       savePath = nextPath
     }),
-    once: vi.fn(),
+    once: vi.fn((event: string, cb: (...args: unknown[]) => void) => {
+      if (event === "done") doneCb = cb as (event: unknown, state: string) => void
+    }),
     getSavePath: vi.fn(() => savePath),
+    triggerDone: (state: string) => doneCb?.({}, state),
   }
 }
 
@@ -331,9 +336,47 @@ describe("BrowserTab", () => {
     const promise = tab.download("a", "D:\\Downloads\\file.txt", 3000)
     const assertion = expect(promise).rejects.toThrow("download did not finish within 3s")
 
-    webContents(tab).session.emit("will-download", {}, downloadItem())
+    webContents(tab).session.emit("will-download", {}, downloadItem(), tab.view.webContents)
     await vi.advanceTimersByTimeAsync(3000)
 
+    await assertion
+    vi.useRealTimers()
+  })
+
+  it("resolves with the saved path when the download completes", async () => {
+    const tab = new BrowserTab(1, "p")
+    const promise = tab.download("a", "D:\\Downloads\\file.txt", 3000)
+    const item = downloadItem()
+
+    webContents(tab).session.emit("will-download", {}, item, tab.view.webContents)
+    item.triggerDone("completed")
+
+    await expect(promise).resolves.toBe("D:\\Downloads\\file.txt")
+    expect(item.setSavePath).toHaveBeenCalledWith("D:\\Downloads\\file.txt")
+  })
+
+  it("rejects when the download ends in a non-completed state", async () => {
+    const tab = new BrowserTab(1, "p")
+    const promise = tab.download("a", "D:\\Downloads\\file.txt", 3000)
+    const item = downloadItem()
+
+    webContents(tab).session.emit("will-download", {}, item, tab.view.webContents)
+    item.triggerDone("cancelled")
+
+    await expect(promise).rejects.toThrow("download failed: cancelled")
+  })
+
+  it("ignores will-download events initiated by other tabs on the shared session", async () => {
+    vi.useFakeTimers()
+    const tab = new BrowserTab(1, "p")
+    const promise = tab.download("a", "D:\\Downloads\\file.txt", 3000)
+    const assertion = expect(promise).rejects.toThrow("download did not start within 3s")
+    const item = downloadItem()
+
+    webContents(tab).session.emit("will-download", {}, item, { other: true })
+    expect(item.setSavePath).not.toHaveBeenCalled()
+
+    await vi.advanceTimersByTimeAsync(3000)
     await assertion
     vi.useRealTimers()
   })

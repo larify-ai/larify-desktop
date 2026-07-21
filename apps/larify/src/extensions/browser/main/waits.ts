@@ -25,7 +25,7 @@ async function poll(
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs
   for (;;) {
-    if (await check()) return
+    if (await check().catch(() => false)) return
     if (Date.now() >= deadline) throw new Error(`${label} timed out after ${formatTimeout(timeoutMs)}`)
     await sleep(POLL_INTERVAL)
   }

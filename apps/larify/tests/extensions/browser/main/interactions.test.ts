@@ -35,6 +35,21 @@ describe("interactions sessionId threading", () => {
     expect(insert).toMatchObject({ params: { text: "hello" }, sessionId: "SID" })
   })
 
+  it("fill clears contenteditable via textContent rather than value", async () => {
+    const { ctx, calls } = makeCtx()
+
+    await fill(ctx, "ref_1", "hello")
+
+    const clearCall = calls.find(
+      (c) =>
+        c.method === "Runtime.callFunctionOn" &&
+        String((c.params as { functionDeclaration?: string }).functionDeclaration).includes("this.value=''"),
+    )
+    const decl = String((clearCall?.params as { functionDeclaration: string }).functionDeclaration)
+    expect(decl).toContain("isContentEditable")
+    expect(decl).toContain("this.textContent=''")
+  })
+
   it("type dispatches keys and text into the resolved frame session", async () => {
     const { ctx, calls } = makeCtx()
 

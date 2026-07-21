@@ -15,7 +15,7 @@ const elementTargetSchema = z
   .min(1)
   .describe('Element selector. Use CSS selector, xpath=..., or snapshot ref like "e2".')
 const cssSelectorSchema = z.string().min(1).describe("CSS selector")
-const timeoutSchema = z.number().positive().optional().describe("Timeout in seconds")
+const timeoutSchema = z.number().min(1).max(600).optional().describe("Timeout in seconds, 1-600")
 
 type BrowserServiceProvider = BrowserService | (() => BrowserService)
 
@@ -409,7 +409,7 @@ const downloadSchema = z
     id: idSchema,
     selector: elementTargetSchema,
     path: z.string().min(1).describe("Local path to save the download."),
-    timeout: z.number().positive().default(1800).describe("Timeout in seconds. Defaults to 1800."),
+    timeout: z.number().min(1).max(3600).default(1800).describe("Timeout in seconds, 1-3600. Defaults to 1800."),
   })
   .strict()
 
@@ -421,7 +421,7 @@ const typeSchema = z
     selector: elementTargetSchema,
     text: z.string(),
     clear: z.boolean().default(false).describe("Clear existing value first."),
-    delay: z.number().nonnegative().optional().describe("Delay between key presses in seconds."),
+    delay: z.number().nonnegative().max(10).optional().describe("Delay between key presses in seconds, 0-10."),
   })
   .strict()
 
@@ -640,10 +640,10 @@ const recordSchema = z
 const recordStartSchema = recordSchema.extend({
   duration: z
     .number()
-    .positive()
+    .min(1)
     .max(600)
     .optional()
-    .describe("Seconds to record before auto-stopping (max 600). Omit to record until record_stop."),
+    .describe("Seconds to record before auto-stopping, 1-600. Omit to record until record_stop."),
 })
 
 function captureTools(service: BrowserServiceProvider): Toolkit["tools"] {

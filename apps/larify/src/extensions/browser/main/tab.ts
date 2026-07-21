@@ -388,7 +388,8 @@ export class BrowserTab {
           ),
         )
       }, timeoutMs)
-      const onWillDownload = (_event: unknown, item: DownloadItem): void => {
+      const onWillDownload = (_event: unknown, item: DownloadItem, contents: WebContents): void => {
+        if (contents !== wc) return
         started = true
         wc.session.off("will-download", onWillDownload)
         item.setSavePath(normalize(path))

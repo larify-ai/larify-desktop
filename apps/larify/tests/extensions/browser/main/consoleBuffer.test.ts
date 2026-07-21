@@ -107,6 +107,18 @@ describe("parseConsoleEvent", () => {
     expect(entry.type).toBe("log")
     expect(entry.url).toBe("http://x/y.js")
   })
+
+  it("formats map/set previews, unserializable values, and the description fallback", () => {
+    expect(parseConsoleEvent({ args: [{ preview: { subtype: "map", description: "Map(2)" } }] }).text).toBe(
+      "Map(2)",
+    )
+    expect(parseConsoleEvent({ args: [{ unserializableValue: "Infinity" }] }).text).toBe("Infinity")
+    expect(parseConsoleEvent({ args: [{ description: "function foo()" }] }).text).toBe("function foo()")
+  })
+
+  it("drops unformattable args from the joined output", () => {
+    expect(parseConsoleEvent({ args: [{ value: "keep" }, {}, { value: "tail" }] }).text).toBe("keep tail")
+  })
 })
 
 describe("parseExceptionEvent", () => {
@@ -124,5 +136,21 @@ describe("parseExceptionEvent", () => {
     expect(entry.message).toBe("TypeError: boom")
     expect(entry.line).toBe(3)
     expect(entry.stack).toContain("at f (http://x/y.js:3:7)")
+  })
+
+  it("falls back to text and the first stack url when no exception description is present", () => {
+    const entry = parseExceptionEvent({
+      exceptionDetails: {
+        text: "Script error",
+        stackTrace: { callFrames: [{ functionName: "g", url: "http://a/b.js", lineNumber: 1, columnNumber: 2 }] },
+      },
+    })
+
+    expect(entry.message).toBe("Script error")
+    expect(entry.url).toBe("http://a/b.js")
+  })
+
+  it("uses the default message when neither description nor text is present", () => {
+    expect(parseExceptionEvent({ exceptionDetails: {} }).message).toBe("Uncaught error")
   })
 })

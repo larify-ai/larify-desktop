@@ -35,6 +35,7 @@ interface ResolveNodeResult {
 }
 interface EvalResult {
   result?: { objectId?: string; value?: unknown }
+  exceptionDetails?: { exception?: { description?: string }; text?: string }
 }
 
 async function scrollIntoView(
@@ -218,6 +219,7 @@ export async function resolveRefToObjectId(
     expression: findElementExpr(selectorOrRef),
     returnByValue: false
   })) as EvalResult
+  if (res.exceptionDetails) throw new Error(`selector '${selectorOrRef}' is invalid`)
   const objectId = res.result?.objectId
   if (!objectId) throw new Error(`selector '${selectorOrRef}' matched no element`)
   return { objectId }

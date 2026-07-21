@@ -631,6 +631,7 @@ describe("browser toolkit", () => {
   })
 
   it("auto-stops record_start when a duration is given and returns the finished recording", async () => {
+    vi.useFakeTimers()
     const recordPath = join(tmpdir(), "larify-record-duration-test.webm")
     const service = {
       ...createService(),
@@ -639,17 +640,21 @@ describe("browser toolkit", () => {
       recordStop: vi.fn(async () => ({ path: recordPath, bytes: 42 })),
     } as unknown as BrowserService
 
-    const result = await tool("record_start", service).execute(
-      { id: 1, path: recordPath, duration: 0.01 },
+    const pending = tool("record_start", service).execute(
+      { id: 1, path: recordPath, duration: 1 },
       ctx,
     )
+    await vi.advanceTimersByTimeAsync(1000)
+    const result = await pending
 
     expect(service.recordStart).toHaveBeenCalledTimes(1)
     expect(service.recordStop).toHaveBeenCalledWith(ctx.context.sessionId)
     expect(result).toEqual({ path: recordPath, bytes: 42 })
+    vi.useRealTimers()
   })
 
   it("does not report an error when the recording is stopped elsewhere during the duration wait", async () => {
+    vi.useFakeTimers()
     const recordPath = join(tmpdir(), "larify-record-raced-test.webm")
     const service = {
       ...createService(),
@@ -660,13 +665,16 @@ describe("browser toolkit", () => {
       }),
     } as unknown as BrowserService
 
-    const result = await tool("record_start", service).execute(
-      { id: 1, path: recordPath, duration: 0.01 },
+    const pending = tool("record_start", service).execute(
+      { id: 1, path: recordPath, duration: 1 },
       ctx,
     )
+    await vi.advanceTimersByTimeAsync(1000)
+    const result = await pending
 
     expect(service.recordStop).toHaveBeenCalledWith(ctx.context.sessionId)
     expect(result).toEqual({ recording: false, path: recordPath })
+    vi.useRealTimers()
   })
 
   it("stops the recording promptly when the tool is aborted during the duration wait", async () => {

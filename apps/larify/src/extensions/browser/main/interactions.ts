@@ -105,7 +105,7 @@ export async function fill(ctx: Interactions, selector: string, text: string): P
   await callOn(
     ctx.send,
     objectId,
-    "function(){ this.select && this.select(); this.value=''; this.dispatchEvent(new Event('input',{bubbles:true})); }",
+    "function(){ if (this.isContentEditable) { this.textContent=''; } else { this.select && this.select(); this.value=''; } this.dispatchEvent(new Event('input',{bubbles:true})); }",
     [],
     sessionId
   )

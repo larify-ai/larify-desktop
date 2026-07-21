@@ -14,6 +14,7 @@ import {
   CircleIcon,
   ClockIcon,
   FileTextIcon,
+  GlobeIcon,
   type LucideIcon,
   SearchIcon,
   SquareTerminalIcon,
@@ -57,6 +58,7 @@ const kindIcons: Record<string, LucideIcon> = {
   search: SearchIcon,
   execute: TerminalIcon,
   terminal: SquareTerminalIcon,
+  browser: GlobeIcon,
   read: FileTextIcon,
   edit: SquarePenIcon,
   other: WrenchIcon,
@@ -173,7 +175,7 @@ export const ToolInput = ({ className, input, ...props }: ToolInputProps) => (
     <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
       Parameters
     </h4>
-    <div className="rounded-md bg-muted/50">
+    <div className="max-h-80 overflow-y-auto rounded-md bg-muted/50">
       <CodeBlock
         code={JSON.stringify(cleanToolInput(input), null, 2) ?? ""}
         language="json"
@@ -214,7 +216,7 @@ export const ToolOutput = ({
       </h4>
       <div
         className={cn(
-          "overflow-x-auto rounded-md text-xs [&_table]:w-full",
+          "max-h-80 overflow-auto rounded-md text-xs [&_table]:w-full",
           errorText
             ? "bg-destructive/10 text-destructive"
             : "bg-muted/50 text-foreground"

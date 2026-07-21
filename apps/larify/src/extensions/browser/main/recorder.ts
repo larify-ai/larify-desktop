@@ -24,6 +24,7 @@ const RECORDER_HTML =
       'let rec = null, out = null, writeChain = Promise.resolve(), bytes = 0;' +
       'ipcRenderer.on("record:init", (_e, o) => {' +
       '  c.width = o.width; c.height = o.height; bytes = 0; writeChain = Promise.resolve();' +
+      '  ctx.fillStyle = "#000"; ctx.fillRect(0, 0, c.width, c.height);' +
       '  out = fs.createWriteStream(o.path); out.on("error", () => {});' +
       '  const stream = c.captureStream(o.fps);' +
       '  const mime = MediaRecorder.isTypeSupported("video/webm;codecs=vp9") ? "video/webm;codecs=vp9" : "video/webm;codecs=vp8";' +

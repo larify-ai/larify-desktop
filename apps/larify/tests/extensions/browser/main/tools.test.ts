@@ -642,6 +642,26 @@ describe("browser toolkit", () => {
     expect(result).toEqual({ path: recordPath, bytes: 42 })
   })
 
+  it("does not report an error when the recording is stopped elsewhere during the duration wait", async () => {
+    const recordPath = join(tmpdir(), "larify-record-raced-test.webm")
+    const service = {
+      ...createService(),
+      tab: vi.fn(() => ({})),
+      recordStart: vi.fn(async () => undefined),
+      recordStop: vi.fn(async () => {
+        throw new Error("no recording in progress")
+      }),
+    } as unknown as BrowserService
+
+    const result = await tool("record_start", service).execute(
+      { id: 1, path: recordPath, duration: 0.01 },
+      ctx,
+    )
+
+    expect(service.recordStop).toHaveBeenCalledWith(ctx.sessionId)
+    expect(result).toEqual({ recording: false, path: recordPath })
+  })
+
   it("rejects a record duration over the 600s cap", () => {
     expect(parseToolInput("record_start", { id: 1, path: "x.webm", duration: 601 }).success).toBe(false)
     expect(parseToolInput("record_start", { id: 1, path: "x.webm", duration: 5 }).success).toBe(true)

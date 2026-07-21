@@ -7,6 +7,7 @@ import { larifyTempPath } from "../../../main/utils/app-paths"
 import { prepareToolOutput } from "../../../main/utils/tool-output"
 import type { BrowserService } from "./browser-service"
 import type { BrowserTab } from "./tab"
+import { waitMs } from "./waits"
 
 const idSchema = z.number().int().positive().describe("Browser tab id")
 const elementTargetSchema = z
@@ -659,20 +660,14 @@ const recordSchema = z
   })
   .strict()
 
-const recordStartSchema = z
-  .object({
-    id: idSchema,
-    path: z.string().min(1).describe("Local .webm file path."),
-    duration: z
-      .number()
-      .positive()
-      .max(600)
-      .optional()
-      .describe("Seconds to record before auto-stopping (max 600). Omit to record until record_stop."),
-  })
-  .strict()
-
-const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
+const recordStartSchema = recordSchema.extend({
+  duration: z
+    .number()
+    .positive()
+    .max(600)
+    .optional()
+    .describe("Seconds to record before auto-stopping (max 600). Omit to record until record_stop."),
+})
 
 function captureTools(service: BrowserServiceProvider): Toolkit["tools"] {
   return [
@@ -711,8 +706,14 @@ function captureTools(service: BrowserServiceProvider): Toolkit["tools"] {
         return withTab(service, ctx.sessionId, id, async (tab) => {
           await resolveService(service).recordStart(ctx.sessionId, tab, path)
           if (duration === undefined) return { recording: true, path }
-          await delay(duration * 1000)
-          return resolveService(service).recordStop(ctx.sessionId)
+          await waitMs(duration * 1000)
+          try {
+            return await resolveService(service).recordStop(ctx.sessionId)
+          } catch {
+            // Recording was already ended during the wait (manual record_stop,
+            // restart, or tab teardown) — that path saved the file, so treat as done.
+            return { recording: false, path }
+          }
         })
       },
     },

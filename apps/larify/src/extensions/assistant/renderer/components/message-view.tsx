@@ -20,7 +20,6 @@ import {
 } from "@renderer/components/ai-elements/tool"
 import { FileDiff, type DiffMeta } from "./file-diff"
 
-const debugToolCardsOpen = import.meta.env.VITE_LARIFY_DEBUG_TOOL_CARDS_OPEN === "1"
 const debugToolErrors = import.meta.env.VITE_LARIFY_DEBUG_TOOL_ERRORS === "1"
 
 export type ToolDisplayMeta = {
@@ -169,9 +168,8 @@ export function MessageView({
               const state = showErrorAsOutput ? "output-available" : part.state
               const output = showErrorAsOutput ? part.errorText : part.output
               const errorText = showErrorAsOutput ? undefined : part.errorText
-              const showRawOutput = Boolean(errorText) || Boolean(output) || !toolMeta
               return (
-                <Tool key={i} defaultOpen={debugToolCardsOpen || Boolean(toolMeta)}>
+                <Tool key={i}>
                   <ToolHeader
                     type="dynamic-tool"
                     toolName={display.toolName}
@@ -180,15 +178,20 @@ export function MessageView({
                     state={state}
                   />
                   <ToolContent>
-                    <ToolInput
-                      input={
-                        display.inputIsOuterToolArgs
-                          ? outerToolInputDisplay(display.toolName, display.input)
-                          : toolInputDisplay(display.toolName, display.input)
-                      }
-                    />
-                    {toolMeta ? <FileDiff meta={toolMeta} /> : null}
-                    {showRawOutput ? <ToolOutput output={output} errorText={errorText} /> : null}
+                    {toolMeta ? (
+                      <FileDiff meta={toolMeta} />
+                    ) : (
+                      <>
+                        <ToolInput
+                          input={
+                            display.inputIsOuterToolArgs
+                              ? outerToolInputDisplay(display.toolName, display.input)
+                              : toolInputDisplay(display.toolName, display.input)
+                          }
+                        />
+                        <ToolOutput output={output} errorText={errorText} />
+                      </>
+                    )}
                   </ToolContent>
                 </Tool>
               )

@@ -35,6 +35,7 @@ import {
 import { Spinner } from "@renderer/components/ui/spinner"
 import { getAgentSessionId, setAgentSessionId } from "@renderer/lib/agent-session"
 import { MessageView } from "./message-view"
+import { conversationToText } from "../lib/conversation-copy"
 import { ipcTransport } from "../lib/transport"
 import type { ToolDisplayMeta } from "./message-view"
 
@@ -261,6 +262,18 @@ function AssistantChat({
   sessions: SessionMeta[]
 }): React.JSX.Element {
   const { messages, sendMessage, status, stop } = useChat({ chat, throttle: 50 })
+  const messagesRef = useRef(messages)
+  messagesRef.current = messages
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.ctrlKey && event.altKey && !event.shiftKey && !event.metaKey && event.code === "KeyC") {
+        event.preventDefault()
+        void navigator.clipboard.writeText(conversationToText(messagesRef.current))
+      }
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [])
   const [toolDisplays, setToolDisplays] = useState<Record<string, ToolDisplayMeta>>({})
   const inputFrameRef = useRef<HTMLDivElement>(null)
   const menuTriggerRef = useRef<HTMLDivElement>(null)

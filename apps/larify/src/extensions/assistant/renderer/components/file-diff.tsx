@@ -23,17 +23,19 @@ export function FileDiff({ meta }: { meta: DiffMeta }): React.JSX.Element {
       <div className="border-b border-border bg-muted/50 px-3 py-1.5 font-mono text-muted-foreground">
         {meta.path}
       </div>
-      <DiffView
-        data={{
-          oldFile: { fileName: meta.path, fileLang: lang, content: contents?.oldContent },
-          newFile: { fileName: meta.path, fileLang: lang, content: contents?.newContent },
-          hunks: [meta.patch],
-        }}
-        diffViewMode={DiffModeEnum.Unified}
-        diffViewHighlight
-        diffViewWrap
-        diffViewTheme={resolvedTheme === "light" ? "light" : "dark"}
-      />
+      <div className="max-h-80 overflow-auto">
+        <DiffView
+          data={{
+            oldFile: { fileName: meta.path, fileLang: lang, content: contents?.oldContent },
+            newFile: { fileName: meta.path, fileLang: lang, content: contents?.newContent },
+            hunks: [meta.patch],
+          }}
+          diffViewMode={DiffModeEnum.Unified}
+          diffViewHighlight
+          diffViewWrap
+          diffViewTheme={resolvedTheme === "light" ? "light" : "dark"}
+        />
+      </div>
     </div>
   )
 }

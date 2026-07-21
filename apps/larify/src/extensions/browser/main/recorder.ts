@@ -1,5 +1,5 @@
 import { BrowserWindow, ipcMain } from 'electron'
-import type { Debugger } from 'electron'
+import type { Debugger, IpcMainEvent, WebContents } from 'electron'
 import { mkdir } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import type { BrowserTab } from './tab'
@@ -23,6 +23,7 @@ const RECORDER_HTML =
       'img.onload = () => ctx.drawImage(img, 0, 0, c.width, c.height);' +
       'let rec = null, out = null, writeChain = Promise.resolve(), bytes = 0;' +
       'ipcRenderer.on("record:init", (_e, o) => {' +
+      '  if (rec) { try { rec.stop(); } catch (e) {} rec = null; }' +
       '  c.width = o.width; c.height = o.height; bytes = 0; writeChain = Promise.resolve();' +
       '  ctx.fillStyle = "#000"; ctx.fillRect(0, 0, c.width, c.height);' +
       '  out = fs.createWriteStream(o.path); out.on("error", () => {});' +
@@ -57,17 +58,27 @@ interface ActiveRecording {
   path: string
 }
 
-function waitForIpc<T>(channel: string, timeoutMs: number, trigger: () => void): Promise<T> {
+function waitForIpc<T>(
+  channel: string,
+  sender: WebContents,
+  timeoutMs: number,
+  trigger: () => void
+): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    const listener = (_e: unknown, payload: T): void => {
+    const cleanup = (): void => {
       clearTimeout(timer)
+      ipcMain.removeListener(channel, listener as never)
+    }
+    const listener = (event: IpcMainEvent, payload: T): void => {
+      if (event.sender !== sender) return
+      cleanup()
       resolve(payload)
     }
     const timer = setTimeout(() => {
-      ipcMain.removeListener(channel, listener as never)
+      cleanup()
       reject(new Error(`recorder: '${channel}' timed out after ${formatTimeout(timeoutMs)}`))
     }, timeoutMs)
-    ipcMain.once(channel, listener as never)
+    ipcMain.on(channel, listener as never)
     trigger()
   })
 }
@@ -115,7 +126,7 @@ export class Recorder {
     const [{ width, height }, win] = await Promise.all([this.canvasSize(dbg), this.ensureWindow()])
 
     try {
-      await waitForIpc('record:ready', READY_TIMEOUT, () =>
+      await waitForIpc('record:ready', win.webContents, READY_TIMEOUT, () =>
         win.webContents.send('record:init', { width, height, fps: FPS, bitrate: BITRATE, path })
       )
     } catch (e) {
@@ -135,6 +146,8 @@ export class Recorder {
       await dbg.sendCommand('Page.startScreencast', { format: 'jpeg', quality: SCREENCAST_QUALITY, everyNthFrame: 1 })
     } catch (e) {
       dbg.off('message', onMessage)
+      if (!win.isDestroyed()) win.destroy()
+      this.win = null
       throw e
     }
     this.active = { dbg, onMessage, path }
@@ -149,7 +162,7 @@ export class Recorder {
     dbg.off('message', onMessage)
 
     try {
-      const { bytes } = await waitForIpc<{ bytes: number }>('record:done', STOP_TIMEOUT, () =>
+      const { bytes } = await waitForIpc<{ bytes: number }>('record:done', win.webContents, STOP_TIMEOUT, () =>
         win.webContents.send('record:stop')
       )
       return { path, bytes }

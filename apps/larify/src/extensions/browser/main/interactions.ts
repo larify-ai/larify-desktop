@@ -88,10 +88,10 @@ export async function drag(ctx: Interactions, source: string, target: string): P
   for (let i = 1; i <= 10; i++) {
     const cx = s.x + ((t.x - s.x) * i) / 10
     const cy = s.y + ((t.y - s.y) * i) / 10
-    await mouse('mouseMoved', cx, cy, { button: 'left', buttons: 1 }, t.sessionId)
+    await mouse('mouseMoved', cx, cy, { button: 'left', buttons: 1 }, s.sessionId)
     await sleep(10)
   }
-  await mouse('mouseReleased', t.x, t.y, { button: 'left', buttons: 0, clickCount: 1 }, t.sessionId)
+  await mouse('mouseReleased', t.x, t.y, { button: 'left', buttons: 0, clickCount: 1 }, s.sessionId)
 }
 
 export async function fill(ctx: Interactions, selector: string, text: string): Promise<void> {

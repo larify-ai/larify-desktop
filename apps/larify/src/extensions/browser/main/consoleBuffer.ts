@@ -149,12 +149,16 @@ export class ConsoleBuffer {
   readConsole(
     opts: { level?: string; limit?: number; clear?: boolean } = {}
   ): { entries: ConsoleEntry[]; dropped: number } {
-    let entries = opts.level ? this.console.filter((e) => e.type === opts.level) : this.console.slice()
-    if (opts.limit != null) entries = opts.limit > 0 ? entries.slice(-opts.limit) : []
+    const filtered = opts.level ? this.console.filter((e) => e.type === opts.level) : this.console.slice()
+    const entries = opts.limit == null ? filtered : opts.limit > 0 ? filtered.slice(-opts.limit) : []
     const dropped = this.consoleDropped
     if (opts.clear) {
-      this.console = []
-      this.consoleDropped = 0
+      if (opts.level) {
+        this.console = this.console.filter((e) => e.type !== opts.level)
+      } else {
+        this.console = []
+        this.consoleDropped = 0
+      }
     }
     return { entries, dropped }
   }

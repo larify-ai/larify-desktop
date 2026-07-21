@@ -338,6 +338,16 @@ describe("BrowserTab", () => {
     vi.useRealTimers()
   })
 
+  it("cleans up the will-download listener when the triggering click throws", async () => {
+    const tab = new BrowserTab(1, "p")
+    h.clickMock.mockRejectedValueOnce(new Error("selector not found"))
+
+    await expect(tab.download("a", "D:\\Downloads\\file.txt", 3000)).rejects.toThrow("selector not found")
+
+    const session = tab.view.webContents.session as unknown as { handlers: Record<string, unknown[]> }
+    expect(session.handlers["will-download"] ?? []).toHaveLength(0)
+  })
+
   it("evaluates JavaScript functions and expressions", async () => {
     h.sendCommandMock.mockImplementation(async (method: string, params: { expression?: string }) => {
       if (method !== "Runtime.evaluate") return {}

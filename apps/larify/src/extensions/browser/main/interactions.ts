@@ -109,7 +109,7 @@ export async function fill(ctx: Interactions, selector: string, text: string): P
     [],
     sessionId
   )
-  await insertText(ctx.send, text)
+  await insertText(ctx.send, text, sessionId)
 }
 
 export async function type(
@@ -130,15 +130,15 @@ export async function type(
     await callOn(
       ctx.send,
       objectId,
-      "function(){ this.select && this.select(); this.value=''; this.dispatchEvent(new Event('input',{bubbles:true})); }",
+      "function(){ if (this.isContentEditable) { this.textContent=''; } else { this.select && this.select(); this.value=''; } this.dispatchEvent(new Event('input',{bubbles:true})); }",
       [],
       sessionId
     )
   }
   for (const ch of text) {
-    if (ch === '\n' || ch === '\r') await dispatchKey(ctx.send, namedKeyInfo('enter'))
-    else if (ch === '\t') await dispatchKey(ctx.send, namedKeyInfo('tab'))
-    else await insertText(ctx.send, ch)
+    if (ch === '\n' || ch === '\r') await dispatchKey(ctx.send, namedKeyInfo('enter'), 0, sessionId)
+    else if (ch === '\t') await dispatchKey(ctx.send, namedKeyInfo('tab'), 0, sessionId)
+    else await insertText(ctx.send, ch, sessionId)
     if (delayMs > 0) await sleep(delayMs)
   }
 }

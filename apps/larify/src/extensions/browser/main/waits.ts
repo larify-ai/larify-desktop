@@ -67,8 +67,20 @@ export function urlMatches(pattern: string, url: string): boolean {
   return true
 }
 
-export function waitMs(ms: number): Promise<void> {
-  return sleep(ms)
+export function waitMs(ms: number, signal?: AbortSignal): Promise<void> {
+  if (!signal) return sleep(ms)
+  if (signal.aborted) return Promise.resolve()
+  return new Promise((resolve) => {
+    const onAbort = (): void => {
+      clearTimeout(timer)
+      resolve()
+    }
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort)
+      resolve()
+    }, ms)
+    signal.addEventListener("abort", onAbort, { once: true })
+  })
 }
 
 export async function waitForSelector(

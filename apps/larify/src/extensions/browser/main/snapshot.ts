@@ -285,7 +285,7 @@ function renderTree(
     line += ` ${node.cursorInfo.kind}`
     if (node.cursorInfo.hints.length) line += ` [${node.cursorInfo.hints.join(', ')}]`
   }
-  if (node.value && node.value !== node.name) line += `: ${node.value}`
+  if (node.value && node.value !== node.name) line += `: ${JSON.stringify(node.value)}`
   out.push(line)
 
   for (const c of node.children) renderTree(tree, c, indent + 1, out, opts, urls, visited)

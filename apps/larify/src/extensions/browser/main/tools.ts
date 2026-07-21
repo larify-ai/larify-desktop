@@ -252,6 +252,7 @@ export function createBrowserToolkit(service: BrowserServiceProvider): Toolkit {
             const tab = getTab(service, ctx.sessionId, id)
             return spill(JSON.stringify(await tab.sendCdp(method, params, sessionId, secondsToMs(timeout)), null, 2))
           } catch (error) {
+            if (shouldExposeToolErrors()) throw error
             const tab = resolveService(service).tab(ctx.sessionId, id)
             return {
               error: error instanceof Error ? error.message : String(error),
@@ -679,7 +680,7 @@ function captureTools(service: BrowserServiceProvider): Toolkit["tools"] {
         return withTab(service, ctx.sessionId, id, async (tab) => {
           await resolveService(service).recordStart(ctx.sessionId, tab, path)
           if (duration === undefined) return { recording: true, path }
-          await waitMs(duration * 1000)
+          await waitMs(duration * 1000, ctx.signal)
           try {
             return await resolveService(service).recordStop(ctx.sessionId)
           } catch {

@@ -43,8 +43,10 @@ function tool(name: string, service = createService()) {
   const rawExecute = found.execute as unknown as (input: unknown, options: unknown) => Promise<unknown>
   return {
     inputSchema,
-    execute: (input: unknown, options: { context: { sessionId: string; cwd: string } }) =>
-      rawExecute(inputSchema.parse(input), { ...options, toolCallId: "test", messages: [] }),
+    execute: (
+      input: unknown,
+      options: { context: { sessionId: string; cwd: string }; abortSignal?: AbortSignal },
+    ) => rawExecute(inputSchema.parse(input), { ...options, toolCallId: "test", messages: [] }),
   }
 }
 
@@ -665,6 +667,26 @@ describe("browser toolkit", () => {
 
     expect(service.recordStop).toHaveBeenCalledWith(ctx.context.sessionId)
     expect(result).toEqual({ recording: false, path: recordPath })
+  })
+
+  it("stops the recording promptly when the tool is aborted during the duration wait", async () => {
+    const recordPath = join(tmpdir(), "larify-record-abort-test.webm")
+    const service = {
+      ...createService(),
+      tab: vi.fn(() => ({})),
+      recordStart: vi.fn(async () => undefined),
+      recordStop: vi.fn(async () => ({ path: recordPath, bytes: 7 })),
+    } as unknown as BrowserService
+    const controller = new AbortController()
+    controller.abort()
+
+    const result = await tool("record_start", service).execute(
+      { id: 1, path: recordPath, duration: 600 },
+      { context: { sessionId: "session-1", cwd: "D:\\Workspace" }, abortSignal: controller.signal },
+    )
+
+    expect(service.recordStop).toHaveBeenCalledWith("session-1")
+    expect(result).toEqual({ path: recordPath, bytes: 7 })
   })
 
   it("rejects a record duration over the 600s cap", () => {

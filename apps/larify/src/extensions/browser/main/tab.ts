@@ -372,10 +372,14 @@ export class BrowserTab {
 
   async download(selector: string, path: string, timeoutMs = 1_800_000): Promise<string> {
     const wc = this.view.webContents
-    const done = new Promise<string>((resolve, reject) => {
+    return new Promise<string>((resolve, reject) => {
       let started = false
-      const timer = setTimeout(() => {
+      const cleanup = (): void => {
+        clearTimeout(timer)
         wc.session.off("will-download", onWillDownload)
+      }
+      const timer = setTimeout(() => {
+        cleanup()
         reject(
           new Error(
             started
@@ -395,9 +399,11 @@ export class BrowserTab {
         })
       }
       wc.session.on("will-download", onWillDownload)
+      interactions.click(this.interactCtx(), selector).catch((error) => {
+        cleanup()
+        reject(error)
+      })
     })
-    await interactions.click(this.interactCtx(), selector)
-    return done
   }
 
   async getText(selector: string): Promise<string> {

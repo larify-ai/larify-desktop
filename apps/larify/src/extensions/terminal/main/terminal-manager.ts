@@ -1,4 +1,5 @@
 import { addListener, type Listener } from '../../../main/utils/listener'
+import { createKeyedLock } from '../../../main/utils/lock'
 import { Terminal, type ShellCommandFinishedEvent } from './terminal'
 import {
   appendRunLog,
@@ -21,7 +22,7 @@ export class TerminalManager {
   private terminals = new Map<number, Terminal>()
   private activeRuns = new Map<number, ActiveRun>()
   private flushing = new Set<number>()
-  private writerQueues = new Map<number, Promise<unknown>>()
+  private writerLock = createKeyedLock()
   private activeId: number | null = null
   private nextId = 1
   private changeListeners = new Set<Listener<[SessionTerminalsState]>>()
@@ -52,7 +53,7 @@ export class TerminalManager {
   create(opts?: TerminalCreateOptions): number {
     const terminal = new Terminal(this.nextId++, opts)
     terminal.bindData((data, start, end) => {
-      void this.flushRunHistory(terminal.id)
+      void this.flushRunHistory(terminal.id).catch(() => {})
       for (const listener of this.dataListeners) listener(terminal.id, data, start, end)
     })
     terminal.bindExit((exitCode) => {
@@ -74,21 +75,10 @@ export class TerminalManager {
 
   async withWriterLock<T>(id: number, fn: () => Promise<T>): Promise<T> {
     if (!this.terminals.has(id)) throw new Error(`Terminal "${id}" not found.`)
-    const previous = this.writerQueues.get(id) ?? Promise.resolve()
-    let release!: () => void
-    const current = new Promise<void>((resolve) => {
-      release = resolve
+    return this.writerLock(String(id), async () => {
+      if (!this.terminals.has(id)) throw new Error(`Terminal "${id}" not found.`)
+      return fn()
     })
-    const queued = previous.then(() => current, () => current)
-    this.writerQueues.set(id, queued)
-    await previous.catch(() => {})
-    if (!this.terminals.has(id)) throw new Error(`Terminal "${id}" not found.`)
-    try {
-      return await fn()
-    } finally {
-      release()
-      if (this.writerQueues.get(id) === queued) this.writerQueues.delete(id)
-    }
   }
 
   async startRun(id: number): Promise<TerminalRunLog | null> {
@@ -175,7 +165,6 @@ export class TerminalManager {
       terminal.close()
       this.terminals.delete(id)
       this.activeRuns.delete(id)
-      this.writerQueues.delete(id)
       if (this.activeId === id) {
         const remaining = [...this.terminals.keys()]
         this.activeId = remaining[index] ?? remaining[index - 1] ?? null
@@ -197,7 +186,6 @@ export class TerminalManager {
     for (const terminal of this.terminals.values()) terminal.kill()
     this.terminals.clear()
     this.activeRuns.clear()
-    this.writerQueues.clear()
     this.activeId = null
     this.emit()
   }

@@ -1,9 +1,9 @@
 import { readFile, stat } from "node:fs/promises"
-import { detect } from "chardet"
-import iconv from "iconv-lite"
+import path from "node:path"
 import { z } from "zod"
-import type { Tool } from "../../../shared/tool"
+import { defineTool } from "../../../shared/tool"
 import { splitLines } from "../../../main/utils/text"
+import { decodeText } from "./encoding"
 import { fileStateFor } from "./state"
 
 const inputSchema = z.object({
@@ -13,19 +13,18 @@ const inputSchema = z.object({
   scroll: z.enum(["down", "up"]).default("down").describe("Read down or up from offset"),
 }).strict()
 
-export const readFileTool: Tool = {
-  name: "read",
+export const readFileTool = defineTool({
   description: "Read a text file.",
   metadata: { icon: "read" },
   inputSchema,
   execute: async (args, ctx) => {
-    const { file_path, offset, limit, scroll } = inputSchema.parse(args)
+    const { file_path, offset, limit, scroll } = args
+    const target = path.resolve(ctx.cwd, file_path)
+    const stats = await stat(target)
+    const buffer = await readFile(target)
+    fileStateFor(ctx.sessionId).set(target, Math.floor(stats.mtimeMs))
 
-    const stats = await stat(file_path)
-    const buffer = await readFile(file_path)
-    fileStateFor(ctx.sessionId).set(file_path, Math.floor(stats.mtimeMs))
-
-    const lines = splitLines(iconv.decode(buffer, detect(buffer) ?? "utf-8"))
+    const lines = splitLines(decodeText(buffer))
     const lastLine = lines.length
     const anchor = Math.min(offset ?? (scroll === "up" ? lastLine : 1), lastLine)
     const start = Math.min(
@@ -42,4 +41,4 @@ export const readFileTool: Tool = {
     if (end < lastLine) body += `\n(Lines ${end + 1}-${lastLine} omitted.)`
     return body
   },
-}
+})

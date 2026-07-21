@@ -1,7 +1,6 @@
 import { Liquid } from "liquidjs"
 import template from "./prompt.md?raw"
 import type { ToolRegistry } from "./registry"
-import { larifyWorkspacePath } from "../../../main/utils/app-paths"
 
 const liquid = new Liquid()
 
@@ -12,7 +11,7 @@ function platformName(): string {
   return process.platform
 }
 
-export function buildSystemPrompt(registry: ToolRegistry, cwd = larifyWorkspacePath()): string {
+export function buildSystemPrompt(registry: ToolRegistry, cwd: string): string {
   const toolkits = registry.listToolkits()
   return liquid.parseAndRenderSync(template, {
     toolkits,

@@ -4,21 +4,17 @@ import type { Extension } from "kernel"
 import type { Toolkit } from "../../../shared/tool"
 import { runAgent } from "./agent"
 import { createToolRegistry } from "./registry"
-import { buildMetaTools } from "./meta-tools"
+import { createAgentToolkit } from "./agent-toolkit"
 import { buildSystemPrompt } from "./system-prompt"
 import { createSessionStore } from "./session-store"
 import { sanitizeAndValidateMessages } from "./message-sanitizer"
-
-const metaToolDisplays = {
-  "agent.list_toolkit_tools": { title: "搜索工具", icon: "search" },
-  "agent.get_tool_schemas": { title: "读取工具", icon: "search" },
-  call_tool: { title: "调用工具", icon: "other" },
-}
+import { larifyWorkspacePath } from "../../../main/utils/app-paths"
 
 interface RunRequest {
   runId: string
   sessionId: string
   messages: UIMessage[]
+  cwd?: string
 }
 
 function prepareMessagesForModel(messages: UIMessage[]): UIMessage[] {
@@ -47,11 +43,6 @@ const extension: Extension = {
     const controllers = new Map<string, AbortController>()
     const sessions = createSessionStore()
 
-    ipcMain.handle("agent:tool-displays", () => {
-      const registry = createToolRegistry(app.getAll<Toolkit>("tool"))
-      return { ...metaToolDisplays, ...registry.listToolDisplays() }
-    })
-
     ipcMain.handle("agent:session-load", (_event, sessionId: string) => {
       return sessions.loadSession(sessionId).then(sanitizeAndValidateMessages)
     })
@@ -64,18 +55,22 @@ const extension: Extension = {
       return sessions.listSessions()
     })
 
-    ipcMain.handle("agent:run", async (event, { runId, sessionId, messages }: RunRequest) => {
+    ipcMain.handle("agent:run", async (event, { runId, sessionId, messages, cwd: requestCwd }: RunRequest) => {
       const controller = new AbortController()
       controllers.set(runId, controller)
       try {
         const registry = createToolRegistry(app.getAll<Toolkit>("tool"))
+        registry.addToolkit(createAgentToolkit(registry))
         const validMessages = await sanitizeAndValidateMessages(messages)
         const modelMessages = await convertToModelMessages(prepareMessagesForModel(validMessages))
+        const cwd = requestCwd ?? larifyWorkspacePath()
         const reader = runAgent({
           messages: modelMessages,
-          buildTools: (writer) => buildMetaTools(registry, { sessionId }, writer),
+          tools: registry.toolSet(),
+          activeTools: registry.activeToolNames(),
+          toolContext: { sessionId, cwd },
           abortSignal: controller.signal,
-          system: buildSystemPrompt(registry),
+          system: buildSystemPrompt(registry, cwd),
         }).getReader()
         for (;;) {
           const { done, value } = await reader.read()
@@ -98,7 +93,6 @@ const extension: Extension = {
       dispose: () => {
         for (const controller of controllers.values()) controller.abort()
         controllers.clear()
-        ipcMain.removeHandler("agent:tool-displays")
         ipcMain.removeHandler("agent:session-load")
         ipcMain.removeHandler("agent:session-save")
         ipcMain.removeHandler("agent:session-list")

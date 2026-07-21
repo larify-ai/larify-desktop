@@ -2,14 +2,14 @@ import { stat } from "node:fs/promises"
 import path from "node:path"
 import { z } from "zod"
 import { trimTrailingLineBreak } from "../../../main/utils/text"
-import type { Tool } from "../../../shared/tool"
+import { defineTool } from "../../../shared/tool"
 import { runRipgrepStream, toAbsolutePath } from "./ripgrep"
 
 const DEFAULT_TIMEOUT_MS = 10 * 60_000
 
 const inputSchema = z.object({
   pattern: z.string().describe("The regex pattern to search for in file contents"),
-  path: z.string().optional().describe("The file or directory to search in. If omitted, the session working directory is used."),
+  path: z.string().optional().describe("The file or directory to search in. If omitted, the current working directory is used."),
   glob: z.string().optional().describe("The glob pattern to filter files"),
   limit: z.number().int().positive().default(50).describe("Maximum number of matching files to return"),
   offset: z.number().int().nonnegative().default(0).describe("Skip the first N matching files"),
@@ -81,9 +81,15 @@ const readMatchGroups = async (
   root: string,
   offset: number,
   limit: number,
+  signal?: AbortSignal,
 ): Promise<{ groups: FileMatches[]; truncated: boolean }> => {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS)
+  const onExternalAbort = (): void => controller.abort()
+  if (signal) {
+    if (signal.aborted) controller.abort()
+    else signal.addEventListener("abort", onExternalAbort, { once: true })
+  }
   const groups: FileMatches[] = []
   const byFile = new Map<string, FileMatches>()
   const seenFiles = new Set<string>()
@@ -124,29 +130,29 @@ const readMatchGroups = async (
     truncated = true
   } finally {
     clearTimeout(timeout)
+    signal?.removeEventListener("abort", onExternalAbort)
   }
 
   return { groups, truncated: truncated || controller.signal.aborted }
 }
 
-export const grepFilesTool: Tool = {
-  name: "grep",
+export const grepFilesTool = defineTool({
   description: "Search file contents.",
   metadata: { icon: "search" },
   inputSchema,
   execute: async (args, ctx) => {
-    const { pattern, path: searchPath, glob, limit, offset } = inputSchema.parse(args)
-    const root = path.resolve(searchPath ?? ctx.cwd ?? process.cwd())
+    const { pattern, path: searchPath, glob, limit, offset } = args
+    const root = path.resolve(ctx.cwd, searchPath ?? ".")
     await stat(root)
 
-    const rgArgs = ["--no-config", "--json", "--hidden", "--no-messages", "--glob", "!**/.git/**"]
+    const rgArgs = ["--no-config", "--json", "--hidden", "--no-messages", "--sort=path", "--glob", "!**/.git/**"]
     if (glob) rgArgs.push("--glob", glob)
     if (pattern.startsWith("-")) rgArgs.push("-e", pattern)
     else rgArgs.push(pattern)
 
-    const { groups, truncated } = await readMatchGroups(rgArgs, root, offset, limit)
+    const { groups, truncated } = await readMatchGroups(rgArgs, root, offset, limit, ctx.signal)
     if (groups.length === 0) return "No matches found."
 
     return formatFileMatches(groups, offset, truncated)
   },
-}
+})

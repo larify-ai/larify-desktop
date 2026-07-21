@@ -1,7 +1,7 @@
 import { stat } from "node:fs/promises"
 import path from "node:path"
 import { z } from "zod"
-import type { Tool } from "../../../shared/tool"
+import { defineTool } from "../../../shared/tool"
 import { runRipgrepLimited, toAbsolutePath } from "./ripgrep"
 
 const inputSchema = z.object({
@@ -9,19 +9,18 @@ const inputSchema = z.object({
   path: z
     .string()
     .optional()
-    .describe("The directory to search in. If omitted, the session working directory is used."),
+    .describe("The directory to search in. If omitted, the current working directory is used."),
   limit: z.number().int().positive().default(100).describe("Maximum number of file paths to return"),
   offset: z.number().int().nonnegative().default(0).describe("Skip the first N matching file paths"),
 }).strict()
 
-export const globFilesTool: Tool = {
-  name: "glob",
+export const globFilesTool = defineTool({
   description: "Find files by glob pattern.",
   metadata: { icon: "search" },
   inputSchema,
   execute: async (args, ctx) => {
-    const { pattern, path: searchPath, limit, offset } = inputSchema.parse(args)
-    const root = path.resolve(searchPath ?? ctx.cwd ?? process.cwd())
+    const { pattern, path: searchPath, limit, offset } = args
+    const root = path.resolve(ctx.cwd, searchPath ?? ".")
     const stats = await stat(root)
     if (!stats.isDirectory()) throw new Error(`Path is not a directory: ${root}`)
 
@@ -31,7 +30,7 @@ export const globFilesTool: Tool = {
         "--files",
         "--glob",
         pattern,
-        "--sort=modified",
+        "--sortr=modified",
         "--hidden",
         "--no-ignore",
         "--no-messages",
@@ -39,7 +38,7 @@ export const globFilesTool: Tool = {
         "!**/.git/**",
       ],
       root,
-      { offset, limit: limit + 1 },
+      { offset, limit: limit + 1, signal: ctx.signal },
     )
     const files = result.lines.slice(0, limit).map((filePath) => toAbsolutePath(root, filePath))
 
@@ -50,4 +49,4 @@ export const globFilesTool: Tool = {
     }
     return output
   },
-}
+})

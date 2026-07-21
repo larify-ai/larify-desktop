@@ -2,10 +2,8 @@ import { describe, expect, it, vi } from "vitest"
 import { z } from "zod"
 import { createTerminalToolkit } from "../../../../src/extensions/terminal/main/tools"
 import type { TerminalService } from "../../../../src/extensions/terminal/main/terminal-service"
-import type { Toolkit } from "../../../../src/shared/tool"
 
-const ctx = { sessionId: "session-1" }
-type TerminalTool = Toolkit["tools"][number]
+const ctx = { context: { sessionId: "session-1", cwd: "D:\\Workspace" } }
 
 function createService(): TerminalService {
   return {
@@ -17,18 +15,25 @@ function createService(): TerminalService {
     close: vi.fn(),
     bindData: vi.fn(() => () => {}),
     bindCommandFinished: vi.fn(() => () => {}),
+    bindExit: vi.fn(() => () => {}),
     withWriterLock: vi.fn((_sessionId, _terminalId, fn) => fn()),
   } as unknown as TerminalService
 }
 
-function tool(name: string, service: TerminalService): TerminalTool {
-  const found = createTerminalToolkit(service).tools.find((item) => item.name === name)
+function tool(name: string, service: TerminalService) {
+  const found = createTerminalToolkit(service).tools[name]
   if (!found) throw new Error(`Tool ${name} not found`)
-  return found
+  const inputSchema = found.inputSchema as unknown as z.ZodTypeAny
+  const rawExecute = found.execute as unknown as (input: unknown, options: unknown) => Promise<unknown>
+  return {
+    inputSchema,
+    execute: (input: unknown, options: { context: { sessionId: string; cwd: string } }) =>
+      rawExecute(inputSchema.parse(input), { ...options, toolCallId: "test", messages: [] }),
+  }
 }
 
 function parseToolInput(name: string, input: unknown, service = createService()) {
-  return (tool(name, service).inputSchema as z.ZodTypeAny).safeParse(input)
+  return tool(name, service).inputSchema.safeParse(input)
 }
 
 describe("terminal schemas", () => {
@@ -323,6 +328,62 @@ describe("write", () => {
     ).resolves.toMatchObject({ status: "shell integration command finish event received", snapshot: { screen: "done" } })
 
     expect(service.bindCommandFinished).toHaveBeenCalled()
+  })
+
+  it("does not miss a command-finished event that fires during startRun (bound before startRun)", async () => {
+    const service = createService()
+    let commandFinished: ((sessionId: string, terminalId: number) => void) | undefined
+    vi.mocked(service.terminalState).mockReturnValue({
+      id: 1,
+      pid: 100,
+      title: "powershell",
+      cwd: "D:\\Workspace",
+      shell: "powershell.exe",
+      shellIntegration: true,
+      commandRunning: true,
+      exitCode: null,
+    })
+    vi.mocked(service.bindCommandFinished).mockImplementation((callback) => {
+      commandFinished = callback
+      return () => {}
+    })
+    vi.mocked(service.startRun).mockImplementation(async () => {
+      commandFinished?.("session-1", 1)
+      return { runId: "run-1", sessionId: "session-1" }
+    })
+    vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: "done" })
+
+    await expect(
+      tool("write", service).execute({ id: 1, input: "", timeout: 300 }, ctx),
+    ).resolves.toMatchObject({ status: "shell integration command finish event received" })
+  })
+
+  it("resolves when a running command ends by the terminal exiting with no shell-integration 'D'", async () => {
+    const service = createService()
+    let exit: ((sessionId: string, terminalId: number) => void) | undefined
+    vi.mocked(service.terminalState).mockReturnValue({
+      id: 1,
+      pid: 100,
+      title: "powershell",
+      cwd: "D:\\Workspace",
+      shell: "powershell.exe",
+      shellIntegration: true,
+      exitCode: null,
+    })
+    vi.mocked(service.bindExit).mockImplementation((callback) => {
+      exit = callback
+      return () => {}
+    })
+    vi.mocked(service.write).mockImplementation(() => {
+      exit?.("session-1", 1)
+    })
+    vi.mocked(service.startRun).mockResolvedValue({ runId: "run-1", sessionId: "session-1" })
+    vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: "done" })
+
+    await expect(
+      tool("write", service).execute({ id: 1, input: "exit", submit: true, timeout: 300 }, ctx),
+    ).resolves.toMatchObject({ status: "shell integration command finish event received", snapshot: { screen: "done" } })
+    expect(service.bindExit).toHaveBeenCalled()
   })
 
 })

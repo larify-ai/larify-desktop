@@ -1,30 +1,52 @@
 import { z } from "zod"
-import type { Tool, Toolkit } from "../../../shared/tool"
+import type { Tool } from "ai"
+import type { Toolkit } from "../../../shared/tool"
 
-export const callToolInvocationSchema = (tool: Tool, name = tool.name) =>
-  z.object({
-    title: z.string().min(1).describe("Short user-facing phrase describing the step"),
-    name: z.literal(name).describe("Tool name in toolkit_name.tool_name format"),
-    args: tool.inputSchema,
-  }).strict()
+const qualify = (toolkit: string, tool: string): string => `${toolkit}_${tool}`
 
-export const createToolRegistry = (toolkits: Toolkit[]): ToolRegistry => {
-  return new ToolRegistry(toolkits)
+export function wrapWithTitle(tool: Tool): Tool {
+  const execute = tool.execute
+  return {
+    ...tool,
+    inputSchema: z
+      .object({
+        title: z.string().min(1).describe("Short user-facing phrase describing the step"),
+        args: tool.inputSchema as z.ZodTypeAny,
+      })
+      .strict(),
+    execute: execute && ((input: { args: unknown }, options: any) => execute(input.args, options)),
+  } as Tool
 }
+
+export const createToolRegistry = (toolkits: Toolkit[]): ToolRegistry => new ToolRegistry(toolkits)
 
 export class ToolRegistry {
   private readonly toolkits = new Map<string, Toolkit>()
-  private readonly qualifiedTools = new Map<string, Tool>()
+  private readonly tools = new Map<string, Tool>()
 
   constructor(toolkits: Toolkit[]) {
     for (const toolkit of toolkits) this.addToolkit(toolkit)
   }
 
-  private addToolkit(toolkit: Toolkit) {
+  addToolkit(toolkit: Toolkit) {
     this.toolkits.set(toolkit.name, toolkit)
-    for (const tool of toolkit.tools) {
-      this.qualifiedTools.set(`${toolkit.name}.${tool.name}`, tool)
+    for (const [name, tool] of Object.entries(toolkit.tools)) {
+      this.tools.set(qualify(toolkit.name, name), wrapWithTitle(tool))
     }
+  }
+
+  toolSet(): Record<string, Tool> {
+    return Object.fromEntries(this.tools)
+  }
+
+  tool(name: string): Tool | undefined {
+    return this.tools.get(name)
+  }
+
+  activeToolNames(): string[] {
+    return [...this.tools.entries()]
+      .filter(([, tool]) => tool.metadata?.eager)
+      .map(([name]) => name)
   }
 
   listToolkits() {
@@ -35,36 +57,15 @@ export class ToolRegistry {
   }
 
   listTools(toolkit_name: string) {
-    return this.toolkits.get(toolkit_name)?.tools.map((tool) => ({
-      tool_name: `${toolkit_name}.${tool.name}`,
-      description: tool.description,
+    const toolkit = this.toolkits.get(toolkit_name)
+    if (!toolkit) return undefined
+    const tools = Object.entries(toolkit.tools).map(([name, tool]) => ({
+      tool_name: qualify(toolkit_name, name),
+      ...(tool.description ? { description: tool.description } : {}),
     }))
-  }
-
-  listToolDisplays() {
-    return Object.fromEntries(
-      [...this.qualifiedTools.entries()].flatMap(([name, tool]) => {
-        const title = tool.metadata?.title
-        const icon = tool.metadata?.icon
-        if (typeof title !== "string" && typeof icon !== "string") return []
-        return [[
-          name,
-          {
-            ...(typeof title === "string" && { title }),
-            ...(typeof icon === "string" && { icon }),
-          },
-        ]]
-      }),
-    )
-  }
-
-  get(tool_name: string): Tool | undefined {
-    return this.resolve(tool_name)?.tool
-  }
-
-  resolve(tool_name: string): { tool_name: string; tool: Tool } | undefined {
-    const tool = this.qualifiedTools.get(tool_name)
-    if (!tool) return undefined
-    return { tool_name, tool }
+    return {
+      ...(toolkit.instruction ? { instruction: toolkit.instruction } : {}),
+      tools,
+    }
   }
 }

@@ -1,10 +1,10 @@
 import { readdir, stat } from "node:fs/promises"
 import path from "node:path"
 import { z } from "zod"
-import type { Tool } from "../../../shared/tool"
+import { defineTool } from "../../../shared/tool"
 
 const inputSchema = z.object({
-  path: z.string().optional().describe("The directory to list. If omitted, the session working directory is used."),
+  path: z.string().optional().describe("The directory to list. If omitted, the current working directory is used."),
   limit: z.number().int().positive().default(200).describe("Maximum number of items to return"),
   offset: z.number().int().nonnegative().default(0).describe("Skip the first N items"),
 }).strict()
@@ -16,14 +16,13 @@ interface Item {
 
 const formatItem = (item: Item): string => item.name + (item.isDirectory ? "/" : "")
 
-export const lsTool: Tool = {
-  name: "ls",
+export const lsTool = defineTool({
   description: "List directory contents.",
   metadata: { icon: "read" },
   inputSchema,
   execute: async (args, ctx) => {
-    const { path: targetPath, limit, offset } = inputSchema.parse(args)
-    const root = path.resolve(targetPath ?? ctx.cwd ?? process.cwd())
+    const { path: targetPath, limit, offset } = args
+    const root = path.resolve(ctx.cwd, targetPath ?? ".")
     const rootStats = await stat(root)
     if (!rootStats.isDirectory()) throw new Error(`Path is not a directory: ${root}`)
 
@@ -39,4 +38,4 @@ export const lsTool: Tool = {
     if (end < items.length) output += `\n(Items ${end + 1}-${items.length} omitted.)`
     return output
   },
-}
+})

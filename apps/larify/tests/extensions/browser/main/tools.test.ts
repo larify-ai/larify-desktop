@@ -5,9 +5,8 @@ import { tmpdir } from "node:os"
 import { z } from "zod"
 import { createBrowserToolkit } from "../../../../src/extensions/browser/main/tools"
 import type { BrowserService } from "../../../../src/extensions/browser/main/browser-service"
-import type { Toolkit } from "../../../../src/shared/tool"
 
-const ctx = { sessionId: "session-1" }
+const ctx = { context: { sessionId: "session-1", cwd: "D:\\Workspace" } }
 
 function createService(): BrowserService {
   const tabs = [
@@ -37,19 +36,25 @@ function createService(): BrowserService {
   } as unknown as BrowserService
 }
 
-function tool(name: string, service = createService()): Toolkit["tools"][number] {
-  const found = createBrowserToolkit(service).tools.find((item) => item.name === name)
+function tool(name: string, service = createService()) {
+  const found = createBrowserToolkit(service).tools[name]
   if (!found) throw new Error(`Tool ${name} not found`)
-  return found
+  const inputSchema = found.inputSchema as unknown as z.ZodTypeAny
+  const rawExecute = found.execute as unknown as (input: unknown, options: unknown) => Promise<unknown>
+  return {
+    inputSchema,
+    execute: (input: unknown, options: { context: { sessionId: string; cwd: string } }) =>
+      rawExecute(inputSchema.parse(input), { ...options, toolCallId: "test", messages: [] }),
+  }
 }
 
 function parseToolInput(name: string, input: unknown, service = createService()) {
-  return (tool(name, service).inputSchema as z.ZodTypeAny).safeParse(input)
+  return tool(name, service).inputSchema.safeParse(input)
 }
 
 describe("browser toolkit", () => {
   it("exposes the migrated browser tool surface without browser_ prefixes", () => {
-    expect(createBrowserToolkit(createService()).tools.map((item) => item.name).sort()).toEqual(
+    expect(Object.keys(createBrowserToolkit(createService()).tools).sort()).toEqual(
       [
         "cdp_call",
         "cdp_events",

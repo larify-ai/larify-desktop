@@ -3,7 +3,7 @@ import {
   normalizeTerminalInputLineBreaks,
   trimTrailingLineBreak
 } from '../../../main/utils/text'
-import type { Toolkit } from '../../../shared/tool'
+import { defineTool, type Toolkit } from '../../../shared/tool'
 import type { TerminalService } from './terminal-service'
 import type { TerminalAgentSnapshot } from '../shared/types'
 
@@ -56,11 +56,17 @@ function waitForCommandFinished(
       if (settled) return
       settled = true
       clearTimeout(timeoutTimer)
-      unbind()
+      unbindFinished()
+      unbindExit()
       resolve(completed)
     }
 
-    const unbind = service.bindCommandFinished((eventSessionId, eventTerminalId) => {
+    const unbindFinished = service.bindCommandFinished((eventSessionId, eventTerminalId) => {
+      if (eventSessionId !== sessionId || eventTerminalId !== terminalId) return
+      finish(true)
+    })
+
+    const unbindExit = service.bindExit((eventSessionId, eventTerminalId) => {
       if (eventSessionId !== sessionId || eventTerminalId !== terminalId) return
       finish(true)
     })
@@ -140,60 +146,57 @@ export function createTerminalToolkit(service: TerminalService): Toolkit {
   return {
     name: 'terminal',
     description: 'Create terminals, run commands, operate interactive TUIs, and read terminal snapshots',
-    tools: [
-      {
-        name: 'list',
+    tools: {
+      list: defineTool({
         description: 'List all terminals',
         metadata: { icon: 'terminal' },
         inputSchema: z.object({}).strict(),
         execute: async (_args, ctx) => service.state(ctx.sessionId).terminals
-      },
-      {
-        name: 'create',
+      }),
+      create: defineTool({
         description: 'Create a terminal',
         metadata: { icon: 'terminal' },
         inputSchema: createSchema,
         execute: async (args, ctx) => {
-          const terminalId = service.create(ctx.sessionId, createSchema.parse(args))
+          const terminalId = service.create(ctx.sessionId, args)
           return service.terminalState(ctx.sessionId, terminalId)
         }
-      },
-      {
-        name: 'close',
+      }),
+      close: defineTool({
         description: 'Close a terminal',
         metadata: { icon: 'terminal' },
         inputSchema: closeSchema,
         execute: async (args, ctx) => {
-          const { id } = closeSchema.parse(args)
+          const { id } = args
           if (!service.terminalState(ctx.sessionId, id)) {
             throw new Error(`Terminal "${id}" not found.`)
           }
           await service.close(ctx.sessionId, id)
           return `Closed terminal ${id}.`
         }
-      },
-      {
-        name: 'write',
+      }),
+      write: defineTool({
         description: 'Write raw node-pty input to a terminal',
         metadata: { icon: 'terminal' },
         inputSchema: writeSchema,
         execute: async (args, ctx) => {
-          const { id, input, submit, timeout, idle } = writeSchema.parse(args)
+          const { id, input, submit, timeout, idle } = args
           return service.withWriterLock(ctx.sessionId, id, async () => {
             const state = service.terminalState(ctx.sessionId, id)
             if (!state) throw new Error(`Terminal "${id}" not found.`)
-            const log = await service.startRun(ctx.sessionId, id)
-            if (!log) throw new Error(`Terminal "${id}" not found.`)
             const data = input
               ? normalizeTerminalInputLineBreaks(submit ? `${trimTrailingLineBreak(input)}\r` : input)
               : input
             const submittedInput = Boolean(data?.endsWith('\r'))
             const shouldWaitForCommand =
               (submittedInput || state.commandRunning) && state.shellIntegration
-            const waitPromise = shouldWaitForCommand
+            const commandWait = shouldWaitForCommand
               ? waitForCommandFinished(service, ctx.sessionId, id, timeout)
-              : waitForIdle(service, ctx.sessionId, id, idle, timeout)
+              : null
+            const log = await service.startRun(ctx.sessionId, id)
+            if (!log) throw new Error(`Terminal "${id}" not found.`)
             if (data) service.write(ctx.sessionId, id, data)
+            const waitPromise = commandWait ?? waitForIdle(service, ctx.sessionId, id, idle, timeout)
             const waitCompleted = await waitPromise
             const completed = shouldWaitForCommand ? waitCompleted : false
             await service.flushRunHistory(ctx.sessionId, id)
@@ -202,14 +205,13 @@ export function createTerminalToolkit(service: TerminalService): Toolkit {
             return terminalResult(snapshot, Boolean(shouldWaitForCommand && completed), log)
           })
         }
-      },
-      {
-        name: 'read',
+      }),
+      read: defineTool({
         description: 'Read a terminal snapshot, including interactive TUI screens',
         metadata: { icon: 'terminal' },
         inputSchema: readSchema,
         execute: async (args, ctx) => {
-          const { id, timeout, idle } = readSchema.parse(args)
+          const { id, timeout, idle } = args
           const state = service.terminalState(ctx.sessionId, id)
           if (!state) {
             throw new Error(`Terminal "${id}" not found.`)
@@ -231,7 +233,7 @@ export function createTerminalToolkit(service: TerminalService): Toolkit {
             log ?? undefined
           )
         }
-      }
-    ]
+      })
+    }
   }
 }

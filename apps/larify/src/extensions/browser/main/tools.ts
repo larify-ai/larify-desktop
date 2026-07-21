@@ -2,7 +2,7 @@ import { mkdir, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { randomUUID } from "node:crypto"
 import { z } from "zod"
-import type { Toolkit } from "../../../shared/tool"
+import { defineTool, type Toolkit } from "../../../shared/tool"
 import { larifyTempPath } from "../../../main/utils/app-paths"
 import { prepareToolOutput } from "../../../main/utils/tool-output"
 import type { BrowserService } from "./browser-service"
@@ -154,15 +154,14 @@ export function createBrowserToolkit(service: BrowserServiceProvider): Toolkit {
   return {
     name: "browser",
     description: "Create browser tabs, navigate pages, inspect content, and interact with web pages",
-    tools: [
-      {
-        name: "create_tab",
+    tools: {
+      create_tab: defineTool({
         description:
           "Open a new browser tab, optionally navigating to a URL or local file path.",
         metadata: { icon: "browser" },
         inputSchema: z.object({ url: z.string().optional().describe("URL or local file path") }).strict(),
         execute: async (args, ctx) => {
-          const { url } = z.object({ url: z.string().optional() }).strict().parse(args)
+          const { url } = args
           try {
             const resolved = resolveService(service)
             const id = resolved.createTab(ctx.sessionId, url)
@@ -173,35 +172,32 @@ export function createBrowserToolkit(service: BrowserServiceProvider): Toolkit {
             return errorResult(error)
           }
         },
-      },
-      {
-        name: "close_tab",
+      }),
+      close_tab: defineTool({
         description: "Close a browser tab by id.",
         metadata: { icon: "browser" },
         inputSchema: z.object({ id: idSchema }).strict(),
         execute: async (args, ctx) => {
-          const { id } = z.object({ id: idSchema }).strict().parse(args)
+          const { id } = args
           return withTab(service, ctx.sessionId, id, () => {
             resolveService(service).close(ctx.sessionId, id)
             return `Closed browser tab ${id}.`
           })
         },
-      },
-      {
-        name: "list_tabs",
+      }),
+      list_tabs: defineTool({
         description: "List all open browser tabs with their navigation state.",
         metadata: { icon: "browser" },
         inputSchema: z.object({}).strict(),
         execute: async (_args, ctx) =>
           resolveService(service).state(ctx.sessionId).tabs.map(({ favIconUrl, ...tab }) => tab),
-      },
-      {
-        name: "navigate",
+      }),
+      navigate: defineTool({
         description: "Navigate a browser tab: goto a URL, go back/forward, or reload.",
         metadata: { icon: "browser" },
         inputSchema: navigateSchema,
         execute: async (args, ctx) => {
-          const { id, action, url } = navigateSchema.parse(args)
+          const { id, action, url } = args
           return withTab(service, ctx.sessionId, id, async (tab) => {
             if (action === "goto") await tab.navigateAndWait(url!)
             else if (action === "back") await tab.goBackAndWait()
@@ -210,52 +206,48 @@ export function createBrowserToolkit(service: BrowserServiceProvider): Toolkit {
             return tabState(tab)
           })
         },
-      },
-      {
-        name: "snapshot",
+      }),
+      snapshot: defineTool({
         description: "Return an accessibility tree with refs for interaction.",
         metadata: { icon: "browser" },
         inputSchema: snapshotSchema,
         execute: async (args, ctx) => {
-          const { id, includeUrls, ...options } = snapshotSchema.parse(args)
+          const { id, includeUrls, ...options } = args
           return withTab(service, ctx.sessionId, id, async (tab) =>
             spill(await tab.snapshot({ ...options, urls: includeUrls })),
           )
         },
-      },
-      {
-        name: "read_page",
+      }),
+      read_page: defineTool({
         description: "Read the current page as clean markdown.",
         metadata: { icon: "browser" },
         inputSchema: tabIdInputSchema,
         execute: async (args, ctx) => {
-          const { id } = tabIdInputSchema.parse(args)
+          const { id } = args
           return withTab(service, ctx.sessionId, id, async (tab) => {
             const page = await tab.read()
             return spill(page.content, { url: page.url, title: page.title })
           })
         },
-      },
-      {
-        name: "eval_js",
+      }),
+      eval_js: defineTool({
         description: "Run a JavaScript function in a tab and return its value.",
         metadata: { icon: "browser" },
         inputSchema: evalSchema,
         execute: async (args, ctx) => {
-          const { id, script, sessionId } = evalSchema.parse(args)
+          const { id, script, sessionId } = args
           return withTab(service, ctx.sessionId, id, async (tab) =>
             spill(JSON.stringify(await tab.evalJs(script, sessionId), null, 2)),
           )
         },
-      },
-      {
-        name: "cdp_call",
+      }),
+      cdp_call: defineTool({
         description:
           "Send a raw Chrome DevTools Protocol command to a tab via Electron's webContents.debugger (https://www.electronjs.org/docs/latest/api/debugger). CDP methods and params: https://chromedevtools.github.io/devtools-protocol/",
         metadata: { icon: "browser" },
         inputSchema: cdpCallSchema,
         execute: async (args, ctx) => {
-          const { id, method, params, sessionId, timeout } = cdpCallSchema.parse(args)
+          const { id, method, params, sessionId, timeout } = args
           try {
             const tab = getTab(service, ctx.sessionId, id)
             return spill(JSON.stringify(await tab.sendCdp(method, params, sessionId, secondsToMs(timeout)), null, 2))
@@ -267,53 +259,50 @@ export function createBrowserToolkit(service: BrowserServiceProvider): Toolkit {
             }
           }
         },
-      },
-      {
-        name: "cdp_events",
+      }),
+      cdp_events: defineTool({
         description:
           "Drain buffered Chrome DevTools Protocol events from a tab. Events accumulate only after their domain is enabled via cdp_call.",
         metadata: { icon: "browser" },
         inputSchema: cdpEventsSchema,
         execute: async (args, ctx) => {
-          const { id, filter } = cdpEventsSchema.parse(args)
+          const { id, filter } = args
           return withTab(service, ctx.sessionId, id, (tab) => {
             const { events, dropped } = tab.drainCdpEvents(filter)
             return spill(JSON.stringify(events, null, 2), { count: events.length, dropped })
           })
         },
-      },
-      {
-        name: "console",
+      }),
+      console: defineTool({
         description: "Read buffered console messages (log/warn/error) from a tab.",
         metadata: { icon: "browser" },
         inputSchema: consoleSchema,
         execute: async (args, ctx) => {
-          const { id, ...options } = consoleSchema.parse(args)
+          const { id, ...options } = args
           return withTab(service, ctx.sessionId, id, (tab) => {
             const { entries, dropped } = tab.readConsole(options)
             return spill(JSON.stringify(entries, null, 2), { count: entries.length, dropped })
           })
         },
-      },
-      {
-        name: "errors",
+      }),
+      errors: defineTool({
         description: "Read uncaught JavaScript errors from a tab.",
         metadata: { icon: "browser" },
         inputSchema: errorsSchema,
         execute: async (args, ctx) => {
-          const { id, clear } = errorsSchema.parse(args)
+          const { id, clear } = args
           return withTab(service, ctx.sessionId, id, (tab) => {
             const { entries, dropped } = tab.readErrors({ clear })
             return spill(JSON.stringify(entries, null, 2), { count: entries.length, dropped })
           })
         },
-      },
+      }),
       ...queryTools(service),
       ...interactionTools(service),
       ...waitTools(service),
       ...captureTools(service),
       ...inputTools(service),
-    ],
+    },
   }
 }
 
@@ -355,14 +344,13 @@ function queryTools(service: BrowserServiceProvider): Toolkit["tools"] {
         })
       }
     })
-  return [
-    {
-      name: "query_element",
+  return {
+    query_element: defineTool({
       description: "Query text, value, state, attributes, styles, or geometry from one element selected by selector.",
       metadata: { icon: "browser" },
       inputSchema: queryElementSchema,
       execute: async (args, ctx) => {
-        const { id, selector, query, name, properties } = queryElementSchema.parse(args)
+        const { id, selector, query, name, properties } = args
         return withTab(service, ctx.sessionId, id, async (tab) => {
           if (query === "text") return spill(await tab.getText(selector))
           if (query === "html") return spill(await tab.getHtml(selector))
@@ -375,8 +363,8 @@ function queryTools(service: BrowserServiceProvider): Toolkit["tools"] {
           return spill(JSON.stringify(await tab.getStyles(selector, properties), null, 2))
         })
       },
-    },
-  ]
+    }),
+  }
 }
 
 const elementActionSchema = z
@@ -456,14 +444,13 @@ const scrollSchema = z
   .strict()
 
 function interactionTools(service: BrowserServiceProvider): Toolkit["tools"] {
-  return [
-    {
-      name: "click",
+  return {
+    click: defineTool({
       description: "Click one element.",
       metadata: { icon: "browser" },
       inputSchema: clickSchema,
       execute: async (args, ctx) => {
-        const { id, selector, newTab } = clickSchema.parse(args)
+        const { id, selector, newTab } = args
         return withTab(service, ctx.sessionId, id, async (tab) => {
           if (newTab) {
             const href = await tab.elementHref(selector)
@@ -479,14 +466,13 @@ function interactionTools(service: BrowserServiceProvider): Toolkit["tools"] {
           return { clicked: selector }
         })
       },
-    },
-    {
-      name: "element_action",
+    }),
+    element_action: defineTool({
       description: "Double-click, hover, focus, check, uncheck, scroll into view, or highlight one element.",
       metadata: { icon: "browser" },
       inputSchema: elementActionInputSchema,
       execute: async (args, ctx) => {
-        const { id, selector, action } = elementActionInputSchema.parse(args)
+        const { id, selector, action } = args
         return withTab(service, ctx.sessionId, id, async (tab) => {
           if (action === "dblclick") await tab.dblclick(selector)
           else if (action === "hover") await tab.hover(selector)
@@ -498,111 +484,103 @@ function interactionTools(service: BrowserServiceProvider): Toolkit["tools"] {
           return { action, selector }
         })
       },
-    },
-    {
-      name: "drag",
+    }),
+    drag: defineTool({
       description: "Drag the source element to the target element.",
       metadata: { icon: "browser" },
       inputSchema: dragSchema,
       execute: async (args, ctx) => {
-        const { id, source, target } = dragSchema.parse(args)
+        const { id, source, target } = args
         return withTab(service, ctx.sessionId, id, async (tab) => {
           await tab.drag(source, target)
           return { dragged: true, source, target }
         })
       },
-    },
-    {
-      name: "upload",
+    }),
+    upload: defineTool({
       description: "Upload files through a file input.",
       metadata: { icon: "browser" },
       inputSchema: uploadSchema,
       execute: async (args, ctx) => {
-        const { id, selector, files } = uploadSchema.parse(args)
+        const { id, selector, files } = args
         return withTab(service, ctx.sessionId, id, async (tab) => {
           await tab.upload(selector, files)
           return { uploaded: files.length }
         })
       },
-    },
-    {
-      name: "download",
+    }),
+    download: defineTool({
       description: "Click an element and save downloads detected by Electron will-download.",
       metadata: { icon: "browser" },
       inputSchema: downloadSchema,
       execute: async (args, ctx) => {
-        const { id, selector, path, timeout } = downloadSchema.parse(args)
+        const { id, selector, path, timeout } = args
         return withTab(service, ctx.sessionId, id, async (tab) => ({
           path: await tab.download(selector, path, secondsToMs(timeout)),
         }))
       },
-    },
-    {
-      name: "fill",
+    }),
+    fill: defineTool({
       description: "Clear and fill an input element.",
       metadata: { icon: "browser" },
       inputSchema: fillSchema,
       execute: async (args, ctx) => {
-        const { id, selector, text } = fillSchema.parse(args)
+        const { id, selector, text } = args
         return withTab(service, ctx.sessionId, id, async (tab) => {
           await tab.fill(selector, text)
           return { filled: selector }
         })
       },
-    },
-    {
-      name: "type",
+    }),
+    type: defineTool({
       description: "Type text into an element.",
       metadata: { icon: "browser" },
       inputSchema: typeSchema,
       execute: async (args, ctx) => {
-        const { id, selector, text, clear, delay } = typeSchema.parse(args)
+        const { id, selector, text, clear, delay } = args
         return withTab(service, ctx.sessionId, id, async (tab) => {
           await tab.type(selector, text, clear, secondsToMs(delay))
           return { typed: text }
         })
       },
-    },
-    {
-      name: "press",
+    }),
+    press: defineTool({
       description: "Press a key at the current focus.",
       metadata: { icon: "browser" },
       inputSchema: pressSchema,
       execute: async (args, ctx) => {
-        const { id, key } = pressSchema.parse(args)
+        const { id, key } = args
         return withTab(service, ctx.sessionId, id, async (tab) => {
           await tab.press(key)
           return { pressed: key }
         })
       },
-    },
-    {
-      name: "select",
+    }),
+    select: defineTool({
       description: "Select one or more options in a select element.",
       metadata: { icon: "browser" },
       inputSchema: selectSchema,
       execute: async (args, ctx) => {
-        const { id, selector, values } = selectSchema.parse(args)
+        const { id, selector, values } = args
         return withTab(service, ctx.sessionId, id, async (tab) => {
           await tab.select(selector, values)
           return { selected: values }
         })
       },
-    },
-    {
-      name: "scroll",
+    }),
+    scroll: defineTool({
       description: "Scroll the page or an element.",
       metadata: { icon: "browser" },
       inputSchema: scrollSchema,
       execute: async (args, ctx) => {
-        const { id, selector, direction, amount } = scrollSchema.parse(args)
+        const { id, selector, direction, amount } = args
         return withTab(service, ctx.sessionId, id, async (tab) => {
           await tab.scroll(selector, direction, amount)
           return { scrolled: true }
         })
       },
-    },
-  ]
+    }),
+  }
 }
 
 function waitTools(service: BrowserServiceProvider): Toolkit["tools"] {
@@ -618,21 +596,19 @@ function waitTools(service: BrowserServiceProvider): Toolkit["tools"] {
     })
     .strict()
 
-  return [
-    {
-      name: "wait_for",
+  return {
+    wait_for: defineTool({
       description: "Wait for an element state.",
       metadata: { icon: "browser" },
       inputSchema: waitForSchema,
       execute: async (args, ctx) => {
-        const input = waitForSchema.parse(args)
-        return withTab(service, ctx.sessionId, input.id, async (tab) => {
-          await tab.waitForSelector(input.selector, input.state, secondsToMs(input.timeout))
-          return { selector: input.selector, state: input.state }
+        return withTab(service, ctx.sessionId, args.id, async (tab) => {
+          await tab.waitForSelector(args.selector, args.state, secondsToMs(args.timeout))
+          return { selector: args.selector, state: args.state }
         })
       },
-    },
-  ]
+    }),
+  }
 }
 
 const screenshotSchema = z
@@ -670,39 +646,36 @@ const recordStartSchema = recordSchema.extend({
 })
 
 function captureTools(service: BrowserServiceProvider): Toolkit["tools"] {
-  return [
-    {
-      name: "screenshot",
+  return {
+    screenshot: defineTool({
       description: "Capture a screenshot of the page or an element.",
       metadata: { icon: "browser" },
       inputSchema: screenshotSchema,
       execute: async (args, ctx) => {
-        const { id, path, ...opts } = screenshotSchema.parse(args)
+        const { id, path, ...opts } = args
         return withTab(service, ctx.sessionId, id, async (tab) => {
           const result = await tab.screenshot(opts)
           return await writeDataUrl(path ?? tempPath(opts.format), result.data, result.mimeType)
         })
       },
-    },
-    {
-      name: "pdf",
+    }),
+    pdf: defineTool({
       description: "Save the current page as a PDF.",
       metadata: { icon: "browser" },
       inputSchema: pdfSchema,
       execute: async (args, ctx) => {
-        const { id, path } = pdfSchema.parse(args)
+        const { id, path } = args
         const target = path ?? tempPath("pdf")
         return withTab(service, ctx.sessionId, id, async (tab) => writeBytes(target, await tab.pdf()))
       },
-    },
-    {
-      name: "record_start",
+    }),
+    record_start: defineTool({
       description:
         "Start recording a tab to a webm video file. Pass duration to record for that many seconds and auto-stop.",
       metadata: { icon: "browser" },
       inputSchema: recordStartSchema,
       execute: async (args, ctx) => {
-        const { id, path, duration } = recordStartSchema.parse(args)
+        const { id, path, duration } = args
         return withTab(service, ctx.sessionId, id, async (tab) => {
           await resolveService(service).recordStart(ctx.sessionId, tab, path)
           if (duration === undefined) return { recording: true, path }
@@ -710,15 +683,12 @@ function captureTools(service: BrowserServiceProvider): Toolkit["tools"] {
           try {
             return await resolveService(service).recordStop(ctx.sessionId)
           } catch {
-            // Recording was already ended during the wait (manual record_stop,
-            // restart, or tab teardown) — that path saved the file, so treat as done.
             return { recording: false, path }
           }
         })
       },
-    },
-    {
-      name: "record_stop",
+    }),
+    record_stop: defineTool({
       description: "Stop the current recording and save the video.",
       metadata: { icon: "browser" },
       inputSchema: z.object({}).strict(),
@@ -729,21 +699,20 @@ function captureTools(service: BrowserServiceProvider): Toolkit["tools"] {
           return errorResult(error)
         }
       },
-    },
-    {
-      name: "record_restart",
+    }),
+    record_restart: defineTool({
       description: "Stop any current recording and start a fresh one for the tab.",
       metadata: { icon: "browser" },
       inputSchema: recordSchema,
       execute: async (args, ctx) => {
-        const { id, path } = recordSchema.parse(args)
+        const { id, path } = args
         return withTab(service, ctx.sessionId, id, async (tab) => {
           await resolveService(service).recordRestart(ctx.sessionId, tab, path)
           return { recording: true, path }
         })
       },
-    },
-  ]
+    }),
+  }
 }
 
 const keyboardActionSchema = z
@@ -786,86 +755,80 @@ const mouseWheelSchema = z
   .strict()
 
 function inputTools(service: BrowserServiceProvider): Toolkit["tools"] {
-  return [
-    {
-      name: "keyboard_key",
+  return {
+    keyboard_key: defineTool({
       description: "Press or release a key.",
       metadata: { icon: "browser" },
       inputSchema: keyboardActionSchema,
       execute: async (args, ctx) => {
-        const { id, action, key } = keyboardActionSchema.parse(args)
+        const { id, action, key } = args
         return withTab(service, ctx.sessionId, id, async (tab) => {
           if (action === "down") await tab.keyDown(key)
           else await tab.keyUp(key)
           return { action, key }
         })
       },
-    },
-    {
-      name: "keyboard_type",
+    }),
+    keyboard_type: defineTool({
       description: "Type text at the current focus using real key events.",
       metadata: { icon: "browser" },
       inputSchema: keyboardTextSchema,
       execute: async (args, ctx) => {
-        const { id, text } = keyboardTextSchema.parse(args)
+        const { id, text } = args
         return withTab(service, ctx.sessionId, id, async (tab) => {
           await tab.keyboardType(text)
           return { typed: text }
         })
       },
-    },
-    {
-      name: "keyboard_insert_text",
+    }),
+    keyboard_insert_text: defineTool({
       description: "Insert text at the current focus without key events.",
       metadata: { icon: "browser" },
       inputSchema: keyboardTextSchema,
       execute: async (args, ctx) => {
-        const { id, text } = keyboardTextSchema.parse(args)
+        const { id, text } = args
         return withTab(service, ctx.sessionId, id, async (tab) => {
           await tab.keyboardInsertText(text)
           return { inserted: text }
         })
       },
-    },
-    {
-      name: "mouse_move",
+    }),
+    mouse_move: defineTool({
       description: "Move the mouse.",
       metadata: { icon: "browser" },
       inputSchema: mouseMoveSchema,
       execute: async (args, ctx) => {
-        const { id, x, y } = mouseMoveSchema.parse(args)
+        const { id, x, y } = args
         return withTab(service, ctx.sessionId, id, async (tab) => {
           await tab.mouseMove(x, y)
           return { x, y }
         })
       },
-    },
-    {
-      name: "mouse_button",
+    }),
+    mouse_button: defineTool({
       description: "Press or release a mouse button.",
       metadata: { icon: "browser" },
       inputSchema: mouseButtonSchema,
       execute: async (args, ctx) => {
-        const { id, action, button } = mouseButtonSchema.parse(args)
+        const { id, action, button } = args
         return withTab(service, ctx.sessionId, id, async (tab) => {
           if (action === "down") await tab.mouseDown(button)
           else await tab.mouseUp(button)
           return { action, button }
         })
       },
-    },
-    {
-      name: "mouse_wheel",
+    }),
+    mouse_wheel: defineTool({
       description: "Scroll with the mouse wheel.",
       metadata: { icon: "browser" },
       inputSchema: mouseWheelSchema,
       execute: async (args, ctx) => {
-        const { id, dx, dy } = mouseWheelSchema.parse(args)
+        const { id, dx, dy } = args
         return withTab(service, ctx.sessionId, id, async (tab) => {
           await tab.mouseWheel(dx, dy)
           return { dx, dy }
         })
       },
-    },
-  ]
+    }),
+  }
 }

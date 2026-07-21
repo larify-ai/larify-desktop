@@ -9,8 +9,15 @@ import { writeFileTool } from "./write"
 
 const fileToolkit: Toolkit = {
   name: "fs",
-  description: "Read, write, list, glob, and grep files",
-  tools: [readFileTool, editFileTool, writeFileTool, lsTool, globFilesTool, grepFilesTool],
+  description: "Read, edit, write, list, glob, and grep files",
+  tools: {
+    read: readFileTool,
+    edit: editFileTool,
+    write: writeFileTool,
+    ls: lsTool,
+    glob: globFilesTool,
+    grep: grepFilesTool,
+  },
 }
 
 const extension: Extension = {

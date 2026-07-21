@@ -1,3 +1,5 @@
+import { createKeyedLock } from "../../../main/utils/lock"
+
 const fileStates = new Map<string, Map<string, number>>()
 
 export function fileStateFor(sessionId: string): Map<string, number> {
@@ -9,13 +11,4 @@ export function fileStateFor(sessionId: string): Map<string, number> {
   return state
 }
 
-const locks = new Map<string, Promise<unknown>>()
-
-export function withFileLock<T>(path: string, fn: () => Promise<T>): Promise<T> {
-  const run = (locks.get(path) ?? Promise.resolve()).then(fn, fn)
-  locks.set(
-    path,
-    run.catch(() => {}),
-  )
-  return run
-}
+export const withFileLock = createKeyedLock()

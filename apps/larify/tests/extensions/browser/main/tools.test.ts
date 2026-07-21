@@ -643,7 +643,7 @@ describe("browser toolkit", () => {
     )
 
     expect(service.recordStart).toHaveBeenCalledTimes(1)
-    expect(service.recordStop).toHaveBeenCalledWith(ctx.sessionId)
+    expect(service.recordStop).toHaveBeenCalledWith(ctx.context.sessionId)
     expect(result).toEqual({ path: recordPath, bytes: 42 })
   })
 
@@ -663,7 +663,7 @@ describe("browser toolkit", () => {
       ctx,
     )
 
-    expect(service.recordStop).toHaveBeenCalledWith(ctx.sessionId)
+    expect(service.recordStop).toHaveBeenCalledWith(ctx.context.sessionId)
     expect(result).toEqual({ recording: false, path: recordPath })
   })
 

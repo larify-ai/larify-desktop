@@ -15,6 +15,10 @@ export class SessionScopedManagers<T> {
     return manager
   }
 
+  peek(sessionId: string): T | undefined {
+    return this.managers.get(sessionId)
+  }
+
   forEach(callback: (manager: T, sessionId: string) => void): void {
     this.managers.forEach(callback)
   }

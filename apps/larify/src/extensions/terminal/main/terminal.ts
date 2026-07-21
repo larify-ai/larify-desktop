@@ -4,10 +4,7 @@ import { SerializeAddon } from '@xterm/addon-serialize'
 import { Terminal as HeadlessTerminal } from '@xterm/headless'
 import { spawn, type IPty } from 'node-pty'
 import { addListener, type Listener } from '../../../main/utils/listener'
-import {
-  readAgentSnapshot,
-  readRenderedLinesRange,
-} from './terminal-output'
+import { readAgentSnapshot } from './terminal-output'
 import type {
   TerminalAgentSnapshot,
   TerminalCreateOptions,
@@ -18,11 +15,6 @@ import type {
 const EXIT_FLUSH_MS = 250
 const SCROLLBACK = 5000
 const VSCODE_SHELL_INTEGRATION_OSC = 633
-
-interface RenderedHistoryFlush {
-  text: string
-  flushedUntilRow: number
-}
 
 export interface ShellCommandFinishedEvent {
   exitCode?: number
@@ -52,6 +44,7 @@ export class Terminal {
   private dataListeners = new Set<Listener<[string, number, number]>>()
   private exitListeners = new Set<Listener<[number]>>()
   private commandFinishedListeners = new Set<Listener<[ShellCommandFinishedEvent]>>()
+  private pendingHistory: string[] = []
 
   constructor(id: number, opts: TerminalCreateOptions = {}) {
     if (!opts.shell) throw new Error('Terminal shell is required')
@@ -75,6 +68,17 @@ export class Terminal {
     this.headless.parser.registerOscHandler(VSCODE_SHELL_INTEGRATION_OSC, (data) => {
       this.handleVSCodeShellIntegration(data)
       return true
+    })
+    this.headless.onLineFeed(() => {
+      const buffer = this.headless.buffer.active
+      if (buffer.type === 'alternate') return
+      const end = buffer.baseY + buffer.cursorY - 1
+      if (end < 0) return
+      let start = end
+      while (start > 0 && buffer.getLine(start)?.isWrapped) start--
+      let text = ''
+      for (let row = start; row <= end; row++) text += buffer.getLine(row)?.translateToString(false) ?? ''
+      this.pendingHistory.push(text.trimEnd())
     })
     this.pty = spawn(this.shell, opts.shellArgs ?? [], {
       name: 'xterm-256color',
@@ -125,23 +129,15 @@ export class Terminal {
     return readAgentSnapshot(this.headless)
   }
 
-  async currentRenderedRow(): Promise<number> {
-    await this.flushHeadlessWrites()
-    const buffer = this.headless.buffer.active
-    return buffer.baseY + buffer.cursorY
+  viewportRows(): number {
+    return this.rows
   }
 
-  async flushRenderedRowsBeforeSnapshot(flushedUntilRow: number): Promise<RenderedHistoryFlush | null> {
+  async takeRenderedHistory(): Promise<string[]> {
     await this.flushHeadlessWrites()
-    const buffer = this.headless.buffer.active
-    if (buffer.type === 'alternate') return null
-    const safeEnd = buffer.viewportY - 1
-    const startRow = flushedUntilRow + 1
-    if (safeEnd < startRow) return null
-    return {
-      text: readRenderedLinesRange(this.headless, startRow, safeEnd),
-      flushedUntilRow: safeEnd
-    }
+    const lines = this.pendingHistory
+    this.pendingHistory = []
+    return lines
   }
 
   write(data: string): void {

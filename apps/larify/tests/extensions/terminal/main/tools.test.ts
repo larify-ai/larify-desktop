@@ -418,7 +418,7 @@ describe("read", () => {
     })
 
     await expect(tool("read", service).execute({ id: 1, timeout: 1, idle: 0 }, ctx)).resolves.toEqual({
-      status: "shell integration command finish event received",
+      status: "command may still be running or waiting for input",
       snapshot: {
         screen: "done",
       },
@@ -446,7 +446,7 @@ describe("read", () => {
     })
 
     await expect(tool("read", service).execute({ id: 1, timeout: 0, idle: 0.001 }, ctx)).resolves.toEqual({
-      status: "shell integration command finish event received",
+      status: "command may still be running or waiting for input",
       snapshot: {
         screen: "done",
       },
@@ -474,7 +474,7 @@ describe("read", () => {
     vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: "done" })
 
     await expect(tool("read", service).execute({ id: 1, timeout: 0, idle: 0 }, ctx)).resolves.toEqual({
-      status: "shell integration command finish event received",
+      status: "command may still be running or waiting for input",
       snapshot: {
         screen: "(Earlier output omitted; full output in log_path.)\ndone",
       },

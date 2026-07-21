@@ -219,7 +219,7 @@ export function createTerminalToolkit(service: TerminalService): Toolkit {
           const completed =
             state.shellIntegration && state.commandRunning && timeout > 0
               ? await waitForCommandFinished(service, ctx.sessionId, id, timeout)
-              : true
+              : false
           if (!(state.shellIntegration && state.commandRunning && timeout > 0)) {
             await waitForIdle(service, ctx.sessionId, id, idle, timeout)
           }

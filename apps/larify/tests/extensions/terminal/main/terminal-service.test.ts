@@ -150,6 +150,23 @@ describe("TerminalService", () => {
     }))
   })
 
+  it("does not resurrect a manager for operations after the session is destroyed", async () => {
+    const { TerminalService } = await importService()
+    const service = new TerminalService()
+
+    service.create("session-1")
+    expect(managers).toHaveLength(1)
+
+    await service.destroySession("session-1")
+
+    service.write("session-1", 1, "echo")
+    expect(service.terminalState("session-1", 1)).toBeNull()
+    await expect(service.startRun("session-1", 1)).resolves.toBeNull()
+    expect(service.state("session-1")).toEqual({ sessionId: "session-1", terminals: [], activeId: null })
+
+    expect(managers).toHaveLength(1)
+  })
+
   it("keeps provided shell, title, and existing cwd", async () => {
     const { TerminalService } = await importService()
     const service = new TerminalService()

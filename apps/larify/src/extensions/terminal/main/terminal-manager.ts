@@ -15,7 +15,8 @@ import type {
 
 interface ActiveRun {
   log: TerminalRunLog
-  flushedUntilRow: number
+  buffered: string[]
+  spilled: boolean
 }
 
 export class TerminalManager {
@@ -85,11 +86,12 @@ export class TerminalManager {
     const terminal = this.terminals.get(id)
     if (!terminal) return null
     await this.flushRunHistory(id)
-    const currentRenderedRow = await terminal.currentRenderedRow()
+    await terminal.takeRenderedHistory()
     const log = createTerminalRunLog(this.sessionId)
     this.activeRuns.set(id, {
       log,
-      flushedUntilRow: currentRenderedRow - 1
+      buffered: [],
+      spilled: false
     })
     return log
   }
@@ -142,10 +144,17 @@ export class TerminalManager {
     const run = this.activeRuns.get(id)
     if (!terminal || !run) return null
 
-    const flushed = await terminal.flushRenderedRowsBeforeSnapshot(run.flushedUntilRow)
-    if (flushed) {
-      await appendRunLog(run.log, flushed.text)
-      run.flushedUntilRow = flushed.flushedUntilRow
+    const lines = await terminal.takeRenderedHistory()
+    if (lines.length === 0) return run.log
+    if (run.spilled) {
+      await appendRunLog(run.log, lines.join('\n'))
+      return run.log
+    }
+    run.buffered.push(...lines)
+    if (run.buffered.length > terminal.viewportRows()) {
+      await appendRunLog(run.log, run.buffered.join('\n'))
+      run.buffered = []
+      run.spilled = true
     }
     return run.log
   }

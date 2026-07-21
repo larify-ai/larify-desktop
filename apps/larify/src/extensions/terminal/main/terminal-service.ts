@@ -178,7 +178,7 @@ export class TerminalService {
 
   create(sessionId: string, opts?: TerminalCreateOptions): number {
     const shell = resolveShell(opts?.shell)
-    return this.manager(sessionId).create({
+    return this.managers.get(sessionId).create({
       ...opts,
       ...shellIntegrationOptions(shell),
       cwd: resolveCwd(opts?.cwd),
@@ -188,51 +188,53 @@ export class TerminalService {
   }
 
   write(sessionId: string, terminalId: number, data: string): void {
-    this.manager(sessionId).write(terminalId, data)
+    this.manager(sessionId)?.write(terminalId, data)
   }
 
   withWriterLock<T>(sessionId: string, terminalId: number, fn: () => Promise<T>): Promise<T> {
-    return this.manager(sessionId).withWriterLock(terminalId, fn)
+    const manager = this.manager(sessionId)
+    if (!manager) throw new Error(`Terminal "${terminalId}" not found.`)
+    return manager.withWriterLock(terminalId, fn)
   }
 
   startRun(sessionId: string, terminalId: number): Promise<TerminalRunLog | null> {
-    return this.manager(sessionId).startRun(terminalId)
+    return this.manager(sessionId)?.startRun(terminalId) ?? Promise.resolve(null)
   }
 
   flushRunHistory(sessionId: string, terminalId: number): Promise<TerminalRunLog | null> {
-    return this.manager(sessionId).flushRunHistory(terminalId)
+    return this.manager(sessionId)?.flushRunHistory(terminalId) ?? Promise.resolve(null)
   }
 
   resize(sessionId: string, terminalId: number, cols: number, rows: number): void {
-    this.manager(sessionId).resize(terminalId, cols, rows)
+    this.manager(sessionId)?.resize(terminalId, cols, rows)
   }
 
   close(sessionId: string, terminalId: number): Promise<void> {
-    return this.manager(sessionId).close(terminalId)
+    return this.manager(sessionId)?.close(terminalId) ?? Promise.resolve()
   }
 
   setActive(sessionId: string, terminalId: number): void {
-    this.manager(sessionId).setActive(terminalId)
+    this.manager(sessionId)?.setActive(terminalId)
   }
 
   reorder(sessionId: string, terminalId: number, toIndex: number): void {
-    this.manager(sessionId).reorder(terminalId, toIndex)
+    this.manager(sessionId)?.reorder(terminalId, toIndex)
   }
 
   snapshot(sessionId: string, terminalId: number): Promise<TerminalSnapshot | null> {
-    return this.manager(sessionId).snapshot(terminalId)
+    return this.manager(sessionId)?.snapshot(terminalId) ?? Promise.resolve(null)
   }
 
   agentSnapshot(sessionId: string, terminalId: number): Promise<TerminalAgentSnapshot | null> {
-    return this.manager(sessionId).agentSnapshot(terminalId)
+    return this.manager(sessionId)?.agentSnapshot(terminalId) ?? Promise.resolve(null)
   }
 
   terminalState(sessionId: string, terminalId: number): TerminalState | null {
-    return this.manager(sessionId).terminalState(terminalId)
+    return this.manager(sessionId)?.terminalState(terminalId) ?? null
   }
 
   state(sessionId: string): SessionTerminalsState {
-    return this.manager(sessionId).state()
+    return this.manager(sessionId)?.state() ?? { sessionId, terminals: [], activeId: null }
   }
 
   async destroySession(sessionId: string): Promise<void> {
@@ -243,8 +245,8 @@ export class TerminalService {
     await this.managers.destroyAll()
   }
 
-  private manager(sessionId: string): TerminalManager {
-    return this.managers.get(sessionId)
+  private manager(sessionId: string): TerminalManager | undefined {
+    return this.managers.peek(sessionId)
   }
 
   private createManager(sessionId: string): TerminalManager {

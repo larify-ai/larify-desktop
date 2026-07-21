@@ -16,10 +16,9 @@ class FakeTerminal {
   resize = vi.fn()
   close = vi.fn()
   kill = vi.fn()
-  private cursorRow = 0
-  private baseY = 0
   private endRow = 0
   private rendered = new Map<number, string>()
+  private history: string[] = []
   private dataCallbacks = new Set<(data: string, start: number, end: number) => void>()
   private exitCallbacks = new Set<(exitCode: number) => void>()
   private commandFinishedCallbacks = new Set<(event: { exitCode?: number }) => void>()
@@ -59,28 +58,24 @@ class FakeTerminal {
     return { screen: lines.join("\n") }
   }
 
-  currentRenderedRow(): number {
-    return this.cursorRow
+  viewportRows(): number {
+    return 24
   }
 
-  flushRenderedRowsBeforeSnapshot(flushedUntilRow: number): { text: string; flushedUntilRow: number } | null {
-    const safeEnd = this.baseY - 1
-    const startRow = flushedUntilRow + 1
-    if (safeEnd < startRow) return null
-    const lines: string[] = []
-    for (let row = startRow; row <= safeEnd; row++) lines.push(this.rendered.get(row) ?? "")
-    return {
-      text: lines.join("\n").replace(/^\n+|\n+$/g, ""),
-      flushedUntilRow: safeEnd,
-    }
+  async takeRenderedHistory(): Promise<string[]> {
+    const lines = this.history
+    this.history = []
+    return lines
   }
 
-  setRendered(lines: string[], baseY = 0): void {
+  pushHistory(...lines: string[]): void {
+    this.history.push(...lines)
+  }
+
+  setRendered(lines: string[]): void {
     this.rendered.clear()
     lines.forEach((line, index) => this.rendered.set(index, line))
-    this.cursorRow = lines.length - 1
     this.endRow = lines.length - 1
-    this.baseY = baseY
   }
 
   state(): {
@@ -301,24 +296,39 @@ describe("TerminalManager", () => {
     expect(manager.state().terminals.map((terminal) => terminal.id)).toEqual([first, third])
   })
 
-  it("starts run logs and appends rendered history", async () => {
+  it("keeps small run output in memory without writing a log file", async () => {
+    const { TerminalManager } = await importManager()
+    const manager = new TerminalManager("session-1")
+    const id = manager.create()
+
+    const log = await manager.startRun(id)
+    terminals[0].pushHistory("line 1", "line 2")
+    await manager.flushRunHistory(id)
+
+    expect(log?.path).toBeUndefined()
+  })
+
+  it("spills overflowing run output to a log file in order", async () => {
     const { readFile } = await import("node:fs/promises")
     const { TerminalManager } = await importManager()
     const manager = new TerminalManager("session-1")
     const id = manager.create()
-    terminals[0].setRendered(["prompt"])
 
     const log = await manager.startRun(id)
-    terminals[0].setRendered(["prompt", "line 1", "line 2"], 0)
+    terminals[0].pushHistory("line 1", "line 2")
     await manager.flushRunHistory(id)
 
     expect(log?.path).toBeUndefined()
 
-    terminals[0].setRendered(["old", "kept", "tail"], 201)
+    const overflow = Array.from({ length: 30 }, (_, index) => `line ${index + 3}`)
+    terminals[0].pushHistory(...overflow)
     await manager.flushRunHistory(id)
 
     expect(log?.path).toContain("sessions")
-    await expect(readFile(log!.path, "utf8")).resolves.toContain("old\nkept")
+    const contents = await readFile(log!.path, "utf8")
+    expect(contents).toContain("line 1\n")
+    expect(contents).toContain("line 32")
+    expect(contents.indexOf("line 1\n")).toBeLessThan(contents.indexOf("line 32"))
   })
 
   it("returns the current agent snapshot for active runs", async () => {
@@ -347,7 +357,7 @@ describe("TerminalManager", () => {
     terminals[0].setRendered(["prompt"])
 
     await manager.startRun(id)
-    terminals[0].setRendered(["old", "kept", "tail"], 201)
+    terminals[0].setRendered(["old", "kept", "tail"])
 
     await expect(manager.agentSnapshot(id)).resolves.toEqual({
       screen: "old\nkept\ntail",
@@ -359,14 +369,16 @@ describe("TerminalManager", () => {
     const { TerminalManager } = await importManager()
     const manager = new TerminalManager("session-1")
     const id = manager.create()
-    terminals[0].setRendered(["prompt"])
 
     const log = await manager.startRun(id)
-    terminals[0].setRendered(["old", "kept", "tail"], 2001)
+    const overflow = Array.from({ length: 30 }, (_, index) => `line ${index + 1}`)
+    terminals[0].pushHistory(...overflow)
     await manager.close(id)
 
     expect(terminals[0].close).toHaveBeenCalled()
-    await expect(readFile(log!.path, "utf8")).resolves.toContain("old\nkept")
+    const contents = await readFile(log!.path, "utf8")
+    expect(contents).toContain("line 1\n")
+    expect(contents).toContain("line 30")
   })
 
   it("auto-checks active run output and writes history before the current screen", async () => {
@@ -374,15 +386,15 @@ describe("TerminalManager", () => {
     const { TerminalManager } = await importManager()
     const manager = new TerminalManager("session-1")
     const id = manager.create()
-    terminals[0].setRendered(["prompt"])
 
     const log = await manager.startRun(id)
-    terminals[0].setRendered(["prompt", "line 1"], 0)
+    terminals[0].pushHistory("line 1")
     terminals[0].emitData("chunk")
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(log?.path).toBeUndefined()
 
-    terminals[0].setRendered(["old", "kept", "tail"], 2001)
+    const overflow = Array.from({ length: 30 }, (_, index) => `line ${index + 2}`)
+    terminals[0].pushHistory(...overflow)
     terminals[0].emitData("chunk")
     await expect
       .poll(async () => {
@@ -393,7 +405,7 @@ describe("TerminalManager", () => {
           return ""
         }
       })
-      .toContain("old\nkept")
+      .toContain("line 1\n")
   })
 
   it("flushes active run history before destroying terminals", async () => {
@@ -401,14 +413,34 @@ describe("TerminalManager", () => {
     const { TerminalManager } = await importManager()
     const manager = new TerminalManager("session-1")
     const id = manager.create()
-    terminals[0].setRendered(["prompt"])
 
     const log = await manager.startRun(id)
-    terminals[0].setRendered(["old", "kept", "tail"], 2001)
+    const overflow = Array.from({ length: 30 }, (_, index) => `line ${index + 1}`)
+    terminals[0].pushHistory(...overflow)
     await manager.destroy()
 
     expect(terminals[0].kill).toHaveBeenCalled()
-    await expect(readFile(log!.path, "utf8")).resolves.toContain("old\nkept")
+    const contents = await readFile(log!.path, "utf8")
+    expect(contents).toContain("line 1\n")
+    expect(contents).toContain("line 30")
+  })
+
+  it("keeps run output beyond the scrollback cap", async () => {
+    const { readFile } = await import("node:fs/promises")
+    const { TerminalManager } = await importManager()
+    const manager = new TerminalManager("session-1")
+    const id = manager.create()
+
+    const log = await manager.startRun(id)
+    const lines = Array.from({ length: 12000 }, (_, index) => `line ${index + 1}`)
+    terminals[0].pushHistory(...lines)
+    await manager.flushRunHistory(id)
+
+    expect(log?.path).toContain("sessions")
+    const contents = await readFile(log!.path, "utf8")
+    expect(contents).toContain("line 1\n")
+    expect(contents).toContain("line 12000")
+    expect(contents.indexOf("line 1\n")).toBeLessThan(contents.indexOf("line 12000"))
   })
 
   it("destroys every terminal", async () => {

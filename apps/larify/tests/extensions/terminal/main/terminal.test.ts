@@ -107,6 +107,34 @@ describe("Terminal", () => {
     expect(terminal.state().title).toBe("Shell")
   })
 
+  it("captures the full text of a wrapped long line in rendered history", async () => {
+    const fakePty = createFakePty()
+    spawnMock.mockReturnValue(fakePty)
+    const { Terminal } = await importTerminal()
+    const terminal = new Terminal(1, { shell: "sh", cwd, cols: 10, rows: 4 })
+
+    fakePty.emitData("ABCDEFGHIJKLMNOPQRSTUVWXY\r\nshort\r\n")
+    const history = await terminal.takeRenderedHistory()
+
+    expect(history).toContain("ABCDEFGHIJKLMNOPQRSTUVWXY")
+    expect(history).toContain("short")
+  })
+
+  it("captures every finished line past the scrollback cap", async () => {
+    const fakePty = createFakePty()
+    spawnMock.mockReturnValue(fakePty)
+    const { Terminal } = await importTerminal()
+    const terminal = new Terminal(1, { shell: "sh", cwd, cols: 80, rows: 4 })
+
+    const lines = Array.from({ length: 6000 }, (_, i) => `line${i + 1}`)
+    fakePty.emitData(lines.join("\r\n") + "\r\n")
+    const history = await terminal.takeRenderedHistory()
+
+    expect(history).toContain("line1")
+    expect(history).toContain("line6000")
+    expect(history.indexOf("line1")).toBeLessThan(history.indexOf("line6000"))
+  })
+
   it("passes shell integration args and env to the pty", async () => {
     const fakePty = createFakePty()
     spawnMock.mockReturnValue(fakePty)

@@ -95,7 +95,7 @@ describe("write", () => {
     })
 
     await expect(
-      tool("write", service).execute({ id: 1, input: "echo done", submit: true, timeout: 0, idle: 0 }, ctx),
+      tool("write", service).execute({ id: 1, input: "echo done", submit: true, timeout: 1, idle: 0 }, ctx),
     ).resolves.toEqual({
       status: "command may still be running or waiting for input",
       snapshot: {
@@ -125,11 +125,11 @@ describe("write", () => {
     vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: "done" })
 
     await expect(
-      tool("write", service).execute({ id: 1, input: "echo done", submit: true, timeout: 0, idle: 0 }, ctx),
+      tool("write", service).execute({ id: 1, input: "echo done", submit: true, timeout: 1, idle: 0 }, ctx),
     ).resolves.toMatchObject({
       status: "command may still be running or waiting for input",
       snapshot: {
-        screen: "(Earlier output omitted; full output in log_path.)\ndone",
+        screen: "(Earlier output in log_path.)\ndone",
       },
       log_path: "run-1.log",
     })
@@ -164,7 +164,7 @@ describe("write", () => {
     })
 
     await expect(
-      tool("write", service).execute({ id: 1, input: "echo done", submit: true, timeout: 0, idle: 0 }, ctx),
+      tool("write", service).execute({ id: 1, input: "echo done", submit: true, timeout: 1, idle: 0 }, ctx),
     ).resolves.toMatchObject({ status: "command may still be running or waiting for input", snapshot: { screen: "done" } })
 
     expect(order).toEqual(["lock", "start", "write", "unlock"])
@@ -184,7 +184,7 @@ describe("write", () => {
     vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: "done" })
 
     await tool("write", service).execute(
-      { id: 1, input: "idf.py menuconfig\r\n\n", submit: true, timeout: 0, idle: 0 },
+      { id: 1, input: "idf.py menuconfig\r\n\n", submit: true, timeout: 1, idle: 0 },
       ctx,
     )
 
@@ -205,7 +205,7 @@ describe("write", () => {
     vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: "done" })
 
     await tool("write", service).execute(
-      { id: 1, input: "first\nsecond\n\rthird\r\n", timeout: 0, idle: 0 },
+      { id: 1, input: "first\nsecond\n\rthird\r\n", timeout: 1, idle: 0 },
       ctx,
     )
 
@@ -226,7 +226,7 @@ describe("write", () => {
     vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: "done" })
 
     await tool("write", service).execute(
-      { id: 1, input: "\u001b[B", timeout: 0, idle: 0 },
+      { id: 1, input: "\u001b[B", timeout: 1, idle: 0 },
       ctx,
     )
 
@@ -248,7 +248,7 @@ describe("write", () => {
     vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: "menu" })
 
     await tool("write", service).execute(
-      { id: 1, input: "\u001b[B", timeout: 0, idle: 0 },
+      { id: 1, input: "\u001b[B", timeout: 1, idle: 0 },
       ctx,
     )
 
@@ -271,7 +271,7 @@ describe("write", () => {
     vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: "done" })
 
     await tool("write", service).execute(
-      { id: 1, input: "first\nsecond", timeout: 0, idle: 0 },
+      { id: 1, input: "first\nsecond", timeout: 1, idle: 0 },
       ctx,
     )
 
@@ -294,7 +294,7 @@ describe("write", () => {
     vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: "done" })
 
     await expect(
-      tool("write", service).execute({ id: 1, input: "", timeout: 0, idle: 0 }, ctx),
+      tool("write", service).execute({ id: 1, input: "", timeout: 1, idle: 0 }, ctx),
     ).resolves.toMatchObject({ status: "command may still be running or waiting for input", snapshot: { screen: "done" } })
 
     expect(service.write).not.toHaveBeenCalled()
@@ -386,6 +386,48 @@ describe("write", () => {
     expect(service.bindExit).toHaveBeenCalled()
   })
 
+  it("reports command may still be running and unbinds listeners when the wait times out", async () => {
+    vi.useFakeTimers()
+    const service = createService()
+    const unbindFinished = vi.fn()
+    const unbindExit = vi.fn()
+    vi.mocked(service.terminalState).mockReturnValue({
+      id: 1,
+      pid: 100,
+      title: "powershell",
+      cwd: "D:\\Workspace",
+      shell: "powershell.exe",
+      shellIntegration: true,
+      exitCode: null,
+    })
+    vi.mocked(service.bindCommandFinished).mockReturnValue(unbindFinished)
+    vi.mocked(service.bindExit).mockReturnValue(unbindExit)
+    vi.mocked(service.startRun).mockResolvedValue({ runId: "run-1", sessionId: "session-1" })
+    vi.mocked(service.write).mockImplementation(() => {})
+    vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: "done" })
+
+    const pending = tool("write", service).execute(
+      { id: 1, input: "sleep 5", submit: true, timeout: 1 },
+      ctx,
+    )
+    await vi.advanceTimersByTimeAsync(1000)
+    await expect(pending).resolves.toMatchObject({
+      status: "command may still be running or waiting for input",
+    })
+
+    expect(unbindFinished).toHaveBeenCalled()
+    expect(unbindExit).toHaveBeenCalled()
+    vi.useRealTimers()
+  })
+
+  it("rejects a timeout outside the 1-3600 second range", () => {
+    expect(parseToolInput("write", { id: 1, input: "x", timeout: 0 }).success).toBe(false)
+    expect(parseToolInput("write", { id: 1, input: "x", timeout: 3601 }).success).toBe(false)
+    expect(parseToolInput("write", { id: 1, input: "x", timeout: 1 }).success).toBe(true)
+    expect(parseToolInput("read", { id: 1, timeout: 0 }).success).toBe(false)
+    expect(parseToolInput("read", { id: 1, timeout: 3600 }).success).toBe(true)
+  })
+
 })
 
 describe("read", () => {
@@ -428,34 +470,6 @@ describe("read", () => {
     expect(service.agentSnapshot).toHaveBeenCalledWith("session-1", 1)
   })
 
-  it("uses idle wait for shell integration terminals when timeout is zero", async () => {
-    const service = createService()
-    vi.mocked(service.terminalState).mockReturnValue({
-      id: 1,
-      pid: 100,
-      title: "powershell",
-      cwd: "D:\\Workspace",
-      shell: "powershell.exe",
-      shellIntegration: true,
-      exitCode: null,
-    })
-    vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: "done" })
-    vi.mocked(service.bindData).mockImplementation((callback) => {
-      callback("session-1", 1, "done", 0, 4)
-      return () => {}
-    })
-
-    await expect(tool("read", service).execute({ id: 1, timeout: 0, idle: 0.001 }, ctx)).resolves.toEqual({
-      status: "command may still be running or waiting for input",
-      snapshot: {
-        screen: "done",
-      },
-    })
-
-    expect(service.bindData).toHaveBeenCalled()
-    expect(service.bindCommandFinished).not.toHaveBeenCalled()
-  })
-
   it("returns log_path when terminal history was written", async () => {
     const service = createService()
     vi.mocked(service.terminalState).mockReturnValue({
@@ -473,10 +487,10 @@ describe("read", () => {
     })
     vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: "done" })
 
-    await expect(tool("read", service).execute({ id: 1, timeout: 0, idle: 0 }, ctx)).resolves.toEqual({
+    await expect(tool("read", service).execute({ id: 1, timeout: 1, idle: 0 }, ctx)).resolves.toEqual({
       status: "command may still be running or waiting for input",
       snapshot: {
-        screen: "(Earlier output omitted; full output in log_path.)\ndone",
+        screen: "(Earlier output in log_path.)\ndone",
       },
       log_path: "run-1.log",
     })

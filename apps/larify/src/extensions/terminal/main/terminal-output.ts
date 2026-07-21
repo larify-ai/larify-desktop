@@ -1,14 +1,6 @@
 import type { Terminal as HeadlessTerminal } from '@xterm/headless'
 import type { TerminalAgentSnapshot } from '../shared/types'
 
-export function readRenderedLinesRange(
-  terminal: HeadlessTerminal,
-  startRow: number,
-  endRow: number
-): string {
-  return readRenderedLines(terminal, startRow, endRow).join('\n')
-}
-
 export function readAgentSnapshot(
   terminal: HeadlessTerminal
 ): TerminalAgentSnapshot {

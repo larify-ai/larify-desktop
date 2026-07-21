@@ -107,32 +107,86 @@ describe("Terminal", () => {
     expect(terminal.state().title).toBe("Shell")
   })
 
-  it("captures the full text of a wrapped long line in rendered history", async () => {
-    const fakePty = createFakePty()
-    spawnMock.mockReturnValue(fakePty)
-    const { Terminal } = await importTerminal()
-    const terminal = new Terminal(1, { shell: "sh", cwd, cols: 10, rows: 4 })
-
-    fakePty.emitData("ABCDEFGHIJKLMNOPQRSTUVWXY\r\nshort\r\n")
-    const history = await terminal.takeRenderedHistory()
-
-    expect(history).toContain("ABCDEFGHIJKLMNOPQRSTUVWXY")
-    expect(history).toContain("short")
-  })
-
-  it("captures every finished line past the scrollback cap", async () => {
+  it("reads run tail scoped to the run start, excluding earlier content", async () => {
     const fakePty = createFakePty()
     spawnMock.mockReturnValue(fakePty)
     const { Terminal } = await importTerminal()
     const terminal = new Terminal(1, { shell: "sh", cwd, cols: 80, rows: 4 })
 
-    const lines = Array.from({ length: 6000 }, (_, i) => `line${i + 1}`)
-    fakePty.emitData(lines.join("\r\n") + "\r\n")
-    const history = await terminal.takeRenderedHistory()
+    fakePty.emitData("PREV1\r\nPREV2\r\nprompt> ")
+    await terminal.beginRun()
+    fakePty.emitData("cmd\r\nOUT1\r\nOUT2\r\n")
+    const output = await terminal.readRunTail(10000)
 
-    expect(history).toContain("line1")
-    expect(history).toContain("line6000")
-    expect(history.indexOf("line1")).toBeLessThan(history.indexOf("line6000"))
+    expect(output.some((line) => line.startsWith("PREV"))).toBe(false)
+    expect(output).toContain("OUT1")
+    expect(output).toContain("OUT2")
+  })
+
+  it("reads a wrapped long line as ordered physical rows", async () => {
+    const fakePty = createFakePty()
+    spawnMock.mockReturnValue(fakePty)
+    const { Terminal } = await importTerminal()
+    const terminal = new Terminal(1, { shell: "sh", cwd, cols: 10, rows: 6 })
+    await terminal.beginRun()
+
+    fakePty.emitData("ABCDEFGHIJKLMNOPQRSTUVWXY\r\n")
+    const output = await terminal.readRunTail(10000)
+
+    expect(output.slice(0, 3)).toEqual(["ABCDEFGHIJ", "KLMNOPQRST", "UVWXY"])
+    expect(output.slice(0, 3).join("")).toBe("ABCDEFGHIJKLMNOPQRSTUVWXY")
+  })
+
+  it("keeps all run output when the terminal is resized mid-run", async () => {
+    const fakePty = createFakePty()
+    spawnMock.mockReturnValue(fakePty)
+    const { Terminal } = await importTerminal()
+    const terminal = new Terminal(1, { shell: "sh", cwd, cols: 40, rows: 4 })
+    await terminal.beginRun()
+
+    fakePty.emitData(Array.from({ length: 20 }, (_, i) => `R${i + 1}`).join("\r\n") + "\r\n")
+    terminal.resize(12, 4)
+    fakePty.emitData(Array.from({ length: 20 }, (_, i) => `R${i + 21}`).join("\r\n") + "\r\n")
+    const output = await terminal.readRunTail(10000)
+
+    for (let k = 1; k <= 40; k++) expect(output).toContain(`R${k}`)
+  })
+
+  it("persists run output past the scrollback cap without loss", async () => {
+    const fakePty = createFakePty()
+    spawnMock.mockReturnValue(fakePty)
+    const { Terminal } = await importTerminal()
+    const terminal = new Terminal(1, { shell: "sh", cwd, cols: 80, rows: 24 })
+    await terminal.beginRun()
+
+    const saved: string[] = []
+    const total = 14000
+    for (let chunk = 0; chunk < total; chunk += 200) {
+      const lines = Array.from({ length: 200 }, (_, i) => `N${chunk + i + 1}`)
+      fakePty.emitData(lines.join("\r\n") + "\r\n")
+      saved.push(...(await terminal.takeSavableFront(2000)))
+    }
+    saved.push(...(await terminal.takeSavableFront(2000)))
+    const tail = await terminal.readRunTail(2000)
+    saved.push(...(await terminal.takeAllRemaining()))
+
+    const covered = new Set([...saved, ...tail])
+    const missing: number[] = []
+    for (let k = 1; k <= total; k++) if (!covered.has(`N${k}`)) missing.push(k)
+    expect(missing).toEqual([])
+  })
+
+  it("returns no run tail while an alternate-buffer TUI is active", async () => {
+    const fakePty = createFakePty()
+    spawnMock.mockReturnValue(fakePty)
+    const { Terminal } = await importTerminal()
+    const terminal = new Terminal(1, { shell: "sh", cwd, cols: 80, rows: 4 })
+    await terminal.beginRun()
+
+    fakePty.emitData("\x1b[?1049h")
+    fakePty.emitData("tui-line-1\r\ntui-line-2\r\n")
+
+    expect(await terminal.readRunTail(10000)).toEqual([])
   })
 
   it("passes shell integration args and env to the pty", async () => {
@@ -186,6 +240,31 @@ describe("Terminal", () => {
     expect(terminal.state().commandRunning).toBeUndefined()
   })
 
+  it("parses OSC 633 exit codes and the E marker", async () => {
+    const fakePty = createFakePty()
+    spawnMock.mockReturnValue(fakePty)
+    const { Terminal } = await importTerminal()
+    const terminal = new Terminal(1, { shell: "sh", cwd })
+    const onCommandFinished = vi.fn()
+    terminal.bindCommandFinished(onCommandFinished)
+
+    fakePty.emitData("\x1b]633;D\x07")
+    await terminal.snapshot()
+    expect(onCommandFinished).toHaveBeenLastCalledWith({})
+
+    fakePty.emitData("\x1b]633;D;137\x07")
+    await terminal.snapshot()
+    expect(onCommandFinished).toHaveBeenLastCalledWith({ exitCode: 137 })
+
+    fakePty.emitData("\x1b]633;D;abc\x07")
+    await terminal.snapshot()
+    expect(onCommandFinished).toHaveBeenLastCalledWith({})
+
+    fakePty.emitData("\x1b]633;E\x07")
+    await terminal.snapshot()
+    expect(terminal.state().commandRunning).toBe(true)
+  })
+
   it("serializes the rendered terminal state instead of raw output", async () => {
     const fakePty = createFakePty()
     spawnMock.mockReturnValue(fakePty)
@@ -229,6 +308,30 @@ describe("Terminal", () => {
     vi.advanceTimersByTime(250)
     expect(onExit).toHaveBeenCalledWith(42)
     expect(terminal.state().exitCode).toBe(42)
+    vi.useRealTimers()
+  })
+
+  it("reschedules the exit flush for late data and fires exit exactly once", async () => {
+    vi.useFakeTimers()
+    const fakePty = createFakePty()
+    spawnMock.mockReturnValue(fakePty)
+    const { Terminal } = await importTerminal()
+    const terminal = new Terminal(1, { shell: "sh", cwd })
+    const onExit = vi.fn()
+    terminal.bindExit(onExit)
+
+    fakePty.emitExit(0)
+    vi.advanceTimersByTime(100)
+    fakePty.emitData("trailing output")
+    vi.advanceTimersByTime(200)
+    expect(onExit).not.toHaveBeenCalled()
+
+    vi.advanceTimersByTime(50)
+    expect(onExit).toHaveBeenCalledTimes(1)
+
+    fakePty.emitData("output after flush")
+    vi.advanceTimersByTime(250)
+    expect(onExit).toHaveBeenCalledTimes(1)
     vi.useRealTimers()
   })
 

@@ -13,16 +13,17 @@ import type {
   TerminalSnapshot
 } from '../shared/types'
 
+const RUN_TAIL_LIMIT = 2000
+
 interface ActiveRun {
   log: TerminalRunLog
-  buffered: string[]
-  spilled: boolean
+  finalized: boolean
 }
 
 export class TerminalManager {
   private terminals = new Map<number, Terminal>()
   private activeRuns = new Map<number, ActiveRun>()
-  private flushing = new Set<number>()
+  private flushLock = createKeyedLock()
   private writerLock = createKeyedLock()
   private activeId: number | null = null
   private nextId = 1
@@ -58,10 +59,12 @@ export class TerminalManager {
       for (const listener of this.dataListeners) listener(terminal.id, data, start, end)
     })
     terminal.bindExit((exitCode) => {
+      void this.finalizeRun(terminal.id).catch(() => {})
       for (const listener of this.exitListeners) listener(terminal.id, exitCode)
       this.emit()
     })
     terminal.bindCommandFinished((event) => {
+      void this.finalizeRun(terminal.id).catch(() => {})
       for (const listener of this.commandFinishedListeners) listener(terminal.id, event)
     })
     this.terminals.set(terminal.id, terminal)
@@ -85,14 +88,10 @@ export class TerminalManager {
   async startRun(id: number): Promise<TerminalRunLog | null> {
     const terminal = this.terminals.get(id)
     if (!terminal) return null
-    await this.flushRunHistory(id)
-    await terminal.takeRenderedHistory()
+    await this.finalizeRun(id)
+    await terminal.beginRun()
     const log = createTerminalRunLog(this.sessionId)
-    this.activeRuns.set(id, {
-      log,
-      buffered: [],
-      spilled: false
-    })
+    this.activeRuns.set(id, { log, finalized: false })
     return log
   }
 
@@ -125,38 +124,40 @@ export class TerminalManager {
     const terminal = this.terminals.get(id)
     if (!terminal) return null
     await this.flushRunHistory(id)
+    if (this.activeRuns.has(id)) {
+      const tail = await terminal.readRunTail(RUN_TAIL_LIMIT)
+      if (tail.length > 0) return { screen: tail.join('\n') }
+    }
     return terminal.agentSnapshot()
   }
 
   async flushRunHistory(id: number): Promise<TerminalRunLog | null> {
-    if (this.flushing.has(id)) return this.activeRuns.get(id)?.log ?? null
-
-    this.flushing.add(id)
-    try {
-      return await this.performFlushRunHistory(id)
-    } finally {
-      this.flushing.delete(id)
-    }
+    return this.flushLock(String(id), () => this.performFlushRunHistory(id))
   }
 
   private async performFlushRunHistory(id: number): Promise<TerminalRunLog | null> {
     const terminal = this.terminals.get(id)
     const run = this.activeRuns.get(id)
-    if (!terminal || !run) return null
+    if (!terminal || !run || run.finalized) return run?.log ?? null
 
-    const lines = await terminal.takeRenderedHistory()
-    if (lines.length === 0) return run.log
-    if (run.spilled) {
-      await appendRunLog(run.log, lines.join('\n'))
-      return run.log
-    }
-    run.buffered.push(...lines)
-    if (run.buffered.length > terminal.viewportRows()) {
-      await appendRunLog(run.log, run.buffered.join('\n'))
-      run.buffered = []
-      run.spilled = true
-    }
+    const front = await terminal.takeSavableFront(RUN_TAIL_LIMIT)
+    if (front.length > 0) await appendRunLog(run.log, front.join('\n'))
     return run.log
+  }
+
+  private async finalizeRun(id: number): Promise<void> {
+    await this.flushLock(String(id), async () => {
+      const terminal = this.terminals.get(id)
+      const run = this.activeRuns.get(id)
+      if (!terminal || !run || run.finalized) return
+      const front = await terminal.takeSavableFront(RUN_TAIL_LIMIT)
+      if (front.length > 0) await appendRunLog(run.log, front.join('\n'))
+      if (run.log.path) {
+        const rest = await terminal.takeAllRemaining()
+        if (rest.length > 0) await appendRunLog(run.log, rest.join('\n'))
+      }
+      run.finalized = true
+    })
   }
 
   terminalState(id: number): ReturnType<Terminal['state']> | null {
@@ -170,7 +171,7 @@ export class TerminalManager {
 
       const order = [...this.terminals.keys()]
       const index = order.indexOf(id)
-      await this.flushRunHistory(id)
+      await this.finalizeRun(id)
       terminal.close()
       this.terminals.delete(id)
       this.activeRuns.delete(id)
@@ -191,7 +192,7 @@ export class TerminalManager {
   }
 
   async destroy(): Promise<void> {
-    await Promise.all([...this.terminals.keys()].map((id) => this.flushRunHistory(id)))
+    await Promise.all([...this.terminals.keys()].map((id) => this.finalizeRun(id)))
     for (const terminal of this.terminals.values()) terminal.kill()
     this.terminals.clear()
     this.activeRuns.clear()

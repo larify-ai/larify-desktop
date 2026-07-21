@@ -51,7 +51,13 @@ class FakeTerminalService {
   unbindData = vi.fn()
   unbindExit = vi.fn()
   private changeCallback?: (state: SessionTerminalsState) => void
-  private dataCallback?: (sessionId: string, terminalId: number, data: string) => void
+  private dataCallback?: (
+    sessionId: string,
+    terminalId: number,
+    data: string,
+    start?: number,
+    end?: number
+  ) => void
   private exitCallback?: (sessionId: string, terminalId: number, exitCode: number) => void
 
   bindChange(callback: (state: SessionTerminalsState) => void): () => void {
@@ -59,7 +65,15 @@ class FakeTerminalService {
     return this.unbindChange
   }
 
-  bindData(callback: (sessionId: string, terminalId: number, data: string) => void): () => void {
+  bindData(
+    callback: (
+      sessionId: string,
+      terminalId: number,
+      data: string,
+      start?: number,
+      end?: number
+    ) => void
+  ): () => void {
     this.dataCallback = callback
     return this.unbindData
   }
@@ -73,8 +87,8 @@ class FakeTerminalService {
     this.changeCallback?.(state)
   }
 
-  emitData(sessionId: string, terminalId: number, data: string): void {
-    this.dataCallback?.(sessionId, terminalId, data)
+  emitData(sessionId: string, terminalId: number, data: string, start?: number, end?: number): void {
+    this.dataCallback?.(sessionId, terminalId, data, start, end)
   }
 
   emitExit(sessionId: string, terminalId: number, exitCode: number): void {
@@ -145,14 +159,17 @@ describe("registerTerminalIpc", () => {
     const service = new FakeTerminalService()
     registerTerminalIpc(service as never)
 
-    service.emitData("session-1", 7, "a")
-    service.emitData("session-1", 7, "b", 1, 2)
+    service.emitData("session-1", 7, "a", 5, 6)
+    service.emitData("session-1", 7, "b", 6, 7)
     expect(electronMock.sends).toEqual([])
 
     vi.advanceTimersByTime(10)
 
     expect(electronMock.sends).toEqual([
-      { channel: "terminal:data", payload: { sessionId: "session-1", terminalId: 7, data: "ab" } },
+      {
+        channel: "terminal:data",
+        payload: { sessionId: "session-1", terminalId: 7, data: "ab", start: 5, end: 7 },
+      },
     ])
     vi.useRealTimers()
   })

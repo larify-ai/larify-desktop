@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs'
 import { basename } from 'node:path'
 import { SerializeAddon } from '@xterm/addon-serialize'
-import { Terminal as HeadlessTerminal } from '@xterm/headless'
+import { Terminal as HeadlessTerminal, type IMarker } from '@xterm/headless'
 import { spawn, type IPty } from 'node-pty'
 import { addListener, type Listener } from '../../../main/utils/listener'
 import { readAgentSnapshot } from './terminal-output'
@@ -13,7 +13,7 @@ import type {
 } from '../shared/types'
 
 const EXIT_FLUSH_MS = 250
-const SCROLLBACK = 5000
+const SCROLLBACK = 10000
 const VSCODE_SHELL_INTEGRATION_OSC = 633
 
 export interface ShellCommandFinishedEvent {
@@ -44,7 +44,8 @@ export class Terminal {
   private dataListeners = new Set<Listener<[string, number, number]>>()
   private exitListeners = new Set<Listener<[number]>>()
   private commandFinishedListeners = new Set<Listener<[ShellCommandFinishedEvent]>>()
-  private pendingHistory: string[] = []
+  private runStartMarker: IMarker | undefined
+  private savedMarker: IMarker | undefined
 
   constructor(id: number, opts: TerminalCreateOptions = {}) {
     if (!opts.shell) throw new Error('Terminal shell is required')
@@ -69,17 +70,6 @@ export class Terminal {
       this.handleVSCodeShellIntegration(data)
       return true
     })
-    this.headless.onLineFeed(() => {
-      const buffer = this.headless.buffer.active
-      if (buffer.type === 'alternate') return
-      const end = buffer.baseY + buffer.cursorY - 1
-      if (end < 0) return
-      let start = end
-      while (start > 0 && buffer.getLine(start)?.isWrapped) start--
-      let text = ''
-      for (let row = start; row <= end; row++) text += buffer.getLine(row)?.translateToString(false) ?? ''
-      this.pendingHistory.push(text.trimEnd())
-    })
     this.pty = spawn(this.shell, opts.shellArgs ?? [], {
       name: 'xterm-256color',
       cols: this.cols,
@@ -93,7 +83,7 @@ export class Terminal {
       const end = start + data.length
       this.outputSeq = end
       this.writeHeadless(data)
-      if (this.pendingExit !== null) this.scheduleExit()
+      if (this.pendingExit !== null && !this.exited) this.scheduleExit()
       for (const listener of this.dataListeners) listener(data, start, end)
     })
     this.pty.onExit(({ exitCode }) => {
@@ -129,14 +119,55 @@ export class Terminal {
     return readAgentSnapshot(this.headless)
   }
 
-  viewportRows(): number {
-    return this.rows
+  async beginRun(): Promise<void> {
+    await this.flushHeadlessWrites()
+    this.runStartMarker?.dispose()
+    this.savedMarker?.dispose()
+    this.runStartMarker = this.headless.registerMarker(0)
+    this.savedMarker = this.headless.registerMarker(0)
   }
 
-  async takeRenderedHistory(): Promise<string[]> {
+  async readRunTail(keepTail: number): Promise<string[]> {
     await this.flushHeadlessWrites()
-    const lines = this.pendingHistory
-    this.pendingHistory = []
+    const buffer = this.headless.buffer.active
+    if (buffer.type === 'alternate') return []
+    const start = this.runStartMarker && this.runStartMarker.line >= 0 ? this.runStartMarker.line : 0
+    const lines = this.readRows(start, buffer.baseY + buffer.cursorY)
+    return lines.slice(-keepTail)
+  }
+
+  async takeSavableFront(keepTail: number): Promise<string[]> {
+    await this.flushHeadlessWrites()
+    const buffer = this.headless.buffer.active
+    if (buffer.type === 'alternate' || !this.savedMarker || this.savedMarker.line < 0) return []
+    const bottom = buffer.baseY + buffer.cursorY
+    const persistUpTo = bottom - keepTail
+    if (persistUpTo <= this.savedMarker.line) return []
+    const lines = this.readRows(this.savedMarker.line, persistUpTo - 1)
+    this.savedMarker.dispose()
+    this.savedMarker = this.headless.registerMarker(persistUpTo - bottom)
+    return lines
+  }
+
+  async takeAllRemaining(): Promise<string[]> {
+    await this.flushHeadlessWrites()
+    const buffer = this.headless.buffer.active
+    if (buffer.type === 'alternate' || !this.savedMarker || this.savedMarker.line < 0) return []
+    const bottom = buffer.baseY + buffer.cursorY
+    if (bottom < this.savedMarker.line) return []
+    const lines = this.readRows(this.savedMarker.line, bottom)
+    this.savedMarker.dispose()
+    this.savedMarker = this.headless.registerMarker(0)
+    return lines
+  }
+
+  private readRows(startRow: number, endRow: number): string[] {
+    const buffer = this.headless.buffer.active
+    const lines: string[] = []
+    for (let row = startRow; row <= endRow; row++) {
+      lines.push(buffer.getLine(row)?.translateToString(true).trimEnd() ?? '')
+    }
+    while (lines.length && lines[lines.length - 1] === '') lines.pop()
     return lines
   }
 

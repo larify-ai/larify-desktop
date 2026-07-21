@@ -16,9 +16,9 @@ class FakeTerminal {
   resize = vi.fn()
   close = vi.fn()
   kill = vi.fn()
-  private endRow = 0
-  private rendered = new Map<number, string>()
-  private history: string[] = []
+  private runOutput: string[] = []
+  private savedPos = 0
+  private viewport: string[] = []
   private dataCallbacks = new Set<(data: string, start: number, end: number) => void>()
   private exitCallbacks = new Set<(exitCode: number) => void>()
   private commandFinishedCallbacks = new Set<(event: { exitCode?: number }) => void>()
@@ -52,30 +52,37 @@ class FakeTerminal {
   }
 
   agentSnapshot(): { screen: string } {
-    const startRow = 0
-    const lines: string[] = []
-    for (let row = startRow; row <= this.endRow; row++) lines.push(this.rendered.get(row) ?? "")
-    return { screen: lines.join("\n") }
+    return { screen: this.viewport.join("\n") }
   }
 
-  viewportRows(): number {
-    return 24
+  async beginRun(): Promise<void> {
+    this.savedPos = 0
   }
 
-  async takeRenderedHistory(): Promise<string[]> {
-    const lines = this.history
-    this.history = []
+  async readRunTail(keepTail: number): Promise<string[]> {
+    return this.runOutput.slice(-keepTail)
+  }
+
+  async takeSavableFront(keepTail: number): Promise<string[]> {
+    const persistUpTo = Math.max(0, this.runOutput.length - keepTail)
+    if (persistUpTo <= this.savedPos) return []
+    const lines = this.runOutput.slice(this.savedPos, persistUpTo)
+    this.savedPos = persistUpTo
     return lines
   }
 
-  pushHistory(...lines: string[]): void {
-    this.history.push(...lines)
+  async takeAllRemaining(): Promise<string[]> {
+    const lines = this.runOutput.slice(this.savedPos)
+    this.savedPos = this.runOutput.length
+    return lines
   }
 
-  setRendered(lines: string[]): void {
-    this.rendered.clear()
-    lines.forEach((line, index) => this.rendered.set(index, line))
-    this.endRow = lines.length - 1
+  setRunOutput(lines: string[]): void {
+    this.runOutput = lines
+  }
+
+  setViewport(lines: string[]): void {
+    this.viewport = lines
   }
 
   state(): {
@@ -103,6 +110,14 @@ class FakeTerminal {
   emitExit(exitCode: number): void {
     for (const callback of this.exitCallbacks) callback(exitCode)
   }
+
+  emitCommandFinished(event: { exitCode?: number } = {}): void {
+    for (const callback of this.commandFinishedCallbacks) callback(event)
+  }
+}
+
+function makeLines(count: number, prefix = "line"): string[] {
+  return Array.from({ length: count }, (_, index) => `${prefix} ${index + 1}`)
 }
 
 vi.mock("../../../../src/extensions/terminal/main/terminal", () => ({
@@ -296,151 +311,164 @@ describe("TerminalManager", () => {
     expect(manager.state().terminals.map((terminal) => terminal.id)).toEqual([first, third])
   })
 
-  it("keeps small run output in memory without writing a log file", async () => {
+  it("keeps a small run inline without writing a log file", async () => {
     const { TerminalManager } = await importManager()
     const manager = new TerminalManager("session-1")
     const id = manager.create()
 
     const log = await manager.startRun(id)
-    terminals[0].pushHistory("line 1", "line 2")
+    terminals[0].setRunOutput(makeLines(10))
     await manager.flushRunHistory(id)
 
     expect(log?.path).toBeUndefined()
+    await expect(manager.agentSnapshot(id)).resolves.toEqual({ screen: makeLines(10).join("\n") })
   })
 
-  it("spills overflowing run output to a log file in order", async () => {
+  it("spills only the front of a large run to the log while a run is active", async () => {
     const { readFile } = await import("node:fs/promises")
     const { TerminalManager } = await importManager()
     const manager = new TerminalManager("session-1")
     const id = manager.create()
 
     const log = await manager.startRun(id)
-    terminals[0].pushHistory("line 1", "line 2")
-    await manager.flushRunHistory(id)
-
-    expect(log?.path).toBeUndefined()
-
-    const overflow = Array.from({ length: 30 }, (_, index) => `line ${index + 3}`)
-    terminals[0].pushHistory(...overflow)
+    terminals[0].setRunOutput(makeLines(2500))
     await manager.flushRunHistory(id)
 
     expect(log?.path).toContain("sessions")
     const contents = await readFile(log!.path, "utf8")
     expect(contents).toContain("line 1\n")
-    expect(contents).toContain("line 32")
-    expect(contents.indexOf("line 1\n")).toBeLessThan(contents.indexOf("line 32"))
+    expect(contents).toContain("line 500\n")
+    expect(contents).not.toContain("line 2500")
   })
 
-  it("returns the current agent snapshot for active runs", async () => {
+  it("caps the agent snapshot to the last 2000 lines of the run", async () => {
     const { TerminalManager } = await importManager()
     const manager = new TerminalManager("session-1")
     const id = manager.create()
-    terminals[0].setRendered(["old prompt"])
-
     await manager.startRun(id)
-    terminals[0].setRendered(["old prompt", "new line 1", "new line 2"])
 
-    await expect(manager.agentSnapshot(id)).resolves.toEqual({
-      screen: "old prompt\nnew line 1\nnew line 2",
-    })
+    terminals[0].setRunOutput(["prompt", "a", "b"])
+    await expect(manager.agentSnapshot(id)).resolves.toEqual({ screen: "prompt\na\nb" })
 
-    terminals[0].setRendered(["old prompt", "new line 1", "new line 2", "new line 3"])
-    await expect(manager.agentSnapshot(id)).resolves.toEqual({
-      screen: "old prompt\nnew line 1\nnew line 2\nnew line 3",
-    })
+    terminals[0].setRunOutput(makeLines(2100))
+    const snap = await manager.agentSnapshot(id)
+    expect(snap?.screen.split("\n")).toHaveLength(2000)
+    expect(snap?.screen.startsWith("line 101\n")).toBe(true)
+    expect(snap?.screen.endsWith("line 2100")).toBe(true)
   })
 
-  it("returns the current screen even after flushing active run history", async () => {
+  it("falls back to the viewport snapshot when no run is active", async () => {
     const { TerminalManager } = await importManager()
     const manager = new TerminalManager("session-1")
     const id = manager.create()
-    terminals[0].setRendered(["prompt"])
+    terminals[0].setViewport(["visible screen"])
 
-    await manager.startRun(id)
-    terminals[0].setRendered(["old", "kept", "tail"])
-
-    await expect(manager.agentSnapshot(id)).resolves.toEqual({
-      screen: "old\nkept\ntail",
-    })
+    await expect(manager.agentSnapshot(id)).resolves.toEqual({ screen: "visible screen" })
   })
 
-  it("flushes active run history before closing a terminal", async () => {
+  it("finalizes the run to the full log on shell command completion", async () => {
     const { readFile } = await import("node:fs/promises")
     const { TerminalManager } = await importManager()
     const manager = new TerminalManager("session-1")
     const id = manager.create()
 
     const log = await manager.startRun(id)
-    const overflow = Array.from({ length: 30 }, (_, index) => `line ${index + 1}`)
-    terminals[0].pushHistory(...overflow)
+    terminals[0].setRunOutput(makeLines(2500))
+    await manager.flushRunHistory(id)
+    terminals[0].emitCommandFinished()
+
+    await expect
+      .poll(async () => {
+        try {
+          return await readFile(log!.path, "utf8")
+        } catch {
+          return ""
+        }
+      })
+      .toContain("line 2500")
+    const contents = await readFile(log!.path, "utf8")
+    expect(contents.indexOf("line 1\n")).toBeLessThan(contents.indexOf("line 2500"))
+  })
+
+  it("finalizes the run to the full log when the terminal exits", async () => {
+    const { readFile } = await import("node:fs/promises")
+    const { TerminalManager } = await importManager()
+    const manager = new TerminalManager("session-1")
+    const id = manager.create()
+
+    const log = await manager.startRun(id)
+    terminals[0].setRunOutput(makeLines(2500))
+    await manager.flushRunHistory(id)
+    terminals[0].emitExit(0)
+
+    await expect
+      .poll(async () => {
+        try {
+          return await readFile(log!.path, "utf8")
+        } catch {
+          return ""
+        }
+      })
+      .toContain("line 2500")
+  })
+
+  it("finalizes the run to the full log before closing a terminal", async () => {
+    const { readFile } = await import("node:fs/promises")
+    const { TerminalManager } = await importManager()
+    const manager = new TerminalManager("session-1")
+    const id = manager.create()
+
+    const log = await manager.startRun(id)
+    terminals[0].setRunOutput(makeLines(2500))
     await manager.close(id)
 
     expect(terminals[0].close).toHaveBeenCalled()
     const contents = await readFile(log!.path, "utf8")
     expect(contents).toContain("line 1\n")
-    expect(contents).toContain("line 30")
+    expect(contents).toContain("line 2500")
   })
 
-  it("auto-checks active run output and writes history before the current screen", async () => {
+  it("finalizes the run to the full log before destroying terminals", async () => {
     const { readFile } = await import("node:fs/promises")
     const { TerminalManager } = await importManager()
     const manager = new TerminalManager("session-1")
     const id = manager.create()
 
     const log = await manager.startRun(id)
-    terminals[0].pushHistory("line 1")
-    terminals[0].emitData("chunk")
-    await new Promise((resolve) => setTimeout(resolve, 0))
-    expect(log?.path).toBeUndefined()
-
-    const overflow = Array.from({ length: 30 }, (_, index) => `line ${index + 2}`)
-    terminals[0].pushHistory(...overflow)
-    terminals[0].emitData("chunk")
-    await expect
-      .poll(async () => {
-        if (!log?.path) return ""
-        try {
-          return await readFile(log.path, "utf8")
-        } catch {
-          return ""
-        }
-      })
-      .toContain("line 1\n")
-  })
-
-  it("flushes active run history before destroying terminals", async () => {
-    const { readFile } = await import("node:fs/promises")
-    const { TerminalManager } = await importManager()
-    const manager = new TerminalManager("session-1")
-    const id = manager.create()
-
-    const log = await manager.startRun(id)
-    const overflow = Array.from({ length: 30 }, (_, index) => `line ${index + 1}`)
-    terminals[0].pushHistory(...overflow)
+    terminals[0].setRunOutput(makeLines(2500))
     await manager.destroy()
 
     expect(terminals[0].kill).toHaveBeenCalled()
     const contents = await readFile(log!.path, "utf8")
     expect(contents).toContain("line 1\n")
-    expect(contents).toContain("line 30")
+    expect(contents).toContain("line 2500")
   })
 
-  it("keeps run output beyond the scrollback cap", async () => {
+  it("finalizes the previous run when a new run starts", async () => {
     const { readFile } = await import("node:fs/promises")
     const { TerminalManager } = await importManager()
     const manager = new TerminalManager("session-1")
     const id = manager.create()
 
     const log = await manager.startRun(id)
-    const lines = Array.from({ length: 12000 }, (_, index) => `line ${index + 1}`)
-    terminals[0].pushHistory(...lines)
+    terminals[0].setRunOutput(makeLines(2500))
     await manager.flushRunHistory(id)
+    await manager.startRun(id)
 
-    expect(log?.path).toContain("sessions")
     const contents = await readFile(log!.path, "utf8")
-    expect(contents).toContain("line 1\n")
-    expect(contents).toContain("line 12000")
-    expect(contents.indexOf("line 1\n")).toBeLessThan(contents.indexOf("line 12000"))
+    expect(contents).toContain("line 2500")
+  })
+
+  it("does not create a log file for a small run even after completion", async () => {
+    const { TerminalManager } = await importManager()
+    const manager = new TerminalManager("session-1")
+    const id = manager.create()
+
+    const log = await manager.startRun(id)
+    terminals[0].setRunOutput(makeLines(10))
+    await manager.close(id)
+
+    expect(log?.path).toBeUndefined()
   })
 
   it("destroys every terminal", async () => {

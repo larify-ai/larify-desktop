@@ -176,6 +176,61 @@ describe("Terminal", () => {
     expect(missing).toEqual([])
   })
 
+  it("keeps logging after a burst pushes the saved marker out of the scrollback", async () => {
+    const fakePty = createFakePty()
+    spawnMock.mockReturnValue(fakePty)
+    const { Terminal } = await importTerminal()
+    const terminal = new Terminal(1, { shell: "sh", cwd, cols: 80, rows: 24 })
+    await terminal.beginRun()
+
+    fakePty.emitData(Array.from({ length: 12000 }, (_, i) => `N${i + 1}`).join("\r\n") + "\r\n")
+    const front = await terminal.takeSavableFront(2000)
+    fakePty.emitData(Array.from({ length: 500 }, (_, i) => `M${i + 1}`).join("\r\n") + "\r\n")
+    const rest = await terminal.takeAllRemaining()
+
+    expect(front.length).toBeGreaterThan(0)
+    expect(rest).toContain("M500")
+    expect([...front, ...rest]).toContain("N12000")
+  })
+
+  it("logs only this run when it started while an alternate-buffer TUI was on screen", async () => {
+    const fakePty = createFakePty()
+    spawnMock.mockReturnValue(fakePty)
+    const { Terminal } = await importTerminal()
+    const terminal = new Terminal(1, { shell: "sh", cwd, cols: 80, rows: 24 })
+
+    fakePty.emitData(Array.from({ length: 500 }, (_, i) => `PREV${i + 1}`).join("\r\n") + "\r\n")
+    fakePty.emitData("\x1b[?1049h")
+    fakePty.emitData("tui-screen\r\n")
+    await terminal.beginRun()
+    fakePty.emitData("\x1b[?1049l")
+    await terminal.takeSavableFront(10)
+    fakePty.emitData(Array.from({ length: 100 }, (_, i) => `A${i + 1}`).join("\r\n") + "\r\n")
+
+    const front = await terminal.takeSavableFront(10)
+    const rest = await terminal.takeAllRemaining()
+
+    const logged = [...front, ...rest]
+    for (let k = 1; k <= 100; k++) expect(logged).toContain(`A${k}`)
+    expect(logged.some((line) => line.startsWith("PREV"))).toBe(false)
+  })
+
+  it("keeps rows below the cursor when a repaint parks the cursor higher", async () => {
+    const fakePty = createFakePty()
+    spawnMock.mockReturnValue(fakePty)
+    const { Terminal } = await importTerminal()
+    const terminal = new Terminal(1, { shell: "sh", cwd, cols: 80, rows: 10 })
+    await terminal.beginRun()
+
+    fakePty.emitData("OUT1\r\nOUT2\r\nOUT3\r\nSTATUS-BOTTOM\r\n")
+    fakePty.emitData("\x1b[3A")
+    fakePty.emitData("PARKED")
+
+    const rest = await terminal.takeAllRemaining()
+
+    expect(rest).toEqual(["OUT1", "PARKED", "OUT3", "STATUS-BOTTOM"])
+  })
+
   it("returns no run tail while an alternate-buffer TUI is active", async () => {
     const fakePty = createFakePty()
     spawnMock.mockReturnValue(fakePty)

@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs'
 import { basename } from 'node:path'
 import { SerializeAddon } from '@xterm/addon-serialize'
-import { Terminal as HeadlessTerminal, type IMarker } from '@xterm/headless'
+import { Terminal as HeadlessTerminal, type IBuffer, type IMarker } from '@xterm/headless'
 import { spawn, type IPty } from 'node-pty'
 import { addListener, type Listener } from '../../../main/utils/listener'
 import { readAgentSnapshot } from './terminal-output'
@@ -19,6 +19,8 @@ const VSCODE_SHELL_INTEGRATION_OSC = 633
 export interface ShellCommandFinishedEvent {
   exitCode?: number
 }
+
+const markerLine = (marker: IMarker | undefined): number => Math.max(marker?.line ?? 0, 0)
 
 export class Terminal {
   readonly id: number
@@ -128,37 +130,43 @@ export class Terminal {
   }
 
   async readRunTail(keepTail: number): Promise<string[]> {
-    await this.flushHeadlessWrites()
-    const buffer = this.headless.buffer.active
-    if (buffer.type === 'alternate') return []
-    const start = this.runStartMarker && this.runStartMarker.line >= 0 ? this.runStartMarker.line : 0
-    const lines = this.readRows(start, buffer.baseY + buffer.cursorY)
+    const buffer = await this.readableBuffer()
+    if (!buffer) return []
+    const lines = this.readRows(markerLine(this.runStartMarker), buffer.length - 1)
     return lines.slice(-keepTail)
   }
 
   async takeSavableFront(keepTail: number): Promise<string[]> {
-    await this.flushHeadlessWrites()
-    const buffer = this.headless.buffer.active
-    if (buffer.type === 'alternate' || !this.savedMarker || this.savedMarker.line < 0) return []
-    const bottom = buffer.baseY + buffer.cursorY
-    const persistUpTo = bottom - keepTail
-    if (persistUpTo <= this.savedMarker.line) return []
-    const lines = this.readRows(this.savedMarker.line, persistUpTo - 1)
-    this.savedMarker.dispose()
-    this.savedMarker = this.headless.registerMarker(persistUpTo - bottom)
+    const buffer = await this.readableBuffer()
+    if (!buffer) return []
+    const start = markerLine(this.savedMarker)
+    const persistUpTo = buffer.length - 1 - keepTail
+    if (persistUpTo <= start) return []
+    const lines = this.readRows(start, persistUpTo - 1)
+    this.moveSavedMarker(persistUpTo - (buffer.baseY + buffer.cursorY))
     return lines
   }
 
   async takeAllRemaining(): Promise<string[]> {
+    const buffer = await this.readableBuffer()
+    if (!buffer) return []
+    const lines = this.readRows(markerLine(this.savedMarker), buffer.length - 1)
+    this.moveSavedMarker(0)
+    return lines
+  }
+
+  private async readableBuffer(): Promise<IBuffer | null> {
     await this.flushHeadlessWrites()
     const buffer = this.headless.buffer.active
-    if (buffer.type === 'alternate' || !this.savedMarker || this.savedMarker.line < 0) return []
-    const bottom = buffer.baseY + buffer.cursorY
-    if (bottom < this.savedMarker.line) return []
-    const lines = this.readRows(this.savedMarker.line, bottom)
-    this.savedMarker.dispose()
-    this.savedMarker = this.headless.registerMarker(0)
-    return lines
+    if (buffer.type === 'alternate') return null
+    this.runStartMarker ??= this.headless.registerMarker(0)
+    this.savedMarker ??= this.headless.registerMarker(0)
+    return buffer
+  }
+
+  private moveSavedMarker(cursorOffset: number): void {
+    this.savedMarker?.dispose()
+    this.savedMarker = this.headless.registerMarker(cursorOffset)
   }
 
   private readRows(startRow: number, endRow: number): string[] {

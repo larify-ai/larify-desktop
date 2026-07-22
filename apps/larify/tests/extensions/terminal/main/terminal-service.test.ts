@@ -54,6 +54,7 @@ class FakeManager {
   private dataCallbacks = new Set<(terminalId: number, data: string, start: number, end: number) => void>()
   private exitCallbacks = new Set<(terminalId: number, exitCode: number) => void>()
   private commandFinishedCallbacks = new Set<(terminalId: number, event: { exitCode?: number }) => void>()
+  private commandStartedCallbacks = new Set<(terminalId: number) => void>()
 
   constructor(sessionId: string) {
     this.sessionId = sessionId
@@ -78,6 +79,11 @@ class FakeManager {
   bindCommandFinished(callback: (terminalId: number, event: { exitCode?: number }) => void): () => void {
     this.commandFinishedCallbacks.add(callback)
     return () => this.commandFinishedCallbacks.delete(callback)
+  }
+
+  bindCommandStarted(callback: (terminalId: number) => void): () => void {
+    this.commandStartedCallbacks.add(callback)
+    return () => this.commandStartedCallbacks.delete(callback)
   }
 
   state(): SessionTerminalsState {

@@ -154,6 +154,7 @@ export class TerminalService {
   private dataListeners = new Set<Listener<[string, number, string, number, number]>>()
   private exitListeners = new Set<Listener<[string, number, number]>>()
   private commandFinishedListeners = new Set<Listener<[string, number, ShellCommandFinishedEvent]>>()
+  private commandStartedListeners = new Set<Listener<[string, number]>>()
 
   bindChange(callback: (state: SessionTerminalsState) => void): () => void {
     return addListener(this.changeListeners, callback)
@@ -175,6 +176,10 @@ export class TerminalService {
     callback: (sessionId: string, terminalId: number, event: ShellCommandFinishedEvent) => void
   ): () => void {
     return addListener(this.commandFinishedListeners, callback)
+  }
+
+  bindCommandStarted(callback: (sessionId: string, terminalId: number) => void): () => void {
+    return addListener(this.commandStartedListeners, callback)
   }
 
   create(sessionId: string, opts?: TerminalCreateOptions): number {
@@ -263,6 +268,9 @@ export class TerminalService {
     })
     manager.bindCommandFinished((terminalId, event) => {
       for (const listener of this.commandFinishedListeners) listener(sessionId, terminalId, event)
+    })
+    manager.bindCommandStarted((terminalId) => {
+      for (const listener of this.commandStartedListeners) listener(sessionId, terminalId)
     })
     return manager
   }

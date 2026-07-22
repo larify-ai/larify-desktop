@@ -46,6 +46,7 @@ export class Terminal {
   private dataListeners = new Set<Listener<[string, number, number]>>()
   private exitListeners = new Set<Listener<[number]>>()
   private commandFinishedListeners = new Set<Listener<[ShellCommandFinishedEvent]>>()
+  private commandStartedListeners = new Set<Listener<[]>>()
   private runStartMarker: IMarker | undefined
   private savedMarker: IMarker | undefined
 
@@ -104,6 +105,10 @@ export class Terminal {
 
   bindCommandFinished(callback: (event: ShellCommandFinishedEvent) => void): () => void {
     return addListener(this.commandFinishedListeners, callback)
+  }
+
+  bindCommandStarted(callback: () => void): () => void {
+    return addListener(this.commandStartedListeners, callback)
   }
 
   async snapshot(): Promise<TerminalSnapshot> {
@@ -262,7 +267,9 @@ export class Terminal {
   private handleVSCodeShellIntegration(data: string): void {
     const [command, ...args] = data.split(';')
     if (command === 'C' || command === 'E') {
+      const wasRunning = this.commandRunning
       this.commandRunning = true
+      if (!wasRunning) for (const listener of this.commandStartedListeners) listener()
       return
     }
     if (command !== 'D') return

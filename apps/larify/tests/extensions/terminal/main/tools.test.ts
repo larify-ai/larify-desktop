@@ -15,6 +15,7 @@ function createService(): TerminalService {
     close: vi.fn(),
     bindData: vi.fn(() => () => {}),
     bindCommandFinished: vi.fn(() => () => {}),
+    bindCommandStarted: vi.fn(() => () => {}),
     bindExit: vi.fn(() => () => {}),
     withWriterLock: vi.fn((_sessionId, _terminalId, fn) => fn()),
   } as unknown as TerminalService

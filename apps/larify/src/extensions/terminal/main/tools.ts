@@ -44,6 +44,8 @@ function waitForIdle(
   })
 }
 
+const SETTLE_MS = 1000
+
 function waitForCommandFinished(
   service: TerminalService,
   sessionId: string,
@@ -52,18 +54,32 @@ function waitForCommandFinished(
 ): Promise<boolean> {
   return new Promise((resolve) => {
     let settled = false
+    let settleTimer: NodeJS.Timeout | null = null
     const finish = (completed: boolean): void => {
       if (settled) return
       settled = true
+      if (settleTimer) clearTimeout(settleTimer)
       clearTimeout(timeoutTimer)
       unbindFinished()
       unbindExit()
+      unbindStarted()
       resolve(completed)
+    }
+
+    const armSettle = (): void => {
+      if (settleTimer) clearTimeout(settleTimer)
+      settleTimer = setTimeout(() => finish(true), SETTLE_MS)
     }
 
     const unbindFinished = service.bindCommandFinished((eventSessionId, eventTerminalId) => {
       if (eventSessionId !== sessionId || eventTerminalId !== terminalId) return
-      finish(true)
+      armSettle()
+    })
+
+    const unbindStarted = service.bindCommandStarted((eventSessionId, eventTerminalId) => {
+      if (eventSessionId !== sessionId || eventTerminalId !== terminalId || !settleTimer) return
+      clearTimeout(settleTimer)
+      settleTimer = null
     })
 
     const unbindExit = service.bindExit((eventSessionId, eventTerminalId) => {

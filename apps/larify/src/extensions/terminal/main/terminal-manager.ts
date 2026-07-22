@@ -31,6 +31,7 @@ export class TerminalManager {
   private dataListeners = new Set<Listener<[number, string, number, number]>>()
   private exitListeners = new Set<Listener<[number, number]>>()
   private commandFinishedListeners = new Set<Listener<[number, ShellCommandFinishedEvent]>>()
+  private commandStartedListeners = new Set<Listener<[number]>>()
 
   constructor(private readonly sessionId: string) {}
 
@@ -52,6 +53,10 @@ export class TerminalManager {
     return addListener(this.commandFinishedListeners, callback)
   }
 
+  bindCommandStarted(callback: (terminalId: number) => void): () => void {
+    return addListener(this.commandStartedListeners, callback)
+  }
+
   create(opts?: TerminalCreateOptions): number {
     const terminal = new Terminal(this.nextId++, opts)
     terminal.bindData((data, start, end) => {
@@ -64,8 +69,11 @@ export class TerminalManager {
       this.emit()
     })
     terminal.bindCommandFinished((event) => {
-      void this.finalizeRun(terminal.id).catch(() => {})
+      void this.drainRun(terminal.id, false).catch(() => {})
       for (const listener of this.commandFinishedListeners) listener(terminal.id, event)
+    })
+    terminal.bindCommandStarted(() => {
+      for (const listener of this.commandStartedListeners) listener(terminal.id)
     })
     this.terminals.set(terminal.id, terminal)
     this.activeId = terminal.id
@@ -145,7 +153,7 @@ export class TerminalManager {
     return run.log
   }
 
-  private async finalizeRun(id: number): Promise<void> {
+  private async drainRun(id: number, endOfRun: boolean): Promise<void> {
     await this.flushLock(String(id), async () => {
       const terminal = this.terminals.get(id)
       const run = this.activeRuns.get(id)
@@ -156,8 +164,12 @@ export class TerminalManager {
         const rest = await terminal.takeAllRemaining()
         if (rest.length > 0) await appendRunLog(run.log, rest.join('\n'))
       }
-      run.finalized = true
+      run.finalized = endOfRun
     })
+  }
+
+  private finalizeRun(id: number): Promise<void> {
+    return this.drainRun(id, true)
   }
 
   terminalState(id: number): ReturnType<Terminal['state']> | null {

@@ -22,6 +22,7 @@ class FakeTerminal {
   private dataCallbacks = new Set<(data: string, start: number, end: number) => void>()
   private exitCallbacks = new Set<(exitCode: number) => void>()
   private commandFinishedCallbacks = new Set<(event: { exitCode?: number }) => void>()
+  private commandStartedCallbacks = new Set<() => void>()
 
   constructor(id: number, opts: { title?: string; shell?: string; cwd?: string } = {}) {
     this.id = id
@@ -45,6 +46,11 @@ class FakeTerminal {
   bindCommandFinished(callback: (event: { exitCode?: number }) => void): () => void {
     this.commandFinishedCallbacks.add(callback)
     return () => this.commandFinishedCallbacks.delete(callback)
+  }
+
+  bindCommandStarted(callback: () => void): () => void {
+    this.commandStartedCallbacks.add(callback)
+    return () => this.commandStartedCallbacks.delete(callback)
   }
 
   snapshot(): string {

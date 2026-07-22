@@ -54,7 +54,7 @@ afterAll(() => {
   rmSync(root, { recursive: true, force: true })
 })
 
-const NOTE = /^\((Earlier content omitted|More follows)/
+const NOTE = /^\((Omitted before|Continue from)/
 
 const bodyOf = (output: string): string =>
   output
@@ -68,11 +68,11 @@ async function pageThrough(file: string, limit: number): Promise<string> {
   for (let page = 0; page < 500; page++) {
     const output = await read(next, { sessionId: freshSession() })
     const rows = output.split("\n")
-    const tail = rows.at(-1)?.startsWith("(More follows;") ? rows.pop() : undefined
-    if (rows[0]?.startsWith("(Earlier content omitted;")) rows.shift()
+    const tail = rows.at(-1)?.startsWith("(Continue from ") ? rows.pop() : undefined
+    if (rows[0]?.startsWith("(Omitted before ")) rows.shift()
     parts.push(rows.join("\n"))
     if (!tail) break
-    const at = /continue from line (\d+)(?: column (\d+))?/.exec(tail)
+    const at = /Continue from line (\d+)(?: column (\d+))?/.exec(tail)
     if (!at) break
     next = { file_path: file, limit, line: Number(at[1]), column: at[2] ? Number(at[2]) : 1 }
   }
@@ -88,22 +88,22 @@ describe("read", () => {
     const output = await read({ file_path: tenPath, limit: 17 }, { sessionId: freshSession() })
 
     expect(bodyOf(output)).toBe("line1\nline2\nline3")
-    expect(output).toContain("(More follows; continue from line 3 column 6.)")
+    expect(output).toContain("(Continue from line 3 column 6.)")
   })
 
   it("starts at the requested line and notes what came before", async () => {
     const output = await read({ file_path: tenPath, line: 5 }, { sessionId: freshSession() })
 
     expect(bodyOf(output)).toBe("line5\nline6\nline7\nline8\nline9\nline10")
-    expect(output).toContain("(Earlier content omitted; this starts at line 5.)")
+    expect(output).toContain("(Omitted before line 5.)")
   })
 
   it("shows both notes for a window in the middle", async () => {
     const output = await read({ file_path: tenPath, line: 5, limit: 17 }, { sessionId: freshSession() })
 
     expect(bodyOf(output)).toBe("line5\nline6\nline7")
-    expect(output).toContain("this starts at line 5")
-    expect(output).toContain("continue from line 7 column 6")
+    expect(output).toContain("Omitted before line 5.")
+    expect(output).toContain("Continue from line 7 column 6.")
   })
 
   it("clamps a start line past the end of the file", async () => {
@@ -116,8 +116,8 @@ describe("read", () => {
     const output = await read({ file_path: tenPath, limit: 17, scroll: "up" }, { sessionId: freshSession() })
 
     expect(bodyOf(output)).toBe("ine8\nline9\nline10")
-    expect(output).toContain("this starts at line 8 column 2")
-    expect(output).not.toContain("More follows")
+    expect(output).toContain("Omitted before line 8 column 2.")
+    expect(output).not.toContain("Continue from")
   })
 
   it("clamps an upward read to the start of the file", async () => {
@@ -127,7 +127,7 @@ describe("read", () => {
     )
 
     expect(bodyOf(output)).toBe("line1\nline2\n")
-    expect(output).toContain("continue from line 3")
+    expect(output).toContain("Continue from line 3")
   })
 
   it("reads an empty file without notes", async () => {

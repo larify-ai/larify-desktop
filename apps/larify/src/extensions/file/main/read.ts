@@ -1,10 +1,12 @@
-import { readFile, stat } from "node:fs/promises"
+import { open, stat } from "node:fs/promises"
 import path from "node:path"
 import { z } from "zod"
 import { defineTool } from "../../../shared/tool"
-import { splitLines } from "../../../main/utils/text"
-import { decodeText } from "./encoding"
+import { normalizeLineBreaks } from "../../../main/utils/text"
+import { createStreamDecoder } from "./encoding"
 import { markRead } from "./state"
+
+const CHUNK_BYTES = 1 << 20
 
 const inputSchema = z.object({
   file_path: z.string().describe("Absolute path to the file"),
@@ -14,21 +16,89 @@ const inputSchema = z.object({
   scroll: z.enum(["down", "up"]).default("down").describe("Read down or up from the start position"),
 }).strict()
 
-const lineStarts = (lines: string[]): number[] => {
-  const starts: number[] = []
-  let at = 0
-  for (const text of lines) {
-    starts.push(at)
-    at += text.length + 1
+async function* normalizedChunks(target: string): AsyncGenerator<string> {
+  const handle = await open(target, "r")
+  try {
+    const buffer = Buffer.alloc(CHUNK_BYTES)
+    const decode = createStreamDecoder()
+    let carry = ""
+    for (;;) {
+      const { bytesRead } = await handle.read(buffer, 0, CHUNK_BYTES, null)
+      if (bytesRead === 0) break
+      let text = carry + decode(buffer.subarray(0, bytesRead))
+      carry = ""
+      if (text.endsWith("\r")) {
+        carry = "\r"
+        text = text.slice(0, -1)
+      }
+      if (text) yield normalizeLineBreaks(text)
+    }
+    if (carry) yield "\n"
+  } finally {
+    await handle.close()
   }
-  return starts
 }
 
-const positionOf = (starts: number[], index: number): string => {
-  let line = starts.length
-  while (line > 1 && starts[line - 1] > index) line -= 1
-  const column = index - starts[line - 1] + 1
-  return column === 1 ? `line ${line}` : `line ${line} column ${column}`
+async function textLength(target: string): Promise<number> {
+  let length = 0
+  for await (const chunk of normalizedChunks(target)) length += chunk.length
+  return length
+}
+
+async function anchorIndex(target: string, line: number, column: number): Promise<number> {
+  let length = 0
+  let lines = 1
+  let lineStart = 0
+  for await (const chunk of normalizedChunks(target)) {
+    for (let at = chunk.indexOf("\n"); at >= 0; at = chunk.indexOf("\n", at + 1)) {
+      lines += 1
+      if (lines <= line) lineStart = length + at + 1
+    }
+    length += chunk.length
+    if (lines > line && lineStart + column - 1 <= length) return lineStart + column - 1
+  }
+  return Math.min(lineStart + column - 1, length)
+}
+
+interface Position {
+  index: number
+  line: number
+  lineStart: number
+}
+
+const positionAt = (chunkStart: Position, chunk: string, index: number): Position => {
+  let { line, lineStart } = chunkStart
+  for (let at = chunk.indexOf("\n"); at >= 0 && chunkStart.index + at < index; at = chunk.indexOf("\n", at + 1)) {
+    line += 1
+    lineStart = chunkStart.index + at + 1
+  }
+  return { index, line, lineStart }
+}
+
+const describePosition = (at: Position): string =>
+  at.index === at.lineStart ? `line ${at.line}` : `line ${at.line} column ${at.index - at.lineStart + 1}`
+
+interface Window {
+  text: string
+  start: Position
+  continueFrom: Position | null
+}
+
+async function readWindow(target: string, from: number, to: number): Promise<Window> {
+  let position: Position = { index: 0, line: 1, lineStart: 0 }
+  let start: Position | null = null
+  let text = ""
+  for await (const chunk of normalizedChunks(target)) {
+    const { index } = position
+    const next = index + chunk.length
+    if (from < next) start ??= positionAt(position, chunk, from)
+    text += chunk.slice(Math.max(from - index, 0), Math.min(to - index, chunk.length))
+    if (to < next) {
+      return { text, start: start ?? position, continueFrom: positionAt(position, chunk, to) }
+    }
+    position = positionAt(position, chunk, next)
+  }
+  return { text, start: start ?? position, continueFrom: null }
 }
 
 export const readFileTool = defineTool({
@@ -39,28 +109,24 @@ export const readFileTool = defineTool({
     const { file_path, line, column, limit, scroll } = args
     const target = path.resolve(ctx.cwd, file_path)
     const stats = await stat(target)
-    const buffer = await readFile(target)
     markRead(ctx.sessionId, target, stats.mtimeMs)
 
-    const lines = splitLines(decodeText(buffer))
-    const text = lines.join("\n")
-    const starts = lineStarts(lines)
-    const anchor = Math.min(
-      line === undefined
-        ? scroll === "up"
-          ? text.length
+    const anchor =
+      line !== undefined
+        ? await anchorIndex(target, line, column)
+        : scroll === "up"
+          ? await textLength(target)
           : 0
-        : starts[Math.min(line, lines.length) - 1] + column - 1,
-      text.length,
-    )
-
-    const start = Math.max(0, Math.min(scroll === "up" ? anchor - limit : anchor, text.length))
-    const end = Math.max(start, Math.min(scroll === "up" ? anchor : anchor + limit, text.length))
+    const from = scroll === "up" ? Math.max(0, anchor - limit) : anchor
+    const to = scroll === "up" ? anchor : anchor + limit
+    const window = await readWindow(target, from, to)
 
     return [
-      start > 0 ? `(Earlier content omitted; this starts at ${positionOf(starts, start)}.)` : null,
-      text.slice(start, end),
-      end < text.length ? `(More follows; continue from ${positionOf(starts, end)}.)` : null,
+      from > 0 ? `(Omitted before ${describePosition(window.start)}.)` : null,
+      window.text,
+      window.continueFrom
+        ? `(Continue from ${describePosition(window.continueFrom)}.)`
+        : null,
     ]
       .filter((part) => part !== null)
       .join("\n")

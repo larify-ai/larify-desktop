@@ -3,7 +3,7 @@ import { dirname, resolve } from "node:path"
 import { createTwoFilesPatch } from "diff"
 import { z } from "zod"
 import { defineTool } from "../../../shared/tool"
-import { dominantLineBreak, splitLines } from "../../../main/utils/text"
+import { applyLineBreaks, dominantLineBreak, normalizeLineBreaks } from "../../../main/utils/text"
 import { decodeText } from "./encoding"
 import { markRead, readAtFor, withFileLock } from "./state"
 
@@ -18,7 +18,7 @@ export const writeFileTool = defineTool({
   inputSchema,
   execute: async (args, ctx) => {
     const { file_path } = args
-    const content = splitLines(args.content).join("\n")
+    const content = normalizeLineBreaks(args.content)
     const target = resolve(ctx.cwd, file_path)
 
     return withFileLock(target, async () => {
@@ -38,13 +38,13 @@ export const writeFileTool = defineTool({
 
         const original = decodeText(await readFile(target))
         lineBreak = dominantLineBreak(original)
-        oldContent = splitLines(original).join("\n")
+        oldContent = normalizeLineBreaks(original)
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
       }
 
       await mkdir(dirname(target), { recursive: true })
-      await writeFile(target, splitLines(content).join(lineBreak))
+      await writeFile(target, applyLineBreaks(content, lineBreak))
       markRead(ctx.sessionId, target, (await stat(target)).mtimeMs)
 
       const type = oldContent === null ? "create" : "update"

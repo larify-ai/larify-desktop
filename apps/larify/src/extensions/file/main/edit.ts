@@ -3,7 +3,7 @@ import path from "node:path"
 import { createTwoFilesPatch } from "diff"
 import { z } from "zod"
 import { defineTool } from "../../../shared/tool"
-import { dominantLineBreak, splitLines } from "../../../main/utils/text"
+import { applyLineBreaks, dominantLineBreak, normalizeLineBreaks } from "../../../main/utils/text"
 import { decodeText } from "./encoding"
 import { markRead, readAtFor, withFileLock } from "./state"
 
@@ -20,8 +20,8 @@ export const editFileTool = defineTool({
   inputSchema,
   execute: async (args, ctx) => {
     const { file_path, replace_all } = args
-    const old_string = splitLines(args.old_string).join("\n")
-    const new_string = splitLines(args.new_string).join("\n")
+    const old_string = normalizeLineBreaks(args.old_string)
+    const new_string = normalizeLineBreaks(args.new_string)
     const target = path.resolve(ctx.cwd, file_path)
 
     if (old_string === new_string) {
@@ -39,7 +39,7 @@ export const editFileTool = defineTool({
 
       const original = decodeText(await readFile(target))
       const lineBreak = dominantLineBreak(original)
-      const content = splitLines(original).join("\n")
+      const content = normalizeLineBreaks(original)
 
       const count = content.split(old_string).length - 1
       if (count === 0) {
@@ -52,7 +52,7 @@ export const editFileTool = defineTool({
       }
 
       const updated = content.split(old_string).join(new_string)
-      await writeFile(target, splitLines(updated).join(lineBreak))
+      await writeFile(target, applyLineBreaks(updated, lineBreak))
       markRead(ctx.sessionId, target, (await stat(target)).mtimeMs)
 
       const patch = createTwoFilesPatch(target, target, content, updated, "", "", { context: 3 })

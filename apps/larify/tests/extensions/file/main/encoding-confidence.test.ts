@@ -87,6 +87,35 @@ describe("grep 认不出编码时退到有损解码而不是丢掉整行", () =>
   }, 120_000)
 })
 
+describe("非法字节出现在第一块之后也报同一条信息", () => {
+  it("read 读到损坏处时给出和 decodeText 一致的措辞", async () => {
+    const clean = Buffer.from("clean utf8 line\n".repeat(100_000), "utf8")
+    const broken = Buffer.concat([clean, Buffer.from([0xff, 0xfe, 0xff, 0xfe]), Buffer.from("\ntail\n")])
+    const file = path.join(root, "broken.txt")
+    writeFileSync(file, broken)
+
+    await expect(
+      callTool(readFileTool, { file_path: file, line: 99_999 }, { sessionId: session }),
+    ).rejects.toThrow(/^Not UTF-8; encoding undetermined \(best guess .+, confidence \d+\)\.$/)
+    expect(() => decodeText(broken)).toThrow(/^Not UTF-8; encoding undetermined/)
+  }, 120_000)
+
+  it("损坏之前的部分仍然读得出来", async () => {
+    const clean = Buffer.from("clean utf8 line\n".repeat(100_000), "utf8")
+    const broken = Buffer.concat([clean, Buffer.from([0xff, 0xfe]), Buffer.from("\ntail\n")])
+    const file = path.join(root, "broken2.txt")
+    writeFileSync(file, broken)
+
+    const shown = await callTool<string>(
+      readFileTool,
+      { file_path: file, line: 1, limit: 40 },
+      { sessionId: session },
+    )
+
+    expect(shown).toContain("clean utf8 line")
+  }, 120_000)
+})
+
 describe("UTF-8 路径不受影响", () => {
   it("普通 UTF-8 直接解码", async () => {
     const shown = await readFile("utf8.txt", Buffer.from("中文 hello\n", "utf8"))

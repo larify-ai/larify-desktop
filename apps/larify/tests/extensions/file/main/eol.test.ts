@@ -47,7 +47,7 @@ describe("read -> edit handoff on a CRLF file", () => {
     })
 
     expect(result.summary).toContain("Edited")
-    expect(readFileSync(file, "utf8")).toBe("const a = 10\nconst b = 20\nconst c = 3\n")
+    expect(readFileSync(file, "utf8")).toBe("const a = 10\r\nconst b = 20\r\nconst c = 3\r\n")
   })
 
   it("still edits when the model sends CRLF in old_string", async () => {
@@ -56,7 +56,7 @@ describe("read -> edit handoff on a CRLF file", () => {
 
     await edit({ file_path: file, old_string: "x1\r\nx2", new_string: "y1\r\ny2" })
 
-    expect(readFileSync(file, "utf8")).toBe("y1\ny2\nx3\n")
+    expect(readFileSync(file, "utf8")).toBe("y1\r\ny2\r\nx3\r\n")
   })
 
   it("keeps a single-line edit working unchanged", async () => {
@@ -65,7 +65,7 @@ describe("read -> edit handoff on a CRLF file", () => {
 
     await edit({ file_path: file, old_string: "target", new_string: "changed" })
 
-    expect(readFileSync(file, "utf8")).toBe("keep\nchanged\nkeep2\n")
+    expect(readFileSync(file, "utf8")).toBe("keep\r\nchanged\r\nkeep2\r\n")
   })
 
   it("produces a patch that only mentions the edited lines", async () => {
@@ -101,6 +101,6 @@ describe("write on a CRLF file", () => {
       .split("\n")
       .filter((line) => /^[+-]/.test(line) && !/^(\+\+\+|---)/.test(line))
     expect(changed).toEqual(["-w3", "+CHANGED"])
-    expect(readFileSync(file, "utf8")).toBe("w1\nw2\nCHANGED\n")
+    expect(readFileSync(file, "utf8")).toBe("w1\r\nw2\r\nCHANGED\r\n")
   })
 })

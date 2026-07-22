@@ -3,7 +3,7 @@ import path from "node:path"
 import { createTwoFilesPatch } from "diff"
 import { z } from "zod"
 import { defineTool } from "../../../shared/tool"
-import { splitLines } from "../../../main/utils/text"
+import { dominantLineBreak, splitLines } from "../../../main/utils/text"
 import { decodeText } from "./encoding"
 import { markRead, readAtFor, withFileLock } from "./state"
 
@@ -37,7 +37,9 @@ export const editFileTool = defineTool({
         throw new Error("The file was modified since you read it. Read it again before editing.")
       }
 
-      const content = splitLines(decodeText(await readFile(target))).join("\n")
+      const original = decodeText(await readFile(target))
+      const lineBreak = dominantLineBreak(original)
+      const content = splitLines(original).join("\n")
 
       const count = content.split(old_string).length - 1
       if (count === 0) {
@@ -50,7 +52,7 @@ export const editFileTool = defineTool({
       }
 
       const updated = content.split(old_string).join(new_string)
-      await writeFile(target, updated)
+      await writeFile(target, splitLines(updated).join(lineBreak))
       markRead(ctx.sessionId, target, (await stat(target)).mtimeMs)
 
       const patch = createTwoFilesPatch(target, target, content, updated, "", "", { context: 3 })

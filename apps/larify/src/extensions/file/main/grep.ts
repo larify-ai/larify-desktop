@@ -4,7 +4,7 @@ import path from "node:path"
 import { z } from "zod"
 import { trimTrailingLineBreak } from "../../../main/utils/text"
 import { defineTool } from "../../../shared/tool"
-import { decodeText } from "./encoding"
+import { decodeLossy, decodeText } from "./encoding"
 import { runRipgrepStream, toAbsolutePath } from "./ripgrep"
 
 const DEFAULT_TIMEOUT_MS = 10 * 60_000
@@ -49,14 +49,24 @@ const isRipgrepMatch = (value: unknown): value is RipgrepMatch => {
   )
 }
 
+const readFileLines = (filePath: string): string[] => {
+  let buffer: Buffer
+  try {
+    buffer = readFileSync(filePath)
+  } catch {
+    return []
+  }
+  try {
+    return decodeText(buffer).split("\n")
+  } catch {
+    return decodeLossy(buffer).split("\n")
+  }
+}
+
 const decodedFileLines = (filePath: string, cache: Map<string, string[]>): string[] => {
   let lines = cache.get(filePath)
   if (!lines) {
-    try {
-      lines = decodeText(readFileSync(filePath)).split("\n")
-    } catch {
-      lines = []
-    }
+    lines = readFileLines(filePath)
     cache.set(filePath, lines)
   }
   return lines

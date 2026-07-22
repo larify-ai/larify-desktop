@@ -3,7 +3,7 @@ import { dirname, resolve } from "node:path"
 import { createTwoFilesPatch } from "diff"
 import { z } from "zod"
 import { defineTool } from "../../../shared/tool"
-import { splitLines } from "../../../main/utils/text"
+import { dominantLineBreak, splitLines } from "../../../main/utils/text"
 import { decodeText } from "./encoding"
 import { markRead, readAtFor, withFileLock } from "./state"
 
@@ -23,6 +23,7 @@ export const writeFileTool = defineTool({
 
     return withFileLock(target, async () => {
       let oldContent: string | null = null
+      let lineBreak = "\n"
 
       try {
         const readAt = readAtFor(ctx.sessionId, target)
@@ -35,13 +36,15 @@ export const writeFileTool = defineTool({
           throw new Error("The file was modified since you read it. Read it again before writing.")
         }
 
-        oldContent = splitLines(decodeText(await readFile(target))).join("\n")
+        const original = decodeText(await readFile(target))
+        lineBreak = dominantLineBreak(original)
+        oldContent = splitLines(original).join("\n")
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
       }
 
       await mkdir(dirname(target), { recursive: true })
-      await writeFile(target, content)
+      await writeFile(target, splitLines(content).join(lineBreak))
       markRead(ctx.sessionId, target, (await stat(target)).mtimeMs)
 
       const type = oldContent === null ? "create" : "update"

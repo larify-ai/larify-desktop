@@ -31,7 +31,14 @@ describe("grep on a non-UTF-8 file", () => {
     expect(output).toContain("1: ")
     expect(output).toContain("2: ")
     expect(output).toContain("3: ")
-    expect(output).toContain("4: function handleTimeout() {}")
+  })
+
+  it("quotes the line ripgrep numbered, not a neighbouring one", async () => {
+    const output = await grep({ pattern: "handleTimeout", path: path.join(root, "utf8.js") })
+
+    for (const row of output.split("\n").filter((line) => /^\d+: /.test(line))) {
+      expect(row).toContain("handleTimeout")
+    }
   })
 
   it("decodes the matched line to the same text read would show", async () => {

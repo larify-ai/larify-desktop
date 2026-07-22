@@ -68,7 +68,7 @@ export function runRipgrepStream(
           const lines = splitLines(remainder).filter(Boolean)
           if (lines.length) onLines(lines)
         }
-        if (code === 0 || code === 1) {
+        if (code === 0 || code === 1 || signal.aborted) {
           resolve()
           return
         }

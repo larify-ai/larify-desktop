@@ -10,7 +10,7 @@ const inputSchema = z.object({
   file_path: z.string().describe("Absolute path to the file"),
   line: z.number().int().positive().optional().describe("Start line (1-based)"),
   column: z.number().int().positive().default(1).describe("Start character within the start line (1-based)"),
-  limit: z.number().int().positive().default(50_000).describe("Maximum number of characters to read"),
+  limit: z.number().int().positive().max(100_000).default(50_000).describe("Maximum number of characters to read"),
   scroll: z.enum(["down", "up"]).default("down").describe("Read down or up from the start position"),
 }).strict()
 

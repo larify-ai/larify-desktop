@@ -79,9 +79,8 @@ function commandCompletionCase(shell: string): void {
   }, 15_000)
 }
 
-describe("TerminalService live", () => {
+describe.skipIf(!process.env.LIVE_TERMINAL)("TerminalService live", () => {
   it("creates a real default terminal and forwards output", async () => {
-    if (!process.env.LIVE_TERMINAL) return
     const service = new TerminalService()
     const output = new Promise<string>((resolve, reject) => {
       const chunks: string[] = []
@@ -107,8 +106,7 @@ describe("TerminalService live", () => {
     await service.destroy()
   }, 15_000)
 
-  it("receives PowerShell shell integration command completion", async () => {
-    if (!process.env.LIVE_TERMINAL || process.platform !== "win32") return
+  it.skipIf(process.platform !== "win32")("receives PowerShell shell integration command completion", async () => {
     const service = new TerminalService()
     const terminalId = service.create("shell-integration-live", { title: "Live" })
     const completion = new Promise<{ exitCode?: number }>((resolve, reject) => {
@@ -126,34 +124,36 @@ describe("TerminalService live", () => {
     await service.destroy()
   }, 15_000)
 
-  it("terminal tools return recent terminal output for an active run", async () => {
-    if (!process.env.LIVE_TERMINAL || process.platform !== "win32") return
+  it.skipIf(process.platform !== "win32")("terminal tools return recent terminal output for an active run", async () => {
     const service = new TerminalService()
     const toolkit = createTerminalToolkit(service)
-    const ctx = { sessionId: "terminal-tools-live" }
+    const ctx = { sessionId: "terminal-tools-live", cwd: process.cwd() }
     const tool = (name: string) => {
-      const found = toolkit.tools.find((candidate) => candidate.name === name)
+      const found = toolkit.tools[name]
       if (!found) throw new Error(`Tool ${name} not found`)
-      return found
+      return {
+        execute: (input: unknown) => {
+          const schema = found.inputSchema as unknown as { parse: (v: unknown) => unknown }
+          const run = found.execute as unknown as (i: unknown, o: unknown) => Promise<unknown>
+          return run(schema.parse(input), { toolCallId: "t", messages: [], context: ctx })
+        },
+      }
     }
 
     try {
-      const terminal = await tool("create").execute({}, ctx) as { id: number }
+      const terminal = await tool("create").execute({}) as { id: number }
       await tool("write").execute(
-        { id: terminal.id, input: `Write-Output "${oldMarker}"`, submit: true, timeout: 10 },
-        ctx,
+        { id: terminal.id, input: `Write-Output "${oldMarker}"`, submit: true, timeout: 10 }
       )
 
       const second = await tool("write").execute(
-        { id: terminal.id, input: `Write-Output "${newMarker}"`, submit: true, timeout: 10 },
-        ctx,
+        { id: terminal.id, input: `Write-Output "${newMarker}"`, submit: true, timeout: 10 }
       ) as { snapshot: { screen: string } }
 
       expect(second.snapshot.screen).toContain(newMarker)
 
       const read = await tool("read").execute(
-        { id: terminal.id, timeout: 0, idle: 0 },
-        ctx,
+        { id: terminal.id, timeout: 1, idle: 0 }
       ) as { snapshot: { screen: string } }
 
       expect(read.snapshot.screen).toContain(newMarker)
@@ -162,27 +162,31 @@ describe("TerminalService live", () => {
     }
   }, 20_000)
 
-  it("terminal tools submit commands with trailing newlines", async () => {
-    if (!process.env.LIVE_TERMINAL || process.platform !== "win32") return
+  it.skipIf(process.platform !== "win32")("terminal tools submit commands with trailing newlines", async () => {
     const service = new TerminalService()
     const toolkit = createTerminalToolkit(service)
-    const ctx = { sessionId: "terminal-newline-submit-live" }
+    const ctx = { sessionId: "terminal-newline-submit-live", cwd: process.cwd() }
     const tool = (name: string) => {
-      const found = toolkit.tools.find((candidate) => candidate.name === name)
+      const found = toolkit.tools[name]
       if (!found) throw new Error(`Tool ${name} not found`)
-      return found
+      return {
+        execute: (input: unknown) => {
+          const schema = found.inputSchema as unknown as { parse: (v: unknown) => unknown }
+          const run = found.execute as unknown as (i: unknown, o: unknown) => Promise<unknown>
+          return run(schema.parse(input), { toolCallId: "t", messages: [], context: ctx })
+        },
+      }
     }
 
     try {
-      const terminal = await tool("create").execute({}, ctx) as { id: number }
+      const terminal = await tool("create").execute({}) as { id: number }
       const result = await tool("write").execute(
         {
           id: terminal.id,
           input: `Write-Output "${newlineMarker}"\n`,
           submit: true,
           timeout: 10,
-        },
-        ctx,
+        }
       ) as { status: string; snapshot: { screen: string } }
 
       expect(result.status).toContain("command")
@@ -193,27 +197,31 @@ describe("TerminalService live", () => {
     }
   }, 20_000)
 
-  it("terminal tools treat raw newlines as terminal enter", async () => {
-    if (!process.env.LIVE_TERMINAL || process.platform !== "win32") return
+  it.skipIf(process.platform !== "win32")("terminal tools treat raw newlines as terminal enter", async () => {
     const service = new TerminalService()
     const toolkit = createTerminalToolkit(service)
-    const ctx = { sessionId: "terminal-raw-newline-live" }
+    const ctx = { sessionId: "terminal-raw-newline-live", cwd: process.cwd() }
     const tool = (name: string) => {
-      const found = toolkit.tools.find((candidate) => candidate.name === name)
+      const found = toolkit.tools[name]
       if (!found) throw new Error(`Tool ${name} not found`)
-      return found
+      return {
+        execute: (input: unknown) => {
+          const schema = found.inputSchema as unknown as { parse: (v: unknown) => unknown }
+          const run = found.execute as unknown as (i: unknown, o: unknown) => Promise<unknown>
+          return run(schema.parse(input), { toolCallId: "t", messages: [], context: ctx })
+        },
+      }
     }
 
     try {
-      const terminal = await tool("create").execute({}, ctx) as { id: number }
+      const terminal = await tool("create").execute({}) as { id: number }
       const result = await tool("write").execute(
         {
           id: terminal.id,
           input: `Write-Output "${rawNewlineMarker}"\n`,
           timeout: 10,
           idle: 1,
-        },
-        ctx,
+        }
       ) as { status: string; snapshot: { screen: string } }
 
       expect(result.status).toContain("command")
@@ -224,69 +232,76 @@ describe("TerminalService live", () => {
     }
   }, 20_000)
 
-  it("terminal tools write long output to a log path without repeating logged history", async () => {
-    if (!process.env.LIVE_TERMINAL || process.platform !== "win32") return
+  it.skipIf(process.platform !== "win32")("terminal tools write long output to a log path without repeating logged history", async () => {
     const service = new TerminalService()
     const toolkit = createTerminalToolkit(service)
-    const ctx = { sessionId: "terminal-long-output-live" }
+    const ctx = { sessionId: "terminal-long-output-live", cwd: process.cwd() }
     const tool = (name: string) => {
-      const found = toolkit.tools.find((candidate) => candidate.name === name)
+      const found = toolkit.tools[name]
       if (!found) throw new Error(`Tool ${name} not found`)
-      return found
+      return {
+        execute: (input: unknown) => {
+          const schema = found.inputSchema as unknown as { parse: (v: unknown) => unknown }
+          const run = found.execute as unknown as (i: unknown, o: unknown) => Promise<unknown>
+          return run(schema.parse(input), { toolCallId: "t", messages: [], context: ctx })
+        },
+      }
     }
 
     try {
-      const terminal = await tool("create").execute({}, ctx) as { id: number }
+      const terminal = await tool("create").execute({}) as { id: number }
       const result = await tool("write").execute(
         {
           id: terminal.id,
           input: `Write-Output "${longStartMarker}"; 1..2300 | ForEach-Object { "LONG_OUTPUT_LINE_$_" }; Write-Output "${longEndMarker}"`,
           submit: true,
           timeout: 30,
-        },
-        ctx,
+        }
       ) as { snapshot: { screen: string }; log_path?: string }
 
       expect(result.log_path).toBeTruthy()
-      expect(result.snapshot.screen).toContain("Earlier output omitted")
+      expect(result.snapshot.screen).toContain("Earlier output in log_path")
       expect(result.snapshot.screen).toContain(longEndMarker)
       expect(result.snapshot.screen).not.toContain(longStartMarker)
-      expect(result.snapshot.screen.split("\n").length).toBeLessThan(350)
+      expect(result.snapshot.screen.split("\n").length).toBeLessThanOrEqual(1001)
 
       const read = await tool("read").execute(
-        { id: terminal.id, timeout: 0, idle: 0 },
-        ctx,
+        { id: terminal.id, timeout: 1, idle: 0 }
       ) as { snapshot: { screen: string }; log_path?: string }
 
       expect(read.snapshot.screen).not.toContain(longStartMarker)
       expect(read.snapshot.screen).toContain(longEndMarker)
-      expect(read.snapshot.screen.split("\n").length).toBeLessThan(350)
+      expect(read.snapshot.screen.split("\n").length).toBeLessThanOrEqual(1001)
     } finally {
       await service.destroy()
     }
   }, 40_000)
 
-  it("terminal tools read the current screen after clear-screen interactive prompts", async () => {
-    if (!process.env.LIVE_TERMINAL || process.platform !== "win32") return
+  it.skipIf(process.platform !== "win32")("terminal tools read the current screen after clear-screen interactive prompts", async () => {
     const service = new TerminalService()
     const toolkit = createTerminalToolkit(service)
-    const ctx = { sessionId: "terminal-clear-screen-live" }
+    const ctx = { sessionId: "terminal-clear-screen-live", cwd: process.cwd() }
     const tool = (name: string) => {
-      const found = toolkit.tools.find((candidate) => candidate.name === name)
+      const found = toolkit.tools[name]
       if (!found) throw new Error(`Tool ${name} not found`)
-      return found
+      return {
+        execute: (input: unknown) => {
+          const schema = found.inputSchema as unknown as { parse: (v: unknown) => unknown }
+          const run = found.execute as unknown as (i: unknown, o: unknown) => Promise<unknown>
+          return run(schema.parse(input), { toolCallId: "t", messages: [], context: ctx })
+        },
+      }
     }
 
     try {
-      const terminal = await tool("create").execute({}, ctx) as { id: number }
+      const terminal = await tool("create").execute({}) as { id: number }
       const result = await tool("write").execute(
         {
           id: terminal.id,
           input: `cls; Write-Host "${menuMarker}"; Write-Host "[1] First"; Write-Host "[Q] Quit"; Read-Host "Choice"`,
           submit: true,
           timeout: 3,
-        },
-        ctx,
+        }
       ) as { status: string; snapshot: { screen: string } }
 
       expect(result.status).toBe("command may still be running or waiting for input")
@@ -295,8 +310,7 @@ describe("TerminalService live", () => {
       expect(result.snapshot.screen).toContain("[Q] Quit")
 
       await tool("write").execute(
-        { id: terminal.id, input: "\u0003", timeout: 5, idle: 1 },
-        ctx,
+        { id: terminal.id, input: "\u0003", timeout: 5, idle: 1 }
       )
     } finally {
       await service.destroy()

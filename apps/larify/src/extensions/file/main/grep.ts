@@ -15,7 +15,7 @@ const inputSchema = z.object({
   pattern: z.string().describe("The regex pattern to search for in file contents"),
   path: z.string().optional().describe("The file or directory to search in. If omitted, the current working directory is used."),
   glob: z.string().optional().describe("Glob pattern, relative to the search directory"),
-  limit: z.number().int().positive().default(100).describe("Maximum number of matching files to return"),
+  limit: z.number().int().positive().max(1000).default(100).describe("Maximum number of matching files to return"),
   offset: z.number().int().nonnegative().default(0).describe("Skip the first N matching files"),
 }).strict()
 

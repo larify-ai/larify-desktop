@@ -13,7 +13,7 @@ import type {
   TerminalSnapshot
 } from '../shared/types'
 
-const RUN_TAIL_LIMIT = 2000
+const RUN_TAIL_LIMIT = 1000
 
 interface ActiveRun {
   log: TerminalRunLog

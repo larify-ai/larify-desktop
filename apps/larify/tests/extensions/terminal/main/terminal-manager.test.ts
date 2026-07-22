@@ -347,7 +347,7 @@ describe("TerminalManager", () => {
     expect(contents).not.toContain("line 2500")
   })
 
-  it("caps the agent snapshot to the last 2000 lines of the run", async () => {
+  it("caps the agent snapshot to the last 1000 lines of the run", async () => {
     const { TerminalManager } = await importManager()
     const manager = new TerminalManager("session-1")
     const id = manager.create()
@@ -358,8 +358,8 @@ describe("TerminalManager", () => {
 
     terminals[0].setRunOutput(makeLines(2100))
     const snap = await manager.agentSnapshot(id)
-    expect(snap?.screen.split("\n")).toHaveLength(2000)
-    expect(snap?.screen.startsWith("line 101\n")).toBe(true)
+    expect(snap?.screen.split("\n")).toHaveLength(1000)
+    expect(snap?.screen.startsWith("line 1101\n")).toBe(true)
     expect(snap?.screen.endsWith("line 2100")).toBe(true)
   })
 

@@ -10,7 +10,7 @@ const inputSchema = z.object({
     .optional()
     .describe("The directory to search in. If omitted, the current working directory is used."),
   pattern: z.string().describe("Glob pattern, relative to the search directory"),
-  limit: z.number().int().positive().default(100).describe("Maximum number of file paths to return"),
+  limit: z.number().int().positive().max(1000).default(100).describe("Maximum number of file paths to return"),
   offset: z.number().int().nonnegative().default(0).describe("Skip the first N matching file paths"),
 }).strict()
 

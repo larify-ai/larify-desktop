@@ -5,7 +5,7 @@ import { defineTool } from "../../../shared/tool"
 
 const inputSchema = z.object({
   path: z.string().optional().describe("The directory to list. If omitted, the current working directory is used."),
-  limit: z.number().int().positive().default(200).describe("Maximum number of items to return"),
+  limit: z.number().int().positive().max(1000).default(200).describe("Maximum number of items to return"),
   offset: z.number().int().nonnegative().default(0).describe("Skip the first N items"),
 }).strict()
 

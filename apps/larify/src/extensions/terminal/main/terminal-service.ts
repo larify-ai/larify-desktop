@@ -6,6 +6,7 @@ import which from 'which'
 import { larifyTempPath, larifyWorkspacePath, resourcePath } from '../../../main/utils/app-paths'
 import { addListener, type Listener } from '../../../main/utils/listener'
 import { SessionScopedManagers } from '../../../main/utils/session-scoped-managers'
+import { createUniqueDir } from '../../../main/utils/unique-path'
 import { TerminalManager } from './terminal-manager'
 import type { ShellCommandFinishedEvent } from './terminal'
 import type { TerminalRunLog } from './terminal-run-log'
@@ -88,14 +89,14 @@ function powerShellLiteral(value: string): string {
 }
 
 function bashIntegrationScript(): string {
-  const dir = larifyTempPath('shell-integration', 'bash', randomUUID())
+  const dir = createUniqueDir(larifyTempPath('shell-integration', 'bash'))
   const scriptPath = join(dir, 'shellIntegration-bash.sh')
   writeIntegrationScript(BASH_INTEGRATION_SCRIPT, scriptPath)
   return scriptPath
 }
 
 function zshIntegrationDir(): string {
-  const dir = larifyTempPath('shell-integration', 'zsh', randomUUID())
+  const dir = createUniqueDir(larifyTempPath('shell-integration', 'zsh'))
   chmodSync(dir, 0o1700)
   for (const [source, target] of ZSH_INTEGRATION_SCRIPTS) {
     writeIntegrationScript(source, join(dir, target))

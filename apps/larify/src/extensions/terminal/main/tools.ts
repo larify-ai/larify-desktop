@@ -12,9 +12,10 @@ function waitForIdle(
   sessionId: string,
   terminalId: number,
   idleSeconds: number,
-  timeoutSeconds: number
+  timeoutSeconds: number,
+  signal?: AbortSignal
 ): Promise<boolean> {
-  if (timeoutSeconds <= 0) return Promise.resolve(false)
+  if (timeoutSeconds <= 0 || signal?.aborted) return Promise.resolve(false)
   return new Promise((resolve) => {
     let settled = false
     let idleTimer: NodeJS.Timeout | null = null
@@ -26,6 +27,7 @@ function waitForIdle(
       settled = true
       if (idleTimer) clearTimeout(idleTimer)
       if (timeoutTimer) clearTimeout(timeoutTimer)
+      signal?.removeEventListener('abort', finish)
       unbind()
       resolve(false)
     }
@@ -40,6 +42,7 @@ function waitForIdle(
       armIdleTimer()
     })
     const timeoutTimer = timeoutMs > 0 ? setTimeout(finish, timeoutMs) : null
+    signal?.addEventListener('abort', finish, { once: true })
     armIdleTimer()
   })
 }
@@ -50,8 +53,10 @@ function waitForCommandFinished(
   service: TerminalService,
   sessionId: string,
   terminalId: number,
-  timeoutSeconds: number
+  timeoutSeconds: number,
+  signal?: AbortSignal
 ): Promise<boolean> {
+  if (signal?.aborted) return Promise.resolve(false)
   return new Promise((resolve) => {
     let settled = false
     let settleTimer: NodeJS.Timeout | null = null
@@ -60,6 +65,7 @@ function waitForCommandFinished(
       settled = true
       if (settleTimer) clearTimeout(settleTimer)
       clearTimeout(timeoutTimer)
+      signal?.removeEventListener('abort', onAbort)
       unbindFinished()
       unbindExit()
       unbindStarted()
@@ -86,6 +92,8 @@ function waitForCommandFinished(
       if (eventSessionId !== sessionId || eventTerminalId !== terminalId) return
       finish(true)
     })
+    const onAbort = (): void => finish(false)
+    signal?.addEventListener('abort', onAbort, { once: true })
     const timeoutTimer = setTimeout(() => finish(false), Math.max(0, timeoutSeconds * 1000))
   })
 }
@@ -211,14 +219,14 @@ export function createTerminalToolkit(service: TerminalService): Toolkit {
             const shouldWaitForCommand =
               (submittedInput || state.commandRunning) && state.shellIntegration
             const commandWait = shouldWaitForCommand
-              ? waitForCommandFinished(service, ctx.sessionId, id, timeout)
+              ? waitForCommandFinished(service, ctx.sessionId, id, timeout, ctx.signal)
               : null
             const log = await service.startRun(ctx.sessionId, id)
             if (!log) throw new Error(`Terminal "${id}" not found.`)
             if (data) service.write(ctx.sessionId, id, data)
             let completed = false
             if (commandWait) completed = await commandWait
-            else await waitForIdle(service, ctx.sessionId, id, idle, timeout)
+            else await waitForIdle(service, ctx.sessionId, id, idle, timeout, ctx.signal)
             await service.flushRunHistory(ctx.sessionId, id)
             const snapshot = await service.agentSnapshot(ctx.sessionId, id)
             if (!snapshot) throw new Error(`Terminal "${id}" not found.`)
@@ -238,10 +246,10 @@ export function createTerminalToolkit(service: TerminalService): Toolkit {
           }
           const waitForCommand = state.shellIntegration && state.commandRunning && timeout > 0
           const completed = waitForCommand
-            ? await waitForCommandFinished(service, ctx.sessionId, id, timeout)
+            ? await waitForCommandFinished(service, ctx.sessionId, id, timeout, ctx.signal)
             : false
           if (!waitForCommand) {
-            await waitForIdle(service, ctx.sessionId, id, idle, timeout)
+            await waitForIdle(service, ctx.sessionId, id, idle, timeout, ctx.signal)
           }
           const log = await service.flushRunHistory(ctx.sessionId, id)
           const snapshot = await service.agentSnapshot(ctx.sessionId, id)

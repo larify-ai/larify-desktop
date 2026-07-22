@@ -24,6 +24,7 @@ export class TerminalManager {
   private terminals = new Map<number, Terminal>()
   private activeRuns = new Map<number, ActiveRun>()
   private flushLock = createKeyedLock()
+  private flushQueued = new Set<number>()
   private writerLock = createKeyedLock()
   private activeId: number | null = null
   private nextId = 1
@@ -60,7 +61,7 @@ export class TerminalManager {
   create(opts?: TerminalCreateOptions): number {
     const terminal = new Terminal(this.nextId++, opts)
     terminal.bindData((data, start, end) => {
-      void this.flushRunHistory(terminal.id).catch(() => {})
+      this.queueFlush(terminal.id)
       for (const listener of this.dataListeners) listener(terminal.id, data, start, end)
     })
     terminal.bindExit((exitCode) => {
@@ -141,6 +142,15 @@ export class TerminalManager {
 
   async flushRunHistory(id: number): Promise<TerminalRunLog | null> {
     return this.flushLock(String(id), () => this.performFlushRunHistory(id))
+  }
+
+  private queueFlush(id: number): void {
+    if (this.flushQueued.has(id)) return
+    this.flushQueued.add(id)
+    void this.flushLock(String(id), () => {
+      this.flushQueued.delete(id)
+      return this.performFlushRunHistory(id)
+    }).catch(() => {})
   }
 
   private async performFlushRunHistory(id: number): Promise<TerminalRunLog | null> {

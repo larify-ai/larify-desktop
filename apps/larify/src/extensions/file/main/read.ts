@@ -52,10 +52,10 @@ async function anchorIndex(target: string, line: number, column: number): Promis
   for await (const chunk of normalizedChunks(target)) {
     for (let at = chunk.indexOf("\n"); at >= 0; at = chunk.indexOf("\n", at + 1)) {
       lines += 1
+      if (lines === line + 1) return Math.min(lineStart + column - 1, length + at)
       if (lines <= line) lineStart = length + at + 1
     }
     length += chunk.length
-    if (lines > line && lineStart + column - 1 <= length) return lineStart + column - 1
   }
   return Math.min(lineStart + column - 1, length)
 }

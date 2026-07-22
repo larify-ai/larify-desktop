@@ -39,12 +39,12 @@ const reference = (content: string, { line, column, limit, scroll }: Params): st
   const lines = splitLines(content)
   const text = lines.join("\n")
   const starts = lineStarts(lines)
+  const anchorOnLine = (): number => {
+    const index = Math.min(line as number, lines.length) - 1
+    return Math.min(starts[index] + column - 1, starts[index] + lines[index].length)
+  }
   const anchor = Math.min(
-    line === undefined
-      ? scroll === "up"
-        ? text.length
-        : 0
-      : starts[Math.min(line, lines.length) - 1] + column - 1,
+    line === undefined ? (scroll === "up" ? text.length : 0) : anchorOnLine(),
     text.length,
   )
   const start = Math.max(0, Math.min(scroll === "up" ? anchor - limit : anchor, text.length))
@@ -143,6 +143,49 @@ describe("流式实现与原实现逐字节一致", () => {
       )
     }
   }, 240_000)
+})
+
+describe("column 超出行长时夹在该行末尾, 不溢出到下一行", () => {
+  const content = "AAA\nBBB\nCCC\nDDD\n"
+
+  it("恰好等于行长加一时停在换行符之前", async () => {
+    const got = await actual(content, { line: 1, column: 4, limit: 6, scroll: "down" })
+
+    expect(got).toBe("(Omitted before line 1 column 4.)\n\nBBB\nC\n(Continue from line 3 column 2.)")
+  })
+
+  it("远超行长也只停在同一行末尾", async () => {
+    const far = await actual(content, { line: 1, column: 999, limit: 6, scroll: "down" })
+    const edge = await actual(content, { line: 1, column: 4, limit: 6, scroll: "down" })
+
+    expect(far).toBe(edge)
+  })
+
+  it("中间一行同样不越界", async () => {
+    const got = await actual(content, { line: 2, column: 999, limit: 4, scroll: "down" })
+
+    expect(got).toBe("(Omitted before line 2 column 4.)\n\nCCC\n(Continue from line 3 column 4.)")
+  })
+
+  it("最后一行超出时夹到文件末尾", async () => {
+    const got = await actual(content, { line: 4, column: 999, limit: 10, scroll: "down" })
+
+    expect(got).toBe("(Omitted before line 4 column 4.)\n\n")
+  })
+
+  it("向上回读时锚点同样夹在行末", async () => {
+    const far = await actual(content, { line: 2, column: 999, limit: 5, scroll: "up" })
+    const edge = await actual(content, { line: 2, column: 4, limit: 5, scroll: "up" })
+
+    expect(far).toBe(edge)
+    expect(far).toContain("BBB")
+  })
+
+  it("空行上的大 column 不会跑到下一行", async () => {
+    const got = await actual("A\n\nB\n", { line: 2, column: 99, limit: 4, scroll: "down" })
+
+    expect(got).toBe("(Omitted before line 2.)\n\nB\n")
+  })
 })
 
 describe("窗口边缘正好压在 1MB 分块边界上", () => {

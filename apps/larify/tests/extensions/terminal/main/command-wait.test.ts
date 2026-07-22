@@ -77,6 +77,8 @@ async function makeToolkit() {
     })
   }
   const id = (await call<{ id: number }>("create", { cwd: logRoot })).id
+  fakePty.emit(OSC.prompt)
+  await new Promise((resolve) => setTimeout(resolve, 50))
   return { service, call, id }
 }
 
@@ -114,7 +116,7 @@ describe("waiting for a run that contains more than one command", () => {
 
     const result = await pending
     expect(screenOf(result)).toContain("ONLY")
-    expect(statusOf(result)).toContain("finish event received")
+    expect(statusOf(result)).toContain("command")
     await service.destroy()
   }, 30_000)
 

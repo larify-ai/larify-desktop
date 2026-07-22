@@ -65,9 +65,12 @@ export class TerminalManager {
       for (const listener of this.dataListeners) listener(terminal.id, data, start, end)
     })
     terminal.bindExit((exitCode) => {
-      void this.finalizeRun(terminal.id).catch(() => {})
       for (const listener of this.exitListeners) listener(terminal.id, exitCode)
-      this.emit()
+      void this.writerLock(String(terminal.id), async () => {
+        await this.finalizeRun(terminal.id)
+        this.forget(terminal.id)
+        this.emit()
+      }).catch(() => {})
     })
     terminal.bindCommandFinished((event) => {
       void this.drainRun(terminal.id, false).catch(() => {})
@@ -150,7 +153,7 @@ export class TerminalManager {
     void this.flushLock(String(id), () => {
       this.flushQueued.delete(id)
       return this.performFlushRunHistory(id)
-    }).catch(() => {})
+    }).catch(() => this.flushQueued.delete(id))
   }
 
   private async performFlushRunHistory(id: number): Promise<TerminalRunLog | null> {
@@ -186,21 +189,26 @@ export class TerminalManager {
     return this.terminals.get(id)?.state() ?? null
   }
 
+  private forget(id: number): void {
+    const index = [...this.terminals.keys()].indexOf(id)
+    if (index < 0) return
+    this.terminals.delete(id)
+    this.activeRuns.delete(id)
+    this.flushQueued.delete(id)
+    if (this.activeId === id) {
+      const remaining = [...this.terminals.keys()]
+      this.activeId = remaining[index] ?? remaining[index - 1] ?? null
+    }
+  }
+
   async close(id: number): Promise<void> {
     await this.withWriterLock(id, async () => {
       const terminal = this.terminals.get(id)
       if (!terminal) return
 
-      const order = [...this.terminals.keys()]
-      const index = order.indexOf(id)
       await this.finalizeRun(id)
       terminal.close()
-      this.terminals.delete(id)
-      this.activeRuns.delete(id)
-      if (this.activeId === id) {
-        const remaining = [...this.terminals.keys()]
-        this.activeId = remaining[index] ?? remaining[index - 1] ?? null
-      }
+      this.forget(id)
       this.emit()
     })
   }

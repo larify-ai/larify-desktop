@@ -164,7 +164,7 @@ const terminalResult = (
     status,
     snapshot: {
       ...snapshot,
-      screen: `(Earlier output in log_path.)\n${snapshot.screen}`
+      screen: `(Earlier output in log_path)\n${snapshot.screen}`
     },
     log_path: log.path
   }
@@ -212,12 +212,12 @@ export function createTerminalToolkit(service: TerminalService): Toolkit {
           return service.withWriterLock(ctx.sessionId, id, async () => {
             const state = service.terminalState(ctx.sessionId, id)
             if (!state) throw new Error(`Terminal "${id}" not found.`)
-            const data = input
-              ? normalizeTerminalInputLineBreaks(submit ? `${trimTrailingLineBreak(input)}\r` : input)
-              : input
-            const submittedInput = Boolean(data?.endsWith('\r'))
+            const data = submit
+              ? normalizeTerminalInputLineBreaks(`${trimTrailingLineBreak(input)}\r`)
+              : normalizeTerminalInputLineBreaks(input)
+            const submittedInput = data.endsWith('\r')
             const shouldWaitForCommand =
-              (submittedInput || state.commandRunning) && state.shellIntegration
+              (submittedInput || (!data && state.commandRunning)) && Boolean(state.shellIntegration)
             const commandWait = shouldWaitForCommand
               ? waitForCommandFinished(service, ctx.sessionId, id, timeout, ctx.signal)
               : null

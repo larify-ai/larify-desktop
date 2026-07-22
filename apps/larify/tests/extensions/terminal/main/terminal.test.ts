@@ -263,7 +263,24 @@ describe("Terminal", () => {
       cwd,
       env: { ...process.env, VSCODE_STABLE: "1" },
     })
+    expect(terminal.state().shellIntegration).toBeUndefined()
+
+    fakePty.emitData("\x1b]633;A\x07\x1b]633;B\x07")
+    await new Promise((resolve) => setTimeout(resolve, 50))
+
     expect(terminal.state().shellIntegration).toBe(true)
+  })
+
+  it("never claims shell integration for a shell that stays silent", async () => {
+    const fakePty = createFakePty()
+    spawnMock.mockReturnValue(fakePty)
+    const { Terminal } = await importTerminal()
+    const terminal = new Terminal(1, { shell: "sh", cwd, shellArgs: ["-i"] })
+
+    fakePty.emitData("PS D:\\> hello\r\n")
+    await new Promise((resolve) => setTimeout(resolve, 50))
+
+    expect(terminal.state().shellIntegration).toBeUndefined()
   })
 
   it("emits shell command completion from VS Code OSC 633 markers", async () => {

@@ -130,7 +130,7 @@ describe("write", () => {
     ).resolves.toMatchObject({
       status: "command may still be running or waiting for input",
       snapshot: {
-        screen: "(Earlier output in log_path.)\ndone",
+        screen: "(Earlier output in log_path)\ndone",
       },
       log_path: "run-1.log",
     })
@@ -319,7 +319,7 @@ describe("write", () => {
       return () => {}
     })
     vi.mocked(service.write).mockImplementation(() => {
-      commandFinished?.("session-1", 1)
+      commandFinished?.("session-1", 1, {})
     })
     vi.mocked(service.startRun).mockResolvedValue({ runId: "run-1", sessionId: "session-1" })
     vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: "done" })
@@ -349,7 +349,7 @@ describe("write", () => {
       return () => {}
     })
     vi.mocked(service.startRun).mockImplementation(async () => {
-      commandFinished?.("session-1", 1)
+      commandFinished?.("session-1", 1, {})
       return { runId: "run-1", sessionId: "session-1" }
     })
     vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: "done" })
@@ -491,7 +491,7 @@ describe("read", () => {
     await expect(tool("read", service).execute({ id: 1, timeout: 1, idle: 0 }, ctx)).resolves.toEqual({
       status: "command may still be running or waiting for input",
       snapshot: {
-        screen: "(Earlier output in log_path.)\ndone",
+        screen: "(Earlier output in log_path)\ndone",
       },
       log_path: "run-1.log",
     })
@@ -523,13 +523,13 @@ describe("read", () => {
       return () => {}
     })
     vi.mocked(service.flushRunHistory).mockImplementation(async () => {
-      commandFinished?.("session-1", 1)
+      commandFinished?.("session-1", 1, {})
       return null
     })
     vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: "done" })
 
     const promise = tool("read", service).execute({ id: 1, timeout: 30, idle: 0 }, ctx)
-    commandFinished?.("session-1", 1)
+    commandFinished?.("session-1", 1, {})
 
     await expect(promise).resolves.toEqual({
       status: "shell integration command finish event received",

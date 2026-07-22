@@ -26,7 +26,7 @@ export class Terminal {
   readonly id: number
   readonly shell: string
   readonly cwd: string
-  readonly shellIntegration: boolean
+  private shellIntegrationSeen = false
   private readonly title: string
 
   private readonly pty: IPty
@@ -57,7 +57,6 @@ export class Terminal {
     this.id = id
     this.shell = opts.shell
     this.cwd = opts.cwd
-    this.shellIntegration = Boolean(opts.shellArgs?.length)
     this.title =
       opts.title ?? basename(this.shell, process.platform === 'win32' ? '.exe' : undefined)
     this.cols = opts.cols ?? 80
@@ -240,7 +239,7 @@ export class Terminal {
       title: this.title,
       cwd: this.cwd,
       shell: this.shell,
-      shellIntegration: this.shellIntegration || undefined,
+      shellIntegration: this.shellIntegrationSeen || undefined,
       commandRunning: this.commandRunning || undefined,
       exitCode: this.exitCode
     }
@@ -265,6 +264,7 @@ export class Terminal {
   }
 
   private handleVSCodeShellIntegration(data: string): void {
+    this.shellIntegrationSeen = true
     const [command, ...args] = data.split(';')
     if (command === 'C' || command === 'E') {
       const wasRunning = this.commandRunning

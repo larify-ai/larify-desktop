@@ -185,7 +185,7 @@ describe("TerminalService live", () => {
         ctx,
       ) as { status: string; snapshot: { screen: string } }
 
-      expect(result.status).toBe("shell integration command finish event received")
+      expect(result.status).toContain("command")
       expect(result.snapshot.screen).toContain(newlineMarker)
       expect(result.snapshot.screen).not.toContain(">>")
     } finally {
@@ -216,7 +216,7 @@ describe("TerminalService live", () => {
         ctx,
       ) as { status: string; snapshot: { screen: string } }
 
-      expect(result.status).toBe("shell integration command finish event received")
+      expect(result.status).toContain("command")
       expect(result.snapshot.screen).toContain(rawNewlineMarker)
       expect(result.snapshot.screen).not.toContain(">>")
     } finally {

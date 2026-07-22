@@ -3,6 +3,7 @@ import path from "node:path"
 import { createTwoFilesPatch } from "diff"
 import { z } from "zod"
 import { defineTool } from "../../../shared/tool"
+import { splitLines } from "../../../main/utils/text"
 import { decodeText } from "./encoding"
 import { fileStateFor, withFileLock } from "./state"
 
@@ -18,7 +19,9 @@ export const editFileTool = defineTool({
   metadata: { icon: "edit" },
   inputSchema,
   execute: async (args, ctx) => {
-    const { file_path, old_string, new_string, replace_all } = args
+    const { file_path, replace_all } = args
+    const old_string = splitLines(args.old_string).join("\n")
+    const new_string = splitLines(args.new_string).join("\n")
     const target = path.resolve(ctx.cwd, file_path)
 
     if (old_string === new_string) {
@@ -35,7 +38,7 @@ export const editFileTool = defineTool({
         throw new Error("The file was modified since you read it. Read it again before editing.")
       }
 
-      const content = decodeText(await readFile(target))
+      const content = splitLines(decodeText(await readFile(target))).join("\n")
 
       const count = content.split(old_string).length - 1
       if (count === 0) {

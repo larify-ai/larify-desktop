@@ -1,8 +1,10 @@
+import { readFileSync } from "node:fs"
 import { stat } from "node:fs/promises"
 import path from "node:path"
 import { z } from "zod"
-import { trimTrailingLineBreak } from "../../../main/utils/text"
+import { splitLines, trimTrailingLineBreak } from "../../../main/utils/text"
 import { defineTool } from "../../../shared/tool"
+import { decodeText } from "./encoding"
 import { runRipgrepStream, toAbsolutePath } from "./ripgrep"
 
 const DEFAULT_TIMEOUT_MS = 10 * 60_000
@@ -30,7 +32,7 @@ interface RipgrepMatch {
   type: "match"
   data: {
     path: { text: string }
-    lines: { text: string }
+    lines: { text?: string }
     line_number: number
   }
 }
@@ -41,12 +43,24 @@ const isRipgrepMatch = (value: unknown): value is RipgrepMatch => {
   return (
     record.type === "match" &&
     typeof record.data?.path?.text === "string" &&
-    typeof record.data?.lines?.text === "string" &&
     typeof record.data?.line_number === "number"
   )
 }
 
-const parseMatch = (root: string, line: string): Match | null => {
+const decodedFileLines = (filePath: string, cache: Map<string, string[]>): string[] => {
+  let lines = cache.get(filePath)
+  if (!lines) {
+    try {
+      lines = splitLines(decodeText(readFileSync(filePath)))
+    } catch {
+      lines = []
+    }
+    cache.set(filePath, lines)
+  }
+  return lines
+}
+
+const parseMatch = (root: string, line: string, cache: Map<string, string[]>): Match | null => {
   let json: unknown
   try {
     json = JSON.parse(line)
@@ -54,11 +68,10 @@ const parseMatch = (root: string, line: string): Match | null => {
     return null
   }
   if (!isRipgrepMatch(json)) return null
-  return {
-    filePath: toAbsolutePath(root, json.data.path.text),
-    lineNumber: json.data.line_number,
-    text: trimTrailingLineBreak(json.data.lines.text),
-  }
+  const filePath = toAbsolutePath(root, json.data.path.text)
+  const lineNumber = json.data.line_number
+  const text = json.data.lines?.text ?? decodedFileLines(filePath, cache)[lineNumber - 1] ?? ""
+  return { filePath, lineNumber, text: trimTrailingLineBreak(text) }
 }
 
 const formatFileMatches = (groups: FileMatches[], offset: number, truncated: boolean): string => {
@@ -93,13 +106,14 @@ const readMatchGroups = async (
   const groups: FileMatches[] = []
   const byFile = new Map<string, FileMatches>()
   const seenFiles = new Set<string>()
+  const decodedLines = new Map<string, string[]>()
   let skipped = 0
   let truncated = false
 
   try {
     await runRipgrepStream(rgArgs, root, controller.signal, (lines) => {
       for (const line of lines) {
-        const match = parseMatch(root, line)
+        const match = parseMatch(root, line, decodedLines)
         if (!match) continue
 
         let group = byFile.get(match.filePath)

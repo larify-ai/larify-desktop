@@ -3,6 +3,7 @@ import { dirname, resolve } from "node:path"
 import { createTwoFilesPatch } from "diff"
 import { z } from "zod"
 import { defineTool } from "../../../shared/tool"
+import { splitLines } from "../../../main/utils/text"
 import { decodeText } from "./encoding"
 import { fileStateFor, withFileLock } from "./state"
 
@@ -16,7 +17,8 @@ export const writeFileTool = defineTool({
   metadata: { icon: "edit" },
   inputSchema,
   execute: async (args, ctx) => {
-    const { file_path, content } = args
+    const { file_path } = args
+    const content = splitLines(args.content).join("\n")
     const target = resolve(ctx.cwd, file_path)
 
     return withFileLock(target, async () => {
@@ -33,7 +35,7 @@ export const writeFileTool = defineTool({
           throw new Error("The file was modified since you read it. Read it again before writing.")
         }
 
-        oldContent = decodeText(await readFile(target))
+        oldContent = splitLines(decodeText(await readFile(target))).join("\n")
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
       }

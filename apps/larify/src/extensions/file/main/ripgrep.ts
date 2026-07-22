@@ -68,12 +68,12 @@ export function runRipgrepStream(
           const lines = splitLines(remainder).filter(Boolean)
           if (lines.length) onLines(lines)
         }
-        const detail = stderr.trim()
-        if (code === 0 || code === 1 || !detail) {
+        if (code === 0 || code === 1) {
           resolve()
           return
         }
-        reject(new Error(`ripgrep exited with code ${code}: ${detail}`))
+        const detail = stderr.trim()
+        reject(new Error(detail ? `ripgrep exited with code ${code}: ${detail}` : `ripgrep exited with code ${code}`))
       })
     })
   })

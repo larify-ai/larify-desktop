@@ -104,7 +104,7 @@ describe("runRipgrepStream", () => {
 
     let onLinesCalls = 0
     await expect(
-      runRipgrepStream(["-n", "needle"], root, controller.signal, () => {
+      runRipgrepStream(["-n", "needle"], root, controller.signal, root, () => {
         onLinesCalls += 1
       }),
     ).resolves.toBeUndefined()
@@ -120,7 +120,7 @@ describe("runRipgrepStream", () => {
     await writeFile(path.join(root, "tail.ts"), "lastmarker")
 
     const lines: string[] = []
-    await runRipgrepStream(["-n", "lastmarker"], root, new AbortController().signal, (chunk) => {
+    await runRipgrepStream(["-n", "lastmarker"], root, new AbortController().signal, root, (chunk) => {
       lines.push(...chunk)
     })
 

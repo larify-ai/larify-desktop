@@ -5,7 +5,7 @@ import { z } from "zod"
 import { defineTool } from "../../../shared/tool"
 import { splitLines } from "../../../main/utils/text"
 import { decodeText } from "./encoding"
-import { fileStateFor, withFileLock } from "./state"
+import { markRead, readAtFor, withFileLock } from "./state"
 
 const inputSchema = z.object({
   file_path: z.string().describe("Absolute path to the file"),
@@ -22,12 +22,12 @@ export const writeFileTool = defineTool({
     const target = resolve(ctx.cwd, file_path)
 
     return withFileLock(target, async () => {
-      const fileState = fileStateFor(ctx.sessionId)
       let oldContent: string | null = null
 
       try {
-        const readAt = fileState.get(target)
+        const readAt = readAtFor(ctx.sessionId, target)
         const stats = await stat(target)
+        if (stats.isDirectory()) throw new Error(`Path is a directory: ${target}`)
         if (readAt === undefined) {
           throw new Error("Read the file before overwriting it.")
         }
@@ -42,7 +42,7 @@ export const writeFileTool = defineTool({
 
       await mkdir(dirname(target), { recursive: true })
       await writeFile(target, content)
-      fileState.set(target, Math.floor((await stat(target)).mtimeMs))
+      markRead(ctx.sessionId, target, (await stat(target)).mtimeMs)
 
       const type = oldContent === null ? "create" : "update"
       const patch = createTwoFilesPatch(target, target, oldContent ?? "", content, "", "", {

@@ -21,8 +21,10 @@ export function runRipgrepStream(
   args: string[],
   target: string,
   signal: AbortSignal,
+  cwd: string,
   onLines: (lines: string[]) => void,
 ): Promise<void> {
+  if (signal.aborted) return Promise.resolve()
   return new Promise((resolve, reject) => {
     let remainder = ""
     let settled = false
@@ -30,6 +32,7 @@ export function runRipgrepStream(
     let stderr = ""
 
     const child = spawn(rgPath, [...args, target], {
+      cwd,
       signal,
       windowsHide: true,
       stdio: ["ignore", "pipe", "pipe"],
@@ -40,8 +43,6 @@ export function runRipgrepStream(
       settled = true
       callback()
     }
-    const onAbort = (): void => settle(resolve)
-    signal.addEventListener("abort", onAbort, { once: true })
 
     child.stdout?.on("data", (chunk: Buffer) => {
       const data = remainder + decoder.write(chunk)
@@ -56,28 +57,23 @@ export function runRipgrepStream(
     })
 
     child.on("error", (error) => {
-      signal.removeEventListener("abort", onAbort)
-      if (signal.aborted) {
-        settle(resolve)
-        return
-      }
+      if (signal.aborted) return
       settle(() => reject(error))
     })
 
     child.on("close", (code) => {
-      signal.removeEventListener("abort", onAbort)
       settle(() => {
         remainder += decoder.end()
         if (remainder) {
           const lines = splitLines(remainder).filter(Boolean)
           if (lines.length) onLines(lines)
         }
-        if (code === 0 || code === 1) {
+        const detail = stderr.trim()
+        if (code === 0 || code === 1 || !detail) {
           resolve()
           return
         }
-        const detail = stderr.trim()
-        reject(new Error(detail ? `ripgrep exited with code ${code}: ${detail}` : `ripgrep exited with code ${code}`))
+        reject(new Error(`ripgrep exited with code ${code}: ${detail}`))
       })
     })
   })
@@ -102,7 +98,7 @@ export async function runRipgrepLimited(
   let truncated = false
 
   try {
-    await runRipgrepStream(args, target, controller.signal, (chunkLines) => {
+    await runRipgrepStream(args, target, controller.signal, target, (chunkLines) => {
       for (const line of chunkLines) {
         if (seen < offset) {
           seen += 1

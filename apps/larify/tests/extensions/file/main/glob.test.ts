@@ -164,7 +164,7 @@ describe("glob", () => {
     expect(result).not.toContain("More results omitted")
   })
 
-  it("returns promptly for a pre-aborted signal", async () => {
+  it("says the search was cut short rather than claiming no files when aborted", async () => {
     const root = await makeFixture()
     const controller = new AbortController()
     controller.abort()
@@ -175,8 +175,8 @@ describe("glob", () => {
       { signal: controller.signal },
     )
 
-    expect(typeof result).toBe("string")
-    expect(result === "No files found." || result.includes("More results omitted")).toBe(true)
+    expect(result).not.toBe("No files found.")
+    expect(result.includes("Search stopped") || result.includes("More results omitted")).toBe(true)
   })
 
   it("returns absolute paths", async () => {

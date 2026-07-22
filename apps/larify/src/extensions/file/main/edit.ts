@@ -5,11 +5,11 @@ import { z } from "zod"
 import { defineTool } from "../../../shared/tool"
 import { splitLines } from "../../../main/utils/text"
 import { decodeText } from "./encoding"
-import { fileStateFor, withFileLock } from "./state"
+import { markRead, readAtFor, withFileLock } from "./state"
 
 const inputSchema = z.object({
   file_path: z.string().describe("Absolute path to the file"),
-  old_string: z.string().describe("The exact text to replace"),
+  old_string: z.string().min(1).describe("The exact text to replace"),
   new_string: z.string().describe("The text to replace it with"),
   replace_all: z.boolean().default(false).describe("Replace all occurrences (default false)"),
 }).strict()
@@ -29,8 +29,7 @@ export const editFileTool = defineTool({
     }
 
     return withFileLock(target, async () => {
-      const fileState = fileStateFor(ctx.sessionId)
-      const readAt = fileState.get(target)
+      const readAt = readAtFor(ctx.sessionId, target)
       if (readAt === undefined) {
         throw new Error("Read the file before editing it.")
       }
@@ -52,7 +51,7 @@ export const editFileTool = defineTool({
 
       const updated = content.split(old_string).join(new_string)
       await writeFile(target, updated)
-      fileState.set(target, Math.floor((await stat(target)).mtimeMs))
+      markRead(ctx.sessionId, target, (await stat(target)).mtimeMs)
 
       const patch = createTwoFilesPatch(target, target, content, updated, "", "", { context: 3 })
       return {

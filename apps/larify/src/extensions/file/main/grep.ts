@@ -12,7 +12,7 @@ const DEFAULT_TIMEOUT_MS = 10 * 60_000
 const inputSchema = z.object({
   pattern: z.string().describe("The regex pattern to search for in file contents"),
   path: z.string().optional().describe("The file or directory to search in. If omitted, the current working directory is used."),
-  glob: z.string().optional().describe("The glob pattern to filter files"),
+  glob: z.string().optional().describe("Glob pattern, relative to the search directory"),
   limit: z.number().int().positive().default(50).describe("Maximum number of matching files to return"),
   offset: z.number().int().nonnegative().default(0).describe("Skip the first N matching files"),
 }).strict()
@@ -92,6 +92,7 @@ const formatFileMatches = (groups: FileMatches[], offset: number, truncated: boo
 const readMatchGroups = async (
   rgArgs: string[],
   root: string,
+  cwd: string,
   offset: number,
   limit: number,
   signal?: AbortSignal,
@@ -111,7 +112,7 @@ const readMatchGroups = async (
   let truncated = false
 
   try {
-    await runRipgrepStream(rgArgs, root, controller.signal, (lines) => {
+    await runRipgrepStream(rgArgs, root, controller.signal, cwd, (lines) => {
       for (const line of lines) {
         const match = parseMatch(root, line, decodedLines)
         if (!match) continue
@@ -150,22 +151,41 @@ const readMatchGroups = async (
   return { groups, truncated: truncated || controller.signal.aborted }
 }
 
+const rgArgs = (pattern: string, glob?: string): string[] => [
+  "--no-config",
+  "--json",
+  "--hidden",
+  "--no-messages",
+  "--sort=path",
+  "--glob",
+  "!**/.git/**",
+  ...(glob ? ["--glob", glob] : []),
+  ...(pattern.startsWith("-") ? ["-e", pattern] : [pattern]),
+]
+
 export const grepFilesTool = defineTool({
-  description: "Search file contents.",
+  description: `Search file contents, by running: rg ${rgArgs("<pattern>", "<glob>").join(" ")} <path>`,
   metadata: { icon: "search" },
   inputSchema,
   execute: async (args, ctx) => {
     const { pattern, path: searchPath, glob, limit, offset } = args
     const root = path.resolve(ctx.cwd, searchPath ?? ".")
-    await stat(root)
+    const stats = await stat(root)
+    const rgCwd = stats.isDirectory() ? root : path.dirname(root)
 
-    const rgArgs = ["--no-config", "--json", "--hidden", "--no-messages", "--sort=path", "--glob", "!**/.git/**"]
-    if (glob) rgArgs.push("--glob", glob)
-    if (pattern.startsWith("-")) rgArgs.push("-e", pattern)
-    else rgArgs.push(pattern)
-
-    const { groups, truncated } = await readMatchGroups(rgArgs, root, offset, limit, ctx.signal)
-    if (groups.length === 0) return "No matches found."
+    const { groups, truncated } = await readMatchGroups(
+      rgArgs(pattern, glob),
+      root,
+      rgCwd,
+      offset,
+      limit,
+      ctx.signal,
+    )
+    if (groups.length === 0) {
+      return truncated
+        ? "Search stopped before any match was found. Narrow the search."
+        : "No matches found."
+    }
 
     return formatFileMatches(groups, offset, truncated)
   },

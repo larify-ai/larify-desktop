@@ -121,7 +121,7 @@ describe("grep", () => {
   it("returns partial results when ripgrep fails after producing matches", async () => {
     const root = await makeFixture()
     const filePath = path.join(root, "src", "a.ts")
-    vi.spyOn(ripgrep, "runRipgrepStream").mockImplementation(async (_args, _target, _signal, onLines) => {
+    vi.spyOn(ripgrep, "runRipgrepStream").mockImplementation(async (_args, _target, _signal, _cwd, onLines) => {
       onLines([
         JSON.stringify({
           type: "match",
@@ -244,7 +244,7 @@ describe("grep", () => {
     const root = await makeFixture()
     const file = path.join(root, "src", "a.ts")
     const rel = path.relative(root, file)
-    vi.spyOn(ripgrep, "runRipgrepStream").mockImplementation(async (_args, _target, _signal, onLines) => {
+    vi.spyOn(ripgrep, "runRipgrepStream").mockImplementation(async (_args, _target, _signal, _cwd, onLines) => {
       onLines([
         JSON.stringify({
           type: "match",
@@ -279,7 +279,7 @@ describe("grep", () => {
     expect(result).not.toContain("\r")
   })
 
-  it("returns no matches promptly when ctx.signal is already aborted", async () => {
+  it("says the search was cut short rather than claiming no matches when aborted", async () => {
     const root = await makeFixture()
 
     const result = await callTool<string>(
@@ -288,7 +288,8 @@ describe("grep", () => {
       { signal: AbortSignal.abort() },
     )
 
-    expect(result).toBe("No matches found.")
+    expect(result).not.toBe("No matches found.")
+    expect(result).toContain("Search stopped")
   })
 
   it("rejects when the path does not exist (stat ENOENT)", async () => {

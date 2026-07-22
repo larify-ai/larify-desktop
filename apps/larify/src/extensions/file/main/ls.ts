@@ -27,7 +27,17 @@ export const lsTool = defineTool({
     if (!rootStats.isDirectory()) throw new Error(`Path is not a directory: ${root}`)
 
     const entries = await readdir(root, { withFileTypes: true })
-    const items = entries.map((entry) => ({ name: entry.name, isDirectory: entry.isDirectory() }))
+    const items = await Promise.all(
+      entries.map(async (entry) => ({
+        name: entry.name,
+        isDirectory: entry.isSymbolicLink()
+          ? await stat(path.join(root, entry.name)).then(
+              (linked) => linked.isDirectory(),
+              () => false,
+            )
+          : entry.isDirectory(),
+      })),
+    )
 
     const end = Math.min(items.length, offset + limit)
     const page = items.slice(offset, end).map(formatItem)

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import iconv from "iconv-lite"
 import { writeFileTool } from "../../../../src/extensions/file/main/write"
-import { fileStateFor, withFileLock } from "../../../../src/extensions/file/main/state"
+import { markRead, withFileLock } from "../../../../src/extensions/file/main/state"
 import { callTool, freshSession } from "./harness"
 
 interface DiffResult {
@@ -23,8 +23,8 @@ let seq = 0
 const uniquePath = (name = "file.txt"): string => join(baseDir, `${++seq}-${name}`)
 
 // Record a read of an absolute path in a session, keyed by the RESOLVED abs path.
-function markRead(session: string, absPath: string): void {
-  fileStateFor(session).set(absPath, Math.floor(statSync(absPath).mtimeMs))
+function seedRead(session: string, absPath: string): void {
+  markRead(session, absPath, statSync(absPath).mtimeMs)
 }
 
 const write = (input: Record<string, unknown>, ctx: Parameters<typeof callTool>[2] = {}) =>
@@ -76,7 +76,7 @@ describe("write", () => {
     const session = freshSession()
     const filePath = uniquePath()
     writeFileSync(filePath, "old")
-    markRead(session, filePath)
+    seedRead(session, filePath)
 
     const result = await write({ file_path: filePath, content: "new" }, { sessionId: session })
 
@@ -117,7 +117,7 @@ describe("write", () => {
     const session = freshSession()
     const filePath = uniquePath()
     writeFileSync(filePath, "original")
-    markRead(session, filePath)
+    seedRead(session, filePath)
 
     // Bump the file's mtime forward so it looks modified since the read.
     const future = new Date(Date.now() + 10_000)
@@ -149,7 +149,7 @@ describe("write", () => {
 
     // Seed the file as GBK/GB18030 on disk.
     writeFileSync(filePath, iconv.encode(oldCn, "gbk"))
-    markRead(session, filePath)
+    seedRead(session, filePath)
 
     const result = await write({ file_path: filePath, content: newCn }, { sessionId: session })
 
@@ -169,7 +169,7 @@ describe("write", () => {
     writeFileSync(resolvedAbs, "old")
 
     // Mark-read using the RESOLVED absolute path; the gate must accept the relative write.
-    markRead(session, resolvedAbs)
+    seedRead(session, resolvedAbs)
 
     const result = await write(
       { file_path: relName, content: "new" },
@@ -199,7 +199,7 @@ describe("write", () => {
     const session = freshSession()
     const filePath = uniquePath()
     writeFileSync(filePath, "same")
-    markRead(session, filePath)
+    seedRead(session, filePath)
 
     const result = await write({ file_path: filePath, content: "same" }, { sessionId: session })
 

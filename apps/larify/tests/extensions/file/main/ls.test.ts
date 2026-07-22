@@ -1,4 +1,5 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
@@ -187,5 +188,62 @@ describe("ls", () => {
 
     const lines = result.split("\n")
     expect(lines).toEqual(expect.arrayContaining([".hidden", ".config/", "visible.ts"]))
+  })
+})
+
+const dirLinkKind = process.platform === "win32" ? "junction" : "dir"
+
+const canLink = (kind: "dir" | "junction" | "file"): boolean => {
+  const probe = mkdtempSync(path.join(os.tmpdir(), "larify-ls-probe-"))
+  try {
+    const target = path.join(probe, "target")
+    if (kind === "file") writeFileSync(target, "x")
+    else mkdirSync(target)
+    symlinkSync(target, path.join(probe, "link"), kind)
+    return true
+  } catch {
+    return false
+  } finally {
+    rmSync(probe, { force: true, recursive: true })
+  }
+}
+
+describe("ls with links", () => {
+  it.skipIf(!canLink(dirLinkKind))("marks a link to a directory as a directory", async () => {
+    const root = await makeFixture()
+    symlinkSync(path.join(root, "components"), path.join(root, "linked"), dirLinkKind)
+
+    const result = await callTool<string>(lsTool, { path: root }, { sessionId: freshSession() })
+
+    expect(result.split("\n")).toContain("linked/")
+  })
+
+  it.skipIf(!canLink(dirLinkKind))("still marks real files and directories correctly", async () => {
+    const root = await makeFixture()
+    symlinkSync(path.join(root, "components"), path.join(root, "linked"), dirLinkKind)
+
+    const lines = (
+      await callTool<string>(lsTool, { path: root }, { sessionId: freshSession() })
+    ).split("\n")
+
+    expect(lines).toEqual(expect.arrayContaining(["components/", "extensions/", "main.ts", "preload.ts"]))
+  })
+
+  it.skipIf(!canLink(dirLinkKind))("lists a broken link as a plain entry without throwing", async () => {
+    const root = await makeFixture()
+    symlinkSync(path.join(root, "missing-target"), path.join(root, "broken"), dirLinkKind)
+
+    const result = await callTool<string>(lsTool, { path: root }, { sessionId: freshSession() })
+
+    expect(result.split("\n")).toContain("broken")
+  })
+
+  it.skipIf(!canLink("file"))("marks a link to a file as a file", async () => {
+    const root = await makeFixture()
+    symlinkSync(path.join(root, "main.ts"), path.join(root, "linked.ts"), "file")
+
+    const result = await callTool<string>(lsTool, { path: root }, { sessionId: freshSession() })
+
+    expect(result.split("\n")).toContain("linked.ts")
   })
 })

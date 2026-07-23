@@ -123,6 +123,11 @@ export function TerminalView(): React.JSX.Element {
     [entriesForSession, sessionId],
   )
 
+  const peekEntries = useCallback(
+    (id: string): Map<number, TerminalEntry> | undefined => entriesBySessionRef.current.get(id),
+    [],
+  )
+
   useEffect(() => {
     activeIdRef.current = state.activeId
   }, [state.activeId])
@@ -348,7 +353,7 @@ export function TerminalView(): React.JSX.Element {
       })
     const offData = window.bridge.on("terminal:data", (payload) => {
       const event = payload as TerminalDataEvent
-      const entry = entriesForSession(event.sessionId).get(event.terminalId)
+      const entry = peekEntries(event.sessionId)?.get(event.terminalId)
       if (!entry) return
       if (entry.restoring) {
         entry.pendingData.push(event)
@@ -358,8 +363,8 @@ export function TerminalView(): React.JSX.Element {
     })
     const offExit = window.bridge.on("terminal:exit", (payload) => {
       const event = payload as TerminalExitEvent
-      entriesForSession(event.sessionId)
-        .get(event.terminalId)
+      peekEntries(event.sessionId)
+        ?.get(event.terminalId)
         ?.term.write(`\r\n[process exited: ${event.exitCode}]\r\n`)
     })
     return () => {
@@ -369,7 +374,7 @@ export function TerminalView(): React.JSX.Element {
       offData()
       offExit()
     }
-  }, [entriesForSession, sessionId])
+  }, [peekEntries, sessionId])
 
   useEffect(() => {
     const onActive = (event: Event): void => {

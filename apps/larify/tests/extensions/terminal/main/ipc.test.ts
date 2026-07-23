@@ -115,7 +115,7 @@ describe("registerTerminalIpc", () => {
     registerTerminalIpc(service as never)
 
     expect(electronMock.ipcMain.handle).toHaveBeenCalledTimes(9)
-    expect(electronMock.handlers.get("terminal:create")?.({}, "session-1", { title: "Shell" })).toBe(7)
+    expect(electronMock.handlers.get("terminal:create")?.({}, "session-1", { title: "Shell", cwd: "/tmp" })).toBe(7)
     expect(electronMock.handlers.get("terminal:getState")?.({}, "session-1")).toEqual({
       sessionId: "session-1",
       terminals: [],
@@ -132,13 +132,41 @@ describe("registerTerminalIpc", () => {
     })
     electronMock.handlers.get("terminal:destroySession")?.({}, "session-1")
 
-    expect(service.create).toHaveBeenCalledWith("session-1", { title: "Shell" })
+    expect(service.create).toHaveBeenCalledWith("session-1", {
+      cwd: "/tmp",
+      title: "Shell",
+      cols: undefined,
+      rows: undefined,
+    })
     expect(service.write).toHaveBeenCalledWith("session-1", 7, "echo hi\r")
     expect(service.resize).toHaveBeenCalledWith("session-1", 7, 120, 30)
     expect(service.setActive).toHaveBeenCalledWith("session-1", 7)
     expect(service.reorder).toHaveBeenCalledWith("session-1", 7, 0)
     expect(service.snapshot).toHaveBeenCalledWith("session-1", 7)
     expect(service.destroySession).toHaveBeenCalledWith("session-1")
+  })
+
+  it("drops renderer-supplied shell, args, and env when creating a terminal", async () => {
+    const { registerTerminalIpc } = await importIpc()
+    const service = new FakeTerminalService()
+    registerTerminalIpc(service as never)
+
+    electronMock.handlers.get("terminal:create")?.({}, "session-1", {
+      cwd: "/tmp",
+      title: "Shell",
+      cols: 100,
+      rows: 40,
+      shell: "/bin/evil",
+      shellArgs: ["-c", "rm -rf /"],
+      shellEnv: { EVIL: "1" },
+    })
+
+    expect(service.create).toHaveBeenCalledWith("session-1", {
+      cwd: "/tmp",
+      title: "Shell",
+      cols: 100,
+      rows: 40,
+    })
   })
 
   it("sends state events to renderer windows", async () => {

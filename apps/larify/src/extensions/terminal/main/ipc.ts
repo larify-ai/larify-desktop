@@ -31,6 +31,13 @@ class DataBatcher {
 
 const batchKey = (sessionId: string, terminalId: number): string => `${sessionId}:${terminalId}`
 
+const rendererCreateOptions = (opts: TerminalCreateOptions): TerminalCreateOptions => ({
+  cwd: opts.cwd,
+  title: opts.title,
+  cols: opts.cols,
+  rows: opts.rows,
+})
+
 export function registerTerminalIpc(service: TerminalService): () => void {
   const batchers = new Map<string, DataBatcher>()
 
@@ -65,7 +72,7 @@ export function registerTerminalIpc(service: TerminalService): () => void {
 
   ipcMain.handle("terminal:getState", (_event, sessionId: string) => service.state(sessionId))
   ipcMain.handle("terminal:create", (_event, sessionId: string, opts?: TerminalCreateOptions) =>
-    service.create(sessionId, opts),
+    service.create(sessionId, opts && rendererCreateOptions(opts)),
   )
   ipcMain.handle("terminal:write", (_event, sessionId: string, terminalId: number, data: string) =>
     service.write(sessionId, terminalId, data),

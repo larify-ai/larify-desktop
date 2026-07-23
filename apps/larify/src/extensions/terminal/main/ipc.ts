@@ -59,6 +59,7 @@ export function registerTerminalIpc(service: TerminalService): () => void {
   const unbindExit = service.bindExit((sessionId, terminalId, exitCode) => {
     const key = batchKey(sessionId, terminalId)
     batchers.get(key)?.flush()
+    batchers.delete(key)
     send("terminal:exit", { sessionId, terminalId, exitCode })
   })
 

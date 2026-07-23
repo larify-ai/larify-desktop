@@ -37,7 +37,6 @@ import { getAgentSessionId, setAgentSessionId } from "@renderer/lib/agent-sessio
 import { MessageView } from "./message-view"
 import { conversationToText } from "../lib/conversation-copy"
 import { ipcTransport } from "../lib/transport"
-import type { ToolDisplayMeta } from "./message-view"
 
 const MemoizedMessageView = memo(MessageView)
 
@@ -274,7 +273,6 @@ function AssistantChat({
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
   }, [])
-  const [toolDisplays, setToolDisplays] = useState<Record<string, ToolDisplayMeta>>({})
   const inputFrameRef = useRef<HTMLDivElement>(null)
   const menuTriggerRef = useRef<HTMLDivElement>(null)
   const pendingInitialSaveRef = useRef(false)
@@ -292,18 +290,6 @@ function AssistantChat({
   const isLive = status === "streaming" || status === "submitted"
   const canSubmit = inputText.trim().length > 0 || attachmentCount > 0 || isLive
 
-  const refreshToolDisplays = async (): Promise<void> => {
-    try {
-      const displays = await window.bridge.invoke("agent:tool-displays")
-      setToolDisplays(displays as Record<string, ToolDisplayMeta>)
-    } catch (error) {
-      console.error("[agent:tool-displays]", error)
-    }
-  }
-
-  useEffect(() => {
-    void refreshToolDisplays()
-  }, [])
 
   useEffect(() => {
     if (isLive) return
@@ -327,7 +313,7 @@ function AssistantChat({
       setInputText("")
       pendingInitialSaveRef.current = true
       submittedMessageCountRef.current = messages.length
-      void refreshToolDisplays().finally(() => void sendMessage({ text, files }))
+      void sendMessage({ text, files })
     }
   }
 
@@ -456,7 +442,6 @@ function AssistantChat({
               key={m.id}
               message={m}
               streaming={isLive && i === messages.length - 1}
-              toolDisplays={toolDisplays}
             />
           ))}
           {status === "submitted" && <Spinner className="text-muted-foreground" />}

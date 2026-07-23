@@ -10,8 +10,6 @@ import { callTool, freshSession } from "./harness"
 interface DiffResult {
   kind: "diff"
   path: string
-  oldContent: string | null
-  newContent: string
   patch: string
   summary: string
 }
@@ -49,14 +47,14 @@ describe("write", () => {
     expect(result).toEqual({
       kind: "diff",
       path: filePath,
-      oldContent: null,
-      newContent: "hello",
       patch: expect.any(String),
       summary: `File created successfully at: ${filePath}`,
     })
     expect(result.patch).toContain("+hello")
 
-    // The obsolete shape is gone: no output / metadata / type / filePath keys.
+    // The obsolete shape is gone: no content / output / metadata / type / filePath keys.
+    expect(result).not.toHaveProperty("oldContent")
+    expect(result).not.toHaveProperty("newContent")
     expect(result).not.toHaveProperty("output")
     expect(result).not.toHaveProperty("metadata")
     expect(result).not.toHaveProperty("type")
@@ -84,8 +82,6 @@ describe("write", () => {
     expect(result).toMatchObject({
       kind: "diff",
       path: filePath,
-      oldContent: "old",
-      newContent: "new",
       summary: `The file ${filePath} has been updated successfully.`,
     })
     expect(result.patch).toContain("-old")
@@ -157,9 +153,9 @@ describe("write", () => {
     // The new bytes are utf8, never GBK.
     expect(onDisk.equals(Buffer.from(newCn, "utf8"))).toBe(true)
     expect(onDisk.equals(iconv.encode(newCn, "gbk"))).toBe(false)
-    // The old content was decoded from GBK for the diff.
-    expect(result.oldContent).toBe(oldCn)
-    expect(result.newContent).toBe(newCn)
+    // The old content was decoded from GBK before diffing, so the patch names it.
+    expect(result.patch).toContain(oldCn)
+    expect(result.patch).toContain(newCn)
   })
 
   it("resolves a relative file_path against ctx.cwd and keys fileState by the resolved abs path", async () => {
@@ -189,27 +185,32 @@ describe("write", () => {
     // Second write in the same session succeeds without re-reading.
     const second = await write({ file_path: filePath, content: "second" }, { sessionId: session })
 
-    expect(second.oldContent).toBe("first")
-    expect(second.newContent).toBe("second")
     expect(readFileSync(filePath, "utf8")).toBe("second")
+    expect(second.patch).toContain("-first")
+    expect(second.patch).toContain("+second")
     expect(second.summary).toBe(`The file ${filePath} has been updated successfully.`)
   })
 
-  it("treats an identical overwrite as an update with an empty diff patch", async () => {
+  it("rejects an overwrite whose content is identical to the current file", async () => {
     const session = freshSession()
     const filePath = uniquePath()
     writeFileSync(filePath, "same")
     seedRead(session, filePath)
 
-    const result = await write({ file_path: filePath, content: "same" }, { sessionId: session })
+    await expect(
+      write({ file_path: filePath, content: "same" }, { sessionId: session }),
+    ).rejects.toThrow("The content is identical to the current file. Nothing to write.")
+  })
 
-    // oldContent non-null => update, even though nothing changed.
-    expect(result.oldContent).toBe("same")
-    expect(result.summary).toBe(`The file ${filePath} has been updated successfully.`)
-    // No hunk in the patch when content is unchanged.
-    expect(result.patch).not.toContain("@@")
-    expect(result.patch).not.toContain("-same")
-    expect(result.patch).not.toContain("+same")
+  it("treats a same-content write differing only in line endings as identical", async () => {
+    const session = freshSession()
+    const filePath = uniquePath()
+    writeFileSync(filePath, "a\r\nb\r\n")
+    seedRead(session, filePath)
+
+    await expect(
+      write({ file_path: filePath, content: "a\nb\n" }, { sessionId: session }),
+    ).rejects.toThrow("identical")
   })
 
   it("creates a zero-byte file for empty content", async () => {
@@ -218,8 +219,6 @@ describe("write", () => {
     const result = await write({ file_path: filePath, content: "" }, { sessionId: session })
 
     expect(statSync(filePath).size).toBe(0)
-    expect(result.oldContent).toBeNull()
-    expect(result.newContent).toBe("")
     expect(result.summary).toBe(`File created successfully at: ${filePath}`)
   })
 
@@ -228,7 +227,7 @@ describe("write", () => {
     const filePath = uniquePath()
     // Fresh session, missing file: must NOT throw the not-read-first error.
     const result = await write({ file_path: filePath, content: "brand new" }, { sessionId: session })
-    expect(result.oldContent).toBeNull()
+    expect(result.summary).toBe(`File created successfully at: ${filePath}`)
     expect(readFileSync(filePath, "utf8")).toBe("brand new")
   })
 

@@ -120,20 +120,18 @@ describe("edit — return shape & toModelOutput", () => {
       kind: string
       path: string
       patch: string
-      oldContent: string
-      newContent: string
       summary: string
     }>(editFileTool, { file_path: abs, old_string: "world", new_string: "there" }, { sessionId: session })
 
-    expect(Object.keys(result).sort()).toEqual(["kind", "newContent", "oldContent", "patch", "path", "summary"])
+    expect(Object.keys(result).sort()).toEqual(["kind", "patch", "path", "summary"])
     expect(result.kind).toBe("diff")
     expect(result.path).toBe(abs)
-    expect(result.oldContent).toBe("hello world")
-    expect(result.newContent).toBe("hello there")
+    expect(result.patch).toContain("-hello world")
+    expect(result.patch).toContain("+hello there")
     expect(result.summary).toBe(`Edited ${abs}.`)
-    expect(typeof result.patch).toBe("string")
 
-    // The OLD shape must be gone.
+    expect(result).not.toHaveProperty("oldContent")
+    expect(result).not.toHaveProperty("newContent")
     expect(result).not.toHaveProperty("output")
     expect(result).not.toHaveProperty("metadata")
     expect(result).not.toHaveProperty("filePath")
@@ -257,15 +255,15 @@ describe("edit — encoding", () => {
     const newStr = "REPLACED这里"
     const updated = original.split(oldStr).join(newStr)
 
-    const result = await callTool<{ oldContent: string; newContent: string }>(
+    const result = await callTool<{ patch: string }>(
       editFileTool,
       { file_path: abs, old_string: oldStr, new_string: newStr },
       { sessionId: session },
     )
 
     // The GBK bytes were decoded to the correct Chinese text before matching.
-    expect(result.oldContent).toBe(original)
-    expect(result.newContent).toBe(updated)
+    expect(result.patch).toContain(`-${original.trimEnd()}`)
+    expect(result.patch).toContain(newStr)
 
     // The file is now written as UTF-8, regardless of the original GBK encoding.
     const raw = readFileSync(abs)

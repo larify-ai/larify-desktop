@@ -60,8 +60,6 @@ export const editFileTool = defineTool({
         kind: "diff" as const,
         path: target,
         patch,
-        oldContent: content,
-        newContent: updated,
         summary: replace_all ? `Edited ${target} (${count} replacements).` : `Edited ${target}.`,
       }
     })

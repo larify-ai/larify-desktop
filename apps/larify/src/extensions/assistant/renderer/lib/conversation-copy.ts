@@ -1,4 +1,5 @@
 import { getToolName, isToolUIPart, type UIMessage } from "ai"
+import { toolCall } from "./diff-meta"
 
 function stringify(value: unknown): string {
   if (typeof value === "string") return value
@@ -21,13 +22,9 @@ export function conversationToText(messages: UIMessage[]): string {
       } else if (part.type === "reasoning" && part.text) {
         lines.push(`> [思考] ${part.text}`)
       } else if (isToolUIPart(part)) {
-        const rawName = getToolName(part)
-        const input = part.input as { name?: unknown; args?: unknown } | undefined
-        const isCall =
-          rawName === "call_tool" && input !== null && typeof input === "object"
-        const name = isCall && typeof input?.name === "string" ? input.name : rawName
-        const args = isCall && input && "args" in input ? input.args : part.input
-        lines.push(`### 🔧 ${name}`)
+        const name = getToolName(part)
+        const { title, args } = toolCall(part.input)
+        lines.push(`### 🔧 ${name}${title ? `: ${title}` : ""}`)
         lines.push("输入:\n```json\n" + stringify(args) + "\n```")
         const out = part.state === "output-error" ? part.errorText : part.output
         if (out !== undefined && out !== null && out !== "") {

@@ -43,6 +43,10 @@ export const writeFileTool = defineTool({
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
       }
 
+      if (oldContent !== null && content === oldContent) {
+        throw new Error("The content is identical to the current file. Nothing to write.")
+      }
+
       await mkdir(dirname(target), { recursive: true })
       await writeFile(target, applyLineBreaks(content, lineBreak))
       markRead(ctx.sessionId, target, (await stat(target)).mtimeMs)
@@ -55,8 +59,6 @@ export const writeFileTool = defineTool({
       return {
         kind: "diff" as const,
         path: target,
-        oldContent,
-        newContent: content,
         patch,
         summary:
           type === "create"

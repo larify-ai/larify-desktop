@@ -42,18 +42,16 @@ describe("message rendering performance guards", () => {
     const liveRender = vi.fn(MessageView)
     const MemoizedOldMessageView = memo(oldRender)
     const MemoizedLiveMessageView = memo(liveRender)
-    const toolDisplays = {}
 
     await act(async () => {
       root.render(
         createElement(
           Fragment,
           null,
-          createElement(MemoizedOldMessageView, { message: oldMessage, toolDisplays }),
+          createElement(MemoizedOldMessageView, { message: oldMessage }),
           createElement(MemoizedLiveMessageView, {
             message: liveMessage("first"),
             streaming: true,
-            toolDisplays,
           }),
         ),
       )
@@ -71,11 +69,10 @@ describe("message rendering performance guards", () => {
         createElement(
           Fragment,
           null,
-          createElement(MemoizedOldMessageView, { message: oldMessage, toolDisplays }),
+          createElement(MemoizedOldMessageView, { message: oldMessage }),
           createElement(MemoizedLiveMessageView, {
             message: liveMessage("first second"),
             streaming: true,
-            toolDisplays,
           }),
         ),
       )

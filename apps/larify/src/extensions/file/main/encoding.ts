@@ -3,7 +3,7 @@ import iconv from "iconv-lite"
 
 const MIN_CONFIDENCE = 50
 
-function guessEncoding(sample: Buffer): { trusted: string | null; note: string } {
+export function guessEncoding(sample: Buffer): { trusted: string | null; note: string } {
   const [best] = analyse(sample)
   const trusted =
     best && best.confidence >= MIN_CONFIDENCE && iconv.encodingExists(best.name) ? best.name : null

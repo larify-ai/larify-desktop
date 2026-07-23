@@ -1,15 +1,16 @@
-import { readFileSync } from "node:fs"
-import { stat } from "node:fs/promises"
+import { open, stat } from "node:fs/promises"
 import path from "node:path"
+import iconv from "iconv-lite"
 import { z } from "zod"
 import { trimTrailingLineBreak } from "../../../main/utils/text"
 import { defineTool } from "../../../shared/tool"
-import { decodeLossy, decodeText } from "./encoding"
+import { guessEncoding } from "./encoding"
 import { runRipgrepStream, toAbsolutePath } from "./ripgrep"
 
 const DEFAULT_TIMEOUT_MS = 10 * 60_000
 const FILE_MATCH_LIMIT = 3
 const LINE_LIMIT = 100
+const SAMPLE_BYTES = 1 << 16
 
 const inputSchema = z.object({
   pattern: z.string().describe("The regex pattern to search for in file contents"),
@@ -23,18 +24,20 @@ interface Match {
   filePath: string
   lineNumber: number
   text: string
+  bytes?: string
 }
 
 interface FileMatches {
   filePath: string
   matches: Match[]
+  hasMore: boolean
 }
 
 interface RipgrepMatch {
   type: "match"
   data: {
     path: { text: string }
-    lines: { text?: string }
+    lines: { text?: string; bytes?: string }
     line_number: number
   }
 }
@@ -49,30 +52,12 @@ const isRipgrepMatch = (value: unknown): value is RipgrepMatch => {
   )
 }
 
-const readFileLines = (filePath: string): string[] => {
-  let buffer: Buffer
-  try {
-    buffer = readFileSync(filePath)
-  } catch {
-    return []
-  }
-  try {
-    return decodeText(buffer).split("\n")
-  } catch {
-    return decodeLossy(buffer).split("\n")
-  }
+const clampLine = (text: string): string => {
+  const trimmed = trimTrailingLineBreak(text)
+  return trimmed.length > LINE_LIMIT ? `${trimmed.slice(0, LINE_LIMIT)}…` : trimmed
 }
 
-const decodedFileLines = (filePath: string, cache: Map<string, string[]>): string[] => {
-  let lines = cache.get(filePath)
-  if (!lines) {
-    lines = readFileLines(filePath)
-    cache.set(filePath, lines)
-  }
-  return lines
-}
-
-const parseMatch = (root: string, line: string, cache: Map<string, string[]>): Match | null => {
+const parseMatch = (root: string, line: string): Match | null => {
   let json: unknown
   try {
     json = JSON.parse(line)
@@ -82,13 +67,34 @@ const parseMatch = (root: string, line: string, cache: Map<string, string[]>): M
   if (!isRipgrepMatch(json)) return null
   const filePath = toAbsolutePath(root, json.data.path.text)
   const lineNumber = json.data.line_number
-  const text = trimTrailingLineBreak(
-    json.data.lines?.text ?? decodedFileLines(filePath, cache)[lineNumber - 1] ?? "",
-  )
-  return {
-    filePath,
-    lineNumber,
-    text: text.length > LINE_LIMIT ? `${text.slice(0, LINE_LIMIT)}…` : text,
+  const { text, bytes } = json.data.lines
+  if (typeof text === "string") return { filePath, lineNumber, text: clampLine(text) }
+  return { filePath, lineNumber, text: "", bytes }
+}
+
+async function fileEncoding(filePath: string): Promise<string> {
+  const handle = await open(filePath, "r")
+  try {
+    const buffer = Buffer.alloc(SAMPLE_BYTES)
+    const { bytesRead } = await handle.read(buffer, 0, SAMPLE_BYTES, 0)
+    return guessEncoding(buffer.subarray(0, bytesRead)).trusted ?? "utf-8"
+  } finally {
+    await handle.close()
+  }
+}
+
+async function resolvePendingText(groups: FileMatches[]): Promise<void> {
+  const encoding = new Map<string, string>()
+  for (const group of groups) {
+    for (const match of group.matches) {
+      if (match.bytes === undefined) continue
+      let enc = encoding.get(match.filePath)
+      if (enc === undefined) {
+        enc = await fileEncoding(match.filePath).catch(() => "utf-8")
+        encoding.set(match.filePath, enc)
+      }
+      match.text = clampLine(iconv.decode(Buffer.from(match.bytes, "base64"), enc))
+    }
   }
 }
 
@@ -96,7 +102,7 @@ const formatFileMatches = (groups: FileMatches[], offset: number, truncated: boo
   const body = groups
     .map((group) => {
       const lines = group.matches.map((match) => `${match.lineNumber}: ${match.text}`)
-      if (group.matches.length >= FILE_MATCH_LIMIT) lines.push("…")
+      if (group.hasMore) lines.push("…")
       return [group.filePath, ...lines].join("\n")
     })
     .join("\n\n")
@@ -126,14 +132,13 @@ const readMatchGroups = async (
   const groups: FileMatches[] = []
   const byFile = new Map<string, FileMatches>()
   const seenFiles = new Set<string>()
-  const decodedLines = new Map<string, string[]>()
   let skipped = 0
   let truncated = false
 
   try {
     await runRipgrepStream(rgArgs, root, controller.signal, cwd, (lines) => {
       for (const line of lines) {
-        const match = parseMatch(root, line, decodedLines)
+        const match = parseMatch(root, line)
         if (!match) continue
 
         let group = byFile.get(match.filePath)
@@ -152,11 +157,12 @@ const readMatchGroups = async (
             controller.abort()
             return
           }
-          group = { filePath: match.filePath, matches: [] }
+          group = { filePath: match.filePath, matches: [], hasMore: false }
           byFile.set(match.filePath, group)
           groups.push(group)
         }
         if (group.matches.length < FILE_MATCH_LIMIT) group.matches.push(match)
+        else group.hasMore = true
       }
     })
   } catch (error) {
@@ -167,6 +173,7 @@ const readMatchGroups = async (
     signal?.removeEventListener("abort", onExternalAbort)
   }
 
+  await resolvePendingText(groups)
   return { groups, truncated: truncated || controller.signal.aborted }
 }
 

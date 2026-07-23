@@ -62,3 +62,25 @@ describe("grep on a non-UTF-8 file", () => {
     expect(output).toBe("No matches found.")
   })
 })
+
+describe("每文件命中封顶与 '…'", () => {
+  it("恰好 3 条命中时不画 '…'", async () => {
+    const file = path.join(root, "three.txt")
+    writeFileSync(file, "hit\nhit\nhit\n")
+
+    const output = await grep({ pattern: "hit", path: file })
+
+    expect(output).toContain("3: hit")
+    expect(output).not.toContain("…")
+  })
+
+  it("4 条及以上才画 '…'", async () => {
+    const file = path.join(root, "four.txt")
+    writeFileSync(file, "hit\nhit\nhit\nhit\n")
+
+    const output = await grep({ pattern: "hit", path: file })
+
+    expect(output).toContain("3: hit")
+    expect(output).toContain("…")
+  })
+})

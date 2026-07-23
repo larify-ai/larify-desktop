@@ -57,8 +57,9 @@ function resolveShell(shell?: string): string {
 }
 
 function resolveCwd(cwd?: string): string {
-  if (cwd && existsSync(cwd)) return cwd
-  return DEFAULT_WORKSPACE
+  if (cwd === undefined) return DEFAULT_WORKSPACE
+  if (!existsSync(cwd)) throw new Error(`Working directory does not exist: ${cwd}`)
+  return cwd
 }
 
 function isPowerShell(shell: string): boolean {

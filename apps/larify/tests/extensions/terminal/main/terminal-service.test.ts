@@ -156,6 +156,15 @@ describe("TerminalService", () => {
     }))
   })
 
+  it("throws when the provided cwd does not exist instead of silently using the workspace", async () => {
+    const { TerminalService } = await importService()
+    const service = new TerminalService()
+
+    expect(() =>
+      service.create("session-1", { cwd: join(tmpdir(), "larify-cwd-does-not-exist-xyz") }),
+    ).toThrow("Working directory does not exist")
+  })
+
   it("does not resurrect a manager for operations after the session is destroyed", async () => {
     const { TerminalService } = await importService()
     const service = new TerminalService()

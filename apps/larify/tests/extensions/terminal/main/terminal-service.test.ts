@@ -194,7 +194,40 @@ describe("TerminalService", () => {
       shell: "custom-shell",
       cwd: existingCwd,
       title: "Custom",
+      shellArgs: [],
+      shellEnv: {},
     })
+  })
+
+  it("falls back to the platform baseline shell when no candidate resolves", async () => {
+    whichSync.mockReturnValue(null)
+    const { TerminalService } = await importService()
+    const service = new TerminalService()
+
+    service.create("session-1")
+
+    const expected =
+      process.platform === "win32" ? "powershell.exe" : process.platform === "darwin" ? "/bin/zsh" : "/bin/bash"
+    expect(managers[0].create).toHaveBeenCalledWith(expect.objectContaining({ shell: expected }))
+  })
+
+  it("merges caller shellArgs and shellEnv with the integration options instead of overriding them", async () => {
+    const { TerminalService } = await importService()
+    const service = new TerminalService()
+
+    service.create("session-1", {
+      shell: "pwsh.exe",
+      cwd: existingCwd,
+      shellArgs: ["--caller-arg"],
+      shellEnv: { CALLER_VAR: "1" },
+    })
+
+    expect(managers[0].create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        shellArgs: expect.arrayContaining(["--caller-arg", "-NoLogo"]),
+        shellEnv: expect.objectContaining({ CALLER_VAR: "1", VSCODE_STABLE: "1" }),
+      }),
+    )
   })
 
   it("does not use unsupported SHELL as a default candidate", async () => {

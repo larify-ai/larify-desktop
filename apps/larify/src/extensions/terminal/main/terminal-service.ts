@@ -53,7 +53,13 @@ function resolveShell(shell?: string): string {
     const found = which.sync(candidate, { nothrow: true })
     if (found) return found
   }
-  return candidates[0]
+  return fallbackShell()
+}
+
+function fallbackShell(): string {
+  if (process.platform === 'win32') return 'powershell.exe'
+  if (process.platform === 'darwin') return '/bin/zsh'
+  return '/bin/bash'
 }
 
 function resolveCwd(cwd?: string): string {
@@ -91,6 +97,7 @@ function powerShellLiteral(value: string): string {
 
 function bashIntegrationScript(): string {
   const dir = createUniqueDir(larifyTempPath('shell-integration', 'bash'))
+  chmodSync(dir, 0o700)
   const scriptPath = join(dir, 'shellIntegration-bash.sh')
   writeIntegrationScript(BASH_INTEGRATION_SCRIPT, scriptPath)
   return scriptPath
@@ -185,12 +192,14 @@ export class TerminalService {
 
   create(sessionId: string, opts?: TerminalCreateOptions): number {
     const shell = resolveShell(opts?.shell)
+    const integration = shellIntegrationOptions(shell)
     return this.managers.get(sessionId).create({
       ...opts,
-      ...shellIntegrationOptions(shell),
-      cwd: resolveCwd(opts?.cwd),
       shell,
-      title: opts?.title
+      cwd: resolveCwd(opts?.cwd),
+      title: opts?.title,
+      shellArgs: [...(opts?.shellArgs ?? []), ...(integration.shellArgs ?? [])],
+      shellEnv: { ...opts?.shellEnv, ...integration.shellEnv }
     })
   }
 

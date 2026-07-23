@@ -364,7 +364,7 @@ function AssistantChat({
             placeholder={labels.placeholder}
             value={inputText}
             onChange={(event) => setInputText(event.target.value)}
-            className="max-h-48 min-h-12 pl-3"
+            className="max-h-48 min-h-12 overflow-y-auto pl-3"
           />
         </PromptInputBody>
         <PromptInputFooter className="justify-between">

@@ -1,13 +1,20 @@
 import { createKeyedLock } from "../../../main/utils/lock"
 
+const MAX_SESSIONS = 100
 const fileStates = new Map<string, Map<string, number>>()
 const lock = createKeyedLock()
 
 function stateFor(sessionId: string): Map<string, number> {
-  let state = fileStates.get(sessionId)
-  if (!state) {
-    state = new Map()
-    fileStates.set(sessionId, state)
+  const existing = fileStates.get(sessionId)
+  if (existing) {
+    fileStates.delete(sessionId)
+    fileStates.set(sessionId, existing)
+    return existing
+  }
+  const state = new Map<string, number>()
+  fileStates.set(sessionId, state)
+  while (fileStates.size > MAX_SESSIONS) {
+    fileStates.delete(fileStates.keys().next().value as string)
   }
   return state
 }
@@ -17,7 +24,7 @@ export function markRead(sessionId: string, target: string, mtimeMs: number): vo
 }
 
 export function readAtFor(sessionId: string, target: string): number | undefined {
-  return stateFor(sessionId).get(target)
+  return fileStates.get(sessionId)?.get(target)
 }
 
 export function withFileLock<T>(target: string, run: () => Promise<T>): Promise<T> {

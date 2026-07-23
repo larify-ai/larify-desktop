@@ -1,4 +1,4 @@
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises"
+import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
 import { createTwoFilesPatch } from "diff"
 import { z } from "zod"
@@ -48,7 +48,14 @@ export const writeFileTool = defineTool({
       }
 
       await mkdir(dirname(target), { recursive: true })
-      await writeFile(target, applyLineBreaks(content, lineBreak))
+      const temp = `${target}.${process.pid}.tmp`
+      try {
+        await writeFile(temp, applyLineBreaks(content, lineBreak))
+        await rename(temp, target)
+      } catch (error) {
+        await rm(temp, { force: true })
+        throw error
+      }
       markRead(ctx.sessionId, target, (await stat(target)).mtimeMs)
 
       const type = oldContent === null ? "create" : "update"

@@ -120,8 +120,8 @@ describe("ls", () => {
     expect(result.endsWith("omitted.)")).toBe(false)
   })
 
-  // 6. offset beyond total item count -> "No items found." even though items exist.
-  it("returns 'No items found.' when offset exceeds the item count", async () => {
+  // 6. offset beyond total item count -> clear "past end" note, not a misleading "empty".
+  it("reports the offset is past the end instead of looking like an empty directory", async () => {
     const root = await makeFixture()
 
     const result = await callTool<string>(
@@ -130,7 +130,16 @@ describe("ls", () => {
       { sessionId: freshSession() },
     )
 
-    expect(result).toBe("No items found.")
+    expect(result).not.toBe("No items found.")
+    expect(result).toMatch(/past the 4 items/)
+  })
+
+  it("lists items in a stable sorted order so pagination does not repeat or skip", async () => {
+    const root = await makeFixture()
+
+    const result = await callTool<string>(lsTool, { path: root }, { sessionId: freshSession() })
+
+    expect(result.split("\n")).toEqual(["components/", "extensions/", "main.ts", "preload.ts"])
   })
 
   // 7. limit exactly equal to remaining count -> no bottom note.

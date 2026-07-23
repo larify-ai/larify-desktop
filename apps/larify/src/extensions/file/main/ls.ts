@@ -26,26 +26,30 @@ export const lsTool = defineTool({
     const rootStats = await stat(root)
     if (!rootStats.isDirectory()) throw new Error(`Path is not a directory: ${root}`)
 
-    const entries = await readdir(root, { withFileTypes: true })
-    const items = await Promise.all(
-      entries.map(async (entry) => ({
-        name: entry.name,
-        isDirectory: entry.isSymbolicLink()
+    const entries = (await readdir(root, { withFileTypes: true })).sort((a, b) =>
+      a.name < b.name ? -1 : a.name > b.name ? 1 : 0,
+    )
+    if (entries.length === 0) return "No items found."
+    if (offset >= entries.length) {
+      return `(Offset ${offset} is past the ${entries.length} items in the directory)`
+    }
+
+    const end = Math.min(entries.length, offset + limit)
+    const page = await Promise.all(
+      entries.slice(offset, end).map(async (entry) => {
+        const isDirectory = entry.isSymbolicLink()
           ? await stat(path.join(root, entry.name)).then(
               (linked) => linked.isDirectory(),
               () => false,
             )
-          : entry.isDirectory(),
-      })),
+          : entry.isDirectory()
+        return formatItem({ name: entry.name, isDirectory })
+      }),
     )
 
-    const end = Math.min(items.length, offset + limit)
-    const page = items.slice(offset, end).map(formatItem)
-
-    if (page.length === 0) return "No items found."
     let output = page.join("\n")
     if (offset > 0) output = `(Items 1-${offset} omitted.)\n${output}`
-    if (end < items.length) output += `\n(Items ${end + 1}-${items.length} omitted.)`
+    if (end < entries.length) output += `\n(Items ${end + 1}-${entries.length} omitted.)`
     return output
   },
 })

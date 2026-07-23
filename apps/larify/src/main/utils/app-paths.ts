@@ -22,6 +22,8 @@ export const larifyTempPath = (...segments: string[]): string => {
 }
 
 export const resourcePath = (...segments: string[]): string => {
-  const root = app?.isPackaged ? process.resourcesPath : join(process.cwd(), "resources")
+  const root = app?.isPackaged
+    ? join(process.resourcesPath, "app.asar.unpacked", "resources")
+    : join(process.cwd(), "resources")
   return join(root, ...segments)
 }

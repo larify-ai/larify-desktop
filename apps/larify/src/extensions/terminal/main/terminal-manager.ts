@@ -70,7 +70,9 @@ export class TerminalManager {
         await this.finalizeRun(terminal.id)
         this.forget(terminal.id)
         this.emit()
-      }).catch(() => {})
+      })
+        .catch(() => {})
+        .finally(() => terminal.dispose())
     })
     terminal.bindCommandFinished((event) => {
       void this.drainRun(terminal.id, false).catch(() => {})
@@ -223,7 +225,10 @@ export class TerminalManager {
 
   async destroy(): Promise<void> {
     await Promise.all([...this.terminals.keys()].map((id) => this.finalizeRun(id)))
-    for (const terminal of this.terminals.values()) terminal.kill()
+    for (const terminal of this.terminals.values()) {
+      terminal.kill()
+      terminal.dispose()
+    }
     this.terminals.clear()
     this.activeRuns.clear()
     this.activeId = null

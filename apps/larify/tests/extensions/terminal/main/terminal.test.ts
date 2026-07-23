@@ -440,4 +440,18 @@ describe("Terminal", () => {
     expect(fakePty.write).not.toHaveBeenCalled()
     vi.useRealTimers()
   })
+
+  it("dispose() tears down the headless terminal once and is idempotent", async () => {
+    const fakePty = createFakePty()
+    spawnMock.mockReturnValue(fakePty)
+    const { Terminal } = await importTerminal()
+    const terminal = new Terminal(1, { shell: "sh", cwd })
+    const headless = (terminal as unknown as { headless: { dispose: () => void } }).headless
+    const spy = vi.spyOn(headless, "dispose")
+
+    terminal.dispose()
+    terminal.dispose()
+
+    expect(spy).toHaveBeenCalledTimes(1)
+  })
 })

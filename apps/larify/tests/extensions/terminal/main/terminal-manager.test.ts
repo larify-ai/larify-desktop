@@ -16,6 +16,7 @@ class FakeTerminal {
   resize = vi.fn()
   close = vi.fn()
   kill = vi.fn()
+  dispose = vi.fn()
   private runOutput: string[] = []
   private savedPos = 0
   private viewport: string[] = []
@@ -487,6 +488,8 @@ describe("TerminalManager", () => {
 
     expect(terminals[0].kill).toHaveBeenCalled()
     expect(terminals[1].kill).toHaveBeenCalled()
+    expect(terminals[0].dispose).toHaveBeenCalled()
+    expect(terminals[1].dispose).toHaveBeenCalled()
     expect(manager.state()).toMatchObject({ activeId: null, terminals: [] })
   })
 })

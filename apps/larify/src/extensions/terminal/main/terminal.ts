@@ -39,6 +39,7 @@ export class Terminal {
   private outputSeq = 0
   private headlessWriteWaiters: Array<{ sequence: number; resolve: () => void }> = []
   private commandRunning = false
+  private disposed = false
   private exitCode: number | null = null
   private exited = false
   private pendingExit: number | null = null
@@ -230,6 +231,24 @@ export class Terminal {
     } catch {
       // The process may already be gone.
     }
+  }
+
+  dispose(): void {
+    if (this.disposed) return
+    this.disposed = true
+    if (this.exitTimer) clearTimeout(this.exitTimer)
+    this.exitTimer = null
+    for (const waiter of this.headlessWriteWaiters) waiter.resolve()
+    this.headlessWriteWaiters = []
+    this.runStartMarker?.dispose()
+    this.savedMarker?.dispose()
+    this.runStartMarker = undefined
+    this.savedMarker = undefined
+    this.dataListeners.clear()
+    this.exitListeners.clear()
+    this.commandFinishedListeners.clear()
+    this.commandStartedListeners.clear()
+    this.headless.dispose()
   }
 
   state(): TerminalState {

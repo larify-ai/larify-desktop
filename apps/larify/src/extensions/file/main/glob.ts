@@ -29,7 +29,7 @@ const rgArgs = (pattern: string): string[] => [
 
 export const globFilesTool = defineTool({
   description: `Find files by glob pattern, by running: rg ${rgArgs("<pattern>").join(" ")} <path>`,
-  metadata: { icon: "search" },
+  metadata: { icon: "search", eager: true },
   inputSchema,
   execute: async (args, ctx) => {
     const { pattern, path: searchPath, limit, offset } = args

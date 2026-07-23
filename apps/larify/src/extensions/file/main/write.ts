@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
 import { createTwoFilesPatch } from "diff"
 import { z } from "zod"
@@ -14,7 +14,7 @@ const inputSchema = z.object({
 
 export const writeFileTool = defineTool({
   description: "Create or overwrite a text file.",
-  metadata: { icon: "edit" },
+  metadata: { icon: "edit", eager: true },
   inputSchema,
   execute: async (args, ctx) => {
     const { file_path } = args
@@ -48,14 +48,7 @@ export const writeFileTool = defineTool({
       }
 
       await mkdir(dirname(target), { recursive: true })
-      const temp = `${target}.${process.pid}.tmp`
-      try {
-        await writeFile(temp, applyLineBreaks(content, lineBreak))
-        await rename(temp, target)
-      } catch (error) {
-        await rm(temp, { force: true })
-        throw error
-      }
+      await writeFile(target, applyLineBreaks(content, lineBreak))
       markRead(ctx.sessionId, target, (await stat(target)).mtimeMs)
 
       const type = oldContent === null ? "create" : "update"

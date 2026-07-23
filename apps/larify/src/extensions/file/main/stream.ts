@@ -2,7 +2,7 @@ import { open } from "node:fs/promises"
 import { normalizeLineBreaks } from "../../../main/utils/text"
 import { createStreamDecoder } from "./encoding"
 
-export const CHUNK_BYTES = 1 << 20
+const CHUNK_BYTES = 1 << 20
 
 export async function* normalizedChunks(target: string): AsyncGenerator<string> {
   const handle = await open(target, "r")

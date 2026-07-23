@@ -359,3 +359,16 @@ describe("edit — concurrency", () => {
     expect(readFileSync(abs, "utf8")).toBe("XXX YYY")
   })
 })
+
+describe("edit — line endings", () => {
+  it("preserves CRLF on disk while matching against normalized text", async () => {
+    const session = freshSession()
+    const abs = join(dir, "crlf.txt")
+    writeFileSync(abs, "a\r\nb\r\nc\r\n")
+    seedRead(session, abs)
+
+    await callTool(editFileTool, { file_path: abs, old_string: "b", new_string: "B" }, { sessionId: session })
+
+    expect(readFileSync(abs)).toEqual(Buffer.from("a\r\nB\r\nc\r\n", "utf8"))
+  })
+})

@@ -184,7 +184,7 @@ const rgArgs = (pattern: string, glob?: string): string[] => [
 
 export const grepFilesTool = defineTool({
   description: `Search file contents, by running: rg ${rgArgs("<pattern>", "<glob>").join(" ")} <path>`,
-  metadata: { icon: "search" },
+  metadata: { icon: "search", eager: true },
   inputSchema,
   execute: async (args, ctx) => {
     const { pattern, path: searchPath, glob, limit, offset } = args

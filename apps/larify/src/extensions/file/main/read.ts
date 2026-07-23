@@ -77,7 +77,7 @@ async function readWindow(target: string, from: number, to: number): Promise<Win
 
 export const readFileTool = defineTool({
   description: "Read a text file.",
-  metadata: { icon: "read" },
+  metadata: { icon: "read", eager: true },
   inputSchema,
   execute: async (args, ctx) => {
     const { file_path, line, column, limit, scroll } = args

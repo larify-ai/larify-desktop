@@ -18,7 +18,7 @@ const formatItem = (item: Item): string => item.name + (item.isDirectory ? "/" :
 
 export const lsTool = defineTool({
   description: "List directory contents.",
-  metadata: { icon: "read" },
+  metadata: { icon: "read", eager: true },
   inputSchema,
   execute: async (args, ctx) => {
     const { path: targetPath, limit, offset } = args

@@ -20,6 +20,12 @@ export interface ShellCommandFinishedEvent {
   exitCode?: number
 }
 
+export interface SavableFront {
+  lines: string[]
+  commit(): void
+  discard(): void
+}
+
 const markerLine = (marker: IMarker | undefined): number => Math.max(marker?.line ?? 0, 0)
 
 export class Terminal {
@@ -141,23 +147,21 @@ export class Terminal {
     return lines.slice(-keepTail)
   }
 
-  async takeSavableFront(keepTail: number): Promise<string[]> {
+  async takeSavableFront(keepTail: number): Promise<SavableFront | null> {
     const buffer = await this.readableBuffer()
-    if (!buffer) return []
+    if (!buffer) return null
     const start = markerLine(this.savedMarker)
     const persistUpTo = buffer.length - 1 - keepTail
-    if (persistUpTo <= start) return []
+    if (persistUpTo <= start) return null
     const lines = this.readRows(start, persistUpTo - 1)
-    this.moveSavedMarker(persistUpTo - (buffer.baseY + buffer.cursorY))
-    return lines
+    return this.savable(lines, persistUpTo - (buffer.baseY + buffer.cursorY))
   }
 
-  async takeAllRemaining(): Promise<string[]> {
+  async takeAllRemaining(): Promise<SavableFront | null> {
     const buffer = await this.readableBuffer()
-    if (!buffer) return []
+    if (!buffer) return null
     const lines = this.readRows(markerLine(this.savedMarker), buffer.length - 1)
-    this.moveSavedMarker(0)
-    return lines
+    return this.savable(lines, 0)
   }
 
   private async readableBuffer(): Promise<IBuffer | null> {
@@ -169,9 +173,16 @@ export class Terminal {
     return buffer
   }
 
-  private moveSavedMarker(cursorOffset: number): void {
-    this.savedMarker?.dispose()
-    this.savedMarker = this.headless.registerMarker(cursorOffset)
+  private savable(lines: string[], cursorOffset: number): SavableFront {
+    const pending = this.headless.registerMarker(cursorOffset)
+    return {
+      lines,
+      commit: () => {
+        this.savedMarker?.dispose()
+        this.savedMarker = pending ?? this.savedMarker
+      },
+      discard: () => pending?.dispose()
+    }
   }
 
   private readRows(startRow: number, endRow: number): string[] {

@@ -1,6 +1,6 @@
 import { addListener, type Listener } from '../../../main/utils/listener'
 import { createKeyedLock } from '../../../main/utils/lock'
-import { Terminal, type ShellCommandFinishedEvent } from './terminal'
+import { Terminal, type SavableFront, type ShellCommandFinishedEvent } from './terminal'
 import {
   appendRunLog,
   createTerminalRunLog,
@@ -158,13 +158,23 @@ export class TerminalManager {
     }).catch(() => this.flushQueued.delete(id))
   }
 
+  private async persist(log: TerminalRunLog, front: SavableFront | null): Promise<void> {
+    if (!front) return
+    try {
+      await appendRunLog(log, front.lines.join('\n'))
+      front.commit()
+    } catch (error) {
+      front.discard()
+      console.error('[terminal:run-log]', error)
+    }
+  }
+
   private async performFlushRunHistory(id: number): Promise<TerminalRunLog | null> {
     const terminal = this.terminals.get(id)
     const run = this.activeRuns.get(id)
     if (!terminal || !run || run.finalized) return run?.log ?? null
 
-    const front = await terminal.takeSavableFront(RUN_TAIL_LIMIT)
-    if (front.length > 0) await appendRunLog(run.log, front.join('\n'))
+    await this.persist(run.log, await terminal.takeSavableFront(RUN_TAIL_LIMIT))
     return run.log
   }
 
@@ -173,12 +183,8 @@ export class TerminalManager {
       const terminal = this.terminals.get(id)
       const run = this.activeRuns.get(id)
       if (!terminal || !run || run.finalized) return
-      const front = await terminal.takeSavableFront(RUN_TAIL_LIMIT)
-      if (front.length > 0) await appendRunLog(run.log, front.join('\n'))
-      if (run.log.path) {
-        const rest = await terminal.takeAllRemaining()
-        if (rest.length > 0) await appendRunLog(run.log, rest.join('\n'))
-      }
+      await this.persist(run.log, await terminal.takeSavableFront(RUN_TAIL_LIMIT))
+      if (run.log.path) await this.persist(run.log, await terminal.takeAllRemaining())
       run.finalized = endOfRun
     })
   }

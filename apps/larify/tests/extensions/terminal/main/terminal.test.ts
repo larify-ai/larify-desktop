@@ -45,6 +45,25 @@ function createFakePty(): FakePty {
 
 const cwd = join(tmpdir(), "larify-terminal-test")
 
+type Savable = { lines: string[]; commit(): void; discard(): void } | null
+
+async function drainFront(
+  terminal: { takeSavableFront(keepTail: number): Promise<Savable> },
+  keepTail: number,
+): Promise<string[]> {
+  const front = await terminal.takeSavableFront(keepTail)
+  if (!front) return []
+  front.commit()
+  return front.lines
+}
+
+async function drainAll(terminal: { takeAllRemaining(): Promise<Savable> }): Promise<string[]> {
+  const front = await terminal.takeAllRemaining()
+  if (!front) return []
+  front.commit()
+  return front.lines
+}
+
 beforeEach(() => {
   mkdirSync(cwd, { recursive: true })
   spawnMock.mockReset()
@@ -164,11 +183,11 @@ describe("Terminal", () => {
     for (let chunk = 0; chunk < total; chunk += 200) {
       const lines = Array.from({ length: 200 }, (_, i) => `N${chunk + i + 1}`)
       fakePty.emitData(lines.join("\r\n") + "\r\n")
-      saved.push(...(await terminal.takeSavableFront(2000)))
+      saved.push(...(await drainFront(terminal, 2000)))
     }
-    saved.push(...(await terminal.takeSavableFront(2000)))
+    saved.push(...(await drainFront(terminal, 2000)))
     const tail = await terminal.readRunTail(2000)
-    saved.push(...(await terminal.takeAllRemaining()))
+    saved.push(...(await drainAll(terminal)))
 
     const covered = new Set([...saved, ...tail])
     const missing: number[] = []
@@ -184,9 +203,9 @@ describe("Terminal", () => {
     await terminal.beginRun()
 
     fakePty.emitData(Array.from({ length: 12000 }, (_, i) => `N${i + 1}`).join("\r\n") + "\r\n")
-    const front = await terminal.takeSavableFront(2000)
+    const front = await drainFront(terminal, 2000)
     fakePty.emitData(Array.from({ length: 500 }, (_, i) => `M${i + 1}`).join("\r\n") + "\r\n")
-    const rest = await terminal.takeAllRemaining()
+    const rest = await drainAll(terminal)
 
     expect(front.length).toBeGreaterThan(0)
     expect(rest).toContain("M500")
@@ -204,11 +223,11 @@ describe("Terminal", () => {
     fakePty.emitData("tui-screen\r\n")
     await terminal.beginRun()
     fakePty.emitData("\x1b[?1049l")
-    await terminal.takeSavableFront(10)
+    await drainFront(terminal, 10)
     fakePty.emitData(Array.from({ length: 100 }, (_, i) => `A${i + 1}`).join("\r\n") + "\r\n")
 
-    const front = await terminal.takeSavableFront(10)
-    const rest = await terminal.takeAllRemaining()
+    const front = await drainFront(terminal, 10)
+    const rest = await drainAll(terminal)
 
     const logged = [...front, ...rest]
     for (let k = 1; k <= 100; k++) expect(logged).toContain(`A${k}`)
@@ -226,7 +245,7 @@ describe("Terminal", () => {
     fakePty.emitData("\x1b[3A")
     fakePty.emitData("PARKED")
 
-    const rest = await terminal.takeAllRemaining()
+    const rest = await drainAll(terminal)
 
     expect(rest).toEqual(["OUT1", "PARKED", "OUT3", "STATUS-BOTTOM"])
   })
@@ -439,6 +458,24 @@ describe("Terminal", () => {
 
     expect(fakePty.write).not.toHaveBeenCalled()
     vi.useRealTimers()
+  })
+
+  it("keeps the saved marker in place when a front is discarded, re-offering the lines", async () => {
+    const fakePty = createFakePty()
+    spawnMock.mockReturnValue(fakePty)
+    const { Terminal } = await importTerminal()
+    const terminal = new Terminal(1, { shell: "sh", cwd, cols: 80, rows: 4 })
+    await terminal.beginRun()
+
+    fakePty.emitData(Array.from({ length: 20 }, (_, i) => `L${i + 1}`).join("\r\n") + "\r\n")
+    const first = await terminal.takeSavableFront(2)
+    first?.discard()
+
+    const second = await terminal.takeSavableFront(2)
+    second?.commit()
+
+    expect(first?.lines.length).toBeGreaterThan(0)
+    expect(second?.lines).toEqual(first?.lines)
   })
 
   it("dispose() tears down the headless terminal once and is idempotent", async () => {

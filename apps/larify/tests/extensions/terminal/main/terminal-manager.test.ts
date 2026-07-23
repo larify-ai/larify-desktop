@@ -70,18 +70,31 @@ class FakeTerminal {
     return this.runOutput.slice(-keepTail)
   }
 
-  async takeSavableFront(keepTail: number): Promise<string[]> {
+  async takeSavableFront(
+    keepTail: number,
+  ): Promise<{ lines: string[]; commit(): void; discard(): void } | null> {
     const persistUpTo = Math.max(0, this.runOutput.length - keepTail)
-    if (persistUpTo <= this.savedPos) return []
+    if (persistUpTo <= this.savedPos) return null
     const lines = this.runOutput.slice(this.savedPos, persistUpTo)
-    this.savedPos = persistUpTo
-    return lines
+    return {
+      lines,
+      commit: () => {
+        this.savedPos = persistUpTo
+      },
+      discard: () => {},
+    }
   }
 
-  async takeAllRemaining(): Promise<string[]> {
+  async takeAllRemaining(): Promise<{ lines: string[]; commit(): void; discard(): void } | null> {
     const lines = this.runOutput.slice(this.savedPos)
-    this.savedPos = this.runOutput.length
-    return lines
+    const end = this.runOutput.length
+    return {
+      lines,
+      commit: () => {
+        this.savedPos = end
+      },
+      discard: () => {},
+    }
   }
 
   setRunOutput(lines: string[]): void {

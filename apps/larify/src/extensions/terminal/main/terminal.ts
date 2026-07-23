@@ -171,8 +171,9 @@ export class Terminal {
   async takeAllRemaining(): Promise<SavableFront | null> {
     const buffer = await this.readableBuffer()
     if (!buffer) return null
-    const lines = this.readRows(markerLine(this.savedMarker), buffer.length - 1)
-    return this.savable(lines, 0)
+    const start = markerLine(this.savedMarker)
+    const lines = this.readRows(start, buffer.length - 1)
+    return this.savable(lines, start + lines.length - (buffer.baseY + buffer.cursorY))
   }
 
   private async readableBuffer(): Promise<IBuffer | null> {

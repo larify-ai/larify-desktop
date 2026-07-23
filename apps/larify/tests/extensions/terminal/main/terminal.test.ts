@@ -195,6 +195,26 @@ describe("Terminal", () => {
     expect(missing).toEqual([])
   })
 
+  it("does not re-persist the last line when output continues after takeAllRemaining", async () => {
+    const fakePty = createFakePty()
+    spawnMock.mockReturnValue(fakePty)
+    const { Terminal } = await importTerminal()
+    const terminal = new Terminal(1, { shell: "sh", cwd, cols: 80, rows: 24 })
+    await terminal.beginRun()
+
+    fakePty.emitData("A1\r\nA2\r\nA3\r\nLAST")
+    const first = await drainAll(terminal)
+    fakePty.emitData("\r\nB1\r\nB2\r\n")
+    const second = await drainAll(terminal)
+
+    expect(first).toContain("LAST")
+    expect(second).not.toContain("LAST")
+    const all = [...first, ...second]
+    for (const line of ["A1", "A2", "A3", "LAST", "B1", "B2"]) {
+      expect(all.filter((entry) => entry === line)).toHaveLength(1)
+    }
+  })
+
   it("keeps logging after a burst pushes the saved marker out of the scrollback", async () => {
     const fakePty = createFakePty()
     spawnMock.mockReturnValue(fakePty)

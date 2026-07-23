@@ -1,12 +1,9 @@
-import { open, stat } from "node:fs/promises"
+import { stat } from "node:fs/promises"
 import path from "node:path"
 import { z } from "zod"
 import { defineTool } from "../../../shared/tool"
-import { normalizeLineBreaks } from "../../../main/utils/text"
-import { createStreamDecoder } from "./encoding"
+import { normalizedChunks } from "./stream"
 import { markRead } from "./state"
-
-const CHUNK_BYTES = 1 << 20
 
 const inputSchema = z.object({
   file_path: z.string().describe("Absolute path to the file"),
@@ -15,29 +12,6 @@ const inputSchema = z.object({
   limit: z.number().int().positive().max(100_000).default(50_000).describe("Maximum number of characters to read"),
   scroll: z.enum(["down", "up"]).default("down").describe("Read down or up from the start position"),
 }).strict()
-
-async function* normalizedChunks(target: string): AsyncGenerator<string> {
-  const handle = await open(target, "r")
-  try {
-    const buffer = Buffer.alloc(CHUNK_BYTES)
-    const decode = createStreamDecoder()
-    let carry = ""
-    for (;;) {
-      const { bytesRead } = await handle.read(buffer, 0, CHUNK_BYTES, null)
-      if (bytesRead === 0) break
-      let text = carry + decode(buffer.subarray(0, bytesRead))
-      carry = ""
-      if (text.endsWith("\r")) {
-        carry = "\r"
-        text = text.slice(0, -1)
-      }
-      if (text) yield normalizeLineBreaks(text)
-    }
-    if (carry) yield "\n"
-  } finally {
-    await handle.close()
-  }
-}
 
 async function textLength(target: string): Promise<number> {
   let length = 0

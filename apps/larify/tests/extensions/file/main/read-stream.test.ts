@@ -4,6 +4,7 @@ import path from "node:path"
 import iconv from "iconv-lite"
 import { afterAll, describe, expect, it } from "vitest"
 import { readFileTool } from "../../../../src/extensions/file/main/read"
+import { readAtFor } from "../../../../src/extensions/file/main/state"
 import { splitLines } from "../../../../src/main/utils/text"
 import { callTool, freshSession } from "./harness"
 
@@ -250,4 +251,17 @@ describe("跨 chunk 边界", () => {
 
     expect(await actual(buffer, params)).toBe(reference(text, params))
   }, 120_000)
+})
+
+describe("末尾残缺的 UTF-8 不再静默丢尾", () => {
+  it("读到不完整的多字节结尾时报错, 而不是丢掉坏字节", async () => {
+    const file = path.join(root, "truncated.txt")
+    writeFileSync(file, Buffer.from([0x61, 0x62, 0x63, 0xe4, 0xb8]))
+    const session = freshSession()
+
+    await expect(
+      callTool(readFileTool, { file_path: file }, { sessionId: session }),
+    ).rejects.toThrow()
+    expect(readAtFor(session, file)).toBeUndefined()
+  })
 })

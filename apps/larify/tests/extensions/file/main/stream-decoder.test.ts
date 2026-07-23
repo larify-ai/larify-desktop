@@ -189,6 +189,22 @@ describe("边界输入", () => {
   })
 })
 
+describe("末尾残缺的多字节序列不再被静默丢弃", () => {
+  it("end() 在半个字符残留时抛错", () => {
+    const decode = createStreamDecoder()
+
+    expect(decode(Buffer.from([0x61, 0x62, 0x63, 0xe4, 0xb8]))).toBe("abc")
+    expect(() => decode.end()).toThrow()
+  })
+
+  it("end() 在干净结尾返回空串", () => {
+    const decode = createStreamDecoder()
+    decode(Buffer.from("完整内容\n", "utf8"))
+
+    expect(decode.end()).toBe("")
+  })
+})
+
 describe("decodeLossy 永不抛错", () => {
   it("合法 UTF-8 结果与 decodeText 相同", () => {
     const buffer = Buffer.from("中文 hello 🎉\n", "utf8")

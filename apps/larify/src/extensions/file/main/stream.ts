@@ -21,7 +21,8 @@ export async function* normalizedChunks(target: string): AsyncGenerator<string> 
       }
       if (text) yield normalizeLineBreaks(text)
     }
-    if (carry) yield "\n"
+    const tail = carry + decode.end()
+    if (tail) yield normalizeLineBreaks(tail)
   } finally {
     await handle.close()
   }

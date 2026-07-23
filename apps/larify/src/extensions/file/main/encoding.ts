@@ -25,13 +25,15 @@ export function decodeText(buffer: Buffer): string {
 export const decodeLossy = (buffer: Buffer): string =>
   new TextDecoder("utf-8", { ignoreBOM: true }).decode(buffer)
 
-export function createStreamDecoder(): (chunk: Buffer) => string {
+export type StreamDecoder = ((chunk: Buffer) => string) & { end: () => string }
+
+export function createStreamDecoder(): StreamDecoder {
   const utf8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true })
-  let fallbackDecode: ((chunk: Buffer) => string) | null = null
+  let fallback: { write(chunk: Buffer): string; end(): string | undefined } | null = null
   let utf8Accepted = false
 
-  return (chunk) => {
-    if (fallbackDecode) return fallbackDecode(chunk)
+  const decode = ((chunk: Buffer): string => {
+    if (fallback) return fallback.write(chunk)
     try {
       const text = utf8.decode(chunk, { stream: true })
       utf8Accepted = true
@@ -39,9 +41,12 @@ export function createStreamDecoder(): (chunk: Buffer) => string {
     } catch {
       const { trusted, note } = guessEncoding(chunk)
       if (utf8Accepted || !trusted) throw notUtf8(note)
-      const decoder = iconv.getDecoder(trusted)
-      fallbackDecode = (next) => decoder.write(next)
-      return fallbackDecode(chunk)
+      fallback = iconv.getDecoder(trusted)
+      return fallback.write(chunk)
     }
-  }
+  }) as StreamDecoder
+
+  decode.end = (): string => (fallback ? fallback.end() ?? "" : utf8.decode())
+
+  return decode
 }

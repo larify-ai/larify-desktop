@@ -83,7 +83,6 @@ export const readFileTool = defineTool({
     const { file_path, line, column, limit, scroll } = args
     const target = path.resolve(ctx.cwd, file_path)
     const stats = await stat(target)
-    markRead(ctx.sessionId, target, stats.mtimeMs)
 
     const anchor =
       line !== undefined
@@ -94,6 +93,7 @@ export const readFileTool = defineTool({
     const from = scroll === "up" ? Math.max(0, anchor - limit) : anchor
     const to = scroll === "up" ? anchor : anchor + limit
     const window = await readWindow(target, from, to)
+    markRead(ctx.sessionId, target, stats.mtimeMs)
 
     return [
       from > 0 ? `(Omitted before ${describePosition(window.start)}.)` : null,

@@ -100,9 +100,15 @@ export function registerTerminalIpc(service: TerminalService): () => void {
     batchers.get(batchKey(sessionId, terminalId))?.flush()
     return service.snapshot(sessionId, terminalId)
   })
-  ipcMain.handle("terminal:destroySession", (_event, sessionId: string) =>
-    service.destroySession(sessionId),
-  )
+  ipcMain.handle("terminal:destroySession", (_event, sessionId: string) => {
+    const prefix = `${sessionId}:`
+    for (const [key, pending] of batchers) {
+      if (!key.startsWith(prefix)) continue
+      pending.flush()
+      batchers.delete(key)
+    }
+    return service.destroySession(sessionId)
+  })
 
   const channels = [
     "terminal:getState",

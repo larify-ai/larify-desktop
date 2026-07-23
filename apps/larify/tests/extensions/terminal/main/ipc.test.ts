@@ -227,6 +227,29 @@ describe("registerTerminalIpc", () => {
     vi.useRealTimers()
   })
 
+  it("flushes and drops a session's batchers on destroySession", async () => {
+    vi.useFakeTimers()
+    const { registerTerminalIpc } = await importIpc()
+    const service = new FakeTerminalService()
+    registerTerminalIpc(service as never)
+
+    service.emitData("session-1", 7, "pending", 0, 7)
+    await electronMock.handlers.get("terminal:destroySession")?.({}, "session-1")
+
+    expect(electronMock.sends).toEqual([
+      { channel: "terminal:data", payload: { sessionId: "session-1", terminalId: 7, data: "pending", start: 0, end: 7 } },
+    ])
+    expect(service.destroySession).toHaveBeenCalledWith("session-1")
+
+    electronMock.sends.length = 0
+    service.emitData("session-1", 7, "after", 7, 12)
+    vi.advanceTimersByTime(10)
+    expect(electronMock.sends).toEqual([
+      { channel: "terminal:data", payload: { sessionId: "session-1", terminalId: 7, data: "after", start: 7, end: 12 } },
+    ])
+    vi.useRealTimers()
+  })
+
   it("unbinds service listeners and removes handlers on dispose", async () => {
     const { registerTerminalIpc } = await importIpc()
     const service = new FakeTerminalService()

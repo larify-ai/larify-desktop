@@ -14,6 +14,9 @@ function createWindow(): BrowserWindow {
     height,
     minWidth: 800,
     minHeight: 600,
+    ...(process.platform === "win32"
+      ? { icon: join(app.getAppPath(), "resources", "icon.png") }
+      : {}),
     x: Math.round(workArea.x + (workArea.width - width) / 2),
     y: Math.round(workArea.y + (workArea.height - height) / 2),
     show: false,

@@ -639,4 +639,50 @@ describe("TerminalView", () => {
 
     expect(window.bridge.invoke).toHaveBeenCalledWith("terminal:resize", "session-resize", 1, 20, 8)
   })
+
+  it("re-sends a resize after a failed attempt instead of deduping it away", async () => {
+    const { TerminalView } = await import("../../../../src/extensions/terminal/renderer/terminal-view")
+
+    setAgentSessionId("session-resize-retry")
+    await act(async () => {
+      root.render(createElement(TerminalView))
+    })
+
+    await act(async () => {
+      stateRequests["session-resize-retry"].resolve({
+        sessionId: "session-resize-retry",
+        activeId: 1,
+        terminals: [{ id: 1, pid: 10, title: "A", cwd: "/", shell: "sh", exitCode: null }],
+      })
+    })
+
+    const resizeHandler = terminalMocks[0].onResize.mock.calls[0][0] as (size: {
+      cols: number
+      rows: number
+    }) => void
+
+    vi.mocked(window.bridge.invoke).mockImplementation((channel: string) =>
+      channel === "terminal:resize"
+        ? Promise.reject(new Error("resize failed"))
+        : Promise.resolve(),
+    )
+
+    const resizeCalls = (): number =>
+      vi
+        .mocked(window.bridge.invoke)
+        .mock.calls.filter((call) => call[0] === "terminal:resize" && call[3] === 30 && call[4] === 10)
+        .length
+
+    await act(async () => {
+      resizeHandler({ cols: 30, rows: 10 })
+      await new Promise((resolve) => setTimeout(resolve, 110))
+    })
+    expect(resizeCalls()).toBe(1)
+
+    await act(async () => {
+      resizeHandler({ cols: 30, rows: 10 })
+      await new Promise((resolve) => setTimeout(resolve, 110))
+    })
+    expect(resizeCalls()).toBe(2)
+  })
 })

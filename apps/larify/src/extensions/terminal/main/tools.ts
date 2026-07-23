@@ -55,22 +55,26 @@ function waitForCommandFinished(
   terminalId: number,
   timeoutSeconds: number,
   signal?: AbortSignal,
-  requireStart = false
+  idleSeconds = 0
 ): Promise<boolean> {
   if (signal?.aborted) return Promise.resolve(false)
   return new Promise((resolve) => {
     let settled = false
-    let started = !requireStart
+    let started = false
     let settleTimer: NodeJS.Timeout | null = null
+    let idleTimer: NodeJS.Timeout | null = null
+    const idleMs = Math.max(0, idleSeconds * 1000)
     const finish = (completed: boolean): void => {
       if (settled) return
       settled = true
       if (settleTimer) clearTimeout(settleTimer)
+      if (idleTimer) clearTimeout(idleTimer)
       clearTimeout(timeoutTimer)
       signal?.removeEventListener('abort', onAbort)
       unbindFinished()
       unbindExit()
       unbindStarted()
+      unbindData()
       resolve(completed)
     }
 
@@ -79,8 +83,18 @@ function waitForCommandFinished(
       settleTimer = setTimeout(() => finish(true), SETTLE_MS)
     }
 
+    const armIdle = (): void => {
+      if (!started || idleMs <= 0) return
+      if (idleTimer) clearTimeout(idleTimer)
+      idleTimer = setTimeout(() => finish(false), idleMs)
+    }
+
     const unbindFinished = service.bindCommandFinished((eventSessionId, eventTerminalId) => {
-      if (eventSessionId !== sessionId || eventTerminalId !== terminalId || !started) return
+      if (eventSessionId !== sessionId || eventTerminalId !== terminalId) return
+      if (idleTimer) {
+        clearTimeout(idleTimer)
+        idleTimer = null
+      }
       armSettle()
     })
 
@@ -91,6 +105,12 @@ function waitForCommandFinished(
         clearTimeout(settleTimer)
         settleTimer = null
       }
+      armIdle()
+    })
+
+    const unbindData = service.bindData((eventSessionId, eventTerminalId) => {
+      if (eventSessionId !== sessionId || eventTerminalId !== terminalId || settleTimer) return
+      armIdle()
     })
 
     const unbindExit = service.bindExit((eventSessionId, eventTerminalId) => {
@@ -182,13 +202,13 @@ export function createTerminalToolkit(service: TerminalService): Toolkit {
     tools: {
       list: defineTool({
         description: 'List all terminals',
-        metadata: { icon: 'terminal' },
+        metadata: { icon: 'terminal', eager: true },
         inputSchema: z.object({}).strict(),
         execute: async (_args, ctx) => service.state(ctx.sessionId).terminals
       }),
       create: defineTool({
         description: 'Create a terminal',
-        metadata: { icon: 'terminal' },
+        metadata: { icon: 'terminal', eager: true },
         inputSchema: createSchema,
         execute: async (args, ctx) => {
           const terminalId = service.create(ctx.sessionId, args)
@@ -197,7 +217,7 @@ export function createTerminalToolkit(service: TerminalService): Toolkit {
       }),
       close: defineTool({
         description: 'Close a terminal',
-        metadata: { icon: 'terminal' },
+        metadata: { icon: 'terminal', eager: true },
         inputSchema: closeSchema,
         execute: async (args, ctx) => {
           const { id } = args
@@ -210,7 +230,7 @@ export function createTerminalToolkit(service: TerminalService): Toolkit {
       }),
       write: defineTool({
         description: 'Write raw node-pty input to a terminal',
-        metadata: { icon: 'terminal' },
+        metadata: { icon: 'terminal', eager: true },
         inputSchema: writeSchema,
         execute: async (args, ctx) => {
           const { id, input, submit, timeout, idle } = args
@@ -224,7 +244,7 @@ export function createTerminalToolkit(service: TerminalService): Toolkit {
             const shouldWaitForCommand =
               (submittedInput || (!data && state.commandRunning)) && Boolean(state.shellIntegration)
             const commandWait = shouldWaitForCommand
-              ? waitForCommandFinished(service, ctx.sessionId, id, timeout, ctx.signal, submittedInput)
+              ? waitForCommandFinished(service, ctx.sessionId, id, timeout, ctx.signal, idle)
               : null
             const log = await service.startRun(ctx.sessionId, id)
             if (!log) throw new Error(`Terminal "${id}" not found.`)
@@ -241,7 +261,7 @@ export function createTerminalToolkit(service: TerminalService): Toolkit {
       }),
       read: defineTool({
         description: 'Read a terminal snapshot, including interactive TUI screens',
-        metadata: { icon: 'terminal' },
+        metadata: { icon: 'terminal', eager: true },
         inputSchema: readSchema,
         execute: async (args, ctx) => {
           const { id, timeout, idle } = args

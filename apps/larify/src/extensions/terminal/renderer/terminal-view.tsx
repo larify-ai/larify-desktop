@@ -142,7 +142,15 @@ export function TerminalView(): React.JSX.Element {
       if (entry.lastSentCols === cols && entry.lastSentRows === rows) return
       entry.lastSentCols = cols
       entry.lastSentRows = rows
-      void window.bridge.invoke("terminal:resize", sessionId, terminalId, cols, rows)
+      void window.bridge
+        .invoke("terminal:resize", sessionId, terminalId, cols, rows)
+        .catch((error) => {
+          if (entry.lastSentCols === cols && entry.lastSentRows === rows) {
+            entry.lastSentCols = null
+            entry.lastSentRows = null
+          }
+          console.error("[terminal:resize]", error)
+        })
     },
     [sessionId],
   )
@@ -263,6 +271,7 @@ export function TerminalView(): React.JSX.Element {
         term.open(host)
         fit.fit()
       } catch (error) {
+        term.dispose()
         host.remove()
         console.error("[terminal:open]", error)
         return
@@ -313,7 +322,9 @@ export function TerminalView(): React.JSX.Element {
 
       term.onData((data) => {
         if (entry.exited) return
-        void window.bridge.invoke("terminal:write", sessionId, terminalId, data)
+        void window.bridge
+          .invoke("terminal:write", sessionId, terminalId, data)
+          .catch((error) => console.error("[terminal:write]", error))
       })
       term.element?.addEventListener("contextmenu", (event) => {
         event.preventDefault()

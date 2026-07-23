@@ -189,14 +189,18 @@ describe("boundaries the tool descriptions promise", () => {
 })
 
 describe("UTF-8 BOM round trip", () => {
-  it("leaves the file byte-identical when the content is written back unchanged", async () => {
+  it("preserves the leading BOM bytes when the file is written back", async () => {
     const file = path.join(root, "bom.ts")
-    const original = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from("const a = 1\n", "utf8")])
-    writeFileSync(file, original)
+    const bom = Buffer.from([0xef, 0xbb, 0xbf])
+    writeFileSync(file, Buffer.concat([bom, Buffer.from("const a = 1\n", "utf8")]))
 
     const shown = await callTool<string>(readFileTool, { file_path: file }, { sessionId: session })
-    await callTool(writeFileTool, { file_path: file, content: shown }, { sessionId: session })
+    await callTool(
+      writeFileTool,
+      { file_path: file, content: shown.replace("const a = 1", "const a = 2") },
+      { sessionId: session },
+    )
 
-    expect(readFileSync(file)).toEqual(original)
+    expect(readFileSync(file)).toEqual(Buffer.concat([bom, Buffer.from("const a = 2\n", "utf8")]))
   })
 })

@@ -491,4 +491,36 @@ describe("Terminal", () => {
 
     expect(spy).toHaveBeenCalledTimes(1)
   })
+
+  it("serves the final snapshot after dispose instead of empty output or a crash", async () => {
+    const fakePty = createFakePty()
+    spawnMock.mockReturnValue(fakePty)
+    const { Terminal } = await importTerminal()
+    const terminal = new Terminal(1, { shell: "sh", cwd })
+
+    fakePty.emitData("hello world\r\n")
+    await terminal.snapshot()
+    terminal.dispose()
+
+    await expect(terminal.snapshot()).resolves.toMatchObject({
+      data: expect.stringContaining("hello world"),
+    })
+    await expect(terminal.agentSnapshot()).resolves.toMatchObject({
+      screen: expect.stringContaining("hello world"),
+    })
+    await expect(terminal.readRunTail(100)).resolves.toEqual([])
+    await expect(terminal.takeSavableFront(0)).resolves.toBeNull()
+  })
+
+  it("ignores stray pty data and exit that arrive after dispose", async () => {
+    const fakePty = createFakePty()
+    spawnMock.mockReturnValue(fakePty)
+    const { Terminal } = await importTerminal()
+    const terminal = new Terminal(1, { shell: "sh", cwd })
+
+    terminal.dispose()
+
+    expect(() => fakePty.emitData("late output")).not.toThrow()
+    expect(() => fakePty.emitExit(0)).not.toThrow()
+  })
 })

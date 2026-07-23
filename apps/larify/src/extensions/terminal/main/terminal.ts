@@ -13,6 +13,7 @@ import type {
 } from '../shared/types'
 
 const EXIT_FLUSH_MS = 250
+const HEADLESS_FLUSH_TIMEOUT_MS = 5000
 const SCROLLBACK = 10000
 const VSCODE_SHELL_INTEGRATION_OSC = 633
 
@@ -43,9 +44,10 @@ export class Terminal {
   private headlessWriteSequence = 0
   private completedHeadlessWriteSequence = 0
   private outputSeq = 0
-  private headlessWriteWaiters: Array<{ sequence: number; resolve: () => void }> = []
+  private headlessWriteWaiters: Array<{ sequence: number; resolve: () => void; timer: NodeJS.Timeout }> = []
   private commandRunning = false
   private disposed = false
+  private finalAgentSnapshot: TerminalAgentSnapshot = { screen: '' }
   private exitCode: number | null = null
   private exited = false
   private pendingExit: number | null = null
@@ -79,15 +81,21 @@ export class Terminal {
       this.handleVSCodeShellIntegration(data)
       return true
     })
-    this.pty = spawn(this.shell, opts.shellArgs ?? [], {
-      name: 'xterm-256color',
-      cols: this.cols,
-      rows: this.rows,
-      cwd: this.cwd,
-      env: { ...process.env, ...opts.shellEnv }
-    })
+    try {
+      this.pty = spawn(this.shell, opts.shellArgs ?? [], {
+        name: 'xterm-256color',
+        cols: this.cols,
+        rows: this.rows,
+        cwd: this.cwd,
+        env: { ...process.env, ...opts.shellEnv }
+      })
+    } catch (error) {
+      this.headless.dispose()
+      throw error
+    }
 
     this.pty.onData((data) => {
+      if (this.disposed) return
       const start = this.outputSeq
       const end = start + data.length
       this.outputSeq = end
@@ -96,6 +104,7 @@ export class Terminal {
       for (const listener of this.dataListeners) listener(data, start, end)
     })
     this.pty.onExit(({ exitCode }) => {
+      if (this.disposed) return
       this.pendingExit = exitCode
       this.scheduleExit()
     })
@@ -119,6 +128,7 @@ export class Terminal {
 
   async snapshot(): Promise<TerminalSnapshot> {
     await this.flushHeadlessWrites()
+    if (this.disposed) return { data: this.finalAgentSnapshot.screen, cols: this.cols, rows: this.rows, seq: this.outputSeq }
     return {
       data: this.serializeAddon.serialize(),
       cols: this.cols,
@@ -129,6 +139,7 @@ export class Terminal {
 
   async agentSnapshot(): Promise<TerminalAgentSnapshot> {
     await this.flushHeadlessWrites()
+    if (this.disposed) return this.finalAgentSnapshot
     return readAgentSnapshot(this.headless)
   }
 
@@ -166,6 +177,7 @@ export class Terminal {
 
   private async readableBuffer(): Promise<IBuffer | null> {
     await this.flushHeadlessWrites()
+    if (this.disposed) return null
     const buffer = this.headless.buffer.active
     if (buffer.type === 'alternate') return null
     this.runStartMarker ??= this.headless.registerMarker(0)
@@ -246,10 +258,14 @@ export class Terminal {
 
   dispose(): void {
     if (this.disposed) return
+    this.finalAgentSnapshot = readAgentSnapshot(this.headless)
     this.disposed = true
     if (this.exitTimer) clearTimeout(this.exitTimer)
     this.exitTimer = null
-    for (const waiter of this.headlessWriteWaiters) waiter.resolve()
+    for (const waiter of this.headlessWriteWaiters) {
+      clearTimeout(waiter.timer)
+      waiter.resolve()
+    }
     this.headlessWriteWaiters = []
     this.runStartMarker?.dispose()
     this.savedMarker?.dispose()
@@ -283,14 +299,28 @@ export class Terminal {
       this.headlessWriteWaiters = this.headlessWriteWaiters.filter(
         (waiter) => waiter.sequence > sequence
       )
-      for (const waiter of ready) waiter.resolve()
+      for (const waiter of ready) {
+        clearTimeout(waiter.timer)
+        waiter.resolve()
+      }
     })
   }
 
   private flushHeadlessWrites(): Promise<void> {
     const sequence = this.headlessWriteSequence
-    if (this.completedHeadlessWriteSequence >= sequence) return Promise.resolve()
-    return new Promise((resolve) => this.headlessWriteWaiters.push({ sequence, resolve }))
+    if (this.disposed || this.completedHeadlessWriteSequence >= sequence) return Promise.resolve()
+    return new Promise<void>((resolve) => {
+      const waiter = {
+        sequence,
+        resolve,
+        timer: setTimeout(() => {
+          this.headlessWriteWaiters = this.headlessWriteWaiters.filter((w) => w !== waiter)
+          resolve()
+        }, HEADLESS_FLUSH_TIMEOUT_MS)
+      }
+      waiter.timer.unref()
+      this.headlessWriteWaiters.push(waiter)
+    })
   }
 
   private handleVSCodeShellIntegration(data: string): void {

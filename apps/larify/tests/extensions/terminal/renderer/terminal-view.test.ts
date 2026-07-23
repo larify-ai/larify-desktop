@@ -97,14 +97,17 @@ vi.mock("@renderer/components/workbench", () => ({
 interface Deferred<T> {
   promise: Promise<T>
   resolve(value: T): void
+  reject(reason: unknown): void
 }
 
 const deferred = <T,>(): Deferred<T> => {
   let resolve!: (value: T) => void
-  const promise = new Promise<T>((done) => {
+  let reject!: (reason: unknown) => void
+  const promise = new Promise<T>((done, fail) => {
     resolve = done
+    reject = fail
   })
-  return { promise, resolve }
+  return { promise, resolve, reject }
 }
 
 describe("TerminalView", () => {
@@ -295,6 +298,25 @@ describe("TerminalView", () => {
     })
 
     expect(window.bridge.invoke).toHaveBeenCalledWith("terminal:create", "session-auto-create")
+  })
+
+  it("still allows auto-create after the initial state load fails", async () => {
+    const { TerminalView } = await import("../../../../src/extensions/terminal/renderer/terminal-view")
+
+    setAgentSessionId("session-getstate-fail")
+    await act(async () => {
+      root.render(createElement(TerminalView))
+    })
+
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent("larify:workbench-active", { detail: "terminal" }))
+    })
+
+    await act(async () => {
+      stateRequests["session-getstate-fail"].reject(new Error("getState failed"))
+    })
+
+    expect(window.bridge.invoke).toHaveBeenCalledWith("terminal:create", "session-getstate-fail")
   })
 
   it("closes the workbench instead of recreating a terminal when the last tab closes", async () => {

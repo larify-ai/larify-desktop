@@ -342,7 +342,12 @@ export function TerminalView(): React.JSX.Element {
         setLoadedSessionId(sessionId)
         setState(asState(value, sessionId))
       })
-      .catch((error) => console.error("[terminal:getState]", error))
+      .catch((error) => {
+        console.error("[terminal:getState]", error)
+        if (cancelled || loadingSessionRef.current !== sessionId) return
+        loadingSessionRef.current = null
+        setLoadedSessionId(sessionId)
+      })
 
       const offState = window.bridge.on("terminal:state", (payload) => {
         const next = payload as SessionTerminalsState
@@ -392,7 +397,7 @@ export function TerminalView(): React.JSX.Element {
     if (loadedSessionId !== sessionId) return
     if (state.terminals.length > 0) return
     if (suppressAutoCreateRef.current) return
-    void createTerminal()
+    void createTerminal().catch((error) => console.error("[terminal:create]", error))
   }, [createTerminal, loadedSessionId, sessionId, state.terminals.length, workbenchVisible])
 
   useEffect(() => {
@@ -479,7 +484,7 @@ export function TerminalView(): React.JSX.Element {
     <WorkbenchTabsLayout
       draggable
       tabs={tabs}
-      onCreate={() => void createTerminal()}
+      onCreate={() => void createTerminal().catch((error) => console.error("[terminal:create]", error))}
       onClose={(id) => void closeTerminal(Number(id))}
       onReorder={(id, _fromIndex, toIndex) => void reorderTerminal(Number(id), toIndex)}
       onSelect={(id) => void setActive(Number(id))}

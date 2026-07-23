@@ -2,7 +2,7 @@ import { ipcMain } from "electron"
 import { convertToModelMessages, type UIMessage } from "ai"
 import type { Extension } from "kernel"
 import type { Toolkit } from "../../../shared/tool"
-import { runAgent } from "./agent"
+import { runAgent, toolsContextFor } from "./agent"
 import { createToolRegistry } from "./registry"
 import { createAgentToolkit } from "./agent-toolkit"
 import { buildSystemPrompt } from "./system-prompt"
@@ -64,11 +64,12 @@ const extension: Extension = {
         const validMessages = await sanitizeAndValidateMessages(messages)
         const modelMessages = await convertToModelMessages(prepareMessagesForModel(validMessages))
         const cwd = requestCwd ?? larifyWorkspacePath()
+        const tools = registry.toolSet()
         const reader = runAgent({
           messages: modelMessages,
-          tools: registry.toolSet(),
+          tools,
           activeTools: registry.activeToolNames(),
-          toolContext: { sessionId, cwd },
+          toolsContext: toolsContextFor(tools, { sessionId, cwd }),
           abortSignal: controller.signal,
           system: buildSystemPrompt(registry, cwd),
         }).getReader()

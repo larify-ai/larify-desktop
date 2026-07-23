@@ -1,7 +1,13 @@
 import { describe, it, expect } from "vitest"
+import { z } from "zod"
 import { MockLanguageModelV4, convertArrayToReadableStream } from "ai/test"
 import { readUIMessageStream, type UIMessage } from "ai"
 import { runAgent } from "../../../../src/extensions/agent/main/agent"
+
+const USAGE = {
+  inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
+  outputTokens: { total: 1, text: 1, reasoning: 0 },
+}
 
 function mockModel(chunks: string[]): MockLanguageModelV4 {
   return new MockLanguageModelV4({
@@ -34,7 +40,9 @@ function textOf(message: UIMessage): string {
 async function assemble(model: MockLanguageModelV4): Promise<UIMessage> {
   const stream = runAgent({
     messages: [{ role: "user", content: "hi" }],
-    buildTools: () => ({}),
+    tools: {},
+    activeTools: [],
+    toolsContext: {},
     model,
   })
   let last: UIMessage | undefined
@@ -55,5 +63,54 @@ describe("runAgent", () => {
     await assemble(model)
     const sent = model.doStreamCalls[0].prompt
     expect(JSON.stringify(sent)).toContain("hi")
+  })
+})
+
+describe("prompt-cache middleware", () => {
+  it("sends only the eager tools to the provider but keeps every tool executable", async () => {
+    let sentToolNames: string[] = []
+    let lazyRan = false
+    const tools = {
+      eager_tool: {
+        description: "eager",
+        inputSchema: z.object({}),
+        metadata: { eager: true },
+        execute: async () => "eager ran",
+      },
+      lazy_tool: {
+        description: "lazy",
+        inputSchema: z.object({}),
+        execute: async () => {
+          lazyRan = true
+          return "lazy ran"
+        },
+      },
+    }
+    const model = new MockLanguageModelV4({
+      doStream: async ({ tools: sent }) => {
+        sentToolNames = (sent ?? []).map((t) => t.name)
+        return {
+          stream: convertArrayToReadableStream([
+            { type: "stream-start", warnings: [] },
+            { type: "tool-call", toolCallId: "c1", toolName: "lazy_tool", input: "{}" },
+            { type: "finish", finishReason: "tool-calls", usage: USAGE },
+          ]),
+        }
+      },
+    })
+
+    const stream = runAgent({
+      messages: [{ role: "user", content: "go" }],
+      tools: tools as never,
+      activeTools: ["eager_tool"],
+      toolsContext: {},
+      model,
+    })
+    for await (const _ of readUIMessageStream({ stream })) {
+      void _
+    }
+
+    expect(sentToolNames).toEqual(["eager_tool"])
+    expect(lazyRan).toBe(true)
   })
 })

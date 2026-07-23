@@ -15,7 +15,6 @@ export function buildSystemPrompt(registry: ToolRegistry, cwd: string): string {
   const toolkits = registry.listToolkits()
   return liquid.parseAndRenderSync(template, {
     toolkits,
-    toolkitsJson: JSON.stringify({ toolkits }, null, 2),
     platform: platformName(),
     cwd,
   }).trim()

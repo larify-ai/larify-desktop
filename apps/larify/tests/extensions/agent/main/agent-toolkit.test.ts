@@ -27,18 +27,34 @@ function agentTools() {
 }
 
 describe("list_toolkit_tools", () => {
-  it("lists a toolkit's tools with instruction", async () => {
+  it("lists a toolkit's tools as markdown with instruction", async () => {
     const { run } = agentTools()
-    const out = JSON.parse(await run("list_toolkit_tools", { toolkit_names: ["file"] }))
-    expect(out).toEqual({
-      toolkits: [
-        {
-          toolkit_name: "file",
-          instruction: "Use these for files.",
-          tools: [{ tool_name: "file_read", description: "Read a file" }],
-        },
-      ],
-    })
+    const out = await run("list_toolkit_tools", { toolkit_names: ["file"] })
+    expect(out).toBe(
+      "## file\n\nUse these for files.\n\n- **file_read**: Read a file",
+    )
+  })
+
+  it("lists multiple toolkits as separate sections; one without instruction has no instruction line", async () => {
+    const barToolkit: Toolkit = {
+      name: "bar",
+      description: "Bar ops",
+      tools: {
+        run: tool({ description: "Run it", inputSchema: z.object({}), execute: async () => "" }),
+        stop: tool({ description: "Stop it", inputSchema: z.object({}), execute: async () => "" }),
+      },
+    }
+    const registry = createToolRegistry([fileToolkit, barToolkit])
+    const toolkit = createAgentToolkit(registry)
+    const out = await (toolkit.tools.list_toolkit_tools.execute as any)(
+      { toolkit_names: ["file", "bar"] },
+      {},
+    )
+    expect(out).toBe(
+      "## file\n\nUse these for files.\n\n- **file_read**: Read a file" +
+        "\n\n" +
+        "## bar\n\n- **bar_run**: Run it\n- **bar_stop**: Stop it",
+    )
   })
 
   it("throws on an unknown toolkit", async () => {

@@ -11,7 +11,12 @@ function textOf(message: UIMessage): string {
 
 describe.skipIf(!process.env.LIVE)("runAgent (live DeepSeek)", () => {
   it("streams a real reply from DeepSeek", async () => {
-    const stream = runAgent([{ role: "user", content: "只回复四个字：你好世界" }])
+    const stream = runAgent({
+      messages: [{ role: "user", content: "只回复四个字：你好世界" }],
+      tools: {},
+      activeTools: [],
+      toolsContext: {},
+    })
     let last: UIMessage | undefined
     for await (const m of readUIMessageStream({ stream })) last = m
     const text = last ? textOf(last) : ""

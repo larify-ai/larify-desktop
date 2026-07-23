@@ -1,6 +1,5 @@
 import { createDeepSeek } from "@ai-sdk/deepseek"
 import type { DeepSeekLanguageModelOptions } from "@ai-sdk/deepseek"
-import type { LanguageModel } from "ai"
 
 export type ModelId = "deepseek-v4-flash" | "deepseek-v4-pro"
 
@@ -13,6 +12,6 @@ export const deepseekProviderOptions = {
   thinking: { type: "disabled" },
 } satisfies DeepSeekLanguageModelOptions
 
-export function createModel(id: ModelId = "deepseek-v4-flash"): LanguageModel {
+export function createModel(id: ModelId = "deepseek-v4-flash") {
   return deepseek(id)
 }

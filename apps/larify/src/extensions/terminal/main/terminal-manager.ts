@@ -216,6 +216,7 @@ export class TerminalManager {
 
       await this.finalizeRun(id)
       terminal.close()
+      terminal.dispose()
       this.forget(id)
       this.emit()
     })

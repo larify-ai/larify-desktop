@@ -327,6 +327,7 @@ describe("TerminalManager", () => {
     await manager.close(second)
 
     expect(terminals[1].close).toHaveBeenCalled()
+    expect(terminals[1].dispose).toHaveBeenCalled()
     expect(manager.state().activeId).toBe(third)
     expect(manager.state().terminals.map((terminal) => terminal.id)).toEqual([first, third])
   })

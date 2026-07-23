@@ -314,11 +314,17 @@ describe("write", () => {
       shellIntegration: true,
       exitCode: null,
     })
+    let commandStarted: ((sessionId: string, terminalId: number) => void) | undefined
     vi.mocked(service.bindCommandFinished).mockImplementation((callback) => {
       commandFinished = callback
       return () => {}
     })
+    vi.mocked(service.bindCommandStarted).mockImplementation((callback) => {
+      commandStarted = callback
+      return () => {}
+    })
     vi.mocked(service.write).mockImplementation(() => {
+      commandStarted?.("session-1", 1)
       commandFinished?.("session-1", 1, {})
     })
     vi.mocked(service.startRun).mockResolvedValue({ runId: "run-1", sessionId: "session-1" })
@@ -329,6 +335,41 @@ describe("write", () => {
     ).resolves.toMatchObject({ status: "shell integration command finish event received", snapshot: { screen: "done" } })
 
     expect(service.bindCommandFinished).toHaveBeenCalled()
+  })
+
+  it("ignores a stale command-finished that precedes the submitted command's start", async () => {
+    vi.useFakeTimers()
+    const service = createService()
+    let commandFinished: ((sessionId: string, terminalId: number) => void) | undefined
+    vi.mocked(service.terminalState).mockReturnValue({
+      id: 1,
+      pid: 100,
+      title: "powershell",
+      cwd: "D:\\Workspace",
+      shell: "powershell.exe",
+      shellIntegration: true,
+      exitCode: null,
+    })
+    vi.mocked(service.bindCommandFinished).mockImplementation((callback) => {
+      commandFinished = callback
+      return () => {}
+    })
+    vi.mocked(service.startRun).mockImplementation(async () => {
+      commandFinished?.("session-1", 1, {})
+      return { runId: "run-1", sessionId: "session-1" }
+    })
+    vi.mocked(service.write).mockImplementation(() => {})
+    vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: "done" })
+
+    const pending = tool("write", service).execute(
+      { id: 1, input: "echo done", submit: true, timeout: 2 },
+      ctx,
+    )
+    await vi.advanceTimersByTimeAsync(2000)
+    await expect(pending).resolves.toMatchObject({
+      status: "command may still be running or waiting for input",
+    })
+    vi.useRealTimers()
   })
 
   it("does not miss a command-finished event that fires during startRun (bound before startRun)", async () => {

@@ -9,6 +9,7 @@ import { setAgentSessionId } from "../../../../src/renderer/src/lib/agent-sessio
 const fitMocks: Array<ReturnType<typeof vi.fn>> = []
 const terminalMocks: Array<{
   dispose: ReturnType<typeof vi.fn>
+  focus: ReturnType<typeof vi.fn>
   onResize: ReturnType<typeof vi.fn>
   resize: ReturnType<typeof vi.fn>
   write: ReturnType<typeof vi.fn>
@@ -54,6 +55,7 @@ vi.mock("@xterm/xterm", () => ({
     constructor() {
       terminalMocks.push({
         dispose: this.dispose,
+        focus: this.focus,
         onResize: this.onResize,
         resize: this.resize,
         write: this.write,
@@ -465,6 +467,114 @@ describe("TerminalView", () => {
     })
 
     expect(terminalMocks[0].write.mock.calls.map((call) => call[0])).toEqual(["snapshot", "live"])
+  })
+
+  it("applies live output even when the snapshot restore returns null", async () => {
+    vi.mocked(window.bridge.invoke).mockImplementation((channel: string, sessionId: string) => {
+      if (channel === "terminal:getState") {
+        stateRequests[sessionId] = deferred()
+        return stateRequests[sessionId].promise
+      }
+      if (channel === "terminal:snapshot") return Promise.resolve(null)
+      if (channel === "terminal:create") return Promise.resolve(1)
+      return Promise.resolve()
+    })
+    const { TerminalView } = await import("../../../../src/extensions/terminal/renderer/terminal-view")
+    setAgentSessionId("session-null-snap")
+    await act(async () => {
+      root.render(createElement(TerminalView))
+    })
+    await act(async () => {
+      stateRequests["session-null-snap"].resolve({
+        sessionId: "session-null-snap",
+        activeId: 1,
+        terminals: [{ id: 1, pid: 10, title: "A", cwd: "/", shell: "sh", exitCode: null }],
+      })
+    })
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 5))
+      listeners["terminal:data"]?.({ sessionId: "session-null-snap", terminalId: 1, data: "live", start: 0, end: 4 })
+    })
+
+    expect(terminalMocks[0].write.mock.calls.map((c) => c[0])).toContain("live")
+  })
+
+  it("does not let a stale same-session getState response roll back a newer state event", async () => {
+    const { TerminalView } = await import("../../../../src/extensions/terminal/renderer/terminal-view")
+    setAgentSessionId("session-stale")
+    await act(async () => {
+      root.render(createElement(TerminalView))
+    })
+    await act(async () => {
+      listeners["terminal:state"]?.({
+        sessionId: "session-stale",
+        activeId: 2,
+        terminals: [{ id: 2, pid: 20, title: "NEW", cwd: "/", shell: "sh", exitCode: null }],
+      })
+    })
+    expect(container.querySelector('[data-testid="tabs"]')?.textContent).toBe("NEW")
+
+    await act(async () => {
+      stateRequests["session-stale"].resolve({ sessionId: "session-stale", activeId: null, terminals: [] })
+    })
+
+    expect(container.querySelector('[data-testid="tabs"]')?.textContent).toBe("NEW")
+  })
+
+  it("does not tear down the terminal when terminal:close fails", async () => {
+    vi.mocked(window.bridge.invoke).mockImplementation((channel: string, sessionId: string) => {
+      if (channel === "terminal:getState") {
+        stateRequests[sessionId] = deferred()
+        return stateRequests[sessionId].promise
+      }
+      if (channel === "terminal:snapshot") return Promise.resolve({ data: "s", cols: 80, rows: 24, seq: 8 })
+      if (channel === "terminal:close") return Promise.reject(new Error("close failed"))
+      return Promise.resolve()
+    })
+    const { TerminalView } = await import("../../../../src/extensions/terminal/renderer/terminal-view")
+    setAgentSessionId("session-close-fail")
+    await act(async () => {
+      root.render(createElement(TerminalView))
+    })
+    await act(async () => {
+      stateRequests["session-close-fail"].resolve({
+        sessionId: "session-close-fail",
+        activeId: 1,
+        terminals: [
+          { id: 1, pid: 10, title: "A", cwd: "/", shell: "sh", exitCode: null },
+          { id: 2, pid: 20, title: "B", cwd: "/", shell: "sh", exitCode: null },
+        ],
+      })
+    })
+    await act(async () => {
+      ;(container.querySelector('[data-testid="close-1"]') as HTMLButtonElement).click()
+      await new Promise((r) => setTimeout(r, 5))
+    })
+
+    expect(terminalMocks[0].dispose).not.toHaveBeenCalled()
+  })
+
+  it("never grabs keyboard focus on fit or layout re-renders", async () => {
+    const { TerminalView } = await import("../../../../src/extensions/terminal/renderer/terminal-view")
+    const activeState = {
+      sessionId: "session-focus",
+      activeId: 1,
+      terminals: [{ id: 1, pid: 10, title: "A", cwd: "/", shell: "sh", exitCode: null }],
+    }
+    setAgentSessionId("session-focus")
+    await act(async () => {
+      root.render(createElement(TerminalView))
+    })
+    await act(async () => {
+      stateRequests["session-focus"].resolve(activeState)
+      await new Promise((r) => setTimeout(r, 5))
+    })
+    await act(async () => {
+      listeners["terminal:state"]?.(activeState)
+      await new Promise((r) => setTimeout(r, 5))
+    })
+
+    expect(terminalMocks[0].focus).not.toHaveBeenCalled()
   })
 
   it("debounces backend resize and sends the latest dimensions", async () => {

@@ -168,15 +168,21 @@ export function TerminalView(): React.JSX.Element {
 
   const closeTerminal = useCallback(
     async (id: number): Promise<void> => {
-      const entries = currentEntries()
       const closingLastTerminal = state.terminals.length <= 1
       if (closingLastTerminal) suppressAutoCreateRef.current = true
+      try {
+        await window.bridge.invoke("terminal:close", sessionId, id)
+      } catch (error) {
+        if (closingLastTerminal) suppressAutoCreateRef.current = false
+        console.error("[terminal:close]", error)
+        return
+      }
+      const entries = currentEntries()
       const entry = entries.get(id)
       if (entry?.resizeTimer) clearTimeout(entry.resizeTimer)
       entry?.term.dispose()
       entry?.host.remove()
       entries.delete(id)
-      await window.bridge.invoke("terminal:close", sessionId, id)
       if (closingLastTerminal) {
         window.dispatchEvent(new CustomEvent("larify:workbench-close", { detail: "terminal" }))
       }
@@ -205,7 +211,6 @@ export function TerminalView(): React.JSX.Element {
     if (!entry) return
     try {
       entry.fit.fit()
-      entry.term.focus()
     } catch (error) {
       console.error("[terminal:fit]", error)
     }
@@ -275,21 +280,29 @@ export function TerminalView(): React.JSX.Element {
       entries.set(terminalId, entry)
 
       entry.restoring = true
+      const finishRestoring = (): void => {
+        entry.restoring = false
+        const pending = entry.pendingData
+        entry.pendingData = []
+        if (entries.get(terminalId) !== entry) return
+        for (const event of pending) applyData(entry, event)
+      }
       void window.bridge
         .invoke("terminal:snapshot", sessionId, terminalId)
         .then((snapshot) => {
-          if (!snapshot || !entries.get(terminalId)) return
-          const restore = snapshot as { data: string; seq: number }
+          if (!entries.get(terminalId)) return
+          const restore = snapshot as { data: string; seq: number } | null
+          if (!restore) {
+            finishRestoring()
+            return
+          }
           entry.term.write(restore.data, () => {
             entry.lastSeq = restore.seq
-            entry.restoring = false
-            const pending = entry.pendingData
-            entry.pendingData = []
-            for (const event of pending) applyData(entry, event)
+            finishRestoring()
           })
         })
         .catch((error) => {
-          entry.restoring = false
+          finishRestoring()
           console.error("[terminal:snapshot]", error)
         })
 
@@ -319,11 +332,10 @@ export function TerminalView(): React.JSX.Element {
     void window.bridge
       .invoke("terminal:getState", sessionId)
       .then((value) => {
-        if (cancelled) return
-        const next = asState(value, sessionId)
-        if (loadingSessionRef.current === sessionId) loadingSessionRef.current = null
+        if (cancelled || loadingSessionRef.current !== sessionId) return
+        loadingSessionRef.current = null
         setLoadedSessionId(sessionId)
-        setState(next)
+        setState(asState(value, sessionId))
       })
       .catch((error) => console.error("[terminal:getState]", error))
 

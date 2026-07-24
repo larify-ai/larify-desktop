@@ -8,7 +8,7 @@ const GET_TEXT_JS = `function() { return this.innerText || this.textContent || '
 const GET_HTML_JS = `function() { return this.innerHTML || ''; }`
 const GET_VALUE_JS = `function() { return typeof this.value === 'string' ? this.value : ''; }`
 const GET_ATTR_JS = `function(n) { return this.getAttribute(n); }`
-const GET_BOX_JS = `function() { const r = this.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; }`
+const GET_BOX_JS = `function() { const r = this.getBoundingClientRect(), w = this.ownerDocument.defaultView; return { x: r.x, y: r.y, width: r.width, height: r.height, viewportWidth: w.innerWidth, viewportHeight: w.innerHeight }; }`
 const IS_VISIBLE_JS = `function() {
   const rect = this.getBoundingClientRect();
   const style = window.getComputedStyle(this);
@@ -58,20 +58,30 @@ export interface BoxWithSession {
   box: Box
   frameId?: string
   sessionId?: string
+  viewport?: { width: number; height: number }
 }
 
-export async function getBoxWithSession(ctx: QueryCtx, selector: string): Promise<BoxWithSession> {
-  const { objectId, sessionId } = await resolveRefToObjectId(
+export async function getBoxWithSession(
+  ctx: QueryCtx,
+  selector: string,
+  scrollIntoView = false
+): Promise<BoxWithSession> {
+  const { objectId, frameId: resolvedFrameId, sessionId } = await resolveRefToObjectId(
     ctx.send,
     ctx.refMap,
     selector,
     ctx.sessions
   )
-  const v = (await callOn(ctx.send, objectId, GET_BOX_JS, [], sessionId)) as Box | undefined
+  if (scrollIntoView && resolvedFrameId) {
+    await ctx.send('DOM.scrollIntoViewIfNeeded', { objectId }, sessionId)
+  }
+  const v = (await callOn(ctx.send, objectId, GET_BOX_JS, [], sessionId)) as
+    | (Box & { viewportWidth?: number; viewportHeight?: number })
+    | undefined
   if (!v || typeof v.width !== 'number')
     throw new Error(`could not get bounding box for '${selector}'`)
-  let frameId: string | undefined
-  if (sessionId) {
+  let frameId = resolvedFrameId
+  if (!frameId && sessionId) {
     for (const [candidateFrameId, candidateSessionId] of ctx.sessions ?? []) {
       if (candidateSessionId === sessionId) {
         frameId = candidateFrameId
@@ -79,7 +89,12 @@ export async function getBoxWithSession(ctx: QueryCtx, selector: string): Promis
       }
     }
   }
-  return { box: v, frameId, sessionId }
+  const box = { x: v.x, y: v.y, width: v.width, height: v.height }
+  const viewport =
+    typeof v.viewportWidth === 'number' && typeof v.viewportHeight === 'number'
+      ? { width: v.viewportWidth, height: v.viewportHeight }
+      : undefined
+  return { box, frameId, sessionId, ...(viewport ? { viewport } : {}) }
 }
 
 export async function getBox(ctx: QueryCtx, selector: string): Promise<Box> {

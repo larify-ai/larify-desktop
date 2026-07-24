@@ -20,7 +20,8 @@ describe('element screenshot frame session', () => {
     h.getBoxWithSession.mockResolvedValue({
       box: { x: 30, y: 40, width: 100, height: 60 },
       frameId: 'FRAME',
-      sessionId: 'OOPIF'
+      sessionId: 'OOPIF',
+      viewport: { width: 400, height: 300 }
     })
     const send = vi.fn(async (method: string, _params?: object, sessionId?: string) => {
       if (method === 'Runtime.evaluate' && sessionId === 'OOPIF') {
@@ -43,6 +44,8 @@ describe('element screenshot frame session', () => {
     ).resolves.toEqual({ data: 'image', mimeType: 'image/png' })
 
     expect(send).toHaveBeenCalledWith('DOM.getFrameOwner', { frameId: 'FRAME' })
+    expect(h.getBoxWithSession).toHaveBeenCalledWith(expect.anything(), 'e1', true)
+    expect(send).not.toHaveBeenCalledWith('Runtime.evaluate', expect.anything(), 'OOPIF')
     expect(send).toHaveBeenCalledWith('DOM.getBoxModel', { backendNodeId: 42 })
     expect(send).toHaveBeenCalledWith(
       'Page.captureScreenshot',
@@ -99,7 +102,8 @@ describe('element screenshot frame session', () => {
     h.getBoxWithSession.mockResolvedValue({
       box: { x: 30, y: 40, width: 100, height: 60 },
       frameId: 'FRAME',
-      sessionId: 'OOPIF'
+      sessionId: 'OOPIF',
+      viewport: { width: 400, height: 300 }
     })
     const send = vi.fn(async (method: string) => {
       if (method === 'Runtime.evaluate') return { result: { value: { x: 0, y: 0 } } }

@@ -55,7 +55,7 @@ export async function screenshot(
   if (format === 'jpeg') params.quality = opts.quality ?? 80
 
   if (opts.selector) {
-    const resolved = await getBoxWithSession(ctx, opts.selector)
+    const resolved = await getBoxWithSession(ctx, opts.selector, true)
     const box = resolved.box
     const scroll = (await ctx.send('Runtime.evaluate', {
       expression: '({ x: window.scrollX, y: window.scrollY })',
@@ -63,8 +63,10 @@ export async function screenshot(
     })) as { result?: { value?: { x: number; y: number } } }
     const offset = scroll.result?.value ?? { x: 0, y: 0 }
     let clipBox = box
-    if (resolved.sessionId) {
-      if (!resolved.frameId) throw new Error('Could not map iframe session to its frame.')
+    if (resolved.sessionId && !resolved.frameId) {
+      throw new Error('Could not map iframe session to its frame.')
+    }
+    if (resolved.frameId) {
       const owner = (await ctx.send('DOM.getFrameOwner', {
         frameId: resolved.frameId
       })) as { backendNodeId: number }
@@ -72,15 +74,7 @@ export async function screenshot(
         backendNodeId: owner.backendNodeId
       })) as { model?: { content?: number[] } }
       const content = ownerBox.model?.content
-      const viewportResult = (await ctx.send(
-        'Runtime.evaluate',
-        {
-          expression: '({ width: window.innerWidth, height: window.innerHeight })',
-          returnByValue: true
-        },
-        resolved.sessionId
-      )) as { result?: { value?: Size } }
-      const viewport = viewportResult.result?.value
+      const viewport = resolved.viewport
       if (!content || !viewport) throw new Error('Could not get iframe geometry.')
       clipBox = mapFrameBoxToTopLevel(box, content, viewport)
     }

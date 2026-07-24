@@ -195,7 +195,7 @@ export async function resolveRefToObjectId(
   refMap: RefMap,
   selectorOrRef: string,
   iframeSessions?: IframeSessions
-): Promise<{ objectId: string; sessionId?: string }> {
+): Promise<{ objectId: string; frameId?: string; sessionId?: string }> {
   const refId = parseRef(selectorOrRef)
   if (refId !== undefined) {
     const entry = lookupRef(refMap, refId)
@@ -207,13 +207,13 @@ export async function resolveRefToObjectId(
         sessionId
       ).catch(() => null)) as ResolveNodeResult | null
       const objectId = r?.object?.objectId
-      if (objectId) return { objectId, sessionId }
+      if (objectId) return { objectId, frameId: entry.frameId, sessionId }
     }
     const fresh = await findNodeIdByRoleName(send, entry, params, sessionId)
     const r = (await send('DOM.resolveNode', { backendNodeId: fresh }, sessionId)) as ResolveNodeResult
     const objectId = r.object?.objectId
     if (!objectId) throw new Error(`could not resolve node for ref @${refId}`)
-    return { objectId, sessionId }
+    return { objectId, frameId: entry.frameId, sessionId }
   }
   const res = (await send('Runtime.evaluate', {
     expression: findElementExpr(selectorOrRef),

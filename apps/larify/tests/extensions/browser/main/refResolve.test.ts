@@ -43,3 +43,28 @@ describe("resolveRefToObjectId selector path", () => {
     )
   })
 })
+
+describe("resolveRefToObjectId ref path", () => {
+  it("preserves the frameId and OOPIF sessionId", async () => {
+    const send = vi.fn(async () => ({ object: { objectId: "OID" } }))
+    const refs = new Map([
+      [
+        "e1",
+        {
+          backendNodeId: 7,
+          frameId: "FRAME",
+          role: "button",
+          name: "Target",
+        },
+      ],
+    ])
+
+    await expect(
+      resolveRefToObjectId(send as never, refs, "@e1", new Map([["FRAME", "OOPIF"]])),
+    ).resolves.toEqual({
+      objectId: "OID",
+      frameId: "FRAME",
+      sessionId: "OOPIF",
+    })
+  })
+})

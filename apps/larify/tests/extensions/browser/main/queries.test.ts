@@ -23,7 +23,12 @@ describe('getBoxWithSession', () => {
   }
 
   beforeEach(() => {
-    h.resolveRefToObjectId.mockResolvedValue({ objectId: 'OID', sessionId: 'OOPIF' })
+    ctx.send.mockClear()
+    h.resolveRefToObjectId.mockResolvedValue({
+      objectId: 'OID',
+      frameId: 'FRAME',
+      sessionId: 'OOPIF'
+    })
     h.callOn.mockResolvedValue({ x: 30, y: 40, width: 100, height: 60 })
   })
 
@@ -33,6 +38,40 @@ describe('getBoxWithSession', () => {
       frameId: 'FRAME',
       sessionId: 'OOPIF'
     })
+  })
+
+  it('scrolls an OOPIF element into view only when requested', async () => {
+    await getBoxWithSession(ctx, '@e1', true)
+
+    expect(ctx.send).toHaveBeenCalledWith(
+      'DOM.scrollIntoViewIfNeeded',
+      { objectId: 'OID' },
+      'OOPIF'
+    )
+  })
+
+  it('scrolls a same-process iframe element without a child session', async () => {
+    h.resolveRefToObjectId.mockResolvedValue({ objectId: 'OID', frameId: 'FRAME' })
+    h.callOn.mockResolvedValue({
+      x: 30,
+      y: 40,
+      width: 100,
+      height: 60,
+      viewportWidth: 400,
+      viewportHeight: 300
+    })
+
+    await expect(getBoxWithSession(ctx, '@e1', true)).resolves.toEqual({
+      box: { x: 30, y: 40, width: 100, height: 60 },
+      frameId: 'FRAME',
+      sessionId: undefined,
+      viewport: { width: 400, height: 300 }
+    })
+    expect(ctx.send).toHaveBeenCalledWith(
+      'DOM.scrollIntoViewIfNeeded',
+      { objectId: 'OID' },
+      undefined
+    )
   })
 
   it('keeps the existing getBox return shape compatible', async () => {
@@ -52,6 +91,11 @@ describe('getBoxWithSession', () => {
       frameId: undefined,
       sessionId: undefined
     })
+    expect(ctx.send).not.toHaveBeenCalledWith(
+      'DOM.scrollIntoViewIfNeeded',
+      expect.anything(),
+      expect.anything()
+    )
   })
 
   it('preserves an unknown session so capture can reject a detached frame', async () => {

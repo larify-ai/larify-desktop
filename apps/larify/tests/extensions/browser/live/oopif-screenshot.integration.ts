@@ -60,15 +60,24 @@ async function main(): Promise<void> {
   let window: BrowserWindow | undefined
   let tab: BrowserTab | undefined
   try {
+    const testCase = process.env.OOPIF_SCREENSHOT_CASE ?? 'default'
+    const targetLeft = testCase === 'offscreen-right' || testCase === 'same-site-offscreen' ? 700 : 30
+    const targetTop = testCase === 'offscreen-bottom' ? 1000 : 400
+    const targetWidth = testCase === 'oversized' ? 500 : 100
+    const childScrollX = testCase === 'offscreen-left' ? 600 : 0
+    const childScrollY = testCase === 'offscreen-top' ? 600 : 300
+    const rootScrollY = testCase === 'frame-offscreen' ? 0 : 500
     childServer = await listen(
       '127.0.0.1',
       () => `<!doctype html><style>
-        html,body{margin:0;min-height:1200px;background:#ffff00}
-        #target{position:absolute;left:30px;top:400px;width:100px;height:60px;
+        html,body{margin:0;min-width:1000px;min-height:1200px;background:#ffff00}
+        #target{position:absolute;left:${targetLeft}px;top:${targetTop}px;width:${targetWidth}px;height:60px;
           border:0;padding:0;background:#00c800;color:#000}
-      </style><button id="target">OOPIF</button><script>scrollTo(0,300)</script>`
+      </style><button id="target">OOPIF</button>
+      <script>scrollTo(${childScrollX},${childScrollY})</script>`
     )
-    const childUrl = url(childServer, '127.0.0.1')
+    const childHost = testCase === 'same-site-offscreen' ? 'localhost' : '127.0.0.1'
+    const childUrl = url(childServer, childHost)
     rootServer = await listen(
       'localhost',
       () => `<!doctype html><style>
@@ -76,7 +85,7 @@ async function main(): Promise<void> {
         iframe{position:absolute;left:150px;top:700px;width:400px;height:300px;
           border:10px solid #c80000;transform:scale(1.25);transform-origin:top left}
       </style><div id="legacy" data-__ab-ci="keep" style="cursor:pointer">Legacy</div>
-      <iframe src="${childUrl}"></iframe><script>scrollTo(0,500)</script>`
+      <iframe src="${childUrl}"></iframe><script>scrollTo(0,${rootScrollY})</script>`
     )
 
     await app.whenReady()
@@ -102,7 +111,7 @@ async function main(): Promise<void> {
     const screenshot = await tab.screenshot({ selector: ref, format: 'png' })
     const size = assertGreenCorners(screenshot.data)
     const scaleFactor = screen.getPrimaryDisplay().scaleFactor
-    const expected = { width: 125 * scaleFactor, height: 75 * scaleFactor }
+    const expected = { width: targetWidth * 1.25 * scaleFactor, height: 75 * scaleFactor }
     if (
       Math.abs(size.width - expected.width) > 1 ||
       Math.abs(size.height - expected.height) > 1

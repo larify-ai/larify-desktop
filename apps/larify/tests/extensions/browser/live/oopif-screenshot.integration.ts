@@ -115,8 +115,9 @@ async function main(): Promise<void> {
     const childScrollX = testCase === 'offscreen-left' ? 600 : 0
     const childScrollY = testCase === 'offscreen-top' ? 600 : 300
     const rootScrollY = testCase === 'frame-offscreen' ? 0 : 500
+    const childHost = testCase === 'same-site-offscreen' ? 'localhost' : '127.0.0.1'
     childServer = await listen(
-      '127.0.0.1',
+      childHost,
       () => `<!doctype html><style>
         html,body{margin:0;min-width:1000px;min-height:1200px;background:#ffff00}
         #target{position:absolute;left:${targetLeft}px;top:${targetTop}px;width:${targetWidth}px;height:60px;
@@ -125,7 +126,6 @@ async function main(): Promise<void> {
       <input aria-label="KeyTarget" onkeydown="if(event.key==='Enter') this.value='pressed'">
       <script>scrollTo(${childScrollX},${childScrollY})</script>`
     )
-    const childHost = testCase === 'same-site-offscreen' ? 'localhost' : '127.0.0.1'
     const childUrl = url(childServer, childHost)
     downloadServer = await new Promise((resolve) => {
       const server = createServer((_request, response) => {
@@ -260,6 +260,14 @@ async function main(): Promise<void> {
     const downloadRef = await waitForDownloadRef(tab)
     downloadDir = await mkdtemp(join(tmpdir(), 'larify-download-destroy-'))
     const download = tab.download(downloadRef, join(downloadDir, 'large.bin'), 10_000)
+    await tab.download(downloadRef, join(downloadDir, 'second.bin'), 10_000).then(
+      () => {
+        throw new Error('concurrent download unexpectedly started')
+      },
+      (error) => {
+        if (!(error instanceof Error) || !error.message.includes('already in progress')) throw error
+      }
+    )
     await new Promise((resolve) => setTimeout(resolve, 300))
     tab.destroy()
     tab = undefined

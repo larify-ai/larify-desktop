@@ -14,6 +14,14 @@ vi.mock("electron", () => {
       ;(this.handlers[event] ??= []).push(cb)
     }
 
+    once(event: string, cb: (...args: unknown[]) => void): void {
+      const once = (...args: unknown[]): void => {
+        this.off(event, once)
+        cb(...args)
+      }
+      this.on(event, once)
+    }
+
     off(event: string, cb: (...args: unknown[]) => void): void {
       this.handlers[event] = (this.handlers[event] ?? []).filter((handler) => handler !== cb)
     }
@@ -41,6 +49,14 @@ vi.mock("electron", () => {
 
     on(event: string, cb: (...args: unknown[]) => void): void {
       ;(this.handlers[event] ??= []).push(cb)
+    }
+
+    once(event: string, cb: (...args: unknown[]) => void): void {
+      const once = (...args: unknown[]): void => {
+        this.off(event, once)
+        cb(...args)
+      }
+      this.on(event, once)
     }
 
     off(event: string, cb: (...args: unknown[]) => void): void {
@@ -276,6 +292,36 @@ describe("BrowserTab", () => {
     expect(tab.state().favIconUrl).toBe("")
   })
 
+  it("does not restore a stale favicon after cross-origin navigation starts", async () => {
+    let resolveFetch!: (value: unknown) => void
+    h.fetchMock.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveFetch = resolve
+      }),
+    )
+    const tab = new BrowserTab(1, "p")
+    tab.navigate("https://a.example")
+    await Promise.resolve()
+    webContents(tab).emit("did-navigate")
+    webContents(tab).emit("page-favicon-updated", {}, ["https://a.example/favicon.ico"])
+
+    webContents(tab).emit("did-start-navigation", {
+      isMainFrame: true,
+      isSameDocument: false,
+      url: "https://b.example/",
+    })
+    resolveFetch({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(Uint8Array.from([1, 2, 3]).buffer),
+      headers: { get: () => "image/png" },
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(tab.state().favIconUrl).toBe("")
+  })
+
   it("marks loading as soon as main-frame navigation starts", () => {
     const tab = new BrowserTab(1, "p")
     expect(tab.state().loading).toBe(false)
@@ -357,6 +403,20 @@ describe("BrowserTab", () => {
 
     await expect(promise).resolves.toBe("D:\\Downloads\\file.txt")
     expect(item.setSavePath).toHaveBeenCalledWith("D:\\Downloads\\file.txt")
+  })
+
+  it("rejects a concurrent download on the same tab instead of claiming the same item twice", async () => {
+    const tab = new BrowserTab(1, "p")
+    const first = tab.download("a", "D:\\Downloads\\first.txt", 3000)
+
+    await expect(tab.download("b", "D:\\Downloads\\second.txt", 3000)).rejects.toThrow(
+      "a download is already in progress",
+    )
+
+    const item = downloadItem()
+    webContents(tab).session.emit("will-download", {}, item, tab.view.webContents)
+    item.triggerDone("completed")
+    await expect(first).resolves.toBe("D:\\Downloads\\first.txt")
   })
 
   it("rejects when the download ends in a non-completed state", async () => {
@@ -443,6 +503,49 @@ describe("BrowserTab", () => {
     messageHandler({}, "Network.loadingFinished", { requestId: "already-running" }, "OOPIF")
     await vi.advanceTimersByTimeAsync(500)
     await expect(promise).resolves.toBeUndefined()
+    vi.useRealTimers()
+  })
+
+  it("removes load listeners when waitForLoad times out", async () => {
+    vi.useFakeTimers()
+    const tab = new BrowserTab(1, "p")
+    await Promise.resolve()
+    webContents(tab).loading = true
+    const wc = tab.view.webContents as unknown as { handlers: Record<string, unknown[]> }
+
+    const pending = tab.waitForLoad("load", 1000)
+    const assertion = expect(pending).rejects.toThrow("wait_for_load load")
+    expect(wc.handlers["did-finish-load"]).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(1000)
+
+    await assertion
+    expect(wc.handlers["did-finish-load"] ?? []).toHaveLength(0)
+    vi.useRealTimers()
+  })
+
+  it("rejects a navigation whose loadURL promise never settles", async () => {
+    vi.useFakeTimers()
+    const tab = new BrowserTab(1, "p")
+    webContents(tab).deferLoad = true
+
+    const pending = tab.navigateAndWait("https://example.com")
+    const assertion = expect(pending).rejects.toThrow("navigation load event timed out after 30s")
+    await vi.advanceTimersByTimeAsync(30_000)
+
+    await assertion
+    vi.useRealTimers()
+  })
+
+  it("records a timeout instead of leaking an unhandled rejection from navigate", async () => {
+    vi.useFakeTimers()
+    const tab = new BrowserTab(1, "p")
+    webContents(tab).deferLoad = true
+
+    expect(tab.navigate("https://example.com")).toBe(true)
+    await vi.advanceTimersByTimeAsync(30_000)
+
+    expect(tab.state().loading).toBe(false)
+    expect(tab.state().error?.description).toContain("navigation load event timed out")
     vi.useRealTimers()
   })
 

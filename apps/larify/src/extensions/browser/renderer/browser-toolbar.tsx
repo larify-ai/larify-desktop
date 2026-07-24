@@ -104,9 +104,10 @@ export function BrowserToolbar({
             onChange={(event) => setEditing(event.target.value)}
             onKeyDown={(event) => {
               if (event.key !== "Enter") return
-              const next = event.currentTarget.value
+              const input = event.currentTarget
+              const next = input.value
               void onNavigate(next).then((navigated) => {
-                if (navigated) event.currentTarget.blur()
+                if (navigated) input.blur()
                 else setEditing(next)
               })
             }}

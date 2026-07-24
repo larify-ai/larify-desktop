@@ -26,12 +26,13 @@ export class SessionScopedManagers<T> {
   async destroySession(sessionId: string): Promise<void> {
     const manager = this.managers.get(sessionId)
     if (!manager) return
-    await this.destroyManager?.(manager)
     this.managers.delete(sessionId)
+    await this.destroyManager?.(manager)
   }
 
   async destroyAll(): Promise<void> {
-    await Promise.all([...this.managers.values()].map((manager) => this.destroyManager?.(manager)))
+    const managers = [...this.managers.values()]
     this.managers.clear()
+    await Promise.all(managers.map((manager) => this.destroyManager?.(manager)))
   }
 }

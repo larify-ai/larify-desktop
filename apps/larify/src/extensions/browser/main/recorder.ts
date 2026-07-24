@@ -127,6 +127,7 @@ export class Recorder {
   private win: BrowserWindow | null = null
   private active: ActiveRecording | null = null
   private starting = false
+  private startDone: Promise<void> | null = null
 
   private async ensureWindow(): Promise<BrowserWindow> {
     if (this.win && !this.win.isDestroyed()) return this.win
@@ -150,8 +151,8 @@ export class Recorder {
     return this.active !== null || this.starting
   }
 
-  private async canvasSize(dbg: Debugger): Promise<{ width: number; height: number }> {
-    const res = (await dbg.sendCommand('Runtime.evaluate', {
+  private async canvasSize(tab: BrowserTab): Promise<{ width: number; height: number }> {
+    const res = (await tab.sendCdp('Runtime.evaluate', {
       expression:
         'JSON.stringify([Math.round(innerWidth * devicePixelRatio), Math.round(innerHeight * devicePixelRatio)])',
       returnByValue: true
@@ -163,10 +164,15 @@ export class Recorder {
   async start(tab: BrowserTab, path: string): Promise<void> {
     if (this.active || this.starting) throw new Error('a recording is already in progress')
     this.starting = true
+    let finishStart!: () => void
+    const startDone = new Promise<void>((resolve) => {
+      finishStart = resolve
+    })
+    this.startDone = startDone
     const dbg = tab.view.webContents.debugger
     try {
       await mkdir(dirname(path), { recursive: true }).catch(() => {})
-      const [{ width, height }, win] = await Promise.all([this.canvasSize(dbg), this.ensureWindow()])
+      const [{ width, height }, win] = await Promise.all([this.canvasSize(tab), this.ensureWindow()])
 
       const ready = await waitForIpc<{ error?: string }>('record:ready', win.webContents, READY_TIMEOUT, () =>
         win.webContents.send('record:init', { width, height, fps: FPS, bitrate: BITRATE, path })
@@ -199,6 +205,8 @@ export class Recorder {
       throw e
     } finally {
       this.starting = false
+      finishStart()
+      if (this.startDone === startDone) this.startDone = null
     }
   }
 
@@ -233,6 +241,7 @@ export class Recorder {
   }
 
   async destroy(): Promise<void> {
+    await this.startDone
     if (this.active) await this.stop().catch(() => {})
     if (this.win && !this.win.isDestroyed()) this.win.destroy()
     this.win = null

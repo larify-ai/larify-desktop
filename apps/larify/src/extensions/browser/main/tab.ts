@@ -50,7 +50,7 @@ function withTimeout<T>(promise: Promise<T>, label: string, timeoutMs = 30000): 
 }
 
 function waitForWebContentsLoadEvent(wc: WebContents, timeoutMs = 30000): Promise<void> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const finish = (): void => {
       clearTimeout(timer)
       wc.off("did-finish-load", finish)
@@ -66,14 +66,18 @@ function waitForWebContentsLoadEvent(wc: WebContents, timeoutMs = 30000): Promis
     ): void => {
       if (isMainFrame) finish()
     }
-    const timer = setTimeout(finish, timeoutMs)
+    const timer = setTimeout(() => {
+      wc.off("did-finish-load", finish)
+      wc.off("did-fail-load", onFail)
+      reject(new Error(`navigation load event timed out after ${waits.formatTimeout(timeoutMs)}`))
+    }, timeoutMs)
     wc.on("did-finish-load", finish)
     wc.on("did-fail-load", onFail)
   })
 }
 
 function waitForWebContentsNotLoading(wc: WebContents, timeoutMs = 30000, stableMs = 100): Promise<void> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     let stable: ReturnType<typeof setTimeout> | undefined
     const cleanup = (): void => {
       clearTimeout(deadline)
@@ -92,7 +96,10 @@ function waitForWebContentsNotLoading(wc: WebContents, timeoutMs = 30000, stable
       }
       if (!wc.isLoading()) stable = setTimeout(finish, stableMs)
     }
-    const deadline = setTimeout(finish, timeoutMs)
+    const deadline = setTimeout(() => {
+      cleanup()
+      reject(new Error(`navigation loading state timed out after ${waits.formatTimeout(timeoutMs)}`))
+    }, timeoutMs)
     wc.on("did-start-loading", check)
     wc.on("did-stop-loading", check)
     check()
@@ -135,6 +142,7 @@ export class BrowserTab {
   private readonly pendingNetworkRequests = new Set<string>()
   private readonly networkWaiters = new Set<() => void>()
   private readonly cancelDownloads = new Set<(error: Error) => void>()
+  private downloadActive = false
   private readonly cdpSend: CdpSend = (method, params, sessionId) =>
     this.sendCdp(method, params, sessionId)
 
@@ -155,7 +163,14 @@ export class BrowserTab {
   navigate(url: string): boolean {
     const target = normalizeUrl(url)
     if (!target) return false
-    void this.startNavigation(target)
+    void this.startNavigation(target).catch((error) => {
+      if (this.pendingUrl === target) this.pendingUrl = ""
+      this.error = {
+        code: -1,
+        description: error instanceof Error ? error.message : String(error),
+      }
+      this.onChange?.()
+    })
     return true
   }
 
@@ -190,12 +205,12 @@ export class BrowserTab {
     this.onChange?.()
     const task = this.cdpReady.then(async () => {
       const loaded = waitForWebContentsLoad(this.view.webContents)
-      try {
-        await this.view.webContents.loadURL(target)
-      } catch {
-        // load failure is captured in state via did-fail-load
-      }
-      await loaded
+      await Promise.all([
+        this.view.webContents.loadURL(target).catch(() => {
+          // load failure is captured in state via did-fail-load
+        }),
+        loaded,
+      ])
       if (this.pendingUrl === target) {
         this.pendingUrl = ""
         this.onChange?.()
@@ -376,6 +391,8 @@ export class BrowserTab {
   }
 
   async download(selector: string, path: string, timeoutMs = 1_800_000): Promise<string> {
+    if (this.downloadActive) throw new Error("a download is already in progress for this tab")
+    this.downloadActive = true
     const wc = this.view.webContents
     return new Promise<string>((resolve, reject) => {
       let started = false
@@ -385,6 +402,7 @@ export class BrowserTab {
         clearTimeout(timer)
         wc.session.off("will-download", onWillDownload)
         this.cancelDownloads.delete(cancel)
+        this.downloadActive = false
       }
       const fail = (error: Error): void => {
         if (settled) return
@@ -528,11 +546,26 @@ export class BrowserTab {
     if (state === "networkidle") return this.waitForNetworkIdle(timeoutMs)
     const wc = this.view.webContents
     if (!wc.isLoading()) return
-    const arrival = new Promise<void>((resolve) => {
-      if (state === "domcontentloaded") wc.once("dom-ready", () => resolve())
-      else wc.once("did-finish-load", () => resolve())
+    await new Promise<void>((resolve, reject) => {
+      const removeListener = (): void => {
+        if (state === "domcontentloaded") wc.off("dom-ready", onLoaded)
+        else wc.off("did-finish-load", onLoaded)
+      }
+      const cleanup = (): void => {
+        clearTimeout(timer)
+        removeListener()
+      }
+      const onLoaded = (): void => {
+        cleanup()
+        resolve()
+      }
+      const timer = setTimeout(() => {
+        cleanup()
+        reject(new Error(`wait_for_load ${state} timed out after ${waits.formatTimeout(timeoutMs)}`))
+      }, timeoutMs)
+      if (state === "domcontentloaded") wc.on("dom-ready", onLoaded)
+      else wc.on("did-finish-load", onLoaded)
     })
-    await withTimeout(arrival, `wait_for_load ${state}`, timeoutMs)
   }
 
   async screenshot(opts: ScreenshotOptions): Promise<ScreenshotResult> {
@@ -590,7 +623,10 @@ export class BrowserTab {
       if (!details.isMainFrame || details.isSameDocument) return
       this.error = null
       this.resetPageState()
-      if (!sameOrigin(details.url, this.currentUrl)) this.favIconUrl = ""
+      if (!sameOrigin(details.url, this.currentUrl)) {
+        this.favIconUrl = ""
+        this.favIconRequest++
+      }
       emit()
     })
     wc.on("did-navigate", syncUrl)

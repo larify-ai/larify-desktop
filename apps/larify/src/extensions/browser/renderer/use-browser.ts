@@ -23,9 +23,12 @@ export function useBrowser(): UseBrowser {
   const suppressAutoCreateRef = useRef(false)
   const [loadedSessionId, setLoadedSessionId] = useState<string | null>(null)
   const [workbenchVisible, setWorkbenchVisible] = useState(false)
+  const currentSessionIdRef = useRef(sessionId)
 
   const refreshState = useCallback(async (): Promise<void> => {
+    const requestedSessionId = sessionId
     const value = await window.bridge.invoke("browser:getState", sessionId)
+    if (currentSessionIdRef.current !== requestedSessionId) return
     const next = (value as BrowserState | null) ?? EMPTY
     setLoadedSessionId(sessionId)
     setState(next)
@@ -33,6 +36,8 @@ export function useBrowser(): UseBrowser {
 
   useEffect(() => {
     let alive = true
+    currentSessionIdRef.current = sessionId
+    suppressAutoCreateRef.current = false
     setLoadedSessionId(null)
     setState(EMPTY)
     void window.bridge.invoke("browser:getState", sessionId).then((value) => {

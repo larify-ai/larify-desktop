@@ -161,4 +161,46 @@ describe("useBrowser", () => {
     })
     expect(onState).toHaveBeenLastCalledWith(ownState)
   })
+
+  it("does not let an old session refresh overwrite the current session", async () => {
+    const requests = new Map<string, Array<Deferred<unknown>>>()
+    invoke.mockImplementation((channel: string, requestedSessionId: string) => {
+      if (channel !== "browser:getState") return Promise.resolve(undefined)
+      const request = deferred<unknown>()
+      const list = requests.get(requestedSessionId) ?? []
+      list.push(request)
+      requests.set(requestedSessionId, list)
+      return request.promise
+    })
+    const onState = vi.fn()
+    await act(async () => root.render(createElement(Probe, { onState })))
+    await act(async () => {
+      requests.get("session-a")![0].resolve({ tabs: [], activeId: null })
+    })
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent("larify:workbench-active", { detail: "browser" }))
+    })
+    expect(requests.get("session-a")).toHaveLength(2)
+
+    await act(async () => {
+      setAgentSessionId("session-b")
+    })
+    const sessionBRequests = requests.get("session-b") ?? []
+    expect(sessionBRequests.length).toBeGreaterThan(0)
+    const sessionBState = {
+      tabs: [{ id: 2, title: "session-b" }],
+      activeId: 2,
+    } as BrowserState
+    await act(async () => {
+      for (const request of sessionBRequests) request.resolve(sessionBState)
+    })
+    await act(async () => {
+      requests.get("session-a")![1].resolve({
+        tabs: [{ id: 1, title: "stale-session-a" }],
+        activeId: 1,
+      })
+    })
+
+    expect(onState).toHaveBeenLastCalledWith(sessionBState)
+  })
 })

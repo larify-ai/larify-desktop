@@ -65,6 +65,47 @@ describe("Recorder guards", () => {
     await expect(new Recorder().destroy()).resolves.toBeUndefined()
   })
 
+  it("waits for an in-progress start before destroying the resulting recording", async () => {
+    const recorder = new Recorder()
+    let finishStart!: () => void
+    const startDone = new Promise<void>((resolve) => {
+      finishStart = resolve
+    })
+    ;(recorder as unknown as { startDone: Promise<void> }).startDone = startDone
+    const destroyWindow = vi.fn()
+    const sender = {
+      send: vi.fn((channel: string) => {
+        if (channel === "record:stop") queueMicrotask(() => h.emit("record:done", { sender }, { bytes: 10 }))
+      }),
+    }
+    const dbg = { sendCommand: vi.fn(async () => ({})), off: vi.fn() }
+    ;(recorder as unknown as { win: unknown }).win = {
+      isDestroyed: () => false,
+      destroy: destroyWindow,
+      webContents: sender,
+    }
+
+    const destroying = recorder.destroy()
+    let settled = false
+    void destroying.then(() => {
+      settled = true
+    })
+    await Promise.resolve()
+    expect(settled).toBe(false)
+
+    ;(recorder as unknown as { active: unknown }).active = {
+      dbg,
+      onMessage: () => {},
+      path: "out.webm",
+      frameCount: () => 7,
+    }
+    finishStart()
+    await destroying
+
+    expect(sender.send).toHaveBeenCalledWith("record:stop")
+    expect(destroyWindow).toHaveBeenCalledOnce()
+  })
+
   it("finalizes an active recording before destroying its window", async () => {
     const recorder = new Recorder()
     const destroy = vi.fn()

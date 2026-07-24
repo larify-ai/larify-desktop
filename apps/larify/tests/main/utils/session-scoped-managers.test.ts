@@ -27,4 +27,43 @@ describe("SessionScopedManagers", () => {
     await managers.destroyAll()
     expect(destroy).toHaveBeenCalledWith(second)
   })
+
+  it("removes a session before awaiting asynchronous destruction", async () => {
+    let finishDestroy!: () => void
+    const destroy = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishDestroy = resolve
+        }),
+    )
+    const managers = new SessionScopedManagers(
+      (sessionId: string) => ({ sessionId }),
+      destroy,
+    )
+    const oldManager = managers.get("a")
+
+    const pending = managers.destroySession("a")
+    expect(managers.peek("a")).toBeUndefined()
+    expect(managers.get("a")).not.toBe(oldManager)
+    finishDestroy()
+    await pending
+  })
+
+  it("does not destroy the same manager twice when destroySession races", async () => {
+    let finishDestroy!: () => void
+    const destroy = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishDestroy = resolve
+        }),
+    )
+    const managers = new SessionScopedManagers(() => ({}), destroy)
+    managers.get("a")
+
+    const first = managers.destroySession("a")
+    const second = managers.destroySession("a")
+    expect(destroy).toHaveBeenCalledTimes(1)
+    finishDestroy()
+    await Promise.all([first, second])
+  })
 })

@@ -65,4 +65,32 @@ describe("BrowserToolbar", () => {
 
     expect(input.value).toBe("baidu")
   })
+
+  it("blurs the captured input after asynchronous navigation succeeds", async () => {
+    await act(async () => {
+      root.render(
+        createElement(BrowserToolbar, {
+          onBack: vi.fn(),
+          onForward: vi.fn(),
+          onNavigate: vi.fn().mockResolvedValue(true),
+          onReload: vi.fn(),
+          tab,
+        }),
+      )
+    })
+    await act(async () => {
+      container.querySelector("button:not([aria-label])")!.dispatchEvent(
+        new MouseEvent("click", { bubbles: true }),
+      )
+    })
+    const input = container.querySelector("input")!
+    const blur = vi.spyOn(input, "blur")
+
+    await act(async () => {
+      input.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Enter" }))
+      await Promise.resolve()
+    })
+
+    expect(blur).toHaveBeenCalledOnce()
+  })
 })

@@ -36,6 +36,13 @@ describe("Recorder guards", () => {
     expect(new Recorder().isRecording()).toBe(false)
   })
 
+  it("reports recording while start is still in progress", () => {
+    const recorder = new Recorder()
+    ;(recorder as unknown as { starting: boolean }).starting = true
+
+    expect(recorder.isRecording()).toBe(true)
+  })
+
   it("rejects stop when there is no active recording", async () => {
     await expect(new Recorder().stop()).rejects.toThrow("no recording in progress")
   })
@@ -43,6 +50,13 @@ describe("Recorder guards", () => {
   it("rejects start when a recording is already active", async () => {
     const recorder = new Recorder()
     ;(recorder as unknown as { active: unknown }).active = { dbg: {}, onMessage: () => {}, path: "x" }
+
+    await expect(recorder.start({} as never, "out.webm")).rejects.toThrow("already in progress")
+  })
+
+  it("rejects a second start while the first is still in progress", async () => {
+    const recorder = new Recorder()
+    ;(recorder as unknown as { starting: boolean }).starting = true
 
     await expect(recorder.start({} as never, "out.webm")).rejects.toThrow("already in progress")
   })
@@ -60,7 +74,12 @@ describe("Recorder guards", () => {
       }),
     }
     const dbg = { sendCommand: vi.fn(async () => ({})), off: vi.fn() }
-    ;(recorder as unknown as { active: unknown }).active = { dbg, onMessage: () => {}, path: "out.webm" }
+    ;(recorder as unknown as { active: unknown }).active = {
+      dbg,
+      onMessage: () => {},
+      path: "out.webm",
+      frameCount: () => 7,
+    }
     ;(recorder as unknown as { win: unknown }).win = {
       isDestroyed: () => false,
       destroy,
@@ -82,13 +101,43 @@ describe("Recorder guards", () => {
       }),
     }
     const dbg = { sendCommand: vi.fn(async () => ({})), off: vi.fn() }
-    ;(recorder as unknown as { active: unknown }).active = { dbg, onMessage: () => {}, path: "out.webm" }
+    ;(recorder as unknown as { active: unknown }).active = {
+      dbg,
+      onMessage: () => {},
+      path: "out.webm",
+      frameCount: () => 7,
+    }
     ;(recorder as unknown as { win: unknown }).win = {
       isDestroyed: () => false,
       destroy: vi.fn(),
       webContents: sender,
     }
 
-    await expect(recorder.stop()).rejects.toThrow("recorder produced an empty file")
+    await expect(recorder.stop()).rejects.toThrow("recorder produced an empty file after 7 frames")
+  })
+
+  it("rejects a recording whose output stream failed", async () => {
+    const recorder = new Recorder()
+    const sender = {
+      send: vi.fn((channel: string) => {
+        if (channel === "record:stop") {
+          queueMicrotask(() => h.emit("record:done", { sender }, { bytes: 0, error: "disk full" }))
+        }
+      }),
+    }
+    const dbg = { sendCommand: vi.fn(async () => ({})), off: vi.fn() }
+    ;(recorder as unknown as { active: unknown }).active = {
+      dbg,
+      onMessage: () => {},
+      path: "out.webm",
+      frameCount: () => 7,
+    }
+    ;(recorder as unknown as { win: unknown }).win = {
+      isDestroyed: () => false,
+      destroy: vi.fn(),
+      webContents: sender,
+    }
+
+    await expect(recorder.stop()).rejects.toThrow("recorder failed to write output: disk full")
   })
 })

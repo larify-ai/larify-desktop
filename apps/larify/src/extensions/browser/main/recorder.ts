@@ -8,7 +8,7 @@ import { formatTimeout } from './waits'
 const FPS = 30
 const SCREENCAST_QUALITY = 90
 const BITRATE = 8_000_000
-const READY_TIMEOUT = 10_000
+const READY_TIMEOUT = 15_000
 const STOP_TIMEOUT = 15_000
 const DEFAULT_SIZE = { width: 1280, height: 800 }
 
@@ -21,33 +21,72 @@ const RECORDER_HTML =
       'const c = document.getElementById("c"), ctx = c.getContext("2d");' +
       'const img = new Image();' +
       'img.onload = () => ctx.drawImage(img, 0, 0, c.width, c.height);' +
-      'let rec = null, out = null, writeChain = Promise.resolve(), bytes = 0;' +
-      'ipcRenderer.on("record:init", (_e, o) => {' +
+      'let rec = null, stream = null, out = null, warmed = false, writeError = null, writeChain = Promise.resolve(), bytes = 0;' +
+      'ipcRenderer.on("record:init", async (_e, o) => {' +
       '  if (rec) { try { rec.stop(); } catch (e) {} rec = null; }' +
-      '  c.width = o.width; c.height = o.height; bytes = 0; writeChain = Promise.resolve();' +
+      '  if (stream) { stream.getTracks().forEach((track) => track.stop()); stream = null; }' +
+      '  c.width = o.width; c.height = o.height; bytes = 0; writeError = null; writeChain = Promise.resolve();' +
       '  ctx.fillStyle = "#000"; ctx.fillRect(0, 0, c.width, c.height);' +
-      '  out = fs.createWriteStream(o.path); out.on("error", () => {});' +
-      '  const stream = c.captureStream(o.fps);' +
       '  const mime = MediaRecorder.isTypeSupported("video/webm;codecs=vp9") ? "video/webm;codecs=vp9" : "video/webm;codecs=vp8";' +
-      '  rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: o.bitrate });' +
+      '  const options = { mimeType: mime, videoBitsPerSecond: o.bitrate };' +
+      '  if (!warmed) {' +
+      '    const warmupCanvas = document.createElement("canvas");' +
+      '    warmupCanvas.width = 320; warmupCanvas.height = 240;' +
+      '    const warmupContext = warmupCanvas.getContext("2d");' +
+      '    const warmupStream = warmupCanvas.captureStream(20);' +
+      '    const warmup = new MediaRecorder(warmupStream, {' +
+      '      mimeType: "video/webm;codecs=vp8", videoBitsPerSecond: 1000000' +
+      '    });' +
+      '    const producedData = await new Promise((res) => {' +
+      '      let frame = 0;' +
+      '      let ready = false;' +
+      '      const timer = setInterval(() => {' +
+      '        warmupContext.fillStyle = frame++ % 2 ? "#f00" : "#00f";' +
+      '        warmupContext.fillRect(0, 0, warmupCanvas.width, warmupCanvas.height);' +
+      '      }, 20);' +
+      '      const timeout = setTimeout(() => {' +
+      '        if (warmup.state !== "inactive") warmup.stop();' +
+      '      }, 10000);' +
+      '      warmup.ondataavailable = (e) => {' +
+      '        if (e.data.size) ready = true;' +
+      '        if (ready && warmup.state !== "inactive") warmup.stop();' +
+      '      };' +
+      '      warmup.onstop = () => {' +
+      '        clearInterval(timer); clearTimeout(timeout);' +
+      '        warmupStream.getTracks().forEach((track) => track.stop()); res(ready);' +
+      '      };' +
+      '      warmup.start(250);' +
+      '    });' +
+      '    if (!producedData) {' +
+      '      ipcRenderer.send("record:ready", { error: "video encoder produced no data during warmup" }); return;' +
+      '    }' +
+      '  }' +
+      '  warmed = true;' +
+      '  out = fs.createWriteStream(o.path);' +
+      '  out.on("error", (err) => { writeError = err; });' +
+      '  stream = c.captureStream(o.fps);' +
+      '  rec = new MediaRecorder(stream, options);' +
       '  rec.ondataavailable = (e) => {' +
       '    if (!e.data || !e.data.size) return;' +
       '    const blob = e.data;' +
       '    writeChain = writeChain.then(async () => {' +
+      '      if (writeError) return;' +
       '      const buf = Buffer.from(await blob.arrayBuffer());' +
-      '      bytes += buf.length;' +
       '      await new Promise((res, rej) => out.write(buf, (err) => err ? rej(err) : res()));' +
-      '    });' +
+      '      bytes += buf.length;' +
+      '    }).catch((err) => { writeError = err; });' +
       '  };' +
-      '  rec.start(250); ipcRenderer.send("record:ready");' +
+      '  rec.start(250); ipcRenderer.send("record:ready", {});' +
       '});' +
       'ipcRenderer.on("record:frame", (_e, b64) => { img.src = "data:image/jpeg;base64," + b64; });' +
       'ipcRenderer.on("record:stop", async () => {' +
       '  if (!rec) { ipcRenderer.send("record:done", { bytes: 0 }); return; }' +
       '  await new Promise((res) => { rec.onstop = res; rec.stop(); });' +
-      '  try { await writeChain; } catch (err) {}' +
+      '  await writeChain;' +
+      '  if (stream) { stream.getTracks().forEach((track) => track.stop()); stream = null; }' +
       '  await new Promise((res) => { if (out.closed || out.destroyed) { res(); } else { out.once("close", res); out.end(); } });' +
-      '  ipcRenderer.send("record:done", { bytes });' +
+      '  rec = null; out = null;' +
+      '  ipcRenderer.send("record:done", { bytes, error: writeError ? String(writeError.message || writeError) : undefined });' +
       '});' +
       '</script></body>'
   )
@@ -56,6 +95,7 @@ interface ActiveRecording {
   dbg: Debugger
   onMessage: (event: unknown, method: string, params: { sessionId?: number; data?: string }) => void
   path: string
+  frameCount: () => number
 }
 
 function waitForIpc<T>(
@@ -86,6 +126,7 @@ function waitForIpc<T>(
 export class Recorder {
   private win: BrowserWindow | null = null
   private active: ActiveRecording | null = null
+  private starting = false
 
   private async ensureWindow(): Promise<BrowserWindow> {
     if (this.win && !this.win.isDestroyed()) return this.win
@@ -106,7 +147,7 @@ export class Recorder {
   }
 
   isRecording(): boolean {
-    return this.active !== null
+    return this.active !== null || this.starting
   }
 
   private async canvasSize(dbg: Debugger): Promise<{ width: number; height: number }> {
@@ -120,52 +161,64 @@ export class Recorder {
   }
 
   async start(tab: BrowserTab, path: string): Promise<void> {
-    if (this.active) throw new Error('a recording is already in progress')
+    if (this.active || this.starting) throw new Error('a recording is already in progress')
+    this.starting = true
     const dbg = tab.view.webContents.debugger
-    await mkdir(dirname(path), { recursive: true }).catch(() => {})
-    const [{ width, height }, win] = await Promise.all([this.canvasSize(dbg), this.ensureWindow()])
-
     try {
-      await waitForIpc('record:ready', win.webContents, READY_TIMEOUT, () =>
+      await mkdir(dirname(path), { recursive: true }).catch(() => {})
+      const [{ width, height }, win] = await Promise.all([this.canvasSize(dbg), this.ensureWindow()])
+
+      const ready = await waitForIpc<{ error?: string }>('record:ready', win.webContents, READY_TIMEOUT, () =>
         win.webContents.send('record:init', { width, height, fps: FPS, bitrate: BITRATE, path })
       )
-    } catch (e) {
-      if (!win.isDestroyed()) win.destroy()
-      this.win = null
-      throw e
-    }
+      if (ready.error) throw new Error(`recorder: ${ready.error}`)
 
-    const onMessage: ActiveRecording['onMessage'] = (_event, method, params) => {
-      if (method !== 'Page.screencastFrame') return
-      if (params.data) win.webContents.send('record:frame', params.data)
-      if (params.sessionId != null)
-        dbg.sendCommand('Page.screencastFrameAck', { sessionId: params.sessionId }).catch(() => {})
-    }
-    dbg.on('message', onMessage)
-    try {
-      await dbg.sendCommand('Page.startScreencast', { format: 'jpeg', quality: SCREENCAST_QUALITY, everyNthFrame: 1 })
+      let frames = 0
+      const onMessage: ActiveRecording['onMessage'] = (_event, method, params) => {
+        if (method !== 'Page.screencastFrame') return
+        frames += 1
+        if (params.data) win.webContents.send('record:frame', params.data)
+        if (params.sessionId != null)
+          dbg.sendCommand('Page.screencastFrameAck', { sessionId: params.sessionId }).catch(() => {})
+      }
+      dbg.on('message', onMessage)
+      try {
+        await dbg.sendCommand('Page.startScreencast', {
+          format: 'jpeg',
+          quality: SCREENCAST_QUALITY,
+          everyNthFrame: 1
+        })
+      } catch (e) {
+        dbg.off('message', onMessage)
+        throw e
+      }
+      this.active = { dbg, onMessage, path, frameCount: () => frames }
     } catch (e) {
-      dbg.off('message', onMessage)
-      if (!win.isDestroyed()) win.destroy()
+      if (this.win && !this.win.isDestroyed()) this.win.destroy()
       this.win = null
       throw e
+    } finally {
+      this.starting = false
     }
-    this.active = { dbg, onMessage, path }
   }
 
   async stop(): Promise<{ path: string; bytes: number }> {
     if (!this.active || !this.win) throw new Error('no recording in progress')
-    const { dbg, onMessage, path } = this.active
+    const { dbg, onMessage, path, frameCount } = this.active
     const win = this.win
     this.active = null
     await dbg.sendCommand('Page.stopScreencast').catch(() => {})
     dbg.off('message', onMessage)
 
     try {
-      const { bytes } = await waitForIpc<{ bytes: number }>('record:done', win.webContents, STOP_TIMEOUT, () =>
-        win.webContents.send('record:stop')
+      const { bytes, error } = await waitForIpc<{ bytes: number; error?: string }>(
+        'record:done',
+        win.webContents,
+        STOP_TIMEOUT,
+        () => win.webContents.send('record:stop')
       )
-      if (bytes <= 0) throw new Error('recorder produced an empty file')
+      if (error) throw new Error(`recorder failed to write output: ${error}`)
+      if (bytes <= 0) throw new Error(`recorder produced an empty file after ${frameCount()} frames`)
       return { path, bytes }
     } catch (e) {
       if (!win.isDestroyed()) win.destroy()

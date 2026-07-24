@@ -4,6 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { BrowserService } from '../../../../src/extensions/browser/main/browser-service'
+import { Recorder } from '../../../../src/extensions/browser/main/recorder'
 import { BrowserTab } from '../../../../src/extensions/browser/main/tab'
 
 app.commandLine.appendSwitch('site-per-process')
@@ -101,6 +102,8 @@ async function main(): Promise<void> {
   let downloadServer: Server | undefined
   let downloadClosed = false
   let downloadDir: string | undefined
+  let recordingDir: string | undefined
+  let recorder: Recorder | undefined
   let window: BrowserWindow | undefined
   let tab: BrowserTab | undefined
   const keepAlive = (): void => {}
@@ -229,6 +232,31 @@ async function main(): Promise<void> {
     }
     console.log(`PASS BrowserTab networkidle existing request: ${networkIdleElapsed}ms`)
 
+    recordingDir = await mkdtemp(join(tmpdir(), 'larify-recorder-live-'))
+    const recordingPath = join(recordingDir, 'recording.webm')
+    recorder = new Recorder()
+    await recorder.start(tab, recordingPath)
+    await tab.evalJs(`() => {
+      let tick = 0
+      window.__larifyRecorderTest = setInterval(() => {
+        document.body.style.opacity = tick++ % 2 ? '0.99' : '1'
+      }, 50)
+    }`)
+    await new Promise((resolve) => setTimeout(resolve, 1500))
+    const recording = await recorder.stop()
+    if (recording.bytes <= 0) throw new Error('recorder produced an empty file')
+    console.log(`PASS Recorder output: ${recording.bytes} bytes`)
+
+    const restartStartedAt = Date.now()
+    await recorder.start(tab, join(recordingDir, 'recording-restart.webm'))
+    const restartElapsed = Date.now() - restartStartedAt
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    const restartedRecording = await recorder.stop()
+    if (restartedRecording.bytes <= 0) throw new Error('restarted recorder produced an empty file')
+    if (restartElapsed >= 1000) throw new Error(`recorder repeated its warmup: ${restartElapsed}ms`)
+    await recorder.destroy()
+    console.log(`PASS Recorder restart without warmup: ${restartedRecording.bytes} bytes`)
+
     const downloadRef = await waitForDownloadRef(tab)
     downloadDir = await mkdtemp(join(tmpdir(), 'larify-download-destroy-'))
     const download = tab.download(downloadRef, join(downloadDir, 'large.bin'), 10_000)
@@ -249,6 +277,7 @@ async function main(): Promise<void> {
     if (!downloadClosed) throw new Error('destroyed tab did not cancel its active download')
     console.log('PASS BrowserTab active download cancellation')
   } finally {
+    await recorder?.destroy()
     tab?.destroy()
     window?.destroy()
     app.removeListener('window-all-closed', keepAlive)
@@ -259,6 +288,7 @@ async function main(): Promise<void> {
       new Promise<void>((resolve) => downloadServer?.close(() => resolve()) ?? resolve())
     ])
     if (downloadDir) await rm(downloadDir, { recursive: true, force: true })
+    if (recordingDir) await rm(recordingDir, { recursive: true, force: true })
   }
 }
 

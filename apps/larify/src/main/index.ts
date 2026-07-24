@@ -3,6 +3,7 @@ import { electronApp, optimizer } from "@electron-toolkit/utils"
 import { createApp, Loader } from "kernel"
 import type { Extension } from "kernel"
 import { discoverExtensions } from "../shared/discover-extensions"
+import { installGracefulShutdown } from "./utils/graceful-shutdown"
 
 const modules = import.meta.glob<{ default: Extension }>("../extensions/*/main/index.ts")
 const { extensions, loaders } = discoverExtensions(modules)
@@ -19,7 +20,7 @@ app.whenReady().then(async () => {
   const loader = new Loader(host, (m) => loaders.get(m.id)!())
   await loader.loadAll(extensions)
 
-  app.on("before-quit", () => void loader.unloadAll())
+  installGracefulShutdown(app, () => loader.unloadAll())
 })
 
 app.on("window-all-closed", () => {

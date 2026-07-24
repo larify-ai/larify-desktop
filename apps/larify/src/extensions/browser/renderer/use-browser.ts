@@ -20,7 +20,12 @@ export interface UseBrowser {
 export function useBrowser(): UseBrowser {
   const sessionId = useAgentSessionId()
   const [state, setState] = useState<BrowserState>(EMPTY)
+  const stateRef = useRef<BrowserState>(EMPTY)
   const suppressAutoCreateRef = useRef(false)
+  const closingTabIdsRef = useRef(new Set<number>())
+  const pendingCloseIdsRef = useRef(new Set<number>())
+  const closeDispatchedRef = useRef(false)
+  const closeEpochRef = useRef(0)
   const [loadedSessionId, setLoadedSessionId] = useState<string | null>(null)
   const loadedSessionIdRef = useRef<string | null>(null)
   const [workbenchVisible, setWorkbenchVisible] = useState(false)
@@ -66,6 +71,7 @@ export function useBrowser(): UseBrowser {
     clearStateLoadRetry()
     appliedStateSequenceRef.current = requestSequence
     const next = (value as BrowserState | null) ?? EMPTY
+    stateRef.current = next
     loadedSessionIdRef.current = sessionId
     setLoadedSessionId(sessionId)
     setState(next)
@@ -73,6 +79,7 @@ export function useBrowser(): UseBrowser {
 
   useEffect(() => {
     let alive = true
+    const closeEpoch = ++closeEpochRef.current
     currentSessionIdRef.current = sessionId
     suppressAutoCreateRef.current = false
     clearStateLoadRetry()
@@ -80,6 +87,10 @@ export function useBrowser(): UseBrowser {
     ensureFailuresRef.current = 0
     setEnsureRetry(0)
     loadedSessionIdRef.current = null
+    stateRef.current = EMPTY
+    closingTabIdsRef.current.clear()
+    pendingCloseIdsRef.current.clear()
+    closeDispatchedRef.current = false
     setLoadedSessionId(null)
     setState(EMPTY)
     const requestSequence = ++nextStateSequenceRef.current
@@ -91,6 +102,7 @@ export function useBrowser(): UseBrowser {
         clearStateLoadRetry()
         appliedStateSequenceRef.current = requestSequence
         const next = (value as BrowserState | null) ?? EMPTY
+        stateRef.current = next
         loadedSessionIdRef.current = sessionId
         setLoadedSessionId(sessionId)
         setState(next)
@@ -106,10 +118,12 @@ export function useBrowser(): UseBrowser {
       appliedStateSequenceRef.current = ++nextStateSequenceRef.current
       loadedSessionIdRef.current = sessionId
       setLoadedSessionId(sessionId)
+      stateRef.current = event.state
       setState(event.state)
     })
     return () => {
       alive = false
+      if (closeEpochRef.current === closeEpoch) closeEpochRef.current++
       if (stateLoadRetryTimerRef.current) clearTimeout(stateLoadRetryTimerRef.current)
       stateLoadRetryTimerRef.current = null
       off()
@@ -169,22 +183,53 @@ export function useBrowser(): UseBrowser {
     () => ({
       back: (id: number) => window.bridge.invoke("browser:back", sessionId, id) as Promise<void>,
       close: async (id: number) => {
-        const closingLastTab = state.tabs.length <= 1
-        if (closingLastTab) suppressAutoCreateRef.current = true
+        const closeEpoch = closeEpochRef.current
+        const closing = closingTabIdsRef.current
+        const pendingClosing = pendingCloseIdsRef.current
+        if (pendingClosing.size === 0) {
+          closing.clear()
+          closeDispatchedRef.current = false
+        }
+        closing.add(id)
+        pendingClosing.add(id)
+        const allCurrentTabsClosing =
+          stateRef.current.tabs.length > 0 &&
+          stateRef.current.tabs.every((tab) => closing.has(tab.id))
+        if (allCurrentTabsClosing) suppressAutoCreateRef.current = true
         let next: BrowserState | undefined
         try {
           next = (await window.bridge.invoke("browser:close", sessionId, id)) as
             | BrowserState
             | undefined
         } catch (error) {
-          if (closingLastTab) suppressAutoCreateRef.current = false
+          if (closeEpochRef.current !== closeEpoch) throw error
+          closing.delete(id)
+          pendingClosing.delete(id)
+          const stillClosingAll =
+            stateRef.current.tabs.length > 0 &&
+            stateRef.current.tabs.every((tab) => closing.has(tab.id))
+          if (!stillClosingAll) suppressAutoCreateRef.current = false
+          if (pendingClosing.size === 0) closing.clear()
           throw error
         }
-        if (closingLastTab && (!next || next.tabs.length === 0)) {
+        if (closeEpochRef.current !== closeEpoch) return
+        const latestHasNewTab = stateRef.current.tabs.some((tab) => !closing.has(tab.id))
+        const shouldCloseWorkbench =
+          (!next || next.tabs.length === 0) &&
+          !latestHasNewTab &&
+          !closeDispatchedRef.current
+        pendingClosing.delete(id)
+        if (shouldCloseWorkbench) {
+          closeDispatchedRef.current = true
           window.dispatchEvent(new CustomEvent("larify:workbench-close", { detail: "browser" }))
-        } else if (closingLastTab) {
-          suppressAutoCreateRef.current = false
+        } else {
+          const remainingTabs = next?.tabs ?? stateRef.current.tabs
+          const stillClosingAll =
+            remainingTabs.length > 0 &&
+            remainingTabs.every((tab) => closing.has(tab.id))
+          if (!stillClosingAll) suppressAutoCreateRef.current = false
         }
+        if (pendingClosing.size === 0) closing.clear()
       },
       create: (url?: string) => window.bridge.invoke("browser:create", sessionId, url) as Promise<number>,
       forward: (id: number) => window.bridge.invoke("browser:forward", sessionId, id) as Promise<void>,
@@ -195,7 +240,7 @@ export function useBrowser(): UseBrowser {
         window.bridge.invoke("browser:reorder", sessionId, id, toIndex) as Promise<void>,
       setActive: (id: number) => window.bridge.invoke("browser:setActive", sessionId, id) as Promise<void>,
     }),
-    [sessionId, state.tabs.length],
+    [sessionId],
   )
 
   const active = useMemo(() => state.tabs.find((tab) => tab.id === state.activeId) ?? null, [state])

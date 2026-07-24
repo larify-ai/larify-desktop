@@ -189,6 +189,125 @@ describe("useBrowser", () => {
     window.removeEventListener("larify:workbench-close", onCloseWorkbench)
   })
 
+  it("closes the workbench when all remaining tabs are closed concurrently", async () => {
+    let browser: BrowserHook | undefined
+    const closeEvents: Array<string | null> = []
+    const onCloseWorkbench = (event: Event): void => {
+      closeEvents.push((event as CustomEvent<string | null>).detail)
+    }
+    window.addEventListener("larify:workbench-close", onCloseWorkbench)
+    invoke.mockImplementation((channel: string, _sessionId: string, id?: number) => {
+      if (channel === "browser:getState") return stateRequest.promise
+      if (channel === "browser:close") {
+        return Promise.resolve(
+          id === 1
+            ? { tabs: [{ id: 2, title: "two" }], activeId: 2 }
+            : { tabs: [], activeId: null },
+        )
+      }
+      return Promise.resolve(undefined)
+    })
+
+    await act(async () =>
+      root.render(
+        createElement(Probe, {
+          onBrowser: (value) => {
+            browser = value
+          },
+          onState: vi.fn(),
+        }),
+      ),
+    )
+    await act(async () => {
+      stateRequest.resolve({
+        tabs: [{ id: 1, title: "one" }, { id: 2, title: "two" }],
+        activeId: 1,
+      })
+      window.dispatchEvent(new CustomEvent("larify:workbench-active", { detail: "browser" }))
+    })
+
+    await act(async () => {
+      await Promise.all([browser!.close(1), browser!.close(2)])
+    })
+
+    expect(closeEvents).toEqual(["browser"])
+    expect(invoke.mock.calls.filter(([channel]) => channel === "browser:ensureTab")).toHaveLength(0)
+    window.removeEventListener("larify:workbench-close", onCloseWorkbench)
+  })
+
+  it("keeps the workbench open when a new tab appears during concurrent closes", async () => {
+    let browser: BrowserHook | undefined
+    const closeEvents: Array<string | null> = []
+    const onCloseWorkbench = (event: Event): void => {
+      closeEvents.push((event as CustomEvent<string | null>).detail)
+    }
+    window.addEventListener("larify:workbench-close", onCloseWorkbench)
+    invoke.mockImplementation((channel: string) => {
+      if (channel === "browser:getState") return stateRequest.promise
+      if (channel === "browser:close") return Promise.resolve({ tabs: [], activeId: null })
+      return Promise.resolve(undefined)
+    })
+
+    await act(async () =>
+      root.render(
+        createElement(Probe, {
+          onBrowser: (value) => {
+            browser = value
+          },
+          onState: vi.fn(),
+        }),
+      ),
+    )
+    await act(async () => {
+      stateRequest.resolve({
+        tabs: [{ id: 1, title: "one" }, { id: 2, title: "two" }],
+        activeId: 1,
+      })
+      window.dispatchEvent(new CustomEvent("larify:workbench-active", { detail: "browser" }))
+    })
+    await act(async () => {
+      const closing = Promise.all([browser!.close(1), browser!.close(2)])
+      listeners[0]({
+        sessionId: "session-a",
+        state: { tabs: [{ id: 3, title: "new" }], activeId: 3 },
+      })
+      await closing
+    })
+
+    expect(closeEvents).toEqual([])
+    window.removeEventListener("larify:workbench-close", onCloseWorkbench)
+  })
+
+  it("restores auto-create suppression when a close fails", async () => {
+    let browser: BrowserHook | undefined
+    invoke.mockImplementation((channel: string) => {
+      if (channel === "browser:getState") return stateRequest.promise
+      if (channel === "browser:close") return Promise.reject(new Error("close failed"))
+      return Promise.resolve(undefined)
+    })
+    await act(async () =>
+      root.render(
+        createElement(Probe, {
+          onBrowser: (value) => {
+            browser = value
+          },
+          onState: vi.fn(),
+        }),
+      ),
+    )
+    await act(async () => {
+      stateRequest.resolve({ tabs: [{ id: 1, title: "one" }], activeId: 1 })
+      window.dispatchEvent(new CustomEvent("larify:workbench-active", { detail: "browser" }))
+    })
+
+    await expect(browser!.close(1)).rejects.toThrow("close failed")
+    await act(async () => {
+      listeners[0]({ sessionId: "session-a", state: { tabs: [], activeId: null } })
+    })
+
+    expect(invoke).toHaveBeenCalledWith("browser:ensureTab", "session-a")
+  })
+
   it("ignores state events for other sessions", async () => {
     const onState = vi.fn()
     await act(async () => root.render(createElement(Probe, { onState })))
@@ -494,4 +613,54 @@ describe("useBrowser", () => {
 
     expect(onState).toHaveBeenLastCalledWith(sessionBState)
   })
+
+  it("does not close the current workbench when an old session close resolves late", async () => {
+    const stateRequests = new Map<string, Deferred<unknown>>()
+    const oldClose = deferred<unknown>()
+    const closeEvents: Array<string | null> = []
+    let browser: BrowserHook | undefined
+    const onCloseWorkbench = (event: Event): void => {
+      closeEvents.push((event as CustomEvent<string | null>).detail)
+    }
+    window.addEventListener("larify:workbench-close", onCloseWorkbench)
+    invoke.mockImplementation((channel: string, requestedSessionId: string) => {
+      if (channel === "browser:getState") {
+        const request = deferred<unknown>()
+        stateRequests.set(requestedSessionId, request)
+        return request.promise
+      }
+      if (channel === "browser:close" && requestedSessionId === "session-a") {
+        return oldClose.promise
+      }
+      return Promise.resolve(undefined)
+    })
+
+    await act(async () =>
+      root.render(
+        createElement(Probe, {
+          onBrowser: (value) => {
+            browser = value
+          },
+          onState: vi.fn(),
+        }),
+      ),
+    )
+    await act(async () => {
+      stateRequests.get("session-a")!.resolve({
+        tabs: [{ id: 1, title: "old" }],
+        activeId: 1,
+      })
+    })
+    const closing = browser!.close(1)
+    await act(async () => setAgentSessionId("session-b"))
+    await act(async () => {
+      stateRequests.get("session-b")!.resolve({ tabs: [], activeId: null })
+      oldClose.resolve({ tabs: [], activeId: null })
+      await closing
+    })
+
+    expect(closeEvents).toEqual([])
+    window.removeEventListener("larify:workbench-close", onCloseWorkbench)
+  })
+
 })

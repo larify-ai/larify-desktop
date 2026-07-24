@@ -847,6 +847,40 @@ describe("BrowserTab", () => {
     expect(tab.state().error).toEqual({ code: -105, description: "ERR_NAME_NOT_RESOLVED" })
   })
 
+  it.each(["back", "forward", "reload"] as const)(
+    "cleans load listeners when waiting %s throws synchronously",
+    async (action) => {
+      const tab = new BrowserTab(1, "p")
+      await Promise.resolve()
+      const wc = webContents(tab)
+      const history = wc.navigationHistory as unknown as Record<string, unknown>
+      if (action === "back") {
+        history.canGoBack = () => true
+        history.goBack = () => {
+          throw new Error("navigation failed")
+        }
+      } else if (action === "forward") {
+        history.canGoForward = () => true
+        history.goForward = () => {
+          throw new Error("navigation failed")
+        }
+      } else {
+        ;(wc as unknown as { reload(): void }).reload = () => {
+          throw new Error("navigation failed")
+        }
+      }
+
+      const operation =
+        action === "back"
+          ? tab.goBackAndWait()
+          : action === "forward"
+            ? tab.goForwardAndWait()
+            : tab.reloadAndWait()
+      await expect(operation).rejects.toThrow("navigation failed")
+      expect(wc.handlers["did-finish-load"] ?? []).toHaveLength(0)
+    },
+  )
+
   it("does not report an older navigation as successful after a newer navigation wins", async () => {
     const tab = new BrowserTab(1, "p")
     const wc = webContents(tab)
@@ -1050,6 +1084,78 @@ describe("BrowserTab", () => {
     expect(
       h.sendCommandMock.mock.calls.some(([method]) => method === "Runtime.evaluate"),
     ).toBe(false)
+  })
+
+  it("tracks a held modifier across raw keyboard down and up calls", async () => {
+    const tab = new BrowserTab(1, "p")
+    await Promise.resolve()
+    h.sendCommandMock.mockClear()
+
+    await tab.keyDown("Ctrl")
+    await tab.keyDown("c")
+    await tab.keyUp("c")
+    await tab.keyUp("Ctrl")
+
+    const keys = h.sendCommandMock.mock.calls
+      .filter(([method]) => method === "Input.dispatchKeyEvent")
+      .map(([, params]) => params)
+    expect(keys).toMatchObject([
+      { type: "keyDown", key: "Control", modifiers: 2 },
+      { type: "keyDown", key: "c", modifiers: 2 },
+      { type: "keyUp", key: "c", modifiers: 2 },
+      { type: "keyUp", key: "Control", modifiers: 0 },
+    ])
+  })
+
+  it("does not retain a modifier whose keyDown command failed", async () => {
+    const tab = new BrowserTab(1, "p")
+    await Promise.resolve()
+    h.sendCommandMock.mockClear()
+    let failModifier = true
+    h.sendCommandMock.mockImplementation(async (method: string) => {
+      if (method === "Input.dispatchKeyEvent" && failModifier) {
+        failModifier = false
+        throw new Error("modifier down failed")
+      }
+      return {}
+    })
+
+    await expect(tab.keyDown("Ctrl")).rejects.toThrow("modifier down failed")
+    await tab.keyDown("c")
+
+    const cDown = h.sendCommandMock.mock.calls.find(
+      ([method, params]) =>
+        method === "Input.dispatchKeyEvent" &&
+        (params as { type?: string; key?: string }).type === "keyDown" &&
+        (params as { key?: string }).key === "c",
+    )
+    expect(cDown?.[1]).toMatchObject({ modifiers: 0 })
+  })
+
+  it("resets synthetic input state after the renderer process is replaced", async () => {
+    const tab = new BrowserTab(1, "p")
+    await Promise.resolve()
+    h.sendCommandMock.mockClear()
+
+    await tab.keyDown("Ctrl")
+    await tab.mouseDown("left")
+    webContents(tab).emit("render-process-gone", {}, { reason: "crashed" })
+    h.sendCommandMock.mockClear()
+    await tab.keyDown("c")
+    await tab.mouseMove(10, 20)
+
+    const keyDownCall = h.sendCommandMock.mock.calls.find(
+      ([method, params]) =>
+        method === "Input.dispatchKeyEvent" &&
+        (params as { type?: string }).type === "keyDown",
+    )
+    const mouseMoveCall = h.sendCommandMock.mock.calls.find(
+      ([method, params]) =>
+        method === "Input.dispatchMouseEvent" &&
+        (params as { type?: string }).type === "mouseMoved",
+    )
+    expect(keyDownCall?.[1]).toMatchObject({ modifiers: 0 })
+    expect(mouseMoveCall?.[1]).toMatchObject({ buttons: 0 })
   })
 
   it("ignores user abort and subframe load failures", () => {

@@ -1,3 +1,6 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const h = vi.hoisted(() => {
@@ -98,6 +101,20 @@ describe("Recorder guards", () => {
     ;(recorder as unknown as { starting: boolean }).starting = true
 
     await expect(recorder.start({} as never, "out.webm")).rejects.toThrow("already in progress")
+  })
+
+  it("rejects start immediately when the output directory cannot be created", async () => {
+    const root = await mkdtemp(join(tmpdir(), "larify-recorder-"))
+    const blockingFile = join(root, "not-a-directory")
+    try {
+      await writeFile(blockingFile, "x")
+      await expect(
+        new Recorder().start({} as never, join(blockingFile, "recording.webm")),
+      ).rejects.toThrow()
+      expect(h.createdWindows).toHaveLength(0)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
   })
 
   it("waits for an in-progress start before stopping the resulting recording", async () => {

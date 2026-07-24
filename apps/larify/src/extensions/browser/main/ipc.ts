@@ -1,9 +1,13 @@
-import { BrowserWindow, ipcMain, type IpcMainInvokeEvent, type Rectangle } from "electron"
+import { ipcMain, type IpcMainInvokeEvent, type Rectangle, type WebContents } from "electron"
 import type { BrowserService } from "./browser-service"
 
 export function registerBrowserIpc(getService: () => BrowserService): () => void {
   let bound = false
   let unbindChange: (() => void) | null = null
+  const subscribers = new Set<WebContents>()
+  const subscribe = (event: IpcMainInvokeEvent): void => {
+    subscribers.add(event.sender)
+  }
   const service = (): BrowserService => {
     const browser = getService()
     if (!bound) {
@@ -14,16 +18,28 @@ export function registerBrowserIpc(getService: () => BrowserService): () => void
   }
 
   const sendState = (sessionId: string, state: unknown): void => {
-    for (const window of BrowserWindow.getAllWindows()) {
-      if (!window.isDestroyed()) window.webContents.send("browser:state", { sessionId, state })
+    for (const sender of subscribers) {
+      if (sender.isDestroyed()) {
+        subscribers.delete(sender)
+        continue
+      }
+      try {
+        sender.send("browser:state", { sessionId, state })
+      } catch {
+        subscribers.delete(sender)
+      }
     }
   }
 
   const handlers = {
-    "browser:getState": (_event: IpcMainInvokeEvent, sessionId: string) =>
-      service().state(sessionId),
-    "browser:create": (_event: IpcMainInvokeEvent, sessionId: string, url?: string) =>
-      service().createTab(sessionId, url),
+    "browser:getState": (event: IpcMainInvokeEvent, sessionId: string) => {
+      subscribe(event)
+      return service().state(sessionId)
+    },
+    "browser:create": (event: IpcMainInvokeEvent, sessionId: string, url?: string) => {
+      subscribe(event)
+      return service().createTab(sessionId, url)
+    },
     "browser:ensureTab": (_event: IpcMainInvokeEvent, sessionId: string) =>
       service().ensureTab(sessionId),
     "browser:setActive": (_event: IpcMainInvokeEvent, sessionId: string, id: number) =>
@@ -54,6 +70,7 @@ export function registerBrowserIpc(getService: () => BrowserService): () => void
   return () => {
     unbindChange?.()
     unbindChange = null
+    subscribers.clear()
     for (const channel of Object.keys(handlers)) ipcMain.removeHandler(channel)
   }
 }

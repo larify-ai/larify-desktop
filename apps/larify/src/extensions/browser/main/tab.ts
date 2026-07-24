@@ -25,7 +25,7 @@ import { newMouseState, type MouseButton } from "./input"
 import * as waits from "./waits"
 import type { WaitState } from "./waits"
 import { screenshot, type ScreenshotOptions, type ScreenshotResult } from "./capture"
-import { parseKeyChord } from "./keymap"
+import { modifierBitForKey, parseKeyChord } from "./keymap"
 
 const DIALOG_OVERRIDE =
   "window.alert=function(){};window.confirm=function(){return true;};window.prompt=function(){return null;};"
@@ -69,6 +69,7 @@ function waitForWebContentsLoadEvent(
   wc: WebContents,
   timeoutMs = 30000,
   acceptsFailedUrl?: (url: string) => boolean,
+  signal?: AbortSignal,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const cleanup = (): void => {
@@ -76,6 +77,7 @@ function waitForWebContentsLoadEvent(
       wc.off("did-finish-load", finish)
       wc.off("did-fail-load", onFail)
       wc.off("destroyed", onDestroyed)
+      signal?.removeEventListener("abort", onAbort)
     }
     const finish = (): void => {
       cleanup()
@@ -97,6 +99,10 @@ function waitForWebContentsLoadEvent(
       cleanup()
       reject(new Error("tab was closed during navigation"))
     }
+    const onAbort = (): void => {
+      cleanup()
+      reject(new Error("navigation wait was cancelled"))
+    }
     const timer = setTimeout(() => {
       cleanup()
       reject(new Error(`navigation load event timed out after ${waits.formatTimeout(timeoutMs)}`))
@@ -104,10 +110,17 @@ function waitForWebContentsLoadEvent(
     wc.on("did-finish-load", finish)
     wc.on("did-fail-load", onFail)
     wc.once("destroyed", onDestroyed)
+    signal?.addEventListener("abort", onAbort, { once: true })
+    if (signal?.aborted) onAbort()
   })
 }
 
-function waitForWebContentsNotLoading(wc: WebContents, timeoutMs = 30000, stableMs = 100): Promise<void> {
+function waitForWebContentsNotLoading(
+  wc: WebContents,
+  timeoutMs = 30000,
+  stableMs = 100,
+  signal?: AbortSignal,
+): Promise<void> {
   return new Promise((resolve, reject) => {
     let stable: ReturnType<typeof setTimeout> | undefined
     const cleanup = (): void => {
@@ -116,6 +129,7 @@ function waitForWebContentsNotLoading(wc: WebContents, timeoutMs = 30000, stable
       wc.off("did-start-loading", check)
       wc.off("did-stop-loading", check)
       wc.off("destroyed", onDestroyed)
+      signal?.removeEventListener("abort", onAbort)
     }
     const finish = (): void => {
       cleanup()
@@ -132,6 +146,10 @@ function waitForWebContentsNotLoading(wc: WebContents, timeoutMs = 30000, stable
       cleanup()
       reject(new Error("tab was closed during navigation"))
     }
+    const onAbort = (): void => {
+      cleanup()
+      reject(new Error("navigation wait was cancelled"))
+    }
     const deadline = setTimeout(() => {
       cleanup()
       reject(new Error(`navigation loading state timed out after ${waits.formatTimeout(timeoutMs)}`))
@@ -139,6 +157,11 @@ function waitForWebContentsNotLoading(wc: WebContents, timeoutMs = 30000, stable
     wc.on("did-start-loading", check)
     wc.on("did-stop-loading", check)
     wc.once("destroyed", onDestroyed)
+    signal?.addEventListener("abort", onAbort, { once: true })
+    if (signal?.aborted) {
+      onAbort()
+      return
+    }
     check()
   })
 }
@@ -147,9 +170,10 @@ async function waitForWebContentsLoad(
   wc: WebContents,
   timeoutMs = 30000,
   acceptsFailedUrl?: (url: string) => boolean,
+  signal?: AbortSignal,
 ): Promise<void> {
-  await waitForWebContentsLoadEvent(wc, timeoutMs, acceptsFailedUrl)
-  await waitForWebContentsNotLoading(wc, timeoutMs)
+  await waitForWebContentsLoadEvent(wc, timeoutMs, acceptsFailedUrl, signal)
+  await waitForWebContentsNotLoading(wc, timeoutMs, 100, signal)
 }
 
 function evalJsExpression(script: string): string {
@@ -182,6 +206,7 @@ export class BrowserTab {
   private nextRef = 1
   private readonly frames = new FrameSessions()
   private readonly mouseState = newMouseState()
+  private keyboardModifiers = 0
   private readonly pendingNetworkRequests = new Set<string>()
   private readonly networkWaiters = new Set<() => void>()
   private readonly cancelDownloads = new Set<(error: Error) => void>()
@@ -279,8 +304,16 @@ export class BrowserTab {
   async goBackAndWait(): Promise<void> {
     const wc = this.view.webContents
     if (!wc.navigationHistory.canGoBack()) return
-    const loaded = waitForWebContentsLoad(wc)
-    const generation = this.runNavigationAction(() => wc.navigationHistory.goBack())
+    const waitController = new AbortController()
+    const loaded = waitForWebContentsLoad(wc, 30000, undefined, waitController.signal)
+    let generation: number
+    try {
+      generation = this.runNavigationAction(() => wc.navigationHistory.goBack())
+    } catch (error) {
+      waitController.abort()
+      await loaded.catch(() => {})
+      throw error
+    }
     await loaded
     this.assertNavigationCurrent(generation)
   }
@@ -288,16 +321,32 @@ export class BrowserTab {
   async goForwardAndWait(): Promise<void> {
     const wc = this.view.webContents
     if (!wc.navigationHistory.canGoForward()) return
-    const loaded = waitForWebContentsLoad(wc)
-    const generation = this.runNavigationAction(() => wc.navigationHistory.goForward())
+    const waitController = new AbortController()
+    const loaded = waitForWebContentsLoad(wc, 30000, undefined, waitController.signal)
+    let generation: number
+    try {
+      generation = this.runNavigationAction(() => wc.navigationHistory.goForward())
+    } catch (error) {
+      waitController.abort()
+      await loaded.catch(() => {})
+      throw error
+    }
     await loaded
     this.assertNavigationCurrent(generation)
   }
 
   async reloadAndWait(): Promise<void> {
     const wc = this.view.webContents
-    const loaded = waitForWebContentsLoad(wc)
-    const generation = this.runNavigationAction(() => wc.reload())
+    const waitController = new AbortController()
+    const loaded = waitForWebContentsLoad(wc, 30000, undefined, waitController.signal)
+    let generation: number
+    try {
+      generation = this.runNavigationAction(() => wc.reload())
+    } catch (error) {
+      waitController.abort()
+      await loaded.catch(() => {})
+      throw error
+    }
     await loaded
     this.assertNavigationCurrent(generation)
   }
@@ -429,7 +478,7 @@ export class BrowserTab {
   }
 
   async press(key: string): Promise<void> {
-    await interactions.press(this.interactCtx(), key)
+    await interactions.press(this.interactCtx(), key, this.keyboardModifiers)
   }
 
   async focus(selector: string): Promise<void> {
@@ -613,16 +662,24 @@ export class BrowserTab {
 
   async keyDown(key: string): Promise<void> {
     const { modifiers, info } = parseKeyChord(key)
-    await input.keyDown(this.cdpSend, info, modifiers)
+    const modifier = modifierBitForKey(info.key)
+    const nextModifiers = this.keyboardModifiers | modifiers | modifier
+    await input.keyDown(this.cdpSend, info, nextModifiers)
+    if (modifier) this.keyboardModifiers = nextModifiers
   }
 
   async keyUp(key: string): Promise<void> {
     const { modifiers, info } = parseKeyChord(key)
-    await input.keyUp(this.cdpSend, info, modifiers)
+    const modifier = modifierBitForKey(info.key)
+    const nextModifiers = modifier
+      ? this.keyboardModifiers & ~modifier
+      : this.keyboardModifiers | modifiers
+    await input.keyUp(this.cdpSend, info, nextModifiers)
+    if (modifier) this.keyboardModifiers = nextModifiers
   }
 
   async keyboardType(text: string): Promise<void> {
-    await input.typeText(this.cdpSend, text)
+    await input.typeText(this.cdpSend, text, this.keyboardModifiers)
   }
 
   async keyboardInsertText(text: string): Promise<void> {
@@ -798,6 +855,7 @@ export class BrowserTab {
     })
     wc.on("render-process-gone", (_event, details) => {
       this.error = { code: -1, description: `render process gone: ${details.reason}` }
+      this.resetInputState()
       this.resetPageState()
       emit()
     })
@@ -994,6 +1052,13 @@ export class BrowserTab {
     this.frames.clear()
     this.pendingNetworkRequests.clear()
     for (const waiter of this.networkWaiters) waiter()
+  }
+
+  private resetInputState(): void {
+    this.keyboardModifiers = 0
+    this.mouseState.x = 0
+    this.mouseState.y = 0
+    this.mouseState.buttons = 0
   }
 
   private async setFavIcon(favicons: string[]): Promise<void> {

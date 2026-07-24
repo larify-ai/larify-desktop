@@ -707,6 +707,48 @@ describe("browser toolkit", () => {
     expect(tab.download).toHaveBeenCalledWith("a", "D:\\Downloads\\file.txt", 1_800_000, controller.signal)
   })
 
+  it("resolves relative interaction and recording paths from the tool working directory", async () => {
+    const tab = {
+      upload: vi.fn(async () => undefined),
+      download: vi.fn(async (_selector: string, path: string) => path),
+    }
+    const service = {
+      ...createService(),
+      tab: vi.fn(() => tab),
+      recordStart: vi.fn(async () => 1),
+      recordRestart: vi.fn(async () => 2),
+    } as unknown as BrowserService
+
+    await tool("upload", service).execute(
+      { id: 1, selector: "input", files: ["files\\a.txt"] },
+      ctx,
+    )
+    await tool("download", service).execute(
+      { id: 1, selector: "a", path: "downloads\\a.txt" },
+      ctx,
+    )
+    await tool("record_start", service).execute({ id: 1, path: "video\\a.webm" }, ctx)
+    await tool("record_restart", service).execute({ id: 1, path: "video\\b.webm" }, ctx)
+
+    expect(tab.upload).toHaveBeenCalledWith("input", [join(ctx.context.cwd, "files\\a.txt")])
+    expect(tab.download).toHaveBeenCalledWith(
+      "a",
+      join(ctx.context.cwd, "downloads\\a.txt"),
+      1_800_000,
+      undefined,
+    )
+    expect(service.recordStart).toHaveBeenCalledWith(
+      "session-1",
+      tab,
+      join(ctx.context.cwd, "video\\a.webm"),
+    )
+    expect(service.recordRestart).toHaveBeenCalledWith(
+      "session-1",
+      tab,
+      join(ctx.context.cwd, "video\\b.webm"),
+    )
+  })
+
   it("returns interaction errors without throwing", async () => {
     const service = {
       ...createService(),

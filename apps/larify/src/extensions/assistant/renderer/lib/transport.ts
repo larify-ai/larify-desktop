@@ -13,6 +13,12 @@ export const ipcTransport: ChatTransport<UIMessage> = {
           controller.close()
           offs.forEach((off) => off())
         }
+        const fail = (error: unknown): void => {
+          if (closed) return
+          closed = true
+          controller.error(error)
+          offs.forEach((off) => off())
+        }
 
         offs.push(
           window.bridge.on(`agent:chunk:${runId}`, (c) => {
@@ -24,14 +30,25 @@ export const ipcTransport: ChatTransport<UIMessage> = {
 
         if (abortSignal) {
           const onAbort = (): void => {
-            void window.bridge.invoke("agent:cancel", runId)
             finish()
+            void Promise.resolve()
+              .then(() => window.bridge.invoke("agent:cancel", runId))
+              .catch((error) => console.error("[agent:cancel]", error))
           }
-          abortSignal.addEventListener("abort", onAbort)
-          offs.push(() => abortSignal.removeEventListener("abort", onAbort))
+          if (abortSignal.aborted) {
+            onAbort()
+          } else {
+            abortSignal.addEventListener("abort", onAbort)
+            offs.push(() => abortSignal.removeEventListener("abort", onAbort))
+          }
         }
 
-        void window.bridge.invoke("agent:run", { runId, sessionId: chatId, messages })
+        void Promise.resolve()
+          .then(() => {
+            if (closed) return
+            return window.bridge.invoke("agent:run", { runId, sessionId: chatId, messages })
+          })
+          .catch(fail)
       },
     })
   },

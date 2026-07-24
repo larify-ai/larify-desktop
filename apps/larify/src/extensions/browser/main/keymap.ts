@@ -15,6 +15,13 @@ export const MODIFIER_BITS: Record<string, number> = {
 }
 
 const NAMED_KEYS: Record<string, KeyInfo> = {
+  alt: { key: 'Alt', code: 'AltLeft', keyCode: 18 },
+  control: { key: 'Control', code: 'ControlLeft', keyCode: 17 },
+  ctrl: { key: 'Control', code: 'ControlLeft', keyCode: 17 },
+  meta: { key: 'Meta', code: 'MetaLeft', keyCode: 91 },
+  cmd: { key: 'Meta', code: 'MetaLeft', keyCode: 91 },
+  command: { key: 'Meta', code: 'MetaLeft', keyCode: 91 },
+  shift: { key: 'Shift', code: 'ShiftLeft', keyCode: 16 },
   enter: { key: 'Enter', code: 'Enter', keyCode: 13 },
   return: { key: 'Enter', code: 'Enter', keyCode: 13 },
   tab: { key: 'Tab', code: 'Tab', keyCode: 9 },
@@ -92,6 +99,10 @@ export function keyText(key: string): string | undefined {
 export interface KeyChord {
   modifiers: number
   info: KeyInfo
+}
+
+export function modifierBitForKey(key: string): number {
+  return MODIFIER_BITS[key.toLowerCase()] ?? 0
 }
 
 export function parseKeyChord(chord: string): KeyChord {

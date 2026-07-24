@@ -70,6 +70,7 @@ describe("prompt-cache middleware", () => {
   it("sends only the eager tools to the provider but keeps every tool executable", async () => {
     let sentToolNames: string[] = []
     let lazyRan = false
+    let calls = 0
     const tools = {
       eager_tool: {
         description: "eager",
@@ -88,7 +89,19 @@ describe("prompt-cache middleware", () => {
     }
     const model = new MockLanguageModelV4({
       doStream: async ({ tools: sent }) => {
+        calls++
         sentToolNames = (sent ?? []).map((t) => t.name)
+        if (calls > 1) {
+          return {
+            stream: convertArrayToReadableStream([
+              { type: "stream-start", warnings: [] },
+              { type: "text-start", id: "0" },
+              { type: "text-delta", id: "0", delta: "done" },
+              { type: "text-end", id: "0" },
+              { type: "finish", finishReason: "stop", usage: USAGE },
+            ]),
+          }
+        }
         return {
           stream: convertArrayToReadableStream([
             { type: "stream-start", warnings: [] },
@@ -112,5 +125,6 @@ describe("prompt-cache middleware", () => {
 
     expect(sentToolNames).toEqual(["eager_tool"])
     expect(lazyRan).toBe(true)
+    expect(calls).toBe(2)
   })
 })

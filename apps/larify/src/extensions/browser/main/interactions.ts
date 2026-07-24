@@ -195,9 +195,9 @@ export async function type(
   }
 }
 
-export async function press(ctx: Interactions, key: string): Promise<void> {
+export async function press(ctx: Interactions, key: string, heldModifiers = 0): Promise<void> {
   const { modifiers, info } = parseKeyChord(key)
-  await dispatchKey(ctx.send, info, modifiers)
+  await dispatchKey(ctx.send, info, modifiers | heldModifiers)
 }
 
 export async function focus(ctx: Interactions, selector: string): Promise<void> {

@@ -8,8 +8,10 @@ import {
   mouseMove,
   mouseUp,
   newMouseState,
+  typeText,
 } from "../../../../src/extensions/browser/main/input"
 import { namedKeyInfo } from "../../../../src/extensions/browser/main/keymap"
+import { parseKeyChord } from "../../../../src/extensions/browser/main/keymap"
 
 describe("boxModelCenter", () => {
   it("averages the four content-quad corners", () => {
@@ -37,6 +39,20 @@ function captureSend(): {
 }
 
 describe("keyDown command-chord text suppression", () => {
+  it("maps standalone modifier names to real CDP keys", async () => {
+    const { send, sent } = captureSend()
+    const { info, modifiers } = parseKeyChord("Ctrl")
+
+    await keyDown(send as never, info, modifiers | 2)
+
+    expect(sent[0]).toMatchObject({
+      key: "Control",
+      code: "ControlLeft",
+      windowsVirtualKeyCode: 17,
+      modifiers: 2,
+    })
+  })
+
   it("includes text for a plain key press", async () => {
     const { send, sent } = captureSend()
     await keyDown(send as never, keyA as never, 0)
@@ -98,6 +114,47 @@ describe("mouse buttons bitmask state machine", () => {
 
     await expect(mouseMove(send as never, state, 50, 60)).rejects.toThrow("move failed")
     expect(state).toEqual({ x: 0, y: 0, buttons: 0 })
+  })
+})
+
+describe("keyboard text events", () => {
+  it("dispatches keyDown and keyUp for representable characters", async () => {
+    const calls: Array<{ method: string; params: Record<string, unknown> }> = []
+    const send = vi.fn(async (method: string, params: Record<string, unknown>) => {
+      calls.push({ method, params })
+      return {}
+    })
+
+    await typeText(send as never, "a1A?")
+
+    expect(calls.map(({ method, params }) => [method, params.type, params.key])).toEqual([
+      ["Input.dispatchKeyEvent", "keyDown", "a"],
+      ["Input.dispatchKeyEvent", "keyUp", "a"],
+      ["Input.dispatchKeyEvent", "keyDown", "1"],
+      ["Input.dispatchKeyEvent", "keyUp", "1"],
+      ["Input.dispatchKeyEvent", "keyDown", "A"],
+      ["Input.dispatchKeyEvent", "keyUp", "A"],
+      ["Input.dispatchKeyEvent", "keyDown", "?"],
+      ["Input.dispatchKeyEvent", "keyUp", "?"],
+    ])
+    expect(calls.slice(4).every(({ params }) => params.modifiers === 8)).toBe(true)
+  })
+
+  it("preserves held modifiers and falls back to insertText for unicode", async () => {
+    const calls: Array<{ method: string; params: Record<string, unknown> }> = []
+    const send = vi.fn(async (method: string, params: Record<string, unknown>) => {
+      calls.push({ method, params })
+      return {}
+    })
+
+    await typeText(send as never, "c中", 2)
+
+    expect(calls[0]).toMatchObject({
+      method: "Input.dispatchKeyEvent",
+      params: { type: "keyDown", key: "c", modifiers: 2 },
+    })
+    expect(calls[0].params.text).toBeUndefined()
+    expect(calls.at(-1)).toEqual({ method: "Input.insertText", params: { text: "中" } })
   })
 })
 

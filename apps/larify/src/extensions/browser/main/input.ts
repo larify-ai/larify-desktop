@@ -1,5 +1,5 @@
 import type { CdpSend } from './snapshotCapture'
-import { keyText, namedKeyInfo, type KeyInfo } from './keymap'
+import { charToKeyInfo, keyText, type KeyInfo } from './keymap'
 
 export type MouseButton = 'left' | 'right' | 'middle'
 
@@ -129,10 +129,18 @@ export async function insertText(send: CdpSend, text: string, sessionId?: string
   await send('Input.insertText', { text }, sessionId)
 }
 
-export async function typeText(send: CdpSend, text: string, sessionId?: string): Promise<void> {
+export async function typeText(
+  send: CdpSend,
+  text: string,
+  modifiers = 0,
+  sessionId?: string
+): Promise<void> {
   for (const ch of text) {
-    if (ch === '\n' || ch === '\r') await dispatchKey(send, namedKeyInfo('enter'), 0, sessionId)
-    else if (ch === '\t') await dispatchKey(send, namedKeyInfo('tab'), 0, sessionId)
+    const info = charToKeyInfo(ch)
+    if (info) {
+      const needsShift = /[A-Z~_+{}|:"<>?]/.test(ch)
+      await dispatchKey(send, info, modifiers | (needsShift ? 8 : 0), sessionId)
+    }
     else await insertText(send, ch, sessionId)
   }
 }

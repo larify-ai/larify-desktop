@@ -2,20 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const h = vi.hoisted(() => ({
   handlers: new Map<string, (...args: unknown[]) => unknown>(),
-  sent: [] as Array<{ channel: string; payload: unknown }>,
+  sent: [] as Array<{ sender: string; channel: string; payload: unknown }>,
 }))
 
 vi.mock("electron", () => ({
-  BrowserWindow: {
-    getAllWindows: () => [
-      {
-        isDestroyed: () => false,
-        webContents: {
-          send: (channel: string, payload: unknown) => h.sent.push({ channel, payload }),
-        },
-      },
-    ],
-  },
   ipcMain: {
     handle: (channel: string, handler: (...args: unknown[]) => unknown) => {
       if (h.handlers.has(channel)) throw new Error(`duplicate handler: ${channel}`)
@@ -27,6 +17,18 @@ vi.mock("electron", () => ({
 
 import { registerBrowserIpc } from "../../../../src/extensions/browser/main/ipc"
 import type { BrowserService } from "../../../../src/extensions/browser/main/browser-service"
+
+function sender(name: string, destroyed = false): {
+  isDestroyed(): boolean
+  send(channel: string, payload: unknown): void
+} {
+  return {
+    isDestroyed: () => destroyed,
+    send: (channel, payload) => h.sent.push({ sender: name, channel, payload }),
+  }
+}
+
+const event = (name: string, destroyed = false): unknown => ({ sender: sender(name, destroyed) })
 
 function fakeService(): BrowserService & { bindChange: ReturnType<typeof vi.fn> } {
   const unbindChange = vi.fn()
@@ -77,30 +79,45 @@ describe("registerBrowserIpc", () => {
   it("routes commands to the manager", () => {
     const service = fakeService()
     registerBrowserIpc(() => service)
-    h.handlers.get("browser:navigate")!({}, "session-a", 3, "openai.com")
+    h.handlers.get("browser:navigate")!(event("main"), "session-a", 3, "openai.com")
     expect(service.navigate).toHaveBeenCalledWith("session-a", 3, "openai.com")
-    expect(h.handlers.get("browser:create")!({}, "session-a", undefined)).toBe(7)
+    expect(h.handlers.get("browser:create")!(event("main"), "session-a", undefined)).toBe(7)
   })
 
-  it("pushes state changes to renderer windows", () => {
+  it("pushes state changes only to renderer webContents that subscribed through IPC", () => {
     const service = fakeService()
     registerBrowserIpc(() => service)
-    h.handlers.get("browser:getState")!({}, "session-a")
+    h.handlers.get("browser:getState")!(event("renderer"), "session-a")
     const onChange = service.bindChange.mock.calls[0][0] as (
       sessionId: string,
       state: unknown,
     ) => void
     onChange("session-a", { tabs: [], activeId: null })
-    expect(h.sent).toContainEqual({
+    expect(h.sent).toEqual([{
+      sender: "renderer",
       channel: "browser:state",
       payload: { sessionId: "session-a", state: { tabs: [], activeId: null } },
-    })
+    }])
+  })
+
+  it("drops destroyed subscribers without sending to them", () => {
+    const service = fakeService()
+    registerBrowserIpc(() => service)
+    h.handlers.get("browser:getState")!(event("destroyed", true), "session-a")
+    const onChange = service.bindChange.mock.calls[0][0] as (
+      sessionId: string,
+      state: unknown,
+    ) => void
+
+    onChange("session-a", { tabs: [], activeId: null })
+
+    expect(h.sent).toEqual([])
   })
 
   it("cleanup removes all handlers", () => {
     const service = fakeService()
     const dispose = registerBrowserIpc(() => service)
-    h.handlers.get("browser:getState")!({}, "session-a")
+    h.handlers.get("browser:getState")!(event("main"), "session-a")
     dispose()
     expect((service as unknown as { unbindChange: ReturnType<typeof vi.fn> }).unbindChange)
       .toHaveBeenCalled()

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { UIMessage } from "ai"
@@ -59,6 +59,27 @@ describe("session store", () => {
       expect(await store.loadSession("chat/one")).toEqual(second)
     } finally {
       await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it("allows a later save after an earlier save fails", async () => {
+    const parent = await mkdtemp(join(tmpdir(), "larify-sessions-"))
+    const root = join(parent, "sessions")
+    try {
+      await writeFile(root, "blocks directory creation")
+      const store = createSessionStore(root)
+      const messages: UIMessage[] = [
+        { id: "user-1", role: "user", parts: [{ type: "text", text: "recovered" }] },
+      ]
+
+      await expect(store.saveSession("chat", messages)).rejects.toThrow()
+      await rm(root)
+      await mkdir(root)
+
+      await expect(store.saveSession("chat", messages)).resolves.toMatchObject({ id: "chat" })
+      expect(await store.loadSession("chat")).toEqual(messages)
+    } finally {
+      await rm(parent, { recursive: true, force: true })
     }
   })
 })

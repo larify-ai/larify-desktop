@@ -64,6 +64,13 @@ const RECORDER_HTML =
       '  warmed = true;' +
       '  out = fs.createWriteStream(o.path);' +
       '  out.on("error", (err) => { writeError = err; });' +
+      '  const openError = await new Promise((res) => {' +
+      '    out.once("open", () => res(null)); out.once("error", res);' +
+      '  });' +
+      '  if (openError) {' +
+      '    writeError = openError; out = null;' +
+      '    ipcRenderer.send("record:ready", { error: String(openError.message || openError) }); return;' +
+      '  }' +
       '  stream = c.captureStream(o.fps);' +
       '  rec = new MediaRecorder(stream, options);' +
       '  rec.ondataavailable = (e) => {' +
@@ -212,7 +219,7 @@ export class Recorder {
     this.startDone = startDone
     const dbg = tab.view.webContents.debugger
     try {
-      await mkdir(dirname(path), { recursive: true }).catch(() => {})
+      await mkdir(dirname(path), { recursive: true })
       const [{ width, height }, win] = await Promise.all([this.canvasSize(tab), this.ensureWindow()])
 
       const ready = await waitForIpc<{ error?: string }>('record:ready', win.webContents, READY_TIMEOUT, () =>

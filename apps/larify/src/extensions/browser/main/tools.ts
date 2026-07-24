@@ -1,5 +1,6 @@
+import { existsSync } from "node:fs"
 import { mkdir, writeFile } from "node:fs/promises"
-import { dirname, join } from "node:path"
+import { dirname, join, resolve } from "node:path"
 import { randomUUID } from "node:crypto"
 import { z } from "zod"
 import { defineTool, type Toolkit } from "../../../shared/tool"
@@ -168,6 +169,13 @@ async function withTab<T>(
 const tempPath = (extension: string): string =>
   join(larifyTempPath("browser"), `${randomUUID()}.${extension}`)
 
+const resolveToolPath = (cwd: string, path: string): string => resolve(cwd, path)
+
+const resolveNavigationInput = (cwd: string, value: string): string => {
+  const localPath = resolveToolPath(cwd, value)
+  return existsSync(localPath) ? localPath : value
+}
+
 async function writeBytes(path: string, data: Buffer): Promise<{ path: string; bytes: number }> {
   await mkdir(dirname(path), { recursive: true }).catch(() => {})
   await writeFile(path, data)
@@ -201,7 +209,7 @@ export function createBrowserToolkit(service: BrowserServiceProvider): Toolkit {
             try {
               if (url) {
                 await runUntilAbort(
-                  () => tab.navigateAndWait(url),
+                  () => tab.navigateAndWait(resolveNavigationInput(ctx.cwd, url)),
                   ctx.signal,
                   "browser navigation",
                 )
@@ -243,7 +251,8 @@ export function createBrowserToolkit(service: BrowserServiceProvider): Toolkit {
           const { id, action, url } = args
           return withTab(service, ctx.sessionId, id, async (tab) => {
             await runUntilAbort(async () => {
-              if (action === "goto") await tab.navigateAndWait(url!)
+              if (action === "goto")
+                await tab.navigateAndWait(resolveNavigationInput(ctx.cwd, url!))
               else if (action === "back") await tab.goBackAndWait()
               else if (action === "forward") await tab.goForwardAndWait()
               else await tab.reloadAndWait()
@@ -576,7 +585,7 @@ function interactionTools(service: BrowserServiceProvider): Toolkit["tools"] {
       execute: async (args, ctx) => {
         const { id, selector, files } = args
         return withTab(service, ctx.sessionId, id, async (tab) => {
-          await tab.upload(selector, files)
+          await tab.upload(selector, files.map((file) => resolveToolPath(ctx.cwd, file)))
           return { uploaded: files.length }
         })
       },
@@ -588,7 +597,12 @@ function interactionTools(service: BrowserServiceProvider): Toolkit["tools"] {
       execute: async (args, ctx) => {
         const { id, selector, path, timeout } = args
         return withTab(service, ctx.sessionId, id, async (tab) => ({
-          path: await tab.download(selector, path, secondsToMs(timeout), ctx.signal),
+          path: await tab.download(
+            selector,
+            resolveToolPath(ctx.cwd, path),
+            secondsToMs(timeout),
+            ctx.signal,
+          ),
         }))
       },
     }),
@@ -732,7 +746,11 @@ function captureTools(service: BrowserServiceProvider): Toolkit["tools"] {
         const { id, path, ...opts } = args
         return withTab(service, ctx.sessionId, id, async (tab) => {
           const result = await tab.screenshot(opts)
-          return await writeDataUrl(path ?? tempPath(opts.format), result.data, result.mimeType)
+          return await writeDataUrl(
+            path ? resolveToolPath(ctx.cwd, path) : tempPath(opts.format),
+            result.data,
+            result.mimeType,
+          )
         })
       },
     }),
@@ -742,7 +760,7 @@ function captureTools(service: BrowserServiceProvider): Toolkit["tools"] {
       inputSchema: pdfSchema,
       execute: async (args, ctx) => {
         const { id, path } = args
-        const target = path ?? tempPath("pdf")
+        const target = path ? resolveToolPath(ctx.cwd, path) : tempPath("pdf")
         return withTab(service, ctx.sessionId, id, async (tab) => writeBytes(target, await tab.pdf()))
       },
     }),
@@ -754,19 +772,20 @@ function captureTools(service: BrowserServiceProvider): Toolkit["tools"] {
       execute: async (args, ctx) => {
         const { id, path, duration } = args
         return withTab(service, ctx.sessionId, id, async (tab) => {
-          const generation = await resolveService(service).recordStart(ctx.sessionId, tab, path)
-          if (duration === undefined) return { recording: true, path }
+          const target = resolveToolPath(ctx.cwd, path)
+          const generation = await resolveService(service).recordStart(ctx.sessionId, tab, target)
+          if (duration === undefined) return { recording: true, path: target }
           await waitMs(duration * 1000, ctx.signal)
           try {
             return (
               (await resolveService(service).recordStopIfCurrent(ctx.sessionId, generation)) ?? {
                 recording: false,
-                path,
+                path: target,
               }
             )
           } catch (error) {
             if (error instanceof Error && error.message === "no recording in progress") {
-              return { recording: false, path }
+              return { recording: false, path: target }
             }
             throw error
           }
@@ -792,8 +811,9 @@ function captureTools(service: BrowserServiceProvider): Toolkit["tools"] {
       execute: async (args, ctx) => {
         const { id, path } = args
         return withTab(service, ctx.sessionId, id, async (tab) => {
-          await resolveService(service).recordRestart(ctx.sessionId, tab, path)
-          return { recording: true, path }
+          const target = resolveToolPath(ctx.cwd, path)
+          await resolveService(service).recordRestart(ctx.sessionId, tab, target)
+          return { recording: true, path: target }
         })
       },
     }),

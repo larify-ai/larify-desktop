@@ -239,6 +239,12 @@ async function main(): Promise<void> {
       throw new Error(`OOPIF press did not reach focused input: ${JSON.stringify(pressedValue)}`)
     }
     console.log('PASS BrowserTab OOPIF focused press')
+    await tab.keyboardType('aA?中')
+    const typedValue = await tab.getValue(keyTarget)
+    if (typedValue !== 'pressedaA?中') {
+      throw new Error(`OOPIF keyboard type produced the wrong value: ${JSON.stringify(typedValue)}`)
+    }
+    console.log('PASS BrowserTab OOPIF keyboard type events and unicode fallback')
 
     const dynamicRef = await waitForDynamicRef(tab)
     await tab.evalJs(`() => {

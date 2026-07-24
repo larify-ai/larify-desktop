@@ -54,11 +54,36 @@ export interface Box {
   height: number
 }
 
-export async function getBox(ctx: QueryCtx, selector: string): Promise<Box> {
-  const { objectId, sessionId } = await resolveRefToObjectId(ctx.send, ctx.refMap, selector, ctx.sessions)
+export interface BoxWithSession {
+  box: Box
+  frameId?: string
+  sessionId?: string
+}
+
+export async function getBoxWithSession(ctx: QueryCtx, selector: string): Promise<BoxWithSession> {
+  const { objectId, sessionId } = await resolveRefToObjectId(
+    ctx.send,
+    ctx.refMap,
+    selector,
+    ctx.sessions
+  )
   const v = (await callOn(ctx.send, objectId, GET_BOX_JS, [], sessionId)) as Box | undefined
-  if (!v || typeof v.width !== 'number') throw new Error(`could not get bounding box for '${selector}'`)
-  return v
+  if (!v || typeof v.width !== 'number')
+    throw new Error(`could not get bounding box for '${selector}'`)
+  let frameId: string | undefined
+  if (sessionId) {
+    for (const [candidateFrameId, candidateSessionId] of ctx.sessions ?? []) {
+      if (candidateSessionId === sessionId) {
+        frameId = candidateFrameId
+        break
+      }
+    }
+  }
+  return { box: v, frameId, sessionId }
+}
+
+export async function getBox(ctx: QueryCtx, selector: string): Promise<Box> {
+  return (await getBoxWithSession(ctx, selector)).box
 }
 
 export async function isVisible(ctx: QueryCtx, selector: string): Promise<boolean> {

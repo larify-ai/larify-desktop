@@ -76,6 +76,9 @@ export async function elementHref(ctx: Interactions, selector: string): Promise<
 export async function drag(ctx: Interactions, source: string, target: string): Promise<void> {
   const s = await resolveRefToBox(ctx.send, ctx.refMap, source, ctx.sessions)
   const t = await resolveRefToBox(ctx.send, ctx.refMap, target, ctx.sessions)
+  if (s.sessionId !== t.sessionId) {
+    throw new Error('Cross-frame drag is not supported.')
+  }
   const mouse = (
     type: string,
     x: number,

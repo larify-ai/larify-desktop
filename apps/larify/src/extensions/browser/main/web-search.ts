@@ -31,7 +31,7 @@ export type WebSearchSelectors = z.infer<typeof selectorsSchema>
 
 export const webSearchInputSchema = z
   .object({
-    query: z.string().trim().min(1).optional().describe('Search query for a new Bing search'),
+    query: z.string().trim().min(1).optional().describe('Search query for a new web search'),
     pageUrl: z.string().trim().min(1).optional().describe('Search page URL or next-page URL'),
     selectors: selectorsSchema.describe('CSS selectors used to extract the search results')
   })
@@ -126,7 +126,7 @@ export function webSearchTools(getService: () => BrowserService): Toolkit['tools
   return {
     web_search: defineTool({
       description:
-        'Search the web using Bing by default. Returns titles, URLs, snippets, and an optional nextPageUrl. Pass nextPageUrl as pageUrl to continue; use web_fetch to read a result.',
+        'Search the web. Returns titles, URLs, snippets, and an optional nextPageUrl. Pass nextPageUrl as pageUrl to continue; use web_fetch to read a result.',
       metadata: { icon: 'browser', eager: true },
       inputSchema: webSearchInputSchema,
       execute: (args, ctx) => executeWebSearch(getService(), args, ctx)

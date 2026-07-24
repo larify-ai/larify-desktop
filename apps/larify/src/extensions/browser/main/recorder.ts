@@ -21,9 +21,10 @@ const RECORDER_HTML =
       'const c = document.getElementById("c"), ctx = c.getContext("2d");' +
       'const img = new Image();' +
       'img.onload = () => ctx.drawImage(img, 0, 0, c.width, c.height);' +
-      'let rec = null, stream = null, out = null, warmed = false, writeError = null, writeChain = Promise.resolve(), bytes = 0;' +
+      'let rec = null, stream = null, frameTimer = null, out = null, warmed = false, writeError = null, writeChain = Promise.resolve(), bytes = 0;' +
       'ipcRenderer.on("record:init", async (_e, o) => {' +
       '  if (rec) { try { rec.stop(); } catch (e) {} rec = null; }' +
+      '  if (frameTimer) { clearInterval(frameTimer); frameTimer = null; }' +
       '  if (stream) { stream.getTracks().forEach((track) => track.stop()); stream = null; }' +
       '  c.width = o.width; c.height = o.height; bytes = 0; writeError = null; writeChain = Promise.resolve();' +
       '  ctx.fillStyle = "#000"; ctx.fillRect(0, 0, c.width, c.height);' +
@@ -71,7 +72,8 @@ const RECORDER_HTML =
       '    writeError = openError; out = null;' +
       '    ipcRenderer.send("record:ready", { error: String(openError.message || openError) }); return;' +
       '  }' +
-      '  stream = c.captureStream(o.fps);' +
+      '  stream = c.captureStream(0);' +
+      '  const videoTrack = stream.getVideoTracks()[0];' +
       '  rec = new MediaRecorder(stream, options);' +
       '  rec.ondataavailable = (e) => {' +
       '    if (!e.data || !e.data.size) return;' +
@@ -83,11 +85,18 @@ const RECORDER_HTML =
       '      bytes += buf.length;' +
       '    }).catch((err) => { writeError = err; });' +
       '  };' +
-      '  rec.start(250); ipcRenderer.send("record:ready", {});' +
+      '  rec.start(250);' +
+      '  const emitFrame = () => {' +
+      '    if (img.complete && img.naturalWidth) ctx.drawImage(img, 0, 0, c.width, c.height);' +
+      '    videoTrack.requestFrame();' +
+      '  };' +
+      '  emitFrame(); frameTimer = setInterval(emitFrame, 1000 / o.fps);' +
+      '  ipcRenderer.send("record:ready", {});' +
       '});' +
       'ipcRenderer.on("record:frame", (_e, b64) => { img.src = "data:image/jpeg;base64," + b64; });' +
       'ipcRenderer.on("record:stop", async () => {' +
       '  if (!rec) { ipcRenderer.send("record:done", { bytes: 0 }); return; }' +
+      '  if (frameTimer) { clearInterval(frameTimer); frameTimer = null; }' +
       '  await new Promise((res) => { rec.onstop = res; rec.stop(); });' +
       '  await writeChain;' +
       '  if (stream) { stream.getTracks().forEach((track) => track.stop()); stream = null; }' +

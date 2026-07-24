@@ -7,7 +7,10 @@ const h = vi.hoisted(() => {
   const listeners = new Map<string, Set<(...args: unknown[]) => void>>()
   return {
     listeners,
-    createdWindows: [] as Array<{ destroy: ReturnType<typeof vi.fn> }>,
+    createdWindows: [] as Array<{
+      destroy: ReturnType<typeof vi.fn>
+      webContents: { loadURL: ReturnType<typeof vi.fn> }
+    }>,
     failWindowLoad: false,
     ipcMain: {
       on: vi.fn((channel: string, listener: (...args: unknown[]) => void) => {
@@ -55,6 +58,22 @@ describe("Recorder guards", () => {
 
   it("reports not recording before any start", () => {
     expect(new Recorder().isRecording()).toBe(false)
+  })
+
+  it("requests canvas frames at the configured rate even when the page is static", async () => {
+    const recorder = new Recorder()
+
+    await (
+      recorder as unknown as {
+        ensureWindow(): Promise<unknown>
+      }
+    ).ensureWindow()
+
+    const recorderUrl = h.createdWindows[0].webContents.loadURL.mock.calls[0][0] as string
+    const html = decodeURIComponent(recorderUrl.slice("data:text/html,".length))
+    expect(html).toContain("c.captureStream(0)")
+    expect(html).toContain("videoTrack.requestFrame()")
+    expect(html).toContain("setInterval(emitFrame, 1000 / o.fps)")
   })
 
   it("reports recording while start is still in progress", () => {

@@ -101,10 +101,15 @@ const spill = (content: string, extra: Record<string, unknown> = {}): Record<str
   return { ...extra, path: output.path, bytes: output.bytes, preview: output.preview }
 }
 
-const tabState = (tab: BrowserTab) => {
-  const { favIconUrl: _favIconUrl, ...state } = tab.state()
-  return state
+type PublicTabState = Omit<ReturnType<BrowserTab["state"]>, "favIconUrl">
+
+const stripFavIcon = (state: ReturnType<BrowserTab["state"]>): PublicTabState => {
+  const result: Partial<ReturnType<BrowserTab["state"]>> = { ...state }
+  delete result.favIconUrl
+  return result as PublicTabState
 }
+
+const tabState = (tab: BrowserTab): PublicTabState => stripFavIcon(tab.state())
 
 const getTab = (provider: BrowserServiceProvider, sessionId: string, id: number): BrowserTab => {
   const service = resolveService(provider)
@@ -164,9 +169,14 @@ export function createBrowserToolkit(service: BrowserServiceProvider): Toolkit {
           const { url } = args
           try {
             const resolved = resolveService(service)
-            const id = resolved.createTab(ctx.sessionId, url)
+            const id = resolved.createTab(ctx.sessionId)
             const tab = getTab(service, ctx.sessionId, id)
-            if (url) await tab.waitForNavigation()
+            try {
+              if (url) await tab.navigateAndWait(url)
+            } catch (error) {
+              await resolved.close(ctx.sessionId, id)
+              throw error
+            }
             return tabState(tab)
           } catch (error) {
             return errorResult(error)
@@ -179,8 +189,8 @@ export function createBrowserToolkit(service: BrowserServiceProvider): Toolkit {
         inputSchema: z.object({ id: idSchema }).strict(),
         execute: async (args, ctx) => {
           const { id } = args
-          return withTab(service, ctx.sessionId, id, () => {
-            resolveService(service).close(ctx.sessionId, id)
+          return withTab(service, ctx.sessionId, id, async () => {
+            await resolveService(service).close(ctx.sessionId, id)
             return `Closed browser tab ${id}.`
           })
         },
@@ -190,7 +200,7 @@ export function createBrowserToolkit(service: BrowserServiceProvider): Toolkit {
         metadata: { icon: "browser" },
         inputSchema: z.object({}).strict(),
         execute: async (_args, ctx) =>
-          resolveService(service).state(ctx.sessionId).tabs.map(({ favIconUrl, ...tab }) => tab),
+          resolveService(service).state(ctx.sessionId).tabs.map(stripFavIcon),
       }),
       navigate: defineTool({
         description: "Navigate a browser tab: goto a URL, go back/forward, or reload.",
@@ -236,9 +246,10 @@ export function createBrowserToolkit(service: BrowserServiceProvider): Toolkit {
         inputSchema: evalSchema,
         execute: async (args, ctx) => {
           const { id, script, sessionId } = args
-          return withTab(service, ctx.sessionId, id, async (tab) =>
-            spill(JSON.stringify(await tab.evalJs(script, sessionId), null, 2)),
-          )
+          return withTab(service, ctx.sessionId, id, async (tab) => {
+            const value = await tab.evalJs(script, sessionId)
+            return spill(JSON.stringify(value, null, 2) ?? "undefined")
+          })
         },
       }),
       cdp_call: defineTool({
@@ -604,7 +615,12 @@ function waitTools(service: BrowserServiceProvider): Toolkit["tools"] {
       inputSchema: waitForSchema,
       execute: async (args, ctx) => {
         return withTab(service, ctx.sessionId, args.id, async (tab) => {
-          await tab.waitForSelector(args.selector, args.state, secondsToMs(args.timeout))
+          await tab.waitForSelector(
+            args.selector,
+            args.state,
+            secondsToMs(args.timeout),
+            ctx.signal
+          )
           return { selector: args.selector, state: args.state }
         })
       },
@@ -678,13 +694,21 @@ function captureTools(service: BrowserServiceProvider): Toolkit["tools"] {
       execute: async (args, ctx) => {
         const { id, path, duration } = args
         return withTab(service, ctx.sessionId, id, async (tab) => {
-          await resolveService(service).recordStart(ctx.sessionId, tab, path)
+          const generation = await resolveService(service).recordStart(ctx.sessionId, tab, path)
           if (duration === undefined) return { recording: true, path }
           await waitMs(duration * 1000, ctx.signal)
           try {
-            return await resolveService(service).recordStop(ctx.sessionId)
-          } catch {
-            return { recording: false, path }
+            return (
+              (await resolveService(service).recordStopIfCurrent(ctx.sessionId, generation)) ?? {
+                recording: false,
+                path,
+              }
+            )
+          } catch (error) {
+            if (error instanceof Error && error.message === "no recording in progress") {
+              return { recording: false, path }
+            }
+            throw error
           }
         })
       },

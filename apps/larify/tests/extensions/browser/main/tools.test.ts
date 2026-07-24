@@ -243,7 +243,7 @@ describe("browser toolkit", () => {
       canGoForward: false,
       error: null,
     })
-    expect(service.createTab).toHaveBeenCalledWith("session-1", "https://example.com")
+    expect(service.createTab).toHaveBeenCalledWith("session-1")
 
     await expect(tool("list_tabs", service).execute({}, ctx)).resolves.toEqual([
       {
@@ -269,7 +269,7 @@ describe("browser toolkit", () => {
       tool("wait_for", service).execute({ id: 1, selector: "button", timeout: 1.5 }, ctx),
     ).resolves.toEqual({ selector: "button", state: "visible" })
 
-    expect(waitForSelector).toHaveBeenCalledWith("button", "visible", 1500)
+    expect(waitForSelector).toHaveBeenCalledWith("button", "visible", 1500, undefined)
   })
 
   it("returns wait tool results in the browser tool shape", async () => {
@@ -341,6 +341,46 @@ describe("browser toolkit", () => {
 
     await expect(tool("eval_js", service).execute({ id: 1, script: "() => document.title" }, ctx)).resolves.toEqual({
       content: JSON.stringify(value, null, 2),
+    })
+  })
+
+  it("reports an invalid create_tab URL instead of returning a blank tab", async () => {
+    const tab = {
+      navigateAndWait: vi.fn(async () => {
+        throw new Error("invalid url: not a url")
+      }),
+      state: vi.fn(() => ({
+        id: 1,
+        url: "",
+        title: "",
+        favIconUrl: "",
+        loading: false,
+        canGoBack: false,
+        canGoForward: false,
+        error: null,
+      })),
+    }
+    const service = {
+      ...createService(),
+      createTab: vi.fn(() => 1),
+      tab: vi.fn(() => tab),
+    } as unknown as BrowserService
+
+    await expect(tool("create_tab", service).execute({ url: "not a url" }, ctx)).resolves.toEqual({
+      error: "invalid url: not a url",
+    })
+    expect(service.createTab).toHaveBeenCalledWith(ctx.context.sessionId)
+    expect(service.close).toHaveBeenCalledWith(ctx.context.sessionId, 1)
+  })
+
+  it("returns undefined from eval_js without an internal serialization error", async () => {
+    const service = {
+      ...createService(),
+      tab: vi.fn(() => ({ evalJs: vi.fn(async () => undefined) })),
+    } as unknown as BrowserService
+
+    await expect(tool("eval_js", service).execute({ id: 1, script: "() => {}" }, ctx)).resolves.toEqual({
+      content: "undefined",
     })
   })
 
@@ -636,8 +676,8 @@ describe("browser toolkit", () => {
     const service = {
       ...createService(),
       tab: vi.fn(() => ({})),
-      recordStart: vi.fn(async () => undefined),
-      recordStop: vi.fn(async () => ({ path: recordPath, bytes: 42 })),
+      recordStart: vi.fn(async () => 1),
+      recordStopIfCurrent: vi.fn(async () => ({ path: recordPath, bytes: 42 })),
     } as unknown as BrowserService
 
     const pending = tool("record_start", service).execute(
@@ -648,7 +688,7 @@ describe("browser toolkit", () => {
     const result = await pending
 
     expect(service.recordStart).toHaveBeenCalledTimes(1)
-    expect(service.recordStop).toHaveBeenCalledWith(ctx.context.sessionId)
+    expect(service.recordStopIfCurrent).toHaveBeenCalledWith(ctx.context.sessionId, 1)
     expect(result).toEqual({ path: recordPath, bytes: 42 })
     vi.useRealTimers()
   })
@@ -659,8 +699,8 @@ describe("browser toolkit", () => {
     const service = {
       ...createService(),
       tab: vi.fn(() => ({})),
-      recordStart: vi.fn(async () => undefined),
-      recordStop: vi.fn(async () => {
+      recordStart: vi.fn(async () => 1),
+      recordStopIfCurrent: vi.fn(async () => {
         throw new Error("no recording in progress")
       }),
     } as unknown as BrowserService
@@ -672,8 +712,53 @@ describe("browser toolkit", () => {
     await vi.advanceTimersByTimeAsync(1000)
     const result = await pending
 
-    expect(service.recordStop).toHaveBeenCalledWith(ctx.context.sessionId)
+    expect(service.recordStopIfCurrent).toHaveBeenCalledWith(ctx.context.sessionId, 1)
     expect(result).toEqual({ recording: false, path: recordPath })
+    vi.useRealTimers()
+  })
+
+  it("does not stop a replacement recording when an old duration expires", async () => {
+    vi.useFakeTimers()
+    const recordPath = join(tmpdir(), "larify-record-replaced-test.webm")
+    const service = {
+      ...createService(),
+      tab: vi.fn(() => ({})),
+      recordStart: vi.fn(async () => 41),
+      recordStopIfCurrent: vi.fn(async () => null),
+    } as unknown as BrowserService
+
+    const pending = tool("record_start", service).execute(
+      { id: 1, path: recordPath, duration: 1 },
+      ctx,
+    )
+    await vi.advanceTimersByTimeAsync(1000)
+
+    await expect(pending).resolves.toEqual({ recording: false, path: recordPath })
+    expect(service.recordStopIfCurrent).toHaveBeenCalledWith(ctx.context.sessionId, 41)
+    vi.useRealTimers()
+  })
+
+  it("does not hide output failures from a duration recording", async () => {
+    vi.useFakeTimers()
+    const recordPath = join(tmpdir(), "larify-record-failed-test.webm")
+    const service = {
+      ...createService(),
+      tab: vi.fn(() => ({})),
+      recordStart: vi.fn(async () => 1),
+      recordStopIfCurrent: vi.fn(async () => {
+        throw new Error("recorder failed to write output: disk full")
+      }),
+    } as unknown as BrowserService
+
+    const pending = tool("record_start", service).execute(
+      { id: 1, path: recordPath, duration: 1 },
+      ctx,
+    )
+    await vi.advanceTimersByTimeAsync(1000)
+
+    await expect(pending).resolves.toEqual({
+      error: "recorder failed to write output: disk full",
+    })
     vi.useRealTimers()
   })
 
@@ -682,8 +767,8 @@ describe("browser toolkit", () => {
     const service = {
       ...createService(),
       tab: vi.fn(() => ({})),
-      recordStart: vi.fn(async () => undefined),
-      recordStop: vi.fn(async () => ({ path: recordPath, bytes: 7 })),
+      recordStart: vi.fn(async () => 1),
+      recordStopIfCurrent: vi.fn(async () => ({ path: recordPath, bytes: 7 })),
     } as unknown as BrowserService
     const controller = new AbortController()
     controller.abort()
@@ -693,7 +778,7 @@ describe("browser toolkit", () => {
       { context: { sessionId: "session-1", cwd: "D:\\Workspace" }, abortSignal: controller.signal },
     )
 
-    expect(service.recordStop).toHaveBeenCalledWith("session-1")
+    expect(service.recordStopIfCurrent).toHaveBeenCalledWith("session-1", 1)
     expect(result).toEqual({ path: recordPath, bytes: 7 })
   })
 

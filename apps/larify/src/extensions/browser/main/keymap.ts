@@ -46,6 +46,16 @@ const NAMED_KEYS: Record<string, KeyInfo> = {
 }
 
 const PUNCTUATION: Record<string, KeyInfo> = {
+  '!': { key: '!', code: 'Digit1', keyCode: 49 },
+  '@': { key: '@', code: 'Digit2', keyCode: 50 },
+  '#': { key: '#', code: 'Digit3', keyCode: 51 },
+  $: { key: '$', code: 'Digit4', keyCode: 52 },
+  '%': { key: '%', code: 'Digit5', keyCode: 53 },
+  '^': { key: '^', code: 'Digit6', keyCode: 54 },
+  '&': { key: '&', code: 'Digit7', keyCode: 55 },
+  '*': { key: '*', code: 'Digit8', keyCode: 56 },
+  '(': { key: '(', code: 'Digit9', keyCode: 57 },
+  ')': { key: ')', code: 'Digit0', keyCode: 48 },
   '`': { key: '`', code: 'Backquote', keyCode: 192 },
   '~': { key: '~', code: 'Backquote', keyCode: 192 },
   '-': { key: '-', code: 'Minus', keyCode: 189 },

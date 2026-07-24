@@ -49,9 +49,19 @@ function createWindow(): BrowserWindow {
 
 const extension: Extension = {
   activate(appHost, context) {
-    const win = createWindow()
-    context.subscriptions.push(appHost.register("service", "main-window", { get: () => win }))
-    context.subscriptions.push({ dispose: () => win.destroy() })
+    let win: BrowserWindow | null = createWindow()
+    const getWindow = (): BrowserWindow => {
+      if (!win || win.isDestroyed()) win = createWindow()
+      return win
+    }
+    context.subscriptions.push(appHost.register("service", "main-window", { get: getWindow }))
+    context.subscriptions.push({
+      dispose: () => {
+        const current = win
+        win = null
+        if (current && !current.isDestroyed()) current.destroy()
+      },
+    })
 
     ipcMain.handle("theme:set", (_e, theme) => {
       if (theme === "light" || theme === "dark" || theme === "system") {
@@ -67,7 +77,7 @@ const extension: Extension = {
       })
     })
     ipcMain.handle("dialog:pick-directories", async (event) => {
-      const owner = BrowserWindow.fromWebContents(event.sender) ?? win
+      const owner = BrowserWindow.fromWebContents(event.sender) ?? getWindow()
       const result = await dialog.showOpenDialog(owner, {
         properties: ["openDirectory", "multiSelections"],
       })
@@ -82,7 +92,7 @@ const extension: Extension = {
     })
 
     const onActivate = (): void => {
-      if (BrowserWindow.getAllWindows().length === 0) createWindow()
+      if (BrowserWindow.getAllWindows().length === 0) getWindow()
     }
     app.on("activate", onActivate)
     context.subscriptions.push({

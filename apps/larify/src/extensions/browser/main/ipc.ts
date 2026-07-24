@@ -4,9 +4,15 @@ import type { BrowserService } from "./browser-service"
 export function registerBrowserIpc(getService: () => BrowserService): () => void {
   let bound = false
   let unbindChange: (() => void) | null = null
-  const subscribers = new Set<WebContents>()
+  const subscribers = new Map<WebContents, () => void>()
   const subscribe = (event: IpcMainInvokeEvent): void => {
-    subscribers.add(event.sender)
+    const sender = event.sender
+    if (subscribers.has(sender)) return
+    const onDestroyed = (): void => {
+      subscribers.delete(sender)
+    }
+    subscribers.set(sender, onDestroyed)
+    sender.once("destroyed", onDestroyed)
   }
   const service = (): BrowserService => {
     const browser = getService()
@@ -18,7 +24,7 @@ export function registerBrowserIpc(getService: () => BrowserService): () => void
   }
 
   const sendState = (sessionId: string, state: unknown): void => {
-    for (const sender of subscribers) {
+    for (const [sender, onDestroyed] of subscribers) {
       if (sender.isDestroyed()) {
         subscribers.delete(sender)
         continue
@@ -27,6 +33,7 @@ export function registerBrowserIpc(getService: () => BrowserService): () => void
         sender.send("browser:state", { sessionId, state })
       } catch {
         subscribers.delete(sender)
+        sender.off("destroyed", onDestroyed)
       }
     }
   }
@@ -70,6 +77,7 @@ export function registerBrowserIpc(getService: () => BrowserService): () => void
   return () => {
     unbindChange?.()
     unbindChange = null
+    for (const [sender, onDestroyed] of subscribers) sender.off("destroyed", onDestroyed)
     subscribers.clear()
     for (const channel of Object.keys(handlers)) ipcMain.removeHandler(channel)
   }

@@ -21,10 +21,21 @@ import type { BrowserService } from "../../../../src/extensions/browser/main/bro
 function sender(name: string, destroyed = false): {
   isDestroyed(): boolean
   send(channel: string, payload: unknown): void
+  once(event: string, listener: () => void): void
+  off(event: string, listener: () => void): void
+  emitDestroyed(): void
 } {
+  let onDestroyed: (() => void) | undefined
   return {
     isDestroyed: () => destroyed,
     send: (channel, payload) => h.sent.push({ sender: name, channel, payload }),
+    once: (event, listener) => {
+      if (event === "destroyed") onDestroyed = listener
+    },
+    off: (event, listener) => {
+      if (event === "destroyed" && onDestroyed === listener) onDestroyed = undefined
+    },
+    emitDestroyed: () => onDestroyed?.(),
   }
 }
 
@@ -36,6 +47,7 @@ function fakeService(): BrowserService & { bindChange: ReturnType<typeof vi.fn> 
     bindChange: vi.fn(() => unbindChange),
     state: vi.fn(() => ({ tabs: [], activeId: null })),
     createTab: vi.fn(() => 7),
+    ensureTab: vi.fn(() => 8),
     setActive: vi.fn(),
     reorder: vi.fn(),
     close: vi.fn(),
@@ -62,6 +74,7 @@ describe("registerBrowserIpc", () => {
     for (const name of [
       "getState",
       "create",
+      "ensureTab",
       "setActive",
       "reorder",
       "close",
@@ -82,6 +95,7 @@ describe("registerBrowserIpc", () => {
     h.handlers.get("browser:navigate")!(event("main"), "session-a", 3, "openai.com")
     expect(service.navigate).toHaveBeenCalledWith("session-a", 3, "openai.com")
     expect(h.handlers.get("browser:create")!(event("main"), "session-a", undefined)).toBe(7)
+    expect(h.handlers.get("browser:ensureTab")!(event("main"), "session-a")).toBe(8)
   })
 
   it("pushes state changes only to renderer webContents that subscribed through IPC", () => {
@@ -104,6 +118,22 @@ describe("registerBrowserIpc", () => {
     const service = fakeService()
     registerBrowserIpc(() => service)
     h.handlers.get("browser:getState")!(event("destroyed", true), "session-a")
+    const onChange = service.bindChange.mock.calls[0][0] as (
+      sessionId: string,
+      state: unknown,
+    ) => void
+
+    onChange("session-a", { tabs: [], activeId: null })
+
+    expect(h.sent).toEqual([])
+  })
+
+  it("drops a subscriber as soon as its webContents is destroyed", () => {
+    const service = fakeService()
+    registerBrowserIpc(() => service)
+    const renderer = sender("renderer")
+    h.handlers.get("browser:getState")!({ sender: renderer }, "session-a")
+    renderer.emitDestroyed()
     const onChange = service.bindChange.mock.calls[0][0] as (
       sessionId: string,
       state: unknown,

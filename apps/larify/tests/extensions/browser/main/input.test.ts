@@ -125,7 +125,7 @@ describe("keyboard text events", () => {
       return {}
     })
 
-    await typeText(send as never, "a1A?")
+    await typeText(send as never, "a1A?!")
 
     expect(calls.map(({ method, params }) => [method, params.type, params.key])).toEqual([
       ["Input.dispatchKeyEvent", "keyDown", "a"],
@@ -136,6 +136,8 @@ describe("keyboard text events", () => {
       ["Input.dispatchKeyEvent", "keyUp", "A"],
       ["Input.dispatchKeyEvent", "keyDown", "?"],
       ["Input.dispatchKeyEvent", "keyUp", "?"],
+      ["Input.dispatchKeyEvent", "keyDown", "!"],
+      ["Input.dispatchKeyEvent", "keyUp", "!"],
     ])
     expect(calls.slice(4).every(({ params }) => params.modifiers === 8)).toBe(true)
   })

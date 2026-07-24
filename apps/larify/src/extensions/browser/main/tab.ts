@@ -545,28 +545,13 @@ export class BrowserTab {
         this.downloadActive = false
       }
       const fail = (error: Error): void => {
-        if (settled) return
-        settled = true
-        cleanup()
-        reject(error)
-      }
-      const cancel = (error: Error): void => {
-        const activeItem = item
-        if (!activeItem) {
-          fail(error)
-          return
+        if (!settled) {
+          settled = true
+          reject(error)
         }
-        if (cancellationError) return
-        cancellationError = error
-        clearTimeout(timer)
-        signal?.removeEventListener("abort", onAbort)
-        timer = setTimeout(() => {
-          fail(
-            new Error(
-              `${error.message}; download cancellation was not confirmed within ${waits.formatTimeout(DOWNLOAD_CANCEL_CONFIRM_TIMEOUT)}`,
-            ),
-          )
-        }, DOWNLOAD_CANCEL_CONFIRM_TIMEOUT)
+        cleanup()
+      }
+      const cancelItem = (activeItem: DownloadItem, error: Error): void => {
         try {
           activeItem.cancel()
         } catch (cancelError) {
@@ -577,6 +562,33 @@ export class BrowserTab {
               }`,
             ),
           )
+        }
+      }
+      const cancel = (error: Error): void => {
+        if (cancellationError) return
+        if (!item && error.message === "tab was closed during download") {
+          fail(error)
+          return
+        }
+        cancellationError = error
+        clearTimeout(timer)
+        signal?.removeEventListener("abort", onAbort)
+        timer = setTimeout(() => {
+          if (item) {
+            fail(
+              new Error(
+                `${error.message}; download cancellation was not confirmed within ${waits.formatTimeout(DOWNLOAD_CANCEL_CONFIRM_TIMEOUT)}`,
+              ),
+            )
+          } else {
+            cleanup()
+          }
+        }, DOWNLOAD_CANCEL_CONFIRM_TIMEOUT)
+        if (item) {
+          cancelItem(item, error)
+        } else {
+          settled = true
+          reject(error)
         }
       }
       const onAbort = (): void => cancel(new Error("download was cancelled"))
@@ -597,6 +609,7 @@ export class BrowserTab {
           else if (state === "completed") succeed(downloadItem.getSavePath())
           else fail(new Error(`download failed: ${state}`))
         })
+        if (cancellationError) cancelItem(downloadItem, cancellationError)
       }
       timer = setTimeout(() => {
         cancel(

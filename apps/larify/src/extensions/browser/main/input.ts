@@ -138,7 +138,7 @@ export async function typeText(
   for (const ch of text) {
     const info = charToKeyInfo(ch)
     if (info) {
-      const needsShift = /[A-Z~_+{}|:"<>?]/.test(ch)
+      const needsShift = /[A-Z~!@#$%^&*()_+{}|:"<>?]/.test(ch)
       await dispatchKey(send, info, modifiers | (needsShift ? 8 : 0), sessionId)
     }
     else await insertText(send, ch, sessionId)

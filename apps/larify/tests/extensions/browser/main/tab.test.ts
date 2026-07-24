@@ -550,6 +550,57 @@ describe("BrowserTab", () => {
     expect(item.cancel).toHaveBeenCalledOnce()
   })
 
+  it("cancels a download that starts after the operation was aborted", async () => {
+    const tab = new BrowserTab(1, "p")
+    const controller = new AbortController()
+    const promise = tab.download("a", "D:\\Downloads\\file.txt", 3000, controller.signal)
+
+    controller.abort()
+    const item = downloadItem()
+    webContents(tab).session.emit("will-download", {}, item, tab.view.webContents)
+
+    await expect(promise).rejects.toThrow("download was cancelled")
+    expect(item.setSavePath).toHaveBeenCalledWith("D:\\Downloads\\file.txt")
+    expect(item.cancel).toHaveBeenCalledOnce()
+  })
+
+  it("keeps the tab download slot occupied while awaiting a late cancelled download", async () => {
+    vi.useFakeTimers()
+    const tab = new BrowserTab(1, "p")
+    const controller = new AbortController()
+    const promise = tab.download("a", "D:\\Downloads\\file.txt", 3000, controller.signal)
+    controller.abort()
+
+    await expect(promise).rejects.toThrow("download was cancelled")
+    await expect(tab.download("b", "D:\\Downloads\\second.txt", 3000)).rejects.toThrow(
+      "a download is already in progress",
+    )
+    await vi.advanceTimersByTimeAsync(5000)
+    const third = tab.download("c", "D:\\Downloads\\third.txt", 3000)
+    const item = downloadItem("D:\\Downloads\\third.txt")
+    webContents(tab).session.emit("will-download", {}, item, tab.view.webContents)
+    item.triggerDone("completed")
+    await expect(third).resolves.toBe("D:\\Downloads\\third.txt")
+    vi.useRealTimers()
+  })
+
+  it("cleans up when a late DownloadItem cannot be cancelled", async () => {
+    const tab = new BrowserTab(1, "p")
+    const controller = new AbortController()
+    const promise = tab.download("a", "D:\\Downloads\\file.txt", 3000, controller.signal)
+    controller.abort()
+    const item = downloadItem()
+    item.cancel.mockImplementation(() => {
+      throw new Error("cancel exploded")
+    })
+
+    webContents(tab).session.emit("will-download", {}, item, tab.view.webContents)
+
+    await expect(promise).rejects.toThrow("download was cancelled")
+    const session = tab.view.webContents.session as unknown as { handlers: Record<string, unknown[]> }
+    expect(session.handlers["will-download"] ?? []).toHaveLength(0)
+  })
+
   it("waits for Electron to close an active download before reporting cancellation", async () => {
     const tab = new BrowserTab(1, "p")
     const controller = new AbortController()

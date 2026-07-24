@@ -130,7 +130,7 @@ async function main(): Promise<void> {
         #target{position:absolute;left:${targetLeft}px;top:${targetTop}px;width:${targetWidth}px;height:60px;
           border:0;padding:0;background:#00c800;color:#000}
       </style><button id="target">OOPIF</button>
-      <input aria-label="KeyTarget" onkeydown="if(event.key==='Enter') this.value='pressed'">
+      <input aria-label="KeyTarget" onkeydown="this.dataset.keys=(this.dataset.keys||'')+event.key; if(event.key==='Enter') this.value='pressed'">
       <script>scrollTo(${childScrollX},${childScrollY})</script>`
     )
     const childUrl = url(childServer, childHost)
@@ -239,10 +239,14 @@ async function main(): Promise<void> {
       throw new Error(`OOPIF press did not reach focused input: ${JSON.stringify(pressedValue)}`)
     }
     console.log('PASS BrowserTab OOPIF focused press')
-    await tab.keyboardType('aA?中')
+    await tab.keyboardType('aA?!中')
     const typedValue = await tab.getValue(keyTarget)
-    if (typedValue !== 'pressedaA?中') {
+    if (typedValue !== 'pressedaA?!中') {
       throw new Error(`OOPIF keyboard type produced the wrong value: ${JSON.stringify(typedValue)}`)
+    }
+    const typedKeys = await tab.getAttr(keyTarget, 'data-keys')
+    if (typedKeys !== 'EnteraA?!') {
+      throw new Error(`OOPIF keyboard events were incomplete: ${JSON.stringify(typedKeys)}`)
     }
     console.log('PASS BrowserTab OOPIF keyboard type events and unicode fallback')
 

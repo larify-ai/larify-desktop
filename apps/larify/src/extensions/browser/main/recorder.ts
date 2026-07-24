@@ -107,21 +107,33 @@ function waitForIpc<T>(
   trigger: () => void
 ): Promise<T> {
   return new Promise<T>((resolve, reject) => {
+    const observesDestroyed = typeof sender.once === 'function' && typeof sender.off === 'function'
     const cleanup = (): void => {
       clearTimeout(timer)
       ipcMain.removeListener(channel, listener as never)
+      if (observesDestroyed) sender.off('destroyed', onDestroyed)
     }
     const listener = (event: IpcMainEvent, payload: T): void => {
       if (event.sender !== sender) return
       cleanup()
       resolve(payload)
     }
+    const onDestroyed = (): void => {
+      cleanup()
+      reject(new Error('recorder window was destroyed'))
+    }
     const timer = setTimeout(() => {
       cleanup()
       reject(new Error(`recorder: '${channel}' timed out after ${formatTimeout(timeoutMs)}`))
     }, timeoutMs)
     ipcMain.on(channel, listener as never)
-    trigger()
+    if (observesDestroyed) sender.once('destroyed', onDestroyed)
+    try {
+      trigger()
+    } catch (error) {
+      cleanup()
+      reject(error)
+    }
   })
 }
 
@@ -148,7 +160,12 @@ export class Recorder {
       webPreferences: { nodeIntegration: true, contextIsolation: false, backgroundThrottling: false }
     })
     win.setPosition(-3000, -3000)
-    await win.webContents.loadURL(RECORDER_HTML)
+    try {
+      await win.webContents.loadURL(RECORDER_HTML)
+    } catch (error) {
+      if (!win.isDestroyed()) win.destroy()
+      throw error
+    }
     this.win = win
     return win
   }

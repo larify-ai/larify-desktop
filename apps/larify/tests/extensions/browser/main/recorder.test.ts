@@ -4,6 +4,8 @@ const h = vi.hoisted(() => {
   const listeners = new Map<string, Set<(...args: unknown[]) => void>>()
   return {
     listeners,
+    createdWindows: [] as Array<{ destroy: ReturnType<typeof vi.fn> }>,
+    failWindowLoad: false,
     ipcMain: {
       on: vi.fn((channel: string, listener: (...args: unknown[]) => void) => {
         const channelListeners = listeners.get(channel) ?? new Set()
@@ -21,7 +23,21 @@ const h = vi.hoisted(() => {
 })
 
 vi.mock("electron", () => ({
-  BrowserWindow: class {},
+  BrowserWindow: class {
+    destroy = vi.fn()
+    webContents = {
+      loadURL: vi.fn(async () => {
+        if (h.failWindowLoad) throw new Error("recorder page failed to load")
+      }),
+    }
+    constructor() {
+      h.createdWindows.push(this)
+    }
+    setPosition(): void {}
+    isDestroyed(): boolean {
+      return false
+    }
+  },
   ipcMain: h.ipcMain,
 }))
 
@@ -30,6 +46,8 @@ import { Recorder } from "../../../../src/extensions/browser/main/recorder"
 describe("Recorder guards", () => {
   beforeEach(() => {
     h.listeners.clear()
+    h.createdWindows.length = 0
+    h.failWindowLoad = false
   })
 
   it("reports not recording before any start", () => {
@@ -41,6 +59,22 @@ describe("Recorder guards", () => {
     ;(recorder as unknown as { starting: boolean }).starting = true
 
     expect(recorder.isRecording()).toBe(true)
+  })
+
+  it("destroys a recorder window whose internal page fails to load", async () => {
+    h.failWindowLoad = true
+    const recorder = new Recorder()
+
+    await expect(
+      (
+        recorder as unknown as {
+          ensureWindow(): Promise<unknown>
+        }
+      ).ensureWindow(),
+    ).rejects.toThrow("recorder page failed to load")
+
+    expect(h.createdWindows).toHaveLength(1)
+    expect(h.createdWindows[0].destroy).toHaveBeenCalledOnce()
   })
 
   it("rejects stop when there is no active recording", async () => {
@@ -289,5 +323,78 @@ describe("Recorder guards", () => {
 
     await expect(recorder.stopIfRecordingTab(7)).resolves.toBeUndefined()
     expect(recorder.isRecording()).toBe(false)
+  })
+
+  it("fails promptly when the recorder window is destroyed while stopping", async () => {
+    const recorder = new Recorder()
+    const listeners = new Map<string, Set<() => void>>()
+    const sender = {
+      send: vi.fn(),
+      once: vi.fn((event: string, listener: () => void) => {
+        const eventListeners = listeners.get(event) ?? new Set()
+        eventListeners.add(listener)
+        listeners.set(event, eventListeners)
+      }),
+      off: vi.fn((event: string, listener: () => void) => {
+        listeners.get(event)?.delete(listener)
+      }),
+      emit(event: string): void {
+        for (const listener of listeners.get(event) ?? []) listener()
+      },
+    }
+    const dbg = { sendCommand: vi.fn(async () => ({})), off: vi.fn() }
+    ;(recorder as unknown as { active: unknown }).active = {
+      dbg,
+      onMessage: () => {},
+      path: "out.webm",
+      tabId: 1,
+      generation: 1,
+      frameCount: () => 7,
+    }
+    ;(recorder as unknown as { win: unknown }).win = {
+      isDestroyed: () => false,
+      destroy: vi.fn(),
+      webContents: sender,
+    }
+
+    const stopping = recorder.stop()
+    await vi.waitFor(() => expect(sender.once).toHaveBeenCalledWith("destroyed", expect.any(Function)))
+    sender.emit("destroyed")
+    const outcome = await Promise.race([
+      stopping.then(
+        () => "resolved",
+        () => "rejected",
+      ),
+      new Promise<string>((resolve) => setTimeout(() => resolve("pending"), 20)),
+    ])
+
+    expect(outcome).toBe("rejected")
+    await expect(stopping).rejects.toThrow("recorder window was destroyed")
+  })
+
+  it("cleans up IPC listeners when sending the stop message throws", async () => {
+    const recorder = new Recorder()
+    const sender = {
+      send: vi.fn(() => {
+        throw new Error("send failed")
+      }),
+    }
+    const dbg = { sendCommand: vi.fn(async () => ({})), off: vi.fn() }
+    ;(recorder as unknown as { active: unknown }).active = {
+      dbg,
+      onMessage: () => {},
+      path: "out.webm",
+      tabId: 1,
+      generation: 1,
+      frameCount: () => 7,
+    }
+    ;(recorder as unknown as { win: unknown }).win = {
+      isDestroyed: () => false,
+      destroy: vi.fn(),
+      webContents: sender,
+    }
+
+    await expect(recorder.stop()).rejects.toThrow("send failed")
+    expect(h.listeners.get("record:done")?.size ?? 0).toBe(0)
   })
 })

@@ -19,6 +19,10 @@ const h = vi.hoisted(() => {
       goBack = vi.fn()
       goForward = vi.fn()
       reload = vi.fn()
+      recordStart = vi.fn(async () => 1)
+      recordStop = vi.fn(async () => ({ path: "out.webm", bytes: 1 }))
+      recordStopIfCurrent = vi.fn(async () => null)
+      recordRestart = vi.fn(async () => 2)
       setBounds = vi.fn()
       setVisible = vi.fn()
       destroy = vi.fn()
@@ -75,6 +79,20 @@ describe("BrowserService", () => {
     })
   })
 
+  it("does not allocate a manager for stale recording operations", async () => {
+    const service = new BrowserService({} as never)
+
+    await expect(service.recordStop("unused-session")).rejects.toThrow("no recording in progress")
+    await expect(service.recordStopIfCurrent("unused-session", 1)).resolves.toBeNull()
+    await expect(service.recordStart("unused-session", {} as never, "out.webm")).rejects.toThrow(
+      "browser session is not active",
+    )
+    await expect(service.recordRestart("unused-session", {} as never, "out.webm")).rejects.toThrow(
+      "browser session is not active",
+    )
+    expect(h.managers).toHaveLength(0)
+  })
+
   it("keeps tabs isolated by session", () => {
     const service = new BrowserService({} as never)
 
@@ -85,6 +103,17 @@ describe("BrowserService", () => {
     const managers = h.managers as FakeBrowserTabManager[]
     expect(managers[0].createTab).toHaveBeenCalledWith(undefined)
     expect(managers[1].createTab).toHaveBeenCalledWith("https://example.com")
+  })
+
+  it("returns the final session state after closing a tab", async () => {
+    const service = new BrowserService({} as never)
+    service.createTab("session-a")
+    const manager = h.managers[0] as FakeBrowserTabManager
+    const finalState = { tabs: [{ id: 2 }], activeId: 2 } as BrowserState
+    manager.state.mockReturnValue(finalState)
+
+    await expect(service.close("session-a", 1)).resolves.toEqual(finalState)
+    expect(manager.close).toHaveBeenCalledWith(1)
   })
 
   it("emits state changes with the owning session id", () => {
@@ -136,5 +165,49 @@ describe("BrowserService", () => {
 
     await service.destroy()
     expect(managers[1].destroy).toHaveBeenCalled()
+  })
+
+  it("does not recreate a session while that session is being destroyed", async () => {
+    const service = new BrowserService({} as never)
+    service.createTab("session-a")
+    const manager = h.managers[0] as FakeBrowserTabManager
+    let finishDestroy!: () => void
+    manager.destroy.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          finishDestroy = resolve
+        }),
+    )
+
+    const destroying = service.destroySession("session-a")
+    expect(() => service.createTab("session-a")).toThrow("browser session is being destroyed")
+    expect(h.managers).toHaveLength(1)
+
+    finishDestroy()
+    await destroying
+    expect(service.createTab("session-a")).toBe(1)
+    expect(h.managers).toHaveLength(2)
+  })
+
+  it("does not create managers after service destruction starts", async () => {
+    const service = new BrowserService({} as never)
+    service.createTab("session-a")
+    const manager = h.managers[0] as FakeBrowserTabManager
+    let finishDestroy!: () => void
+    manager.destroy.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          finishDestroy = resolve
+        }),
+    )
+
+    const destroying = service.destroy()
+    expect(() => service.createTab("session-b")).toThrow("browser service is destroyed")
+    expect(h.managers).toHaveLength(1)
+
+    await vi.waitFor(() => expect(finishDestroy).toBeTypeOf("function"))
+    finishDestroy()
+    await destroying
+    expect(() => service.createTab("session-b")).toThrow("browser service is destroyed")
   })
 })

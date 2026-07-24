@@ -61,6 +61,32 @@ describe("poll retries transient evaluation failures", () => {
       "wait_for_function timed out",
     )
   })
+
+  it("reports an invalid selector immediately with its parse error", async () => {
+    const send = vi.fn(async () => ({
+      exceptionDetails: {
+        text: "Uncaught",
+        exception: { description: "SyntaxError: Failed to execute 'querySelector'" },
+      },
+    }))
+
+    await expect(waitForSelector(send as never, "input[", "visible", 0)).rejects.toThrow(
+      "SyntaxError: Failed to execute 'querySelector'",
+    )
+  })
+
+  it.each(["visible", "hidden"] as const)(
+    "checks ancestor visibility and element geometry for %s",
+    async (state) => {
+      const send = vi.fn(async (_method: string, params: { expression: string }) => {
+        expect(params.expression).toContain("parentElement")
+        expect(params.expression).toContain("getBoundingClientRect")
+        return { result: { value: true } }
+      })
+
+      await waitForSelector(send as never, "#target", state, 0)
+    },
+  )
 })
 
 describe("urlMatches", () => {

@@ -16,7 +16,10 @@ export class BrowserTabManager {
   private onChange?: (state: BrowserState) => void
   private readonly host: BrowserWindow
   private readonly viewParent = new Map<number, BrowserWindow>()
+  private readonly closing = new Map<number, Promise<void>>()
   private readonly recorder = new Recorder()
+  private destroyTask: Promise<void> | null = null
+  private destroying = false
   private readonly handleWindowClosed = (): void => {
     if (!this.host.isDestroyed()) this.host.destroy()
   }
@@ -50,10 +53,11 @@ export class BrowserTabManager {
   }
 
   createTab(url?: string): number {
+    if (this.destroying) throw new Error("browser tab manager is destroyed")
     const tab = new BrowserTab(this.nextId++, PARTITION)
     tab.bindChange(() => this.emit())
     tab.view.webContents.setWindowOpenHandler((details) => {
-      this.createTab(details.url || undefined)
+      if (!this.destroying) this.createTab(details.url || undefined)
       return { action: "deny" }
     })
     this.tabs.set(tab.id, tab)
@@ -71,9 +75,20 @@ export class BrowserTabManager {
     this.emit()
   }
 
-  async close(id: number): Promise<void> {
+  close(id: number): Promise<void> {
+    if (this.destroyTask) return this.destroyTask
+    const pending = this.closing.get(id)
+    if (pending) return pending
     const tab = this.tabs.get(id)
-    if (!tab) return
+    if (!tab) return Promise.resolve()
+    const closing = this.closeTab(id, tab).finally(() => {
+      if (this.closing.get(id) === closing) this.closing.delete(id)
+    })
+    this.closing.set(id, closing)
+    return closing
+  }
+
+  private async closeTab(id: number, tab: BrowserTab): Promise<void> {
     await this.recorder.stopIfRecordingTab(id)
     const order = [...this.tabs.keys()]
     const index = order.indexOf(id)
@@ -155,8 +170,16 @@ export class BrowserTabManager {
     }
   }
 
-  async destroy(): Promise<void> {
+  destroy(): Promise<void> {
+    if (this.destroyTask) return this.destroyTask
+    this.destroying = true
+    this.destroyTask = this.destroyResources()
+    return this.destroyTask
+  }
+
+  private async destroyResources(): Promise<void> {
     this.window.removeListener("closed", this.handleWindowClosed)
+    await Promise.allSettled([...this.closing.values()])
     await this.recorder.destroy()
     for (const tab of this.tabs.values()) {
       this.viewParent.get(tab.id)?.contentView.removeChildView(tab.view)

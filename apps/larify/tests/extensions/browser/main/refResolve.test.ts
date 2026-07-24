@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest"
-import { parseRef, resolveRefToObjectId } from "../../../../src/extensions/browser/main/refResolve"
+import {
+  parseRef,
+  resolveRefToBox,
+  resolveRefToObjectId,
+} from "../../../../src/extensions/browser/main/refResolve"
 
 describe("parseRef", () => {
   it("accepts ref tokens and rejects selectors", () => {
@@ -40,6 +44,19 @@ describe("resolveRefToObjectId selector path", () => {
     const send = vi.fn(async () => ({ result: {} }))
     await expect(resolveRefToObjectId(send as never, new Map(), ".missing")).rejects.toThrow(
       "matched no element",
+    )
+  })
+})
+
+describe("resolveRefToBox selector path", () => {
+  it("reports a malformed selector as invalid instead of missing", async () => {
+    const send = vi.fn(async () => ({
+      result: {},
+      exceptionDetails: { text: "SyntaxError: bad selector" },
+    }))
+
+    await expect(resolveRefToBox(send as never, new Map(), "input[")).rejects.toThrow(
+      "selector 'input[' is invalid",
     )
   })
 })

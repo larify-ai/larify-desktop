@@ -38,41 +38,71 @@ function sameOrigin(a: string, b: string): boolean {
   }
 }
 
-function withTimeout<T>(promise: Promise<T>, label: string, timeoutMs = 30000): Promise<T> {
+function withTimeout<T>(
+  promise: Promise<T>,
+  label: string,
+  timeoutMs = 30000,
+  signal?: AbortSignal,
+): Promise<T> {
+  if (signal?.aborted) return Promise.reject(new Error(`CDP command was cancelled: ${label}`))
   let timer: ReturnType<typeof setTimeout>
+  let onAbort: (() => void) | undefined
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(
       () => reject(new Error(`CDP command timed out after ${waits.formatTimeout(timeoutMs)}: ${label}`)),
       timeoutMs,
     )
   })
-  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer))
+  const aborted = new Promise<never>((_, reject) => {
+    if (!signal) return
+    onAbort = () => reject(new Error(`CDP command was cancelled: ${label}`))
+    signal.addEventListener("abort", onAbort, { once: true })
+  })
+  return Promise.race([promise, timeout, aborted]).finally(() => {
+    clearTimeout(timer)
+    if (onAbort) signal?.removeEventListener("abort", onAbort)
+  })
 }
 
-function waitForWebContentsLoadEvent(wc: WebContents, timeoutMs = 30000): Promise<void> {
+function waitForWebContentsLoadEvent(
+  wc: WebContents,
+  timeoutMs = 30000,
+  expectedUrl?: string,
+): Promise<void> {
   return new Promise((resolve, reject) => {
-    const finish = (): void => {
+    const cleanup = (): void => {
       clearTimeout(timer)
       wc.off("did-finish-load", finish)
       wc.off("did-fail-load", onFail)
+      wc.off("destroyed", onDestroyed)
+    }
+    const finish = (): void => {
+      cleanup()
       resolve()
     }
     const onFail = (
       _event: unknown,
-      _code: number,
-      _description: string,
-      _url: string,
+      code: number,
+      description: string,
+      url: string,
       isMainFrame: boolean,
     ): void => {
-      if (isMainFrame) finish()
+      if (!isMainFrame) return
+      if (expectedUrl && url && (normalizeUrl(url) ?? url) !== expectedUrl) return
+      cleanup()
+      reject(new Error(`navigation failed (${code}): ${description}${url ? `: ${url}` : ""}`))
+    }
+    const onDestroyed = (): void => {
+      cleanup()
+      reject(new Error("tab was closed during navigation"))
     }
     const timer = setTimeout(() => {
-      wc.off("did-finish-load", finish)
-      wc.off("did-fail-load", onFail)
+      cleanup()
       reject(new Error(`navigation load event timed out after ${waits.formatTimeout(timeoutMs)}`))
     }, timeoutMs)
     wc.on("did-finish-load", finish)
     wc.on("did-fail-load", onFail)
+    wc.once("destroyed", onDestroyed)
   })
 }
 
@@ -84,6 +114,7 @@ function waitForWebContentsNotLoading(wc: WebContents, timeoutMs = 30000, stable
       if (stable) clearTimeout(stable)
       wc.off("did-start-loading", check)
       wc.off("did-stop-loading", check)
+      wc.off("destroyed", onDestroyed)
     }
     const finish = (): void => {
       cleanup()
@@ -96,18 +127,27 @@ function waitForWebContentsNotLoading(wc: WebContents, timeoutMs = 30000, stable
       }
       if (!wc.isLoading()) stable = setTimeout(finish, stableMs)
     }
+    const onDestroyed = (): void => {
+      cleanup()
+      reject(new Error("tab was closed during navigation"))
+    }
     const deadline = setTimeout(() => {
       cleanup()
       reject(new Error(`navigation loading state timed out after ${waits.formatTimeout(timeoutMs)}`))
     }, timeoutMs)
     wc.on("did-start-loading", check)
     wc.on("did-stop-loading", check)
+    wc.once("destroyed", onDestroyed)
     check()
   })
 }
 
-async function waitForWebContentsLoad(wc: WebContents, timeoutMs = 30000): Promise<void> {
-  await waitForWebContentsLoadEvent(wc, timeoutMs)
+async function waitForWebContentsLoad(
+  wc: WebContents,
+  timeoutMs = 30000,
+  expectedUrl?: string,
+): Promise<void> {
+  await waitForWebContentsLoadEvent(wc, timeoutMs, expectedUrl)
   await waitForWebContentsNotLoading(wc, timeoutMs)
 }
 
@@ -164,12 +204,14 @@ export class BrowserTab {
     const target = normalizeUrl(url)
     if (!target) return false
     void this.startNavigation(target).catch((error) => {
-      if (this.pendingUrl === target) this.pendingUrl = ""
-      this.error = {
-        code: -1,
-        description: error instanceof Error ? error.message : String(error),
+      if (this.pendingUrl === target) {
+        this.pendingUrl = ""
+        this.error = {
+          code: -1,
+          description: error instanceof Error ? error.message : String(error),
+        }
+        this.onChange?.()
       }
-      this.onChange?.()
     })
     return true
   }
@@ -204,7 +246,7 @@ export class BrowserTab {
     this.pendingUrl = target
     this.onChange?.()
     const task = this.cdpReady.then(async () => {
-      const loaded = waitForWebContentsLoad(this.view.webContents)
+      const loaded = waitForWebContentsLoad(this.view.webContents, 30000, target)
       await Promise.all([
         this.view.webContents.loadURL(target).catch(() => {
           // load failure is captured in state via did-fail-load
@@ -276,14 +318,21 @@ export class BrowserTab {
     params?: object,
     sessionId?: string,
     timeoutMs = 30000,
+    signal?: AbortSignal,
   ): Promise<unknown> {
+    const throwIfCancelled = (): void => {
+      if (signal?.aborted) throw new Error(`CDP command was cancelled: ${method}`)
+    }
+    throwIfCancelled()
     await this.cdpReady
+    throwIfCancelled()
     const dbg = this.view.webContents.debugger
     if (!dbg.isAttached()) {
       dbg.attach()
       await this.setupAutoAttach(dbg)
+      throwIfCancelled()
     }
-    return withTimeout(dbg.sendCommand(method, params ?? {}, sessionId), method, timeoutMs)
+    return withTimeout(dbg.sendCommand(method, params ?? {}, sessionId), method, timeoutMs, signal)
   }
 
   async evalJs(script: string, sessionId?: string): Promise<unknown> {
@@ -342,8 +391,14 @@ export class BrowserTab {
     await interactions.fill(this.interactCtx(), selector, text)
   }
 
-  async type(selector: string, text: string, clear = false, delayMs = 0): Promise<void> {
-    await interactions.type(this.interactCtx(), selector, text, clear, delayMs)
+  async type(
+    selector: string,
+    text: string,
+    clear = false,
+    delayMs = 0,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    await interactions.type(this.interactCtx(), selector, text, clear, delayMs, signal)
   }
 
   async press(key: string): Promise<void> {
@@ -390,7 +445,13 @@ export class BrowserTab {
     await interactions.upload(this.interactCtx(), selector, files)
   }
 
-  async download(selector: string, path: string, timeoutMs = 1_800_000): Promise<string> {
+  async download(
+    selector: string,
+    path: string,
+    timeoutMs = 1_800_000,
+    signal?: AbortSignal,
+  ): Promise<string> {
+    if (signal?.aborted) throw new Error("download was cancelled")
     if (this.downloadActive) throw new Error("a download is already in progress for this tab")
     this.downloadActive = true
     const wc = this.view.webContents
@@ -398,9 +459,11 @@ export class BrowserTab {
       let started = false
       let settled = false
       let item: DownloadItem | null = null
+      let timer!: ReturnType<typeof setTimeout>
       const cleanup = (): void => {
         clearTimeout(timer)
         wc.session.off("will-download", onWillDownload)
+        signal?.removeEventListener("abort", onAbort)
         this.cancelDownloads.delete(cancel)
         this.downloadActive = false
       }
@@ -415,6 +478,7 @@ export class BrowserTab {
         fail(error)
         activeItem?.cancel()
       }
+      const onAbort = (): void => cancel(new Error("download was cancelled"))
       const succeed = (value: string): void => {
         if (settled) return
         settled = true
@@ -432,7 +496,7 @@ export class BrowserTab {
           else fail(new Error(`download failed: ${state}`))
         })
       }
-      const timer = setTimeout(() => {
+      timer = setTimeout(() => {
         cancel(
           new Error(
             started
@@ -443,6 +507,11 @@ export class BrowserTab {
       }, timeoutMs)
       this.cancelDownloads.add(cancel)
       wc.session.on("will-download", onWillDownload)
+      signal?.addEventListener("abort", onAbort, { once: true })
+      if (signal?.aborted) {
+        onAbort()
+        return
+      }
       interactions.click(this.interactCtx(), selector).catch((error) => {
         fail(error instanceof Error ? error : new Error(String(error)))
       })
@@ -591,7 +660,17 @@ export class BrowserTab {
     const res = (await this.sendCdp("Runtime.evaluate", {
       expression: "document.documentElement.outerHTML",
       returnByValue: true,
-    })) as { result?: { value?: unknown } }
+    })) as {
+      result?: { value?: unknown }
+      exceptionDetails?: { exception?: { description?: string }; text?: string }
+    }
+    if (res.exceptionDetails) {
+      throw new Error(
+        res.exceptionDetails.exception?.description ??
+          res.exceptionDetails.text ??
+          "page read evaluation failed",
+      )
+    }
     const html = typeof res.result?.value === "string" ? res.result.value : ""
     const sourceUrl = this.view.webContents.getURL()
     const { title, markdown } = await htmlToMarkdown(html, sourceUrl)
@@ -665,7 +744,7 @@ export class BrowserTab {
       if (!dbg.isAttached()) dbg.attach()
       dbg.on("message", (_event, eventMethod, eventParams, eventSessionId) => {
         try {
-          if (this.handleNetworkEvent(eventMethod, eventParams)) return
+          if (this.handleNetworkEvent(eventMethod, eventParams, eventSessionId || undefined)) return
           if (this.handleTargetEvent(dbg, eventMethod, eventParams, eventSessionId || undefined)) {
             return
           }
@@ -720,6 +799,19 @@ export class BrowserTab {
       return true
     }
     if (method === "Target.detachedFromTarget") {
+      const sessionId = (params as { sessionId?: string } | null)?.sessionId
+      if (sessionId) {
+        const prefix = `${sessionId}\0`
+        let changed = false
+        for (const key of this.pendingNetworkRequests) {
+          if (!key.startsWith(prefix)) continue
+          this.pendingNetworkRequests.delete(key)
+          changed = true
+        }
+        if (changed) {
+          for (const waiter of this.networkWaiters) waiter()
+        }
+      }
       this.frames.detached(params)
       return true
     }
@@ -792,7 +884,7 @@ export class BrowserTab {
     })
   }
 
-  private handleNetworkEvent(method: string, params: unknown): boolean {
+  private handleNetworkEvent(method: string, params: unknown, sessionId?: string): boolean {
     if (!method.startsWith("Network.")) return false
     if (
       method !== "Network.requestWillBeSent" &&
@@ -801,8 +893,16 @@ export class BrowserTab {
     ) return true
     const requestId = (params as { requestId?: string } | null)?.requestId
     if (!requestId) return true
-    if (method === "Network.requestWillBeSent") this.pendingNetworkRequests.add(requestId)
-    else this.pendingNetworkRequests.delete(requestId)
+    const key = `${sessionId ?? ""}\0${requestId}`
+    if (method === "Network.requestWillBeSent") {
+      this.pendingNetworkRequests.add(key)
+    } else if (!this.pendingNetworkRequests.delete(key)) {
+      const suffix = `\0${requestId}`
+      const matches = [...this.pendingNetworkRequests].filter((candidate) =>
+        candidate.endsWith(suffix),
+      )
+      if (matches.length === 1) this.pendingNetworkRequests.delete(matches[0])
+    }
     for (const waiter of this.networkWaiters) waiter()
     return true
   }

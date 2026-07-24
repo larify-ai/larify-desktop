@@ -43,6 +43,7 @@ vi.mock("electron", () => {
     debugger = {
       isAttached: () => true,
       attach: vi.fn(),
+      detach: vi.fn(),
       on: vi.fn(),
       sendCommand: (...args: unknown[]) => h.sendCommandMock(...args),
     }
@@ -100,7 +101,9 @@ vi.mock("electron", () => {
     }
 
     reload(): void {}
-    close(): void {}
+    close(): void {
+      this.emit("destroyed")
+    }
     navigationHistory = {
       canGoBack: () => false,
       canGoForward: () => false,
@@ -498,6 +501,19 @@ describe("BrowserTab", () => {
     expect(item.cancel).toHaveBeenCalledOnce()
   })
 
+  it("cancels an active download when the operation is aborted", async () => {
+    const tab = new BrowserTab(1, "p")
+    const controller = new AbortController()
+    const promise = tab.download("a", "D:\\Downloads\\file.txt", 3000, controller.signal)
+    const item = downloadItem()
+    webContents(tab).session.emit("will-download", {}, item, tab.view.webContents)
+
+    controller.abort()
+
+    await expect(promise).rejects.toThrow("download was cancelled")
+    expect(item.cancel).toHaveBeenCalledOnce()
+  })
+
   it("does not report networkidle while a request seen before the wait is pending", async () => {
     vi.useFakeTimers()
     const tab = new BrowserTab(1, "p")
@@ -518,9 +534,78 @@ describe("BrowserTab", () => {
     await vi.advanceTimersByTimeAsync(501)
     expect(settled).toBe(false)
 
-    messageHandler({}, "Network.loadingFinished", { requestId: "already-running" }, "OOPIF")
+    messageHandler({}, "Network.loadingFinished", { requestId: "already-running" })
     await vi.advanceTimersByTimeAsync(500)
     await expect(promise).resolves.toBeUndefined()
+    vi.useRealTimers()
+  })
+
+  it("finishes a uniquely identified request across an auto-attach session transition", async () => {
+    vi.useFakeTimers()
+    const tab = new BrowserTab(1, "p")
+    const dbg = tab.view.webContents.debugger as unknown as {
+      on: ReturnType<typeof vi.fn>
+    }
+    const messageHandler = dbg.on.mock.calls.find((call) => call[0] === "message")?.[1]
+    expect(messageHandler).toBeTypeOf("function")
+    messageHandler({}, "Network.requestWillBeSent", { requestId: "transitioning" })
+
+    const pending = tab.waitForLoad("networkidle", 3000)
+    messageHandler({}, "Network.loadingFinished", { requestId: "transitioning" }, "OOPIF")
+    await vi.advanceTimersByTimeAsync(500)
+
+    await expect(pending).resolves.toBeUndefined()
+    vi.useRealTimers()
+  })
+
+  it("tracks identical network request ids independently across CDP sessions", async () => {
+    vi.useFakeTimers()
+    const tab = new BrowserTab(1, "p")
+    const dbg = tab.view.webContents.debugger as unknown as {
+      on: ReturnType<typeof vi.fn>
+    }
+    const messageHandler = dbg.on.mock.calls.find((call) => call[0] === "message")?.[1]
+    expect(messageHandler).toBeTypeOf("function")
+    messageHandler({}, "Network.requestWillBeSent", { requestId: "shared-id" })
+    messageHandler({}, "Network.requestWillBeSent", { requestId: "shared-id" }, "OOPIF")
+
+    const pending = tab.waitForLoad("networkidle", 3000)
+    let settled = false
+    void pending.then(() => {
+      settled = true
+    })
+
+    messageHandler({}, "Network.loadingFinished", { requestId: "shared-id" }, "OOPIF")
+    await vi.advanceTimersByTimeAsync(501)
+    expect(settled).toBe(false)
+
+    messageHandler({}, "Network.loadingFinished", { requestId: "shared-id" })
+    await vi.advanceTimersByTimeAsync(500)
+    await expect(pending).resolves.toBeUndefined()
+    vi.useRealTimers()
+  })
+
+  it("forgets pending requests when an OOPIF target is detached", async () => {
+    vi.useFakeTimers()
+    const tab = new BrowserTab(1, "p")
+    const dbg = tab.view.webContents.debugger as unknown as {
+      on: ReturnType<typeof vi.fn>
+    }
+    const messageHandler = dbg.on.mock.calls.find((call) => call[0] === "message")?.[1]
+    expect(messageHandler).toBeTypeOf("function")
+    messageHandler({}, "Network.requestWillBeSent", { requestId: "abandoned" }, "OOPIF")
+
+    const pending = tab.waitForLoad("networkidle", 3000)
+    let settled = false
+    void pending.then(() => {
+      settled = true
+    })
+    await vi.advanceTimersByTimeAsync(501)
+    expect(settled).toBe(false)
+
+    messageHandler({}, "Target.detachedFromTarget", { sessionId: "OOPIF" })
+    await vi.advanceTimersByTimeAsync(500)
+    await expect(pending).resolves.toBeUndefined()
     vi.useRealTimers()
   })
 
@@ -575,6 +660,42 @@ describe("BrowserTab", () => {
     vi.useRealTimers()
   })
 
+  it("rejects a pending navigation promptly when the tab is destroyed", async () => {
+    const tab = new BrowserTab(1, "p")
+    webContents(tab).deferLoad = true
+    const pending = tab.navigateAndWait("https://example.com")
+    await vi.waitFor(() => {
+      expect(
+        (webContents(tab) as unknown as { handlers: Record<string, unknown[]> }).handlers[
+          "did-fail-load"
+        ],
+      ).toHaveLength(2)
+    })
+
+    tab.destroy()
+
+    await expect(pending).rejects.toThrow("tab was closed during navigation")
+  })
+
+  it("rejects a navigation when the main frame fails to load", async () => {
+    const tab = new BrowserTab(1, "p")
+    const wc = webContents(tab)
+    wc.deferLoad = true
+
+    const pending = tab.navigateAndWait("https://missing.example")
+    const assertion = expect(pending).rejects.toThrow("ERR_NAME_NOT_RESOLVED")
+    await vi.waitFor(() => {
+      expect(
+        (wc as unknown as { handlers: Record<string, unknown[]> }).handlers["did-fail-load"],
+      ).toHaveLength(2)
+    })
+    wc.loading = false
+    wc.emit("did-fail-load", {}, -105, "ERR_NAME_NOT_RESOLVED", "https://missing.example", true)
+
+    await assertion
+    expect(tab.state().error).toEqual({ code: -105, description: "ERR_NAME_NOT_RESOLVED" })
+  })
+
   it("records a timeout instead of leaking an unhandled rejection from navigate", async () => {
     vi.useFakeTimers()
     const tab = new BrowserTab(1, "p")
@@ -600,6 +721,57 @@ describe("BrowserTab", () => {
     await expect(tab.evalJs("function () { return 1 + 1 }")).resolves.toBe(2)
     await expect(tab.evalJs("1 + 1")).resolves.toBe(2)
     await expect(tab.evalJs("missingGlobal")).rejects.toThrow("missingGlobal is not defined")
+  })
+
+  it("does not turn a read evaluation failure into an empty successful page", async () => {
+    h.sendCommandMock.mockImplementation(async (method: string) => {
+      if (method !== "Runtime.evaluate") return {}
+      return {
+        exceptionDetails: {
+          text: "Uncaught",
+          exception: { description: "Error: execution context was destroyed" },
+        },
+      }
+    })
+    const tab = new BrowserTab(1, "p")
+
+    await expect(tab.read()).rejects.toThrow("execution context was destroyed")
+  })
+
+  it("cancels a pending raw CDP call when the operation is aborted", async () => {
+    h.sendCommandMock.mockImplementation(
+      async (method: string) =>
+        method === "Runtime.neverCompletes" ? new Promise<never>(() => {}) : {},
+    )
+    const tab = new BrowserTab(1, "p")
+    const controller = new AbortController()
+    const pending = tab.sendCdp(
+      "Runtime.neverCompletes",
+      {},
+      undefined,
+      600_000,
+      controller.signal,
+    )
+
+    controller.abort()
+
+    await expect(pending).rejects.toThrow("CDP command was cancelled: Runtime.neverCompletes")
+    expect(
+      h.sendCommandMock.mock.calls.some(([method]) => method === "Runtime.neverCompletes"),
+    ).toBe(false)
+  })
+
+  it("does not send a raw CDP command when already aborted", async () => {
+    const tab = new BrowserTab(1, "p")
+    const controller = new AbortController()
+    controller.abort()
+
+    await expect(
+      tab.sendCdp("Runtime.evaluate", {}, undefined, 600_000, controller.signal),
+    ).rejects.toThrow("CDP command was cancelled: Runtime.evaluate")
+    expect(
+      h.sendCommandMock.mock.calls.some(([method]) => method === "Runtime.evaluate"),
+    ).toBe(false)
   })
 
   it("ignores user abort and subframe load failures", () => {

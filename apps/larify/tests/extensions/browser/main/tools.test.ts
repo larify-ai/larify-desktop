@@ -213,6 +213,27 @@ describe("browser toolkit", () => {
     expect(tab.reloadAndWait).toHaveBeenCalledTimes(1)
   })
 
+  it("stops waiting for navigation when the tool is aborted", async () => {
+    const tab = {
+      navigateAndWait: vi.fn(() => new Promise<void>(() => {})),
+    }
+    const service = {
+      ...createService(),
+      tab: vi.fn(() => tab),
+    } as unknown as BrowserService
+    const controller = new AbortController()
+    const pending = tool("navigate", service).execute(
+      { id: 1, url: "https://example.com" },
+      { ...ctx, abortSignal: controller.signal },
+    )
+
+    controller.abort()
+
+    await expect(pending).resolves.toEqual({ error: "browser navigation was cancelled" })
+    await Promise.resolve()
+    expect(tab.navigateAndWait).not.toHaveBeenCalled()
+  })
+
   it("exposes runtime tool errors when debug tool errors are enabled", async () => {
     const original = process.env.LARIFY_DEBUG_TOOL_ERRORS
     process.env.LARIFY_DEBUG_TOOL_ERRORS = "1"
@@ -386,14 +407,26 @@ describe("browser toolkit", () => {
 
   it("returns cdp_call output through tool output handling", async () => {
     const value = { result: { value: "ok" } }
+    const sendCdp = vi.fn(async () => value)
     const service = {
       ...createService(),
-      tab: vi.fn(() => ({ sendCdp: vi.fn(async () => value) })),
+      tab: vi.fn(() => ({ sendCdp })),
     } as unknown as BrowserService
+    const controller = new AbortController()
 
-    await expect(tool("cdp_call", service).execute({ id: 1, method: "Runtime.evaluate" }, ctx)).resolves.toEqual({
-      content: JSON.stringify(value, null, 2),
-    })
+    await expect(
+      tool("cdp_call", service).execute(
+        { id: 1, method: "Runtime.evaluate" },
+        { ...ctx, abortSignal: controller.signal },
+      ),
+    ).resolves.toEqual({ content: JSON.stringify(value, null, 2) })
+    expect(sendCdp).toHaveBeenCalledWith(
+      "Runtime.evaluate",
+      undefined,
+      undefined,
+      undefined,
+      controller.signal,
+    )
   })
 
   it("returns cdp_call errors with tab state", async () => {
@@ -530,6 +563,7 @@ describe("browser toolkit", () => {
     const tab = {
       click: vi.fn(async () => undefined),
       elementHref: vi.fn(async () => "https://example.com/next"),
+      navigateAndWait: vi.fn(async () => undefined),
       dblclick: vi.fn(async () => undefined),
       hover: vi.fn(async () => undefined),
       focus: vi.fn(async () => undefined),
@@ -577,7 +611,7 @@ describe("browser toolkit", () => {
     ).resolves.toEqual({
       typed: "hello",
     })
-    expect(tab.type).toHaveBeenCalledWith("input", "hello", false, 250)
+    expect(tab.type).toHaveBeenCalledWith("input", "hello", false, 250, undefined)
     await expect(tool("press", service).execute({ id: 1, key: "Enter" }, ctx)).resolves.toEqual({
       pressed: "Enter",
     })
@@ -603,13 +637,39 @@ describe("browser toolkit", () => {
     ).resolves.toEqual({
       path: "D:\\Downloads\\file.txt",
     })
-    expect(tab.download).toHaveBeenCalledWith("a", "D:\\Downloads\\file.txt", 45_000)
+    expect(tab.download).toHaveBeenCalledWith("a", "D:\\Downloads\\file.txt", 45_000, undefined)
     await expect(
       tool("download", service).execute({ id: 1, selector: "a", path: "D:\\Downloads\\default.txt" }, ctx),
     ).resolves.toEqual({
       path: "D:\\Downloads\\file.txt",
     })
-    expect(tab.download).toHaveBeenCalledWith("a", "D:\\Downloads\\default.txt", 1_800_000)
+    expect(tab.download).toHaveBeenCalledWith(
+      "a",
+      "D:\\Downloads\\default.txt",
+      1_800_000,
+      undefined,
+    )
+  })
+
+  it("passes the tool cancellation signal to downloads", async () => {
+    const tab = { download: vi.fn(async () => "D:\\Downloads\\file.txt") }
+    const service = {
+      ...createService(),
+      tab: vi.fn(() => tab),
+    } as unknown as BrowserService
+    const controller = new AbortController()
+
+    await tool("download", service).execute(
+      { id: 1, selector: "a", path: "D:\\Downloads\\file.txt" },
+      { ...ctx, abortSignal: controller.signal },
+    )
+
+    expect(tab.download).toHaveBeenCalledWith(
+      "a",
+      "D:\\Downloads\\file.txt",
+      1_800_000,
+      controller.signal,
+    )
   })
 
   it("returns interaction errors without throwing", async () => {
@@ -715,6 +775,28 @@ describe("browser toolkit", () => {
     expect(service.recordStopIfCurrent).toHaveBeenCalledWith(ctx.context.sessionId, 1)
     expect(result).toEqual({ recording: false, path: recordPath })
     vi.useRealTimers()
+  })
+
+  it("closes a new click tab when its navigation fails", async () => {
+    const source = {
+      elementHref: vi.fn(async () => "https://missing.example"),
+    }
+    const target = {
+      navigateAndWait: vi.fn(async () => {
+        throw new Error("ERR_NAME_NOT_RESOLVED")
+      }),
+    }
+    const service = {
+      ...createService(),
+      createTab: vi.fn(() => 2),
+      close: vi.fn(async () => undefined),
+      tab: vi.fn((_sessionId: string, id: number) => (id === 1 ? source : target)),
+    } as unknown as BrowserService
+
+    await expect(
+      tool("click", service).execute({ id: 1, selector: "a", newTab: true }, ctx),
+    ).resolves.toEqual({ error: "ERR_NAME_NOT_RESOLVED" })
+    expect(service.close).toHaveBeenCalledWith("session-1", 2)
   })
 
   it("does not stop a replacement recording when an old duration expires", async () => {

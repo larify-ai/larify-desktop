@@ -1,11 +1,18 @@
 import { describe, expect, it, vi } from "vitest"
+import { JSDOM } from "jsdom"
 
 vi.mock("../../../../src/extensions/browser/main/refResolve", () => ({
   resolveRefToObjectId: vi.fn(async () => ({ objectId: "OID", sessionId: "SID" })),
   resolveRefToBox: vi.fn(async () => ({ x: 0, y: 0, sessionId: "SID" })),
 }))
 
-import { callOn, fill, type as typeInto } from "../../../../src/extensions/browser/main/interactions"
+import {
+  callOn,
+  check,
+  fill,
+  select,
+  type as typeInto,
+} from "../../../../src/extensions/browser/main/interactions"
 
 interface Call {
   method: string
@@ -76,5 +83,95 @@ describe("interactions sessionId threading", () => {
     expect(keyEvents.every((c) => c.sessionId === "SID")).toBe(true)
     expect(textEvents.map((c) => c.params.text)).toEqual(["a", "b"])
     expect(textEvents.every((c) => c.sessionId === "SID")).toBe(true)
+  })
+
+  it("stops delayed typing when the operation is aborted", async () => {
+    const { ctx, calls } = makeCtx()
+    const controller = new AbortController()
+    const pending = typeInto(ctx, "ref_1", "abc", false, 10_000, controller.signal)
+    await vi.waitFor(() => {
+      expect(calls.some((call) => call.method === "Input.insertText")).toBe(true)
+    })
+
+    controller.abort()
+
+    await expect(pending).rejects.toThrow("typing was cancelled")
+    expect(calls.filter((call) => call.method === "Input.insertText")).toHaveLength(1)
+  })
+
+  it("does not report check success when the element remains unchecked", async () => {
+    const { ctx } = makeCtx()
+    vi.mocked(ctx.send).mockImplementation(async (method, params) => {
+      if (
+        method === "Runtime.callFunctionOn" &&
+        String((params as { functionDeclaration?: string }).functionDeclaration).includes(
+          "aria-checked",
+        )
+      ) {
+        return { result: { value: false } }
+      }
+      return { result: { value: undefined } }
+    })
+
+    await expect(check(ctx, "ref_1")).rejects.toThrow("remains unchecked")
+  })
+
+  it("does not silently select only the matching subset of requested values", async () => {
+    const { ctx } = makeCtx()
+    const element = {
+      options: [
+        { value: "a", textContent: "Alpha", selected: false },
+        { value: "b", textContent: "Beta", selected: false },
+      ],
+      dispatchEvent: vi.fn(),
+    }
+    vi.mocked(ctx.send).mockImplementation(async (method, params) => {
+      if (method !== "Runtime.callFunctionOn") return {}
+      const declaration = String(
+        (params as { functionDeclaration?: string }).functionDeclaration,
+      )
+      const args = (
+        (params as { arguments?: Array<{ value: unknown }> }).arguments ?? []
+      ).map(({ value }) => value)
+      const fn = Function(`return (${declaration})`)() as (
+        this: typeof element,
+        ...values: unknown[]
+      ) => unknown
+      return { result: { value: fn.apply(element, args) } }
+    })
+
+    await expect(select(ctx, "ref_1", ["a", "missing"])).rejects.toThrow(
+      'No option matched "missing"',
+    )
+    expect(element.options[0].selected).toBe(false)
+  })
+
+  it("rejects multiple values for a single-select before changing its selection", async () => {
+    const { ctx } = makeCtx()
+    const dom = new JSDOM(
+      '<select><option value="a" selected>Alpha</option><option value="b">Beta</option></select>',
+      { runScripts: "outside-only" },
+    )
+    const element = dom.window.document.querySelector("select")!
+    vi.mocked(ctx.send).mockImplementation(async (method, params) => {
+      if (method !== "Runtime.callFunctionOn") return {}
+      const declaration = String(
+        (params as { functionDeclaration?: string }).functionDeclaration,
+      )
+      const args = (
+        (params as { arguments?: Array<{ value: unknown }> }).arguments ?? []
+      ).map(({ value }) => value)
+      const fn = dom.window.Function(`return (${declaration})`)() as (
+        this: HTMLSelectElement,
+        ...values: unknown[]
+      ) => unknown
+      return { result: { value: fn.apply(element, args) } }
+    })
+
+    await expect(select(ctx, "ref_1", ["a", "b"])).rejects.toThrow(
+      "multiple values for a single-select",
+    )
+    expect(element.value).toBe("a")
+    dom.window.close()
   })
 })

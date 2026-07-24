@@ -157,7 +157,7 @@ export async function resolveRefToBox(
   refMap: RefMap,
   selectorOrRef: string,
   iframeSessions?: IframeSessions
-): Promise<{ x: number; y: number; sessionId?: string }> {
+): Promise<{ x: number; y: number; frameId?: string; sessionId?: string }> {
   const refId = parseRef(selectorOrRef)
   if (refId !== undefined) {
     const entry = lookupRef(refMap, refId)
@@ -177,7 +177,7 @@ export async function resolveRefToBox(
       }
       if (center) {
         await checkInterception(send, entry.backendNodeId, selectorOrRef, center.x, center.y, sessionId)
-        return { ...center, sessionId }
+        return { ...center, frameId: entry.frameId, sessionId }
       }
     }
     const fresh = await findNodeIdByRoleName(send, entry, params, sessionId)
@@ -185,7 +185,7 @@ export async function resolveRefToBox(
     const r = (await send('DOM.getBoxModel', { backendNodeId: fresh }, sessionId)) as BoxModelResult
     const { x, y } = boxModelCenter(r.model)
     await checkInterception(send, fresh, selectorOrRef, x, y, sessionId)
-    return { x, y, sessionId }
+    return { x, y, frameId: entry.frameId, sessionId }
   }
   const js = `(() => {
     const el = ${findElementExpr(selectorOrRef)};
@@ -200,6 +200,7 @@ export async function resolveRefToBox(
     return { x, y, blocker: blockerAt(document, el, x, y) };
   })()`
   const res = (await send('Runtime.evaluate', { expression: js, returnByValue: true })) as EvalResult
+  if (res.exceptionDetails) throw new Error(`selector '${selectorOrRef}' is invalid`)
   const val = res.result?.value as { x: number; y: number; blocker?: string } | null | undefined
   if (!val) throw new Error(`selector '${selectorOrRef}' matched no element`)
   if (typeof val.blocker === 'string' && val.blocker) {

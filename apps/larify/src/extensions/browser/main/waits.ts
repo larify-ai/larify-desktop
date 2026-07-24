@@ -32,9 +32,21 @@ async function evalBool(send: CdpSend, expression: string): Promise<boolean> {
     expression,
     returnByValue: true,
     awaitPromise: true
-  })) as { result?: { value?: unknown } }
+  })) as {
+    result?: { value?: unknown }
+    exceptionDetails?: { text?: string; exception?: { description?: string } }
+  }
+  if (res.exceptionDetails) {
+    throw new EvaluationError(
+      res.exceptionDetails.exception?.description ??
+        res.exceptionDetails.text ??
+        'Runtime.evaluate failed'
+    )
+  }
   return res.result?.value === true
 }
+
+class EvaluationError extends Error {}
 
 async function poll(
   check: () => Promise<boolean>,
@@ -45,7 +57,11 @@ async function poll(
   const deadline = Date.now() + timeoutMs
   for (;;) {
     if (signal?.aborted) throw abortError()
-    if (await check().catch(() => false)) return
+    try {
+      if (await check()) return
+    } catch (error) {
+      if (error instanceof EvaluationError) throw error
+    }
     if (signal?.aborted) throw abortError()
     if (Date.now() >= deadline) throw new Error(`${label} timed out after ${formatTimeout(timeoutMs)}`)
     await sleepUntilPoll(POLL_INTERVAL, signal)
@@ -54,15 +70,24 @@ async function poll(
 
 function selectorExpr(selector: string, state: WaitState): string {
   const sel = JSON.stringify(selector)
+  const visible = `(el) => {
+    const rect = el.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return false;
+    for (let node = el; node && node.nodeType === 1; node = node.parentElement) {
+      const style = node.ownerDocument.defaultView.getComputedStyle(node);
+      if (style.visibility === 'hidden' || style.display === 'none' || parseFloat(style.opacity) <= 0) return false;
+    }
+    return true;
+  }`
   switch (state) {
     case 'attached':
       return `!!document.querySelector(${sel})`
     case 'detached':
       return `!document.querySelector(${sel})`
     case 'hidden':
-      return `(() => { const el = document.querySelector(${sel}); if (!el) return true; const s = getComputedStyle(el); return s.display === 'none' || s.visibility === 'hidden' || parseFloat(s.opacity) === 0; })()`
+      return `(() => { const el = document.querySelector(${sel}); return !el || !(${visible})(el); })()`
     default:
-      return `(() => { const el = document.querySelector(${sel}); if (!el) return false; const s = getComputedStyle(el); const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none'; })()`
+      return `(() => { const el = document.querySelector(${sel}); return !!el && (${visible})(el); })()`
   }
 }
 

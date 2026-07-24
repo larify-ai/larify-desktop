@@ -10,6 +10,22 @@ import { namedKeyInfo, parseKeyChord } from './keymap'
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
+const sleepWhileActive = (ms: number, signal?: AbortSignal): Promise<void> => {
+  if (!signal) return sleep(ms)
+  if (signal.aborted) return Promise.reject(new Error("typing was cancelled"))
+  return new Promise((resolve, reject) => {
+    const onAbort = (): void => {
+      clearTimeout(timer)
+      reject(new Error("typing was cancelled"))
+    }
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort)
+      resolve()
+    }, ms)
+    signal.addEventListener("abort", onAbort, { once: true })
+  })
+}
+
 export async function callOn(
   send: CdpSend,
   objectId: string,
@@ -89,7 +105,7 @@ export async function elementHref(ctx: Interactions, selector: string): Promise<
 export async function drag(ctx: Interactions, source: string, target: string): Promise<void> {
   const s = await resolveRefToBox(ctx.send, ctx.refMap, source, ctx.sessions)
   const t = await resolveRefToBox(ctx.send, ctx.refMap, target, ctx.sessions)
-  if (s.sessionId !== t.sessionId) {
+  if (s.sessionId !== t.sessionId || s.frameId !== t.frameId) {
     throw new Error('Cross-frame drag is not supported.')
   }
   const mouse = (
@@ -133,8 +149,10 @@ export async function type(
   selector: string,
   text: string,
   clear = false,
-  delayMs = 0
+  delayMs = 0,
+  signal?: AbortSignal
 ): Promise<void> {
+  if (signal?.aborted) throw new Error("typing was cancelled")
   const { objectId, sessionId } = await resolveRefToObjectId(
     ctx.send,
     ctx.refMap,
@@ -152,10 +170,11 @@ export async function type(
     )
   }
   for (const ch of text) {
+    if (signal?.aborted) throw new Error("typing was cancelled")
     if (ch === '\n' || ch === '\r') await dispatchKey(ctx.send, namedKeyInfo('enter'), 0, sessionId)
     else if (ch === '\t') await dispatchKey(ctx.send, namedKeyInfo('tab'), 0, sessionId)
     else await insertText(ctx.send, ch, sessionId)
-    if (delayMs > 0) await sleep(delayMs)
+    if (delayMs > 0) await sleepWhileActive(delayMs, signal)
   }
 }
 
@@ -212,6 +231,9 @@ async function setChecked(ctx: Interactions, selector: string, target: boolean):
     ctx.sessions
   )
   await callOn(ctx.send, objectId, JS_CLICK_CHECKBOX, [], sessionId)
+  if ((await isChecked(ctx, selector)) !== target) {
+    throw new Error(`Element '${selector}' remains ${target ? 'unchecked' : 'checked'}.`)
+  }
 }
 
 export async function check(ctx: Interactions, selector: string): Promise<void> {
@@ -223,14 +245,23 @@ export async function uncheck(ctx: Interactions, selector: string): Promise<void
 }
 
 const SELECT_JS = `function(vals){
+  const options = Array.from(this.options);
+  const requested = vals.map(v => ({
+    value: v,
+    option: options.find(opt => opt.value === v || (opt.textContent||'').trim() === v)
+  }));
+  const unmatched = requested.filter(item => !item.option).map(item => item.value);
+  if (unmatched.length > 0) {
+    return { error: 'No option matched ' + unmatched.map(v => JSON.stringify(v)).join(', ') + '. Available options: ' + options.map(o => o.value + ' ("' + (o.textContent||'').trim() + '")').join(', ') };
+  }
+  if (!this.multiple && new Set(requested.map(item => item.option)).size > 1) {
+    return { error: 'Cannot select multiple values for a single-select element.' };
+  }
   let matched = 0;
-  for (const opt of this.options) {
+  for (const opt of options) {
     const sel = vals.includes(opt.value) || vals.includes((opt.textContent||'').trim());
     opt.selected = sel;
     if (sel) matched++;
-  }
-  if (matched === 0) {
-    return { error: 'No option matched ' + JSON.stringify(vals) + '. Available options: ' + Array.from(this.options).map(o => o.value + ' ("' + (o.textContent||'').trim() + '")').join(', ') };
   }
   this.dispatchEvent(new Event('change', { bubbles: true }));
   return { matched };

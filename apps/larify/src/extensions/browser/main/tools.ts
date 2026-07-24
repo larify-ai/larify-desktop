@@ -25,6 +25,31 @@ const resolveService = (provider: BrowserServiceProvider): BrowserService =>
 const secondsToMs = (seconds: number | undefined): number | undefined =>
   seconds === undefined ? undefined : seconds * 1000
 
+async function runUntilAbort<T>(
+  action: () => Promise<T>,
+  signal: AbortSignal | undefined,
+  label: string,
+): Promise<T> {
+  if (!signal) return action()
+  if (signal.aborted) throw new Error(`${label} was cancelled`)
+  let onAbort!: () => void
+  const aborted = new Promise<never>((_resolve, reject) => {
+    onAbort = () => reject(new Error(`${label} was cancelled`))
+    signal.addEventListener("abort", onAbort, { once: true })
+  })
+  try {
+    return await Promise.race([
+      Promise.resolve().then(() => {
+        if (signal.aborted) throw new Error(`${label} was cancelled`)
+        return action()
+      }),
+      aborted,
+    ])
+  } finally {
+    signal.removeEventListener("abort", onAbort)
+  }
+}
+
 const navigateSchema = z
   .object({
     id: idSchema,
@@ -209,10 +234,12 @@ export function createBrowserToolkit(service: BrowserServiceProvider): Toolkit {
         execute: async (args, ctx) => {
           const { id, action, url } = args
           return withTab(service, ctx.sessionId, id, async (tab) => {
-            if (action === "goto") await tab.navigateAndWait(url!)
-            else if (action === "back") await tab.goBackAndWait()
-            else if (action === "forward") await tab.goForwardAndWait()
-            else await tab.reloadAndWait()
+            await runUntilAbort(async () => {
+              if (action === "goto") await tab.navigateAndWait(url!)
+              else if (action === "back") await tab.goBackAndWait()
+              else if (action === "forward") await tab.goForwardAndWait()
+              else await tab.reloadAndWait()
+            }, ctx.signal, "browser navigation")
             return tabState(tab)
           })
         },
@@ -261,7 +288,13 @@ export function createBrowserToolkit(service: BrowserServiceProvider): Toolkit {
           const { id, method, params, sessionId, timeout } = args
           try {
             const tab = getTab(service, ctx.sessionId, id)
-            return spill(JSON.stringify(await tab.sendCdp(method, params, sessionId, secondsToMs(timeout)), null, 2))
+            return spill(
+              JSON.stringify(
+                await tab.sendCdp(method, params, sessionId, secondsToMs(timeout), ctx.signal),
+                null,
+                2,
+              ),
+            )
           } catch (error) {
             if (shouldExposeToolErrors()) throw error
             const tab = resolveService(service).tab(ctx.sessionId, id)
@@ -467,10 +500,19 @@ function interactionTools(service: BrowserServiceProvider): Toolkit["tools"] {
           if (newTab) {
             const href = await tab.elementHref(selector)
             if (!href) throw new Error(`element '${selector}' has no link target`)
+            const resolved = resolveService(service)
+            const newTabId = resolved.createTab(ctx.sessionId)
+            const created = getTab(service, ctx.sessionId, newTabId)
+            try {
+              await created.navigateAndWait(href)
+            } catch (error) {
+              await resolved.close(ctx.sessionId, newTabId)
+              throw error
+            }
             return {
               clicked: selector,
               newTab: true,
-              id: resolveService(service).createTab(ctx.sessionId, href),
+              id: newTabId,
               url: href,
             }
           }
@@ -528,7 +570,7 @@ function interactionTools(service: BrowserServiceProvider): Toolkit["tools"] {
       execute: async (args, ctx) => {
         const { id, selector, path, timeout } = args
         return withTab(service, ctx.sessionId, id, async (tab) => ({
-          path: await tab.download(selector, path, secondsToMs(timeout)),
+          path: await tab.download(selector, path, secondsToMs(timeout), ctx.signal),
         }))
       },
     }),
@@ -551,7 +593,7 @@ function interactionTools(service: BrowserServiceProvider): Toolkit["tools"] {
       execute: async (args, ctx) => {
         const { id, selector, text, clear, delay } = args
         return withTab(service, ctx.sessionId, id, async (tab) => {
-          await tab.type(selector, text, clear, secondsToMs(delay))
+          await tab.type(selector, text, clear, secondsToMs(delay), ctx.signal)
           return { typed: text }
         })
       },

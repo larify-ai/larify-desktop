@@ -88,9 +88,19 @@ export function useBrowser(): UseBrowser {
       close: async (id: number) => {
         const closingLastTab = state.tabs.length <= 1
         if (closingLastTab) suppressAutoCreateRef.current = true
-        await window.bridge.invoke("browser:close", sessionId, id)
-        if (closingLastTab) {
+        let next: BrowserState | undefined
+        try {
+          next = (await window.bridge.invoke("browser:close", sessionId, id)) as
+            | BrowserState
+            | undefined
+        } catch (error) {
+          if (closingLastTab) suppressAutoCreateRef.current = false
+          throw error
+        }
+        if (closingLastTab && (!next || next.tabs.length === 0)) {
           window.dispatchEvent(new CustomEvent("larify:workbench-close", { detail: "browser" }))
+        } else if (closingLastTab) {
+          suppressAutoCreateRef.current = false
         }
       },
       create: (url?: string) => window.bridge.invoke("browser:create", sessionId, url) as Promise<number>,

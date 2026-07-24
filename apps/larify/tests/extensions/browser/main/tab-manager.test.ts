@@ -9,8 +9,11 @@ const h = vi.hoisted(() => ({
 vi.mock("electron", () => {
   class FakeWebContents {
     url = "about:blank"
+    windowOpenHandler?: (details: { url: string }) => { action: string }
     on(): void {}
-    setWindowOpenHandler(): void {}
+    setWindowOpenHandler(handler: (details: { url: string }) => { action: string }): void {
+      this.windowOpenHandler = handler
+    }
     loadURL(url: string): Promise<void> {
       this.url = url
       return Promise.resolve()
@@ -208,6 +211,93 @@ describe("BrowserTabManager", () => {
 
     expect(stopIfRecordingTab).toHaveBeenCalledWith(id)
     expect(manager.state().tabs).toEqual([])
+  })
+
+  it("coalesces concurrent closes of the same tab", async () => {
+    const manager = new BrowserTabManager(fakeWindow())
+    const id = manager.createTab()
+    const tab = manager.get(id)!
+    const destroy = vi.spyOn(tab, "destroy")
+    let finishStop!: () => void
+    const stopIfRecordingTab = vi.fn(
+      () => new Promise<void>((resolve) => {
+        finishStop = resolve
+      }),
+    )
+    ;(
+      manager as unknown as {
+        recorder: { stopIfRecordingTab: (tabId: number) => Promise<void> }
+      }
+    ).recorder.stopIfRecordingTab = stopIfRecordingTab
+
+    const first = manager.close(id)
+    const second = manager.close(id)
+    finishStop()
+    await Promise.all([first, second])
+
+    expect(stopIfRecordingTab).toHaveBeenCalledOnce()
+    expect(destroy).toHaveBeenCalledOnce()
+  })
+
+  it("waits for an in-progress close before destroying the manager", async () => {
+    const manager = new BrowserTabManager(fakeWindow())
+    const id = manager.createTab()
+    const tab = manager.get(id)!
+    const destroyTab = vi.spyOn(tab, "destroy")
+    let finishStop!: () => void
+    ;(
+      manager as unknown as {
+        recorder: { stopIfRecordingTab: (tabId: number) => Promise<void> }
+      }
+    ).recorder.stopIfRecordingTab = () =>
+      new Promise<void>((resolve) => {
+        finishStop = resolve
+      })
+
+    const closing = manager.close(id)
+    const destroying = manager.destroy()
+    await Promise.resolve()
+    expect(destroyTab).not.toHaveBeenCalled()
+
+    finishStop()
+    await Promise.all([closing, destroying])
+    expect(destroyTab).toHaveBeenCalledOnce()
+  })
+
+  it("makes destroy idempotent and rejects new tabs after teardown starts", async () => {
+    const manager = new BrowserTabManager(fakeWindow())
+    const id = manager.createTab()
+    const tab = manager.get(id)!
+    const destroyTab = vi.spyOn(tab, "destroy")
+    let finishRecorderDestroy!: () => void
+    const destroyRecorder = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishRecorderDestroy = resolve
+        }),
+    )
+    ;(manager as unknown as { recorder: { destroy: () => Promise<void> } }).recorder.destroy =
+      destroyRecorder
+
+    const first = manager.destroy()
+    const second = manager.destroy()
+    expect(second).toBe(first)
+    expect(() => manager.createTab()).toThrow("browser tab manager is destroyed")
+    expect(manager.close(id)).toBe(first)
+
+    const windowOpen = (
+      tab.view.webContents as unknown as {
+        windowOpenHandler: (details: { url: string }) => { action: string }
+      }
+    ).windowOpenHandler
+    expect(windowOpen({ url: "https://example.com" })).toEqual({ action: "deny" })
+    expect(manager.state().tabs).toHaveLength(1)
+
+    await vi.waitFor(() => expect(finishRecorderDestroy).toBeTypeOf("function"))
+    finishRecorderDestroy()
+    await first
+    expect(destroyRecorder).toHaveBeenCalledOnce()
+    expect(destroyTab).toHaveBeenCalledOnce()
   })
 
   it("removes its main-window closed listener when destroyed", async () => {

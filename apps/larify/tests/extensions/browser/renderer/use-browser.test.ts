@@ -140,6 +140,52 @@ describe("useBrowser", () => {
     window.removeEventListener("larify:workbench-close", onCloseWorkbench)
   })
 
+  it("does not close the workbench when another tab appears during the close", async () => {
+    let browser: BrowserHook | undefined
+    const closeRequest = deferred<unknown>()
+    const closeEvents: Array<string | null> = []
+    const onCloseWorkbench = (event: Event): void => {
+      closeEvents.push((event as CustomEvent<string | null>).detail)
+    }
+    window.addEventListener("larify:workbench-close", onCloseWorkbench)
+    invoke.mockImplementation((channel: string) => {
+      if (channel === "browser:getState") return stateRequest.promise
+      if (channel === "browser:close") return closeRequest.promise
+      return Promise.resolve(undefined)
+    })
+
+    await act(async () =>
+      root.render(
+        createElement(Probe, {
+          onBrowser: (value) => {
+            browser = value
+          },
+          onState: vi.fn(),
+        }),
+      ),
+    )
+    await act(async () => {
+      stateRequest.resolve({
+        tabs: [{ id: 1, title: "only" }],
+        activeId: 1,
+      })
+    })
+
+    let closing!: Promise<void>
+    await act(async () => {
+      closing = browser!.close(1)
+      listeners[0]({
+        sessionId: "session-a",
+        state: { tabs: [{ id: 2, title: "new" }], activeId: 2 },
+      })
+      closeRequest.resolve({ tabs: [{ id: 2, title: "new" }], activeId: 2 })
+      await closing
+    })
+
+    expect(closeEvents).toEqual([])
+    window.removeEventListener("larify:workbench-close", onCloseWorkbench)
+  })
+
   it("ignores state events for other sessions", async () => {
     const onState = vi.fn()
     await act(async () => root.render(createElement(Probe, { onState })))

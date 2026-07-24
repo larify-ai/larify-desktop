@@ -106,10 +106,12 @@ export function BrowserToolbar({
               if (event.key !== "Enter") return
               const input = event.currentTarget
               const next = input.value
-              void onNavigate(next).then((navigated) => {
-                if (navigated) input.blur()
-                else setEditing(next)
-              })
+              void onNavigate(next)
+                .then((navigated) => {
+                  if (navigated) input.blur()
+                  else setEditing(next)
+                })
+                .catch(() => setEditing(next))
             }}
           />
         )}

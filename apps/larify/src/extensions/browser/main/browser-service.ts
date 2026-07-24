@@ -12,6 +12,8 @@ export class BrowserService {
   )
   private readonly changeListeners = new Set<Listener<[string, BrowserState]>>()
   private readonly bounds = new Map<string, Rectangle>()
+  private readonly sessionDestructions = new Map<string, Promise<void>>()
+  private destroyed = false
 
   constructor(private readonly window: BrowserWindow) {}
 
@@ -43,8 +45,10 @@ export class BrowserService {
     this.managers.peek(sessionId)?.reorder(id, toIndex)
   }
 
-  async close(sessionId: string, id: number): Promise<void> {
-    await this.managers.peek(sessionId)?.close(id)
+  async close(sessionId: string, id: number): Promise<BrowserState> {
+    const manager = this.managers.peek(sessionId)
+    await manager?.close(id)
+    return manager?.state() ?? { tabs: [], activeId: null }
   }
 
   navigate(sessionId: string, id: number, url: string): boolean {
@@ -64,22 +68,28 @@ export class BrowserService {
   }
 
   recordStart(sessionId: string, tab: BrowserTab, path: string): Promise<number> {
-    return this.manager(sessionId).recordStart(tab, path)
+    const manager = this.managers.peek(sessionId)
+    if (!manager) return Promise.reject(new Error("browser session is not active"))
+    return manager.recordStart(tab, path)
   }
 
   recordStop(sessionId: string): Promise<{ path: string; bytes: number }> {
-    return this.manager(sessionId).recordStop()
+    const manager = this.managers.peek(sessionId)
+    if (!manager) return Promise.reject(new Error("no recording in progress"))
+    return manager.recordStop()
   }
 
   recordStopIfCurrent(
     sessionId: string,
     generation: number
   ): Promise<{ path: string; bytes: number } | null> {
-    return this.manager(sessionId).recordStopIfCurrent(generation)
+    return this.managers.peek(sessionId)?.recordStopIfCurrent(generation) ?? Promise.resolve(null)
   }
 
   recordRestart(sessionId: string, tab: BrowserTab, path: string): Promise<number> {
-    return this.manager(sessionId).recordRestart(tab, path)
+    const manager = this.managers.peek(sessionId)
+    if (!manager) return Promise.reject(new Error("browser session is not active"))
+    return manager.recordRestart(tab, path)
   }
 
   setBounds(sessionId: string, bounds: Rectangle): void {
@@ -98,18 +108,36 @@ export class BrowserService {
     this.manager(sessionId).setVisible(true)
   }
 
-  async destroySession(sessionId: string): Promise<void> {
-    await this.managers.destroySession(sessionId)
-    this.bounds.delete(sessionId)
+  destroySession(sessionId: string): Promise<void> {
+    const existing = this.sessionDestructions.get(sessionId)
+    if (existing) return existing
+    const destroying = this.destroySessionManager(sessionId).finally(() => {
+      if (this.sessionDestructions.get(sessionId) === destroying) {
+        this.sessionDestructions.delete(sessionId)
+      }
+    })
+    this.sessionDestructions.set(sessionId, destroying)
+    return destroying
   }
 
   async destroy(): Promise<void> {
+    this.destroyed = true
+    await Promise.allSettled([...this.sessionDestructions.values()])
     await this.managers.destroyAll()
     this.bounds.clear()
   }
 
   private manager(sessionId: string): BrowserTabManager {
+    if (this.destroyed) throw new Error("browser service is destroyed")
+    if (this.sessionDestructions.has(sessionId)) {
+      throw new Error("browser session is being destroyed")
+    }
     return this.managers.get(sessionId)
+  }
+
+  private async destroySessionManager(sessionId: string): Promise<void> {
+    await this.managers.destroySession(sessionId)
+    this.bounds.delete(sessionId)
   }
 
   private createManager(sessionId: string): BrowserTabManager {

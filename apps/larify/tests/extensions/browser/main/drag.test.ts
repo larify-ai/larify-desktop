@@ -40,6 +40,18 @@ describe('drag frame sessions', () => {
     expect(calls).toHaveLength(0)
   })
 
+  it('rejects drag between same-process frames with no child sessions', async () => {
+    vi.mocked(resolveRefToBox)
+      .mockResolvedValueOnce({ x: 10, y: 20, frameId: 'FRAME-A' })
+      .mockResolvedValueOnce({ x: 30, y: 40, frameId: 'FRAME-B' })
+    const { ctx, calls } = makeCtx()
+
+    await expect(drag(ctx, '#source', '#target')).rejects.toThrow(
+      'Cross-frame drag is not supported.'
+    )
+    expect(calls).toHaveLength(0)
+  })
+
   it.each([undefined, 'OOPIF'])(
     'keeps same-frame drag events in session %s',
     async (sessionId) => {

@@ -93,4 +93,34 @@ describe("BrowserToolbar", () => {
 
     expect(blur).toHaveBeenCalledOnce()
   })
+
+  it("keeps address text when asynchronous navigation rejects", async () => {
+    await act(async () => {
+      root.render(
+        createElement(BrowserToolbar, {
+          onBack: vi.fn(),
+          onForward: vi.fn(),
+          onNavigate: vi.fn().mockRejectedValue(new Error("IPC unavailable")),
+          onReload: vi.fn(),
+          tab,
+        }),
+      )
+    })
+    await act(async () => {
+      container.querySelector("button:not([aria-label])")!.dispatchEvent(
+        new MouseEvent("click", { bubbles: true }),
+      )
+    })
+    const input = container.querySelector("input")!
+
+    await act(async () => {
+      input.value = "example.com"
+      input.dispatchEvent(new Event("input", { bubbles: true }))
+      input.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Enter" }))
+      await Promise.resolve()
+    })
+
+    expect(input.value).toBe("example.com")
+    expect(document.activeElement).toBe(input)
+  })
 })

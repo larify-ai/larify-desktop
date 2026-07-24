@@ -17,6 +17,9 @@ export class BrowserTabManager {
   private readonly host: BrowserWindow
   private readonly viewParent = new Map<number, BrowserWindow>()
   private readonly recorder = new Recorder()
+  private readonly handleWindowClosed = (): void => {
+    if (!this.host.isDestroyed()) this.host.destroy()
+  }
 
   constructor(private readonly window: BrowserWindow) {
     this.host = new BrowserWindow({
@@ -30,9 +33,7 @@ export class BrowserTabManager {
       webPreferences: { backgroundThrottling: false },
     })
     this.host.setPosition(HOST_POSITION.x, HOST_POSITION.y)
-    this.window.once("closed", () => {
-      if (!this.host.isDestroyed()) this.host.destroy()
-    })
+    this.window.once("closed", this.handleWindowClosed)
   }
 
   bindChange(cb: (state: BrowserState) => void): void {
@@ -147,7 +148,9 @@ export class BrowserTabManager {
     }
   }
 
-  destroy(): void {
+  async destroy(): Promise<void> {
+    this.window.removeListener("closed", this.handleWindowClosed)
+    await this.recorder.destroy()
     for (const tab of this.tabs.values()) {
       this.viewParent.get(tab.id)?.contentView.removeChildView(tab.view)
       tab.destroy()
@@ -155,7 +158,6 @@ export class BrowserTabManager {
     this.tabs.clear()
     this.viewParent.clear()
     this.activeId = null
-    this.recorder.destroy()
     if (!this.host.isDestroyed()) this.host.destroy()
   }
 

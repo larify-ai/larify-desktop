@@ -1,5 +1,9 @@
 import { app, BrowserWindow, nativeImage, screen } from 'electron'
 import { createServer, type Server } from 'node:http'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { BrowserService } from '../../../../src/extensions/browser/main/browser-service'
 import { BrowserTab } from '../../../../src/extensions/browser/main/tab'
 
 app.commandLine.appendSwitch('site-per-process')
@@ -9,6 +13,18 @@ function listen(host: string, html: () => string): Promise<Server> {
     const server = createServer((_request, response) => {
       response.writeHead(200, { 'content-type': 'text/html' })
       response.end(html())
+    })
+    server.listen(0, host, () => resolve(server))
+  })
+}
+
+function listenSlow(host: string, delayMs: number): Promise<Server> {
+  return new Promise((resolve) => {
+    const server = createServer((_request, response) => {
+      setTimeout(() => {
+        response.writeHead(200, { 'access-control-allow-origin': '*', 'content-type': 'text/plain' })
+        response.end('done')
+      }, delayMs)
     })
     server.listen(0, host, () => resolve(server))
   })
@@ -30,6 +46,30 @@ async function waitForRef(tab: BrowserTab): Promise<string> {
     await new Promise((resolve) => setTimeout(resolve, 100))
   }
   throw new Error(`OOPIF target ref was not captured:\n${lastSnapshot}`)
+}
+
+async function waitForKeyTargetRef(tab: BrowserTab): Promise<string> {
+  const deadline = Date.now() + 10_000
+  let lastSnapshot = ''
+  while (Date.now() < deadline) {
+    lastSnapshot = await tab.snapshot()
+    const match = lastSnapshot.match(/textbox "KeyTarget" \[ref=(e\d+)\]/)
+    if (match) return `@${match[1]}`
+    await new Promise((resolve) => setTimeout(resolve, 100))
+  }
+  throw new Error(`OOPIF key target ref was not captured:\n${lastSnapshot}`)
+}
+
+async function waitForDownloadRef(tab: BrowserTab): Promise<string> {
+  const deadline = Date.now() + 10_000
+  let lastSnapshot = ''
+  while (Date.now() < deadline) {
+    lastSnapshot = await tab.snapshot()
+    const match = lastSnapshot.match(/link "Download" \[ref=(e\d+)\]/)
+    if (match) return `@${match[1]}`
+    await new Promise((resolve) => setTimeout(resolve, 100))
+  }
+  throw new Error(`download ref was not captured:\n${lastSnapshot}`)
 }
 
 function assertGreenCorners(data: string): { width: number; height: number } {
@@ -57,8 +97,13 @@ function assertGreenCorners(data: string): { width: number; height: number } {
 async function main(): Promise<void> {
   let childServer: Server | undefined
   let rootServer: Server | undefined
+  let slowServer: Server | undefined
+  let downloadServer: Server | undefined
+  let downloadClosed = false
+  let downloadDir: string | undefined
   let window: BrowserWindow | undefined
   let tab: BrowserTab | undefined
+  const keepAlive = (): void => {}
   try {
     const testCase = process.env.OOPIF_SCREENSHOT_CASE ?? 'default'
     const targetLeft = testCase === 'offscreen-right' || testCase === 'same-site-offscreen' ? 700 : 30
@@ -74,10 +119,26 @@ async function main(): Promise<void> {
         #target{position:absolute;left:${targetLeft}px;top:${targetTop}px;width:${targetWidth}px;height:60px;
           border:0;padding:0;background:#00c800;color:#000}
       </style><button id="target">OOPIF</button>
+      <input aria-label="KeyTarget" onkeydown="if(event.key==='Enter') this.value='pressed'">
       <script>scrollTo(${childScrollX},${childScrollY})</script>`
     )
     const childHost = testCase === 'same-site-offscreen' ? 'localhost' : '127.0.0.1'
     const childUrl = url(childServer, childHost)
+    downloadServer = await new Promise((resolve) => {
+      const server = createServer((_request, response) => {
+        response.on('close', () => {
+          downloadClosed = true
+        })
+        response.writeHead(200, {
+          'content-disposition': 'attachment; filename="large.bin"',
+          'content-type': 'application/octet-stream'
+        })
+        response.write(Buffer.alloc(1024))
+        setTimeout(() => response.end(Buffer.alloc(1024)), 5000)
+      })
+      server.listen(0, 'localhost', () => resolve(server))
+    })
+    const downloadUrl = url(downloadServer, 'localhost')
     rootServer = await listen(
       'localhost',
       () => `<!doctype html><style>
@@ -85,11 +146,38 @@ async function main(): Promise<void> {
         iframe{position:absolute;left:150px;top:700px;width:400px;height:300px;
           border:10px solid #c80000;transform:scale(1.25);transform-origin:top left}
       </style><div id="legacy" data-__ab-ci="keep" style="cursor:pointer">Legacy</div>
+      <a href="${downloadUrl}">Download</a>
       <iframe src="${childUrl}"></iframe><script>scrollTo(0,${rootScrollY})</script>`
     )
+    slowServer = await listenSlow('localhost', 1000)
 
     await app.whenReady()
+    app.on('window-all-closed', keepAlive)
     window = new BrowserWindow({ show: true, x: -2000, y: -2000, width: 900, height: 700 })
+
+    const service = new BrowserService(window)
+    const initialWindowCount = BrowserWindow.getAllWindows().length
+    const initialClosedListeners = window.listenerCount('closed')
+    service.state('unused')
+    service.setBounds('unused', { x: 0, y: 0, width: 800, height: 600 })
+    service.close('unused', 1)
+    if (
+      BrowserWindow.getAllWindows().length !== initialWindowCount ||
+      window.listenerCount('closed') !== initialClosedListeners
+    ) {
+      throw new Error('empty browser session allocated native resources')
+    }
+    service.createTab('used')
+    if (window.listenerCount('closed') !== initialClosedListeners + 1) {
+      throw new Error('browser session did not register its host cleanup listener')
+    }
+    await service.destroySession('used')
+    if (window.listenerCount('closed') !== initialClosedListeners) {
+      throw new Error('destroyed browser session retained its host cleanup listener')
+    }
+    await service.destroy()
+    console.log('PASS BrowserService empty session resources and listener cleanup')
+
     tab = new BrowserTab(1, `oopif-live-${Date.now()}`)
     window.contentView.addChildView(tab.view)
     tab.view.setBounds({ x: 0, y: 0, width: 900, height: 700 })
@@ -123,13 +211,54 @@ async function main(): Promise<void> {
     console.log(
       `PASS BrowserTab OOPIF screenshot: ${size.width}x${size.height}, scaleFactor=${scaleFactor}`
     )
+    const keyTarget = await waitForKeyTargetRef(tab)
+    await tab.focus(keyTarget)
+    await tab.press('Enter')
+    const pressedValue = await tab.getValue(keyTarget)
+    if (pressedValue !== 'pressed') {
+      throw new Error(`OOPIF press did not reach focused input: ${JSON.stringify(pressedValue)}`)
+    }
+    console.log('PASS BrowserTab OOPIF focused press')
+
+    await tab.evalJs(`() => { void fetch(${JSON.stringify(url(slowServer, 'localhost'))}); return true }`)
+    const networkIdleStartedAt = Date.now()
+    await tab.waitForLoad('networkidle', 5000)
+    const networkIdleElapsed = Date.now() - networkIdleStartedAt
+    if (networkIdleElapsed < 900) {
+      throw new Error(`networkidle returned before an existing request completed: ${networkIdleElapsed}ms`)
+    }
+    console.log(`PASS BrowserTab networkidle existing request: ${networkIdleElapsed}ms`)
+
+    const downloadRef = await waitForDownloadRef(tab)
+    downloadDir = await mkdtemp(join(tmpdir(), 'larify-download-destroy-'))
+    const download = tab.download(downloadRef, join(downloadDir, 'large.bin'), 10_000)
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    tab.destroy()
+    tab = undefined
+    await download.then(
+      () => {
+        throw new Error('download unexpectedly completed before tab destruction')
+      },
+      (error) => {
+        if (!(error instanceof Error) || !error.message.includes('tab was closed during download')) {
+          throw error
+        }
+      }
+    )
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    if (!downloadClosed) throw new Error('destroyed tab did not cancel its active download')
+    console.log('PASS BrowserTab active download cancellation')
   } finally {
     tab?.destroy()
     window?.destroy()
+    app.removeListener('window-all-closed', keepAlive)
     await Promise.all([
       new Promise<void>((resolve) => childServer?.close(() => resolve()) ?? resolve()),
-      new Promise<void>((resolve) => rootServer?.close(() => resolve()) ?? resolve())
+      new Promise<void>((resolve) => rootServer?.close(() => resolve()) ?? resolve()),
+      new Promise<void>((resolve) => slowServer?.close(() => resolve()) ?? resolve()),
+      new Promise<void>((resolve) => downloadServer?.close(() => resolve()) ?? resolve())
     ])
+    if (downloadDir) await rm(downloadDir, { recursive: true, force: true })
   }
 }
 

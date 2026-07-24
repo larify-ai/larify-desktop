@@ -132,6 +132,9 @@ export class BrowserTab {
   private nextRef = 1
   private readonly frames = new FrameSessions()
   private readonly mouseState = newMouseState()
+  private readonly pendingNetworkRequests = new Set<string>()
+  private readonly networkWaiters = new Set<() => void>()
+  private readonly cancelDownloads = new Set<(error: Error) => void>()
   private readonly cdpSend: CdpSend = (method, params, sessionId) =>
     this.sendCdp(method, params, sessionId)
 
@@ -246,6 +249,8 @@ export class BrowserTab {
   }
 
   destroy(): void {
+    const error = new Error("tab was closed during download")
+    for (const cancel of [...this.cancelDownloads]) cancel(error)
     const dbg = this.view.webContents.debugger
     if (dbg?.isAttached()) dbg.detach()
     this.view.webContents.close()
@@ -374,13 +379,43 @@ export class BrowserTab {
     const wc = this.view.webContents
     return new Promise<string>((resolve, reject) => {
       let started = false
+      let settled = false
+      let item: DownloadItem | null = null
       const cleanup = (): void => {
         clearTimeout(timer)
         wc.session.off("will-download", onWillDownload)
+        this.cancelDownloads.delete(cancel)
+      }
+      const fail = (error: Error): void => {
+        if (settled) return
+        settled = true
+        cleanup()
+        reject(error)
+      }
+      const cancel = (error: Error): void => {
+        const activeItem = item
+        fail(error)
+        activeItem?.cancel()
+      }
+      const succeed = (value: string): void => {
+        if (settled) return
+        settled = true
+        cleanup()
+        resolve(value)
+      }
+      const onWillDownload = (_event: unknown, downloadItem: DownloadItem, contents: WebContents): void => {
+        if (contents !== wc) return
+        started = true
+        item = downloadItem
+        wc.session.off("will-download", onWillDownload)
+        downloadItem.setSavePath(normalize(path))
+        downloadItem.once("done", (_doneEvent, state) => {
+          if (state === "completed") succeed(downloadItem.getSavePath())
+          else fail(new Error(`download failed: ${state}`))
+        })
       }
       const timer = setTimeout(() => {
-        cleanup()
-        reject(
+        cancel(
           new Error(
             started
               ? `download did not finish within ${waits.formatTimeout(timeoutMs)}`
@@ -388,21 +423,10 @@ export class BrowserTab {
           ),
         )
       }, timeoutMs)
-      const onWillDownload = (_event: unknown, item: DownloadItem, contents: WebContents): void => {
-        if (contents !== wc) return
-        started = true
-        wc.session.off("will-download", onWillDownload)
-        item.setSavePath(normalize(path))
-        item.once("done", (_doneEvent, state) => {
-          clearTimeout(timer)
-          if (state === "completed") resolve(item.getSavePath())
-          else reject(new Error(`download failed: ${state}`))
-        })
-      }
+      this.cancelDownloads.add(cancel)
       wc.session.on("will-download", onWillDownload)
       interactions.click(this.interactCtx(), selector).catch((error) => {
-        cleanup()
-        reject(error)
+        fail(error instanceof Error ? error : new Error(String(error)))
       })
     })
   }
@@ -597,6 +621,7 @@ export class BrowserTab {
       if (!dbg.isAttached()) dbg.attach()
       dbg.on("message", (_event, eventMethod, eventParams, eventSessionId) => {
         try {
+          if (this.handleNetworkEvent(eventMethod, eventParams)) return
           if (this.handleTargetEvent(dbg, eventMethod, eventParams, eventSessionId || undefined)) {
             return
           }
@@ -610,6 +635,7 @@ export class BrowserTab {
           // never let event buffering disrupt the debugger message pump
         }
       })
+      await dbg.sendCommand("Network.enable").catch(() => {})
       await this.setupAutoAttach(dbg)
       await blankReady
       await dbg.sendCommand("Page.enable").catch(() => {})
@@ -645,6 +671,7 @@ export class BrowserTab {
         dbg.sendCommand("Runtime.runIfWaitingForDebugger", {}, sid).catch(() => {})
         dbg.sendCommand("DOM.enable", {}, sid).catch(() => {})
         dbg.sendCommand("Accessibility.enable", {}, sid).catch(() => {})
+        dbg.sendCommand("Network.enable", {}, sid).catch(() => {})
       }
       return true
     }
@@ -685,15 +712,13 @@ export class BrowserTab {
 
   private async waitForNetworkIdle(timeoutMs: number): Promise<void> {
     await this.cdpReady
-    const dbg = this.view.webContents.debugger
-    const pending = new Set<string>()
     return new Promise<void>((resolve, reject) => {
       let idle: ReturnType<typeof setTimeout> | null = null
       let settled = false
       const cleanup = (): void => {
         clearTimeout(deadline)
         if (idle) clearTimeout(idle)
-        dbg.off("message", onMessage)
+        this.networkWaiters.delete(check)
       }
       const arm = (): void => {
         if (idle) clearTimeout(idle)
@@ -704,16 +729,12 @@ export class BrowserTab {
           resolve()
         }, 500)
       }
-      const onMessage = (_event: unknown, method: string, params: { requestId?: string }): void => {
-        if (method === "Network.requestWillBeSent") {
-          if (params.requestId) pending.add(params.requestId)
-          if (idle) {
-            clearTimeout(idle)
-            idle = null
-          }
-        } else if (method === "Network.loadingFinished" || method === "Network.loadingFailed") {
-          if (params.requestId) pending.delete(params.requestId)
-          if (pending.size === 0) arm()
+      const check = (): void => {
+        if (this.pendingNetworkRequests.size === 0) {
+          arm()
+        } else if (idle) {
+          clearTimeout(idle)
+          idle = null
         }
       }
       const deadline = setTimeout(() => {
@@ -722,15 +743,24 @@ export class BrowserTab {
         cleanup()
         reject(new Error(`wait_for_load networkidle timed out after ${waits.formatTimeout(timeoutMs)}`))
       }, timeoutMs)
-      dbg
-        .sendCommand("Network.enable")
-        .catch(() => {})
-        .finally(() => {
-          if (settled) return
-          dbg.on("message", onMessage)
-          arm()
-        })
+      this.networkWaiters.add(check)
+      check()
     })
+  }
+
+  private handleNetworkEvent(method: string, params: unknown): boolean {
+    if (!method.startsWith("Network.")) return false
+    if (
+      method !== "Network.requestWillBeSent" &&
+      method !== "Network.loadingFinished" &&
+      method !== "Network.loadingFailed"
+    ) return true
+    const requestId = (params as { requestId?: string } | null)?.requestId
+    if (!requestId) return true
+    if (method === "Network.requestWillBeSent") this.pendingNetworkRequests.add(requestId)
+    else this.pendingNetworkRequests.delete(requestId)
+    for (const waiter of this.networkWaiters) waiter()
+    return true
   }
 
   private resetPageState(): void {

@@ -151,6 +151,7 @@ function webContents(tab: BrowserTab): {
 }
 
 function downloadItem(path = "D:\\Downloads\\file.txt"): {
+  cancel: ReturnType<typeof vi.fn>
   setSavePath: (nextPath: string) => void
   once: (event: string, cb: (...args: unknown[]) => void) => void
   getSavePath: () => string
@@ -159,6 +160,7 @@ function downloadItem(path = "D:\\Downloads\\file.txt"): {
   let savePath = path
   let doneCb: ((event: unknown, state: string) => void) | undefined
   return {
+    cancel: vi.fn(),
     setSavePath: vi.fn((nextPath: string) => {
       savePath = nextPath
     }),
@@ -335,11 +337,13 @@ describe("BrowserTab", () => {
     const tab = new BrowserTab(1, "p")
     const promise = tab.download("a", "D:\\Downloads\\file.txt", 3000)
     const assertion = expect(promise).rejects.toThrow("download did not finish within 3s")
+    const item = downloadItem()
 
-    webContents(tab).session.emit("will-download", {}, downloadItem(), tab.view.webContents)
+    webContents(tab).session.emit("will-download", {}, item, tab.view.webContents)
     await vi.advanceTimersByTimeAsync(3000)
 
     await assertion
+    expect(item.cancel).toHaveBeenCalledOnce()
     vi.useRealTimers()
   })
 
@@ -389,6 +393,57 @@ describe("BrowserTab", () => {
 
     const session = tab.view.webContents.session as unknown as { handlers: Record<string, unknown[]> }
     expect(session.handlers["will-download"] ?? []).toHaveLength(0)
+  })
+
+  it("rejects and cleans up a pending download when destroyed", async () => {
+    const tab = new BrowserTab(1, "p")
+    const promise = tab.download("a", "D:\\Downloads\\file.txt", 3000)
+    const session = tab.view.webContents.session as unknown as { handlers: Record<string, unknown[]> }
+    ;(tab.view.webContents.debugger as unknown as { detach: () => void }).detach = vi.fn()
+
+    tab.destroy()
+
+    await expect(promise).rejects.toThrow("tab was closed during download")
+    expect(session.handlers["will-download"] ?? []).toHaveLength(0)
+  })
+
+  it("cancels an active download when destroyed", async () => {
+    const tab = new BrowserTab(1, "p")
+    const promise = tab.download("a", "D:\\Downloads\\file.txt", 3000)
+    const item = downloadItem()
+    ;(tab.view.webContents.debugger as unknown as { detach: () => void }).detach = vi.fn()
+    webContents(tab).session.emit("will-download", {}, item, tab.view.webContents)
+
+    tab.destroy()
+
+    await expect(promise).rejects.toThrow("tab was closed during download")
+    expect(item.cancel).toHaveBeenCalledOnce()
+  })
+
+  it("does not report networkidle while a request seen before the wait is pending", async () => {
+    vi.useFakeTimers()
+    const tab = new BrowserTab(1, "p")
+    const dbg = tab.view.webContents.debugger as unknown as {
+      off: ReturnType<typeof vi.fn>
+      on: ReturnType<typeof vi.fn>
+    }
+    dbg.off = vi.fn()
+    const messageHandler = dbg.on.mock.calls.find((call) => call[0] === "message")?.[1]
+    expect(messageHandler).toBeTypeOf("function")
+    messageHandler({}, "Network.requestWillBeSent", { requestId: "already-running" })
+
+    const promise = tab.waitForLoad("networkidle", 3000)
+    let settled = false
+    void promise.then(() => {
+      settled = true
+    })
+    await vi.advanceTimersByTimeAsync(501)
+    expect(settled).toBe(false)
+
+    messageHandler({}, "Network.loadingFinished", { requestId: "already-running" }, "OOPIF")
+    await vi.advanceTimersByTimeAsync(500)
+    await expect(promise).resolves.toBeUndefined()
+    vi.useRealTimers()
   })
 
   it("evaluates JavaScript functions and expressions", async () => {

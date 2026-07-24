@@ -76,8 +76,15 @@ vi.mock("electron", () => {
 import { BrowserTabManager } from "../../../../src/extensions/browser/main/tab-manager"
 
 function fakeWindow(): import("electron").BrowserWindow {
+  const closedListeners = new Set<() => void>()
   const win = {
-    once(): void {},
+    once(_event: string, listener: () => void): void {
+      closedListeners.add(listener)
+    },
+    removeListener(_event: string, listener: () => void): void {
+      closedListeners.delete(listener)
+    },
+    listenerCount: () => closedListeners.size,
     isDestroyed: () => false,
     destroy(): void {},
     contentView: {
@@ -185,5 +192,15 @@ describe("BrowserTabManager", () => {
     manager.close(b)
     expect(manager.state().tabs.map((tab) => tab.id)).toEqual([a, c])
     expect(manager.state().activeId).toBe(c)
+  })
+
+  it("removes its main-window closed listener when destroyed", async () => {
+    const win = fakeWindow() as unknown as import("electron").BrowserWindow & { listenerCount(): number }
+    const manager = new BrowserTabManager(win)
+    expect(win.listenerCount()).toBe(1)
+
+    await manager.destroy()
+
+    expect(win.listenerCount()).toBe(0)
   })
 })

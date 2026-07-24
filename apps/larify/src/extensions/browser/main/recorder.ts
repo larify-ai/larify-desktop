@@ -165,6 +165,7 @@ export class Recorder {
       const { bytes } = await waitForIpc<{ bytes: number }>('record:done', win.webContents, STOP_TIMEOUT, () =>
         win.webContents.send('record:stop')
       )
+      if (bytes <= 0) throw new Error('recorder produced an empty file')
       return { path, bytes }
     } catch (e) {
       if (!win.isDestroyed()) win.destroy()
@@ -178,13 +179,8 @@ export class Recorder {
     await this.start(tab, path)
   }
 
-  destroy(): void {
-    if (this.active) {
-      const { dbg, onMessage } = this.active
-      dbg.off('message', onMessage)
-      dbg.sendCommand('Page.stopScreencast').catch(() => {})
-      this.active = null
-    }
+  async destroy(): Promise<void> {
+    if (this.active) await this.stop().catch(() => {})
     if (this.win && !this.win.isDestroyed()) this.win.destroy()
     this.win = null
   }

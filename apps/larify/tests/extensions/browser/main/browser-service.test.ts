@@ -49,6 +49,32 @@ describe("BrowserService", () => {
     h.managers.length = 0
   })
 
+  it("does not allocate a browser manager when reading an empty session", () => {
+    const service = new BrowserService({} as never)
+
+    expect(service.state("unused-session")).toEqual({ tabs: [], activeId: null })
+    expect(h.managers).toHaveLength(0)
+  })
+
+  it("does not allocate a manager for layout or stale tab operations", () => {
+    const service = new BrowserService({} as never)
+    service.setBounds("unused-session", { x: 1, y: 2, width: 3, height: 4 })
+    service.setActive("unused-session", 1)
+    service.close("unused-session", 1)
+
+    expect(service.tab("unused-session", 1)).toBeUndefined()
+    expect(service.navigate("unused-session", 1, "https://example.com")).toBe(false)
+    expect(h.managers).toHaveLength(0)
+
+    service.createTab("unused-session")
+    expect((h.managers[0] as FakeBrowserTabManager).setBounds).toHaveBeenCalledWith({
+      x: 1,
+      y: 2,
+      width: 3,
+      height: 4,
+    })
+  })
+
   it("keeps tabs isolated by session", () => {
     const service = new BrowserService({} as never)
 
@@ -65,7 +91,7 @@ describe("BrowserService", () => {
     const service = new BrowserService({} as never)
     const onChange = vi.fn()
     service.bindChange(onChange)
-    service.state("session-a")
+    service.createTab("session-a")
 
     const state = { tabs: [{ id: 1 }], activeId: 1 } as BrowserState
     const managers = h.managers as FakeBrowserTabManager[]
@@ -76,8 +102,8 @@ describe("BrowserService", () => {
 
   it("shows only the requested session", () => {
     const service = new BrowserService({} as never)
-    service.state("session-a")
-    service.state("session-b")
+    service.createTab("session-a")
+    service.createTab("session-b")
 
     service.setVisible("session-b", true)
 
@@ -88,8 +114,8 @@ describe("BrowserService", () => {
 
   it("destroys session managers", async () => {
     const service = new BrowserService({} as never)
-    service.state("session-a")
-    service.state("session-b")
+    service.createTab("session-a")
+    service.createTab("session-b")
 
     await service.destroySession("session-a")
     const managers = h.managers as FakeBrowserTabManager[]

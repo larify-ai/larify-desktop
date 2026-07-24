@@ -10,14 +10,22 @@ const GET_VALUE_JS = `function() { return typeof this.value === 'string' ? this.
 const GET_ATTR_JS = `function(n) { return this.getAttribute(n); }`
 const GET_BOX_JS = `function() { const r = this.getBoundingClientRect(), w = this.ownerDocument.defaultView; return { x: r.x, y: r.y, width: r.width, height: r.height, viewportWidth: w.innerWidth, viewportHeight: w.innerHeight }; }`
 const IS_VISIBLE_JS = `function() {
+  if (!this.isConnected) return false;
   const rect = this.getBoundingClientRect();
-  const style = window.getComputedStyle(this);
-  return rect.width > 0 && rect.height > 0 &&
-         style.visibility !== 'hidden' &&
-         style.display !== 'none' &&
-         parseFloat(style.opacity) > 0;
+  if (rect.width <= 0 || rect.height <= 0) return false;
+  for (let node = this; node && node.nodeType === 1; node = node.parentElement) {
+    const style = node.ownerDocument.defaultView.getComputedStyle(node);
+    if (style.visibility === 'hidden' || style.display === 'none' || parseFloat(style.opacity) <= 0) {
+      return false;
+    }
+  }
+  return true;
 }`
-const IS_ENABLED_JS = `function() { return !this.disabled; }`
+const IS_ENABLED_JS = `function() {
+  if (this.matches && this.matches(':disabled')) return false;
+  if (this.closest && this.closest('[aria-disabled="true"],[inert]')) return false;
+  return !this.disabled;
+}`
 
 async function callString(ctx: QueryCtx, selector: string, fn: string): Promise<string> {
   const { objectId, sessionId } = await resolveRefToObjectId(ctx.send, ctx.refMap, selector, ctx.sessions)
@@ -153,7 +161,8 @@ export async function getCount(ctx: { send: CdpSend }, selector: string): Promis
   const res = (await ctx.send('Runtime.evaluate', {
     expression: countExpr(selector),
     returnByValue: true
-  })) as { result?: { value?: unknown } }
+  })) as { result?: { value?: unknown }; exceptionDetails?: unknown }
+  if (res.exceptionDetails) throw new Error(`selector '${selector}' is invalid`)
   const v = res.result?.value
   return typeof v === 'number' ? v : 0
 }

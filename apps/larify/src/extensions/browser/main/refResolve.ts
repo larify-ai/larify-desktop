@@ -111,7 +111,7 @@ async function findNodeIdByRoleName(
 ): Promise<number> {
   const res = (await send('Accessibility.getFullAXTree', axParams, sessionId)) as { nodes: AXNode[] }
   const sameOriginChild = entry.frameId !== undefined && sessionId === undefined
-  const cursorMap = sameOriginChild ? new Map() : await scanCursor(send, sessionId)
+  const cursorMap = await scanCursor(send, sessionId, sameOriginChild ? entry.frameId : undefined)
   const rebuilt = new Map<string, RefEntry>()
   buildSnapshot(res.nodes, rebuilt, 1, cursorMap, undefined, entry.frameId)
   const targetNth = entry.nth ?? 0
@@ -132,6 +132,24 @@ function lookupRef(refMap: RefMap, refId: string): RefEntry {
   const entry = refMap.get(refId)
   if (!entry) throw new Error(`unknown ref @${refId}`)
   return entry
+}
+
+async function isConnectedObject(
+  send: CdpSend,
+  objectId: string,
+  sessionId?: string
+): Promise<boolean> {
+  const res = (await send(
+    'Runtime.callFunctionOn',
+    {
+      objectId,
+      functionDeclaration: 'function(){ return this.isConnected === true; }',
+      returnByValue: true,
+      awaitPromise: false
+    },
+    sessionId
+  ).catch(() => null)) as { result?: { value?: unknown }; exceptionDetails?: unknown } | null
+  return !res?.exceptionDetails && res?.result?.value === true
 }
 
 export async function resolveRefToBox(
@@ -207,7 +225,9 @@ export async function resolveRefToObjectId(
         sessionId
       ).catch(() => null)) as ResolveNodeResult | null
       const objectId = r?.object?.objectId
-      if (objectId) return { objectId, frameId: entry.frameId, sessionId }
+      if (objectId && (await isConnectedObject(send, objectId, sessionId))) {
+        return { objectId, frameId: entry.frameId, sessionId }
+      }
     }
     const fresh = await findNodeIdByRoleName(send, entry, params, sessionId)
     const r = (await send('DOM.resolveNode', { backendNodeId: fresh }, sessionId)) as ResolveNodeResult

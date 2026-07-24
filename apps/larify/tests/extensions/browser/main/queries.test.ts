@@ -13,7 +13,7 @@ vi.mock('../../../../src/extensions/browser/main/interactions', () => ({
   callOn: h.callOn
 }))
 
-import { getBox, getBoxWithSession } from '../../../../src/extensions/browser/main/queries'
+import { getBox, getBoxWithSession, getCount } from '../../../../src/extensions/browser/main/queries'
 
 describe('getBoxWithSession', () => {
   const ctx = {
@@ -113,6 +113,19 @@ describe('getBoxWithSession', () => {
 
     await expect(getBoxWithSession(ctx, '@e1')).rejects.toThrow(
       "could not get bounding box for '@e1'"
+    )
+  })
+})
+
+describe('getCount', () => {
+  it('reports an invalid selector instead of returning zero', async () => {
+    const send = vi.fn(async () => ({
+      result: { type: 'object', subtype: 'error' },
+      exceptionDetails: { text: 'SyntaxError: invalid selector' }
+    }))
+
+    await expect(getCount({ send: send as never }, 'input[')).rejects.toThrow(
+      "selector 'input[' is invalid"
     )
   })
 })

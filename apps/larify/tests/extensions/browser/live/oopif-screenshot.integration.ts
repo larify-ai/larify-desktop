@@ -9,11 +9,11 @@ import { BrowserTab } from '../../../../src/extensions/browser/main/tab'
 
 app.commandLine.appendSwitch('site-per-process')
 
-function listen(host: string, html: () => string): Promise<Server> {
+function listen(host: string, html: (path: string) => string): Promise<Server> {
   return new Promise((resolve) => {
-    const server = createServer((_request, response) => {
+    const server = createServer((request, response) => {
       response.writeHead(200, { 'content-type': 'text/html' })
-      response.end(html())
+      response.end(html(request.url ?? '/'))
     })
     server.listen(0, host, () => resolve(server))
   })
@@ -71,6 +71,13 @@ async function waitForDownloadRef(tab: BrowserTab): Promise<string> {
     await new Promise((resolve) => setTimeout(resolve, 100))
   }
   throw new Error(`download ref was not captured:\n${lastSnapshot}`)
+}
+
+async function waitForDynamicRef(tab: BrowserTab): Promise<string> {
+  const snapshot = await tab.snapshot()
+  const match = snapshot.match(/button "Dynamic" \[ref=(e\d+)\]/)
+  if (!match) throw new Error(`dynamic target ref was not captured:\n${snapshot}`)
+  return `@${match[1]}`
 }
 
 function assertGreenCorners(data: string): { width: number; height: number } {
@@ -144,13 +151,23 @@ async function main(): Promise<void> {
     const downloadUrl = url(downloadServer, 'localhost')
     rootServer = await listen(
       'localhost',
-      () => `<!doctype html><style>
+      (path) =>
+        path === '/same-frame'
+          ? `<!doctype html><div id="same-clickable" onclick="window.clicked=true"
+              style="cursor:pointer">Same Frame Clickable</div>`
+          : `<!doctype html><style>
         html,body{margin:0;min-height:1800px;background:#00ffff}
         iframe{position:absolute;left:150px;top:700px;width:400px;height:300px;
           border:10px solid #c80000;transform:scale(1.25);transform-origin:top left}
       </style><div id="legacy" data-__ab-ci="keep" style="cursor:pointer">Legacy</div>
+      <button id="dynamic" aria-label="Dynamic">Old</button>
+      <fieldset disabled><input id="fieldset-disabled"></fieldset>
+      <div id="aria-disabled" role="button" aria-disabled="true">Disabled action</div>
+      <div style="opacity:0"><button id="ancestor-hidden">Hidden action</button></div>
       <a href="${downloadUrl}">Download</a>
-      <iframe src="${childUrl}"></iframe><script>scrollTo(0,${rootScrollY})</script>`
+      <iframe src="${childUrl}"></iframe>
+      <iframe src="/same-frame"></iframe>
+      <script>scrollTo(0,${rootScrollY})</script>`
     )
     slowServer = await listenSlow('localhost', 1000)
 
@@ -223,6 +240,44 @@ async function main(): Promise<void> {
     }
     console.log('PASS BrowserTab OOPIF focused press')
 
+    const dynamicRef = await waitForDynamicRef(tab)
+    await tab.evalJs(`() => {
+      const old = document.querySelector('#dynamic')
+      const fresh = document.createElement('button')
+      fresh.id = 'dynamic'
+      fresh.setAttribute('aria-label', 'Dynamic')
+      fresh.textContent = 'Fresh'
+      old.replaceWith(fresh)
+    }`)
+    const dynamicText = await tab.getText(dynamicRef)
+    if (dynamicText !== 'Fresh') {
+      throw new Error(`detached ref was not re-anchored: ${JSON.stringify(dynamicText)}`)
+    }
+    console.log('PASS BrowserTab detached ref re-anchor')
+
+    if (await tab.isEnabled('#fieldset-disabled')) {
+      throw new Error('input inside a disabled fieldset was reported as enabled')
+    }
+    if (await tab.isEnabled('#aria-disabled')) {
+      throw new Error('aria-disabled control was reported as enabled')
+    }
+    console.log('PASS BrowserTab effective disabled state')
+
+    if (await tab.isVisible('#ancestor-hidden')) {
+      throw new Error('element under an opacity:0 ancestor was reported as visible')
+    }
+    console.log('PASS BrowserTab ancestor visibility state')
+
+    const sameFrameSnapshot = await tab.snapshot()
+    if (
+      !/generic \[ref=e\d+\] clickable \[cursor:pointer, onclick\]\s+- StaticText "Same Frame Clickable"/.test(
+        sameFrameSnapshot
+      )
+    ) {
+      throw new Error(`same-process iframe clickable element had no ref:\n${sameFrameSnapshot}`)
+    }
+    console.log('PASS BrowserTab same-process iframe clickable ref')
+
     await tab.evalJs(`() => { void fetch(${JSON.stringify(url(slowServer, 'localhost'))}); return true }`)
     const networkIdleStartedAt = Date.now()
     await tab.waitForLoad('networkidle', 5000)
@@ -254,8 +309,23 @@ async function main(): Promise<void> {
     const restartedRecording = await recorder.stop()
     if (restartedRecording.bytes <= 0) throw new Error('restarted recorder produced an empty file')
     if (restartElapsed >= 1000) throw new Error(`recorder repeated its warmup: ${restartElapsed}ms`)
+
+    await recorder.start(tab, join(recordingDir, 'recording-crashed.webm'))
+    const recorderWindow = (
+      recorder as unknown as { win: BrowserWindow | null }
+    ).win
+    if (!recorderWindow) throw new Error('recorder window was not created')
+    recorderWindow.destroy()
+    if (recorder.isRecording()) throw new Error('recorder retained active state after window crash')
+    await recorder.start(tab, join(recordingDir, 'recording-recovered.webm'))
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    const recoveredRecording = await recorder.stop()
+    if (recoveredRecording.bytes <= 0) {
+      throw new Error('recorder did not recover after its window was destroyed')
+    }
     await recorder.destroy()
     console.log(`PASS Recorder restart without warmup: ${restartedRecording.bytes} bytes`)
+    console.log(`PASS Recorder window crash recovery: ${recoveredRecording.bytes} bytes`)
 
     const downloadRef = await waitForDownloadRef(tab)
     downloadDir = await mkdtemp(join(tmpdir(), 'larify-download-destroy-'))

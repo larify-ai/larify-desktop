@@ -156,23 +156,57 @@ function toCursorInfo(hit: CursorHit): CursorInfo {
   }
 }
 
-export async function scanCursor(send: CdpSend, sessionId?: string): Promise<CursorMap> {
+export async function scanCursor(
+  send: CdpSend,
+  sessionId?: string,
+  frameId?: string
+): Promise<CursorMap> {
   const map: CursorMap = new Map()
   const marker = `data-__larify_cursor_${randomUUID().replaceAll('-', '')}`
+  let contextId: number | undefined
   try {
+    if (frameId) {
+      const world = (await send('Page.createIsolatedWorld', {
+        frameId,
+        worldName: 'larify-cursor',
+        grantUniveralAccess: false
+      })) as { executionContextId?: number }
+      contextId = world.executionContextId
+      if (contextId === undefined) return map
+    }
     const evalRes = (await send(
       'Runtime.evaluate',
-      { expression: cursorScanJs(marker), returnByValue: true },
+      {
+        expression: cursorScanJs(marker),
+        returnByValue: true,
+        ...(contextId === undefined ? {} : { contextId })
+      },
       sessionId
     )) as { result?: { value?: CursorHit[] } }
     const hits = evalRes.result?.value
     if (!hits || hits.length === 0) return map
-    const doc = (await send('DOM.getDocument', { depth: 0 }, sessionId)) as {
-      root: { nodeId: number }
+    let rootNodeId: number
+    if (frameId) {
+      const owner = (await send('DOM.getFrameOwner', { frameId }, sessionId)) as {
+        backendNodeId: number
+      }
+      const desc = (await send(
+        'DOM.describeNode',
+        { backendNodeId: owner.backendNodeId, depth: 1 },
+        sessionId
+      )) as { node?: { contentDocument?: { nodeId?: number } } }
+      const nodeId = desc.node?.contentDocument?.nodeId
+      if (nodeId === undefined) return map
+      rootNodeId = nodeId
+    } else {
+      const doc = (await send('DOM.getDocument', { depth: 0 }, sessionId)) as {
+        root: { nodeId: number }
+      }
+      rootNodeId = doc.root.nodeId
     }
     const found = (await send(
       'DOM.querySelectorAll',
-      { nodeId: doc.root.nodeId, selector: `[${marker}]` },
+      { nodeId: rootNodeId, selector: `[${marker}]` },
       sessionId
     )) as { nodeIds: number[] }
     const descs = await Promise.all(
@@ -194,7 +228,14 @@ export async function scanCursor(send: CdpSend, sessionId?: string): Promise<Cur
     // ignore
   } finally {
     try {
-      await send('Runtime.evaluate', { expression: cursorCleanupJs(marker) }, sessionId)
+      await send(
+        'Runtime.evaluate',
+        {
+          expression: cursorCleanupJs(marker),
+          ...(contextId === undefined ? {} : { contextId })
+        },
+        sessionId
+      )
     } catch {
       // ignore
     }
@@ -279,7 +320,11 @@ export async function captureSnapshot(
       await send('Accessibility.enable', {}, sessionId).catch(() => {})
     }
     const sameOriginChild = frameId !== undefined && sessionId === undefined
-    const cursorMap: CursorMap = sameOriginChild ? new Map() : await scanCursor(send, sessionId)
+    const cursorMap: CursorMap = await scanCursor(
+      send,
+      sessionId,
+      sameOriginChild ? frameId : undefined
+    )
     const res = (await send('Accessibility.getFullAXTree', axParams, sessionId)) as {
       nodes: AXNode[]
     }

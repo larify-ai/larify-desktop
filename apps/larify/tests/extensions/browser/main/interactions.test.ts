@@ -5,7 +5,7 @@ vi.mock("../../../../src/extensions/browser/main/refResolve", () => ({
   resolveRefToBox: vi.fn(async () => ({ x: 0, y: 0, sessionId: "SID" })),
 }))
 
-import { fill, type as typeInto } from "../../../../src/extensions/browser/main/interactions"
+import { callOn, fill, type as typeInto } from "../../../../src/extensions/browser/main/interactions"
 
 interface Call {
   method: string
@@ -26,6 +26,20 @@ function makeCtx(): { ctx: Parameters<typeof fill>[0]; calls: Call[] } {
 }
 
 describe("interactions sessionId threading", () => {
+  it("throws when Runtime.callFunctionOn reports an exception", async () => {
+    const send = vi.fn(async () => ({
+      result: { type: "object", subtype: "error" },
+      exceptionDetails: {
+        text: "Uncaught",
+        exception: { description: "Error: detached node" },
+      },
+    }))
+
+    await expect(callOn(send as never, "OID", "function(){ return this.value; }")).rejects.toThrow(
+      "Error: detached node",
+    )
+  })
+
   it("fill inserts text into the resolved frame session", async () => {
     const { ctx, calls } = makeCtx()
 

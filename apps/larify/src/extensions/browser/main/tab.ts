@@ -523,8 +523,13 @@ export class BrowserTab {
     await input.mouseWheel(this.cdpSend, this.mouseState, deltaX, deltaY)
   }
 
-  async waitForSelector(selector: string, state?: WaitState, timeoutMs?: number): Promise<void> {
-    await waits.waitForSelector(this.cdpSend, selector, state, timeoutMs)
+  async waitForSelector(
+    selector: string,
+    state?: WaitState,
+    timeoutMs?: number,
+    signal?: AbortSignal
+  ): Promise<void> {
+    await waits.waitForSelector(this.cdpSend, selector, state, timeoutMs, signal)
   }
 
   async waitForText(text: string, timeoutMs?: number): Promise<void> {
@@ -638,8 +643,11 @@ export class BrowserTab {
     })
     wc.on("did-start-loading", emit)
     wc.on("did-stop-loading", emit)
-    wc.on("did-fail-load", (_event, errorCode, errorDescription, _url, isMainFrame) => {
+    wc.on("did-fail-load", (_event, errorCode, errorDescription, failedUrl, isMainFrame) => {
       if (!isMainFrame || errorCode === -3) return
+      const normalizedFailedUrl = normalizeUrl(failedUrl) ?? failedUrl
+      if (this.pendingUrl && normalizedFailedUrl !== this.pendingUrl) return
+      if (!this.pendingUrl && this.currentUrl && normalizedFailedUrl !== this.currentUrl) return
       this.pendingUrl = ""
       this.error = { code: errorCode, description: errorDescription }
       emit()
@@ -803,6 +811,8 @@ export class BrowserTab {
     this.refMap.clear()
     this.nextRef = 1
     this.frames.clear()
+    this.pendingNetworkRequests.clear()
+    for (const waiter of this.networkWaiters) waiter()
   }
 
   private async setFavIcon(favicons: string[]): Promise<void> {

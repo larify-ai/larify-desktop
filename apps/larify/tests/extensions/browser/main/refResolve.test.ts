@@ -46,7 +46,11 @@ describe("resolveRefToObjectId selector path", () => {
 
 describe("resolveRefToObjectId ref path", () => {
   it("preserves the frameId and OOPIF sessionId", async () => {
-    const send = vi.fn(async () => ({ object: { objectId: "OID" } }))
+    const send = vi.fn(async (method: string) =>
+      method === "Runtime.callFunctionOn"
+        ? { result: { value: true } }
+        : { object: { objectId: "OID" } },
+    )
     const refs = new Map([
       [
         "e1",
@@ -65,6 +69,58 @@ describe("resolveRefToObjectId ref path", () => {
       objectId: "OID",
       frameId: "FRAME",
       sessionId: "OOPIF",
+    })
+  })
+
+  it("re-anchors a ref whose resolved object is detached from the document", async () => {
+    const ax = (value: string): { value: string } => ({ value })
+    const send = vi.fn(async (method: string, params: { backendNodeId?: number }) => {
+      if (method === "DOM.resolveNode") {
+        return {
+          object: {
+            objectId: params.backendNodeId === 7 ? "DETACHED" : "FRESH",
+          },
+        }
+      }
+      if (method === "Runtime.callFunctionOn") return { result: { value: false } }
+      if (method === "Runtime.evaluate") return { result: { value: [] } }
+      if (method === "Accessibility.getFullAXTree") {
+        return {
+          nodes: [
+            {
+              nodeId: "1",
+              ignored: false,
+              role: ax("RootWebArea"),
+              name: ax(""),
+              childIds: ["2"],
+            },
+            {
+              nodeId: "2",
+              ignored: false,
+              role: ax("button"),
+              name: ax("Target"),
+              backendDOMNodeId: 9,
+            },
+          ],
+        }
+      }
+      return {}
+    })
+    const refs = new Map([
+      [
+        "e1",
+        {
+          backendNodeId: 7,
+          role: "button",
+          name: "Target",
+        },
+      ],
+    ])
+
+    await expect(resolveRefToObjectId(send as never, refs, "@e1")).resolves.toEqual({
+      objectId: "FRESH",
+      frameId: undefined,
+      sessionId: undefined,
     })
   })
 })

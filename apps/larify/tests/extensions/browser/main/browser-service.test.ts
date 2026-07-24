@@ -112,6 +112,18 @@ describe("BrowserService", () => {
     expect(managers[1].setVisible).toHaveBeenLastCalledWith(true)
   })
 
+  it("hides only the requested session", () => {
+    const service = new BrowserService({} as never)
+    service.createTab("session-a")
+    service.createTab("session-b")
+    const managers = h.managers as FakeBrowserTabManager[]
+
+    service.setVisible("session-a", false)
+
+    expect(managers[0].setVisible).toHaveBeenCalledWith(false)
+    expect(managers[1].setVisible).not.toHaveBeenCalled()
+  })
+
   it("destroys session managers", async () => {
     const service = new BrowserService({} as never)
     service.createTab("session-a")

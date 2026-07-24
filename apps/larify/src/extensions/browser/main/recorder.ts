@@ -95,6 +95,8 @@ interface ActiveRecording {
   dbg: Debugger
   onMessage: (event: unknown, method: string, params: { sessionId?: number; data?: string }) => void
   path: string
+  tabId: number
+  generation: number
   frameCount: () => number
 }
 
@@ -127,7 +129,11 @@ export class Recorder {
   private win: BrowserWindow | null = null
   private active: ActiveRecording | null = null
   private starting = false
+  private startingTabId: number | null = null
   private startDone: Promise<void> | null = null
+  private stopping: Promise<{ path: string; bytes: number }> | null = null
+  private stoppingGeneration: number | null = null
+  private nextGeneration = 1
 
   private async ensureWindow(): Promise<BrowserWindow> {
     if (this.win && !this.win.isDestroyed()) return this.win
@@ -147,8 +153,20 @@ export class Recorder {
     return win
   }
 
+  private discardDestroyedWindow(): void {
+    if (this.win && !this.win.isDestroyed()) return
+    if (this.active) {
+      const { dbg, onMessage } = this.active
+      this.active = null
+      dbg.off('message', onMessage)
+      void dbg.sendCommand('Page.stopScreencast').catch(() => {})
+    }
+    this.win = null
+  }
+
   isRecording(): boolean {
-    return this.active !== null || this.starting
+    this.discardDestroyedWindow()
+    return this.active !== null || this.starting || this.stopping !== null
   }
 
   private async canvasSize(tab: BrowserTab): Promise<{ width: number; height: number }> {
@@ -161,9 +179,12 @@ export class Recorder {
     return { width: w || DEFAULT_SIZE.width, height: h || DEFAULT_SIZE.height }
   }
 
-  async start(tab: BrowserTab, path: string): Promise<void> {
-    if (this.active || this.starting) throw new Error('a recording is already in progress')
+  async start(tab: BrowserTab, path: string): Promise<number> {
+    this.discardDestroyedWindow()
+    if (this.active || this.starting || this.stopping)
+      throw new Error('a recording is already in progress')
     this.starting = true
+    this.startingTabId = tab.id
     let finishStart!: () => void
     const startDone = new Promise<void>((resolve) => {
       finishStart = resolve
@@ -198,19 +219,46 @@ export class Recorder {
         dbg.off('message', onMessage)
         throw e
       }
-      this.active = { dbg, onMessage, path, frameCount: () => frames }
+      if (win.isDestroyed()) {
+        dbg.off('message', onMessage)
+        await dbg.sendCommand('Page.stopScreencast').catch(() => {})
+        throw new Error('recorder window was destroyed during startup')
+      }
+      const generation = this.nextGeneration++
+      this.active = { dbg, onMessage, path, tabId: tab.id, generation, frameCount: () => frames }
+      return generation
     } catch (e) {
       if (this.win && !this.win.isDestroyed()) this.win.destroy()
       this.win = null
       throw e
     } finally {
       this.starting = false
+      this.startingTabId = null
       finishStart()
       if (this.startDone === startDone) this.startDone = null
     }
   }
 
   async stop(): Promise<{ path: string; bytes: number }> {
+    await this.startDone
+    this.discardDestroyedWindow()
+    if (this.stopping) return this.stopping
+    if (!this.active || !this.win) throw new Error('no recording in progress')
+    const generation = this.active.generation
+    const stopping = this.stopActive()
+    this.stopping = stopping
+    this.stoppingGeneration = generation
+    try {
+      return await stopping
+    } finally {
+      if (this.stopping === stopping) {
+        this.stopping = null
+        this.stoppingGeneration = null
+      }
+    }
+  }
+
+  private async stopActive(): Promise<{ path: string; bytes: number }> {
     if (!this.active || !this.win) throw new Error('no recording in progress')
     const { dbg, onMessage, path, frameCount } = this.active
     const win = this.win
@@ -235,14 +283,34 @@ export class Recorder {
     }
   }
 
-  async restart(tab: BrowserTab, path: string): Promise<void> {
+  async restart(tab: BrowserTab, path: string): Promise<number> {
+    await this.startDone
+    this.discardDestroyedWindow()
+    if (this.stopping) await this.stopping
     if (this.active) await this.stop()
-    await this.start(tab, path)
+    return this.start(tab, path)
+  }
+
+  async stopIfRecordingTab(tabId: number): Promise<void> {
+    if (this.startingTabId === tabId) await this.startDone
+    this.discardDestroyedWindow()
+    if (this.active?.tabId === tabId) await this.stop()
+  }
+
+  async stopIfCurrent(
+    generation: number
+  ): Promise<{ path: string; bytes: number } | null> {
+    await this.startDone
+    this.discardDestroyedWindow()
+    if (this.stoppingGeneration === generation && this.stopping) return this.stopping
+    if (this.active?.generation !== generation) return null
+    return this.stop()
   }
 
   async destroy(): Promise<void> {
     await this.startDone
-    if (this.active) await this.stop().catch(() => {})
+    if (this.stopping) await this.stopping.catch(() => {})
+    else if (this.active) await this.stop().catch(() => {})
     if (this.win && !this.win.isDestroyed()) this.win.destroy()
     this.win = null
   }

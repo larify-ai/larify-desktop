@@ -183,15 +183,31 @@ describe("BrowserTabManager", () => {
     expect(manager.state().tabs.map((tab) => tab.id)).toEqual([a, b, c])
   })
 
-  it("activates the neighbor when closing the active tab", () => {
+  it("activates the neighbor when closing the active tab", async () => {
     const manager = new BrowserTabManager(fakeWindow())
     const a = manager.createTab()
     const b = manager.createTab()
     const c = manager.createTab()
     manager.setActive(b)
-    manager.close(b)
+    await manager.close(b)
     expect(manager.state().tabs.map((tab) => tab.id)).toEqual([a, c])
     expect(manager.state().activeId).toBe(c)
+  })
+
+  it("stops a recording before destroying its tab", async () => {
+    const manager = new BrowserTabManager(fakeWindow())
+    const id = manager.createTab()
+    const stopIfRecordingTab = vi.fn(async () => undefined)
+    ;(
+      manager as unknown as {
+        recorder: { stopIfRecordingTab: (tabId: number) => Promise<void> }
+      }
+    ).recorder.stopIfRecordingTab = stopIfRecordingTab
+
+    await manager.close(id)
+
+    expect(stopIfRecordingTab).toHaveBeenCalledWith(id)
+    expect(manager.state().tabs).toEqual([])
   })
 
   it("removes its main-window closed listener when destroyed", async () => {

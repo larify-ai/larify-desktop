@@ -43,8 +43,8 @@ export class BrowserService {
     this.managers.peek(sessionId)?.reorder(id, toIndex)
   }
 
-  close(sessionId: string, id: number): void {
-    this.managers.peek(sessionId)?.close(id)
+  async close(sessionId: string, id: number): Promise<void> {
+    await this.managers.peek(sessionId)?.close(id)
   }
 
   navigate(sessionId: string, id: number, url: string): boolean {
@@ -63,7 +63,7 @@ export class BrowserService {
     this.managers.peek(sessionId)?.reload(id)
   }
 
-  recordStart(sessionId: string, tab: BrowserTab, path: string): Promise<void> {
+  recordStart(sessionId: string, tab: BrowserTab, path: string): Promise<number> {
     return this.manager(sessionId).recordStart(tab, path)
   }
 
@@ -71,7 +71,14 @@ export class BrowserService {
     return this.manager(sessionId).recordStop()
   }
 
-  recordRestart(sessionId: string, tab: BrowserTab, path: string): Promise<void> {
+  recordStopIfCurrent(
+    sessionId: string,
+    generation: number
+  ): Promise<{ path: string; bytes: number } | null> {
+    return this.manager(sessionId).recordStopIfCurrent(generation)
+  }
+
+  recordRestart(sessionId: string, tab: BrowserTab, path: string): Promise<number> {
     return this.manager(sessionId).recordRestart(tab, path)
   }
 
@@ -81,10 +88,14 @@ export class BrowserService {
   }
 
   setVisible(sessionId: string, visible: boolean): void {
+    if (!visible) {
+      this.managers.peek(sessionId)?.setVisible(false)
+      return
+    }
     this.managers.forEach((manager, managerSessionId) => {
-      manager.setVisible(visible && managerSessionId === sessionId)
+      manager.setVisible(managerSessionId === sessionId)
     })
-    if (visible) this.manager(sessionId).setVisible(true)
+    this.manager(sessionId).setVisible(true)
   }
 
   async destroySession(sessionId: string): Promise<void> {

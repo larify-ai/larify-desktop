@@ -5,6 +5,24 @@ const POLL_INTERVAL = 100
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
+const abortError = (): Error => new Error('operation aborted')
+
+function sleepUntilPoll(ms: number, signal?: AbortSignal): Promise<void> {
+  if (!signal) return sleep(ms)
+  if (signal.aborted) return Promise.reject(abortError())
+  return new Promise((resolve, reject) => {
+    const onAbort = (): void => {
+      clearTimeout(timer)
+      reject(abortError())
+    }
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    signal.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
 export const formatTimeout = (timeoutMs: number): string => `${timeoutMs / 1000}s`
 
 export type WaitState = 'visible' | 'attached' | 'detached' | 'hidden'
@@ -21,13 +39,16 @@ async function evalBool(send: CdpSend, expression: string): Promise<boolean> {
 async function poll(
   check: () => Promise<boolean>,
   timeoutMs: number,
-  label: string
+  label: string,
+  signal?: AbortSignal
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs
   for (;;) {
+    if (signal?.aborted) throw abortError()
     if (await check().catch(() => false)) return
+    if (signal?.aborted) throw abortError()
     if (Date.now() >= deadline) throw new Error(`${label} timed out after ${formatTimeout(timeoutMs)}`)
-    await sleep(POLL_INTERVAL)
+    await sleepUntilPoll(POLL_INTERVAL, signal)
   }
 }
 
@@ -87,10 +108,11 @@ export async function waitForSelector(
   send: CdpSend,
   selector: string,
   state: WaitState = 'visible',
-  timeoutMs: number = DEFAULT_TIMEOUT
+  timeoutMs: number = DEFAULT_TIMEOUT,
+  signal?: AbortSignal
 ): Promise<void> {
   const expr = selectorExpr(selector, state)
-  await poll(() => evalBool(send, expr), timeoutMs, `wait_for_selector ${selector} (${state})`)
+  await poll(() => evalBool(send, expr), timeoutMs, `wait_for_selector ${selector} (${state})`, signal)
 }
 
 export async function waitForText(

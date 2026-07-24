@@ -27,7 +27,20 @@ export async function callOn(
       awaitPromise: false
     },
     sessionId
-  )) as { result?: { value?: unknown } }
+  )) as {
+    result?: { value?: unknown }
+    exceptionDetails?: {
+      text?: string
+      exception?: { description?: string }
+    }
+  }
+  if (res.exceptionDetails) {
+    throw new Error(
+      res.exceptionDetails.exception?.description ??
+        res.exceptionDetails.text ??
+        'Runtime.callFunctionOn failed'
+    )
+  }
   return res.result?.value
 }
 

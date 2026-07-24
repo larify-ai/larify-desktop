@@ -71,9 +71,10 @@ export class BrowserTabManager {
     this.emit()
   }
 
-  close(id: number): void {
+  async close(id: number): Promise<void> {
     const tab = this.tabs.get(id)
     if (!tab) return
+    await this.recorder.stopIfRecordingTab(id)
     const order = [...this.tabs.keys()]
     const index = order.indexOf(id)
     this.viewParent.get(id)?.contentView.removeChildView(tab.view)
@@ -119,7 +120,7 @@ export class BrowserTabManager {
     this.tabs.get(id)?.reload()
   }
 
-  recordStart(tab: BrowserTab, path: string): Promise<void> {
+  recordStart(tab: BrowserTab, path: string): Promise<number> {
     return this.recorder.start(tab, path)
   }
 
@@ -127,7 +128,13 @@ export class BrowserTabManager {
     return this.recorder.stop()
   }
 
-  recordRestart(tab: BrowserTab, path: string): Promise<void> {
+  recordStopIfCurrent(
+    generation: number
+  ): Promise<{ path: string; bytes: number } | null> {
+    return this.recorder.stopIfCurrent(generation)
+  }
+
+  recordRestart(tab: BrowserTab, path: string): Promise<number> {
     return this.recorder.restart(tab, path)
   }
 

@@ -228,6 +228,24 @@ describe("BrowserTab", () => {
     expect(webContents(tab).loadURLCalls).toEqual(["about:blank"])
   })
 
+  it("ignores a delayed failure from an older navigation", () => {
+    const tab = new BrowserTab(1, "p")
+    expect(tab.navigate("https://new.example")).toBe(true)
+    const pendingState = tab.state()
+
+    webContents(tab).emit(
+      "did-fail-load",
+      {},
+      -105,
+      "ERR_NAME_NOT_RESOLVED",
+      "https://old.example",
+      true,
+    )
+
+    expect(tab.state().url).toBe(pendingState.url)
+    expect(tab.state().error).toBeNull()
+  })
+
   it("keeps about:blank internal and exposes an empty tab state", async () => {
     const tab = new BrowserTab(1, "p")
     await Promise.resolve()
@@ -503,6 +521,27 @@ describe("BrowserTab", () => {
     messageHandler({}, "Network.loadingFinished", { requestId: "already-running" }, "OOPIF")
     await vi.advanceTimersByTimeAsync(500)
     await expect(promise).resolves.toBeUndefined()
+    vi.useRealTimers()
+  })
+
+  it("does not let an abandoned request from the previous page block networkidle", async () => {
+    vi.useFakeTimers()
+    const tab = new BrowserTab(1, "p")
+    const dbg = tab.view.webContents.debugger as unknown as {
+      on: ReturnType<typeof vi.fn>
+    }
+    const messageHandler = dbg.on.mock.calls.find((call) => call[0] === "message")?.[1]
+    messageHandler({}, "Network.requestWillBeSent", { requestId: "old-page-request" })
+
+    webContents(tab).emit("did-start-navigation", {
+      isMainFrame: true,
+      isSameDocument: false,
+      url: "https://example.com/new",
+    })
+    const pending = tab.waitForLoad("networkidle", 3000)
+    await vi.advanceTimersByTimeAsync(500)
+
+    await expect(pending).resolves.toBeUndefined()
     vi.useRealTimers()
   })
 

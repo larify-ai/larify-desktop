@@ -13,6 +13,7 @@ export class BrowserService {
   private readonly changeListeners = new Set<Listener<[string, BrowserState]>>()
   private readonly bounds = new Map<string, Rectangle>()
   private readonly sessionDestructions = new Map<string, Promise<void>>()
+  private destroyTask: Promise<void> | null = null
   private destroyed = false
 
   constructor(private readonly window: BrowserWindow) {}
@@ -31,6 +32,14 @@ export class BrowserService {
 
   createTab(sessionId: string, url?: string): number {
     return this.manager(sessionId).createTab(url)
+  }
+
+  withTemporaryTab<T>(
+    sessionId: string,
+    url: string,
+    callback: (tab: BrowserTab) => Promise<T>
+  ): Promise<T> {
+    return this.manager(sessionId).withTemporaryTab(url, callback)
   }
 
   ensureTab(sessionId: string): void {
@@ -109,6 +118,7 @@ export class BrowserService {
   }
 
   destroySession(sessionId: string): Promise<void> {
+    if (this.destroyTask) return this.destroyTask
     const existing = this.sessionDestructions.get(sessionId)
     if (existing) return existing
     const destroying = this.destroySessionManager(sessionId).finally(() => {
@@ -120,10 +130,16 @@ export class BrowserService {
     return destroying
   }
 
-  async destroy(): Promise<void> {
+  destroy(): Promise<void> {
+    if (this.destroyTask) return this.destroyTask
     this.destroyed = true
-    await Promise.allSettled([...this.sessionDestructions.values()])
-    await this.managers.destroyAll()
+    this.destroyTask = this.destroyResources()
+    return this.destroyTask
+  }
+
+  private async destroyResources(): Promise<void> {
+    const managers = this.managers.destroyAll()
+    await Promise.allSettled([managers, ...this.sessionDestructions.values()])
     this.bounds.clear()
   }
 

@@ -72,4 +72,32 @@ describe('drag frame sessions', () => {
       })
     }
   )
+
+  it('best-effort releases the mouse after an intermediate move fails', async () => {
+    vi.mocked(resolveRefToBox)
+      .mockResolvedValueOnce({ x: 10, y: 20 })
+      .mockResolvedValueOnce({ x: 30, y: 40 })
+    const calls: Call[] = []
+    let moves = 0
+    const send = vi.fn(
+      async (method: string, params: Record<string, unknown>, sessionId?: string) => {
+        calls.push({ method, params, sessionId })
+        if (params.type === 'mouseMoved' && ++moves === 4) {
+          throw new Error('intermediate move failed')
+        }
+        return {}
+      }
+    )
+    const ctx = { send, refMap: new Map() } as Parameters<typeof drag>[0]
+
+    await expect(drag(ctx, '#source', '#target')).rejects.toThrow(
+      'intermediate move failed'
+    )
+    expect(calls.some(({ params }) => params.type === 'mousePressed')).toBe(true)
+    expect(calls.at(-1)?.params).toMatchObject({
+      type: 'mouseReleased',
+      button: 'left',
+      buttons: 0
+    })
+  })
 })

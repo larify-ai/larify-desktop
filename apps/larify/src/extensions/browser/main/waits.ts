@@ -7,6 +7,28 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 
 const abortError = (): Error => new Error('operation aborted')
 
+export async function waitForOperationOrAbort<T>(
+  operation: Promise<T>,
+  signal?: AbortSignal,
+  message = 'operation aborted'
+): Promise<T> {
+  if (!signal) return operation
+  if (signal.aborted) {
+    void operation.catch(() => {})
+    throw new Error(message)
+  }
+  let onAbort: (() => void) | undefined
+  const aborted = new Promise<never>((_resolve, reject) => {
+    onAbort = () => reject(new Error(message))
+    signal.addEventListener('abort', onAbort, { once: true })
+  })
+  try {
+    return await Promise.race([operation, aborted])
+  } finally {
+    if (onAbort) signal.removeEventListener('abort', onAbort)
+  }
+}
+
 function sleepUntilPoll(ms: number, signal?: AbortSignal): Promise<void> {
   if (!signal) return sleep(ms)
   if (signal.aborted) return Promise.reject(abortError())
@@ -48,6 +70,13 @@ async function evalBool(send: CdpSend, expression: string): Promise<boolean> {
 
 class EvaluationError extends Error {}
 
+function isTerminalCdpError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false
+  return /(?:tab was closed|target closed|session closed|webcontents was destroyed|object has been destroyed|render frame was disposed|debugger is not attached)/i.test(
+    error.message
+  )
+}
+
 async function poll(
   check: () => Promise<boolean>,
   timeoutMs: number,
@@ -60,7 +89,7 @@ async function poll(
     try {
       if (await check()) return
     } catch (error) {
-      if (error instanceof EvaluationError) throw error
+      if (error instanceof EvaluationError || isTerminalCdpError(error)) throw error
     }
     if (signal?.aborted) throw abortError()
     if (Date.now() >= deadline) throw new Error(`${label} timed out after ${formatTimeout(timeoutMs)}`)
@@ -73,9 +102,11 @@ function selectorExpr(selector: string, state: WaitState): string {
   const visible = `(el) => {
     const rect = el.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) return false;
-    for (let node = el; node && node.nodeType === 1; node = node.parentElement) {
+    for (let node = el; node && node.nodeType === 1;) {
       const style = node.ownerDocument.defaultView.getComputedStyle(node);
       if (style.visibility === 'hidden' || style.display === 'none' || parseFloat(style.opacity) <= 0) return false;
+      const root = node.getRootNode && node.getRootNode();
+      node = node.parentElement || (root && root.host) || null;
     }
     return true;
   }`

@@ -40,7 +40,8 @@ async function resolveSelectorIds(send: CdpSend, selector: string): Promise<Set<
   const evalRes = (await send('Runtime.evaluate', {
     expression: `document.querySelector(${JSON.stringify(selector)})`,
     returnByValue: false
-  })) as { result?: { objectId?: string } }
+  })) as { result?: { objectId?: string }; exceptionDetails?: unknown }
+  if (evalRes.exceptionDetails) throw new Error(`selector '${selector}' is invalid`)
   const objectId = evalRes.result?.objectId
   if (!objectId) throw new Error(`selector '${selector}' matched no element`)
   const desc = (await send('DOM.describeNode', { objectId, depth: -1 })) as { node?: DomNode }

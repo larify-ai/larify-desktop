@@ -1,10 +1,36 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
   urlMatches,
+  waitForOperationOrAbort,
   waitForFunction,
   waitForSelector,
   waitMs,
 } from "../../../../src/extensions/browser/main/waits"
+
+describe("waitForOperationOrAbort", () => {
+  it("handles a later operation rejection when the signal is already aborted", async () => {
+    let rejectOperation!: (error: Error) => void
+    const operation = new Promise<void>((_resolve, reject) => {
+      rejectOperation = reject
+    })
+    const controller = new AbortController()
+    controller.abort()
+    const unhandled = vi.fn()
+    process.on("unhandledRejection", unhandled)
+    try {
+      await expect(
+        waitForOperationOrAbort(operation, controller.signal),
+      ).rejects.toThrow("operation aborted")
+
+      rejectOperation(new Error("late operation failure"))
+      await new Promise((resolve) => setImmediate(resolve))
+
+      expect(unhandled).not.toHaveBeenCalled()
+    } finally {
+      process.off("unhandledRejection", unhandled)
+    }
+  })
+})
 
 describe("waitMs abort handling", () => {
   beforeEach(() => vi.useFakeTimers())
@@ -55,6 +81,20 @@ describe("poll retries transient evaluation failures", () => {
     expect(calls).toBeGreaterThanOrEqual(2)
   })
 
+  it.each([
+    "tab was closed",
+    "Target closed",
+    "Object has been destroyed",
+    "Debugger is not attached",
+  ])("reports terminal CDP failure immediately: %s", async (message) => {
+    const send = vi.fn().mockRejectedValue(new Error(message))
+
+    await expect(waitForSelector(send as never, "#target", "visible", 25_000)).rejects.toThrow(
+      message,
+    )
+    expect(send).toHaveBeenCalledTimes(1)
+  })
+
   it("times out with a labeled error when the condition never holds", async () => {
     const send = vi.fn(async () => ({ result: { value: false } }))
     await expect(waitForFunction(send as never, "never", 0)).rejects.toThrow(
@@ -80,6 +120,7 @@ describe("poll retries transient evaluation failures", () => {
     async (state) => {
       const send = vi.fn(async (_method: string, params: { expression: string }) => {
         expect(params.expression).toContain("parentElement")
+        expect(params.expression).toContain("getRootNode")
         expect(params.expression).toContain("getBoundingClientRect")
         return { result: { value: true } }
       })

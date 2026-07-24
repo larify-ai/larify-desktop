@@ -42,11 +42,20 @@ export async function dispatchClick(
     { type: 'mousePressed', x, y, button, buttons, clickCount },
     sessionId
   )
-  await send(
-    'Input.dispatchMouseEvent',
-    { type: 'mouseReleased', x, y, button, buttons: 0, clickCount },
-    sessionId
-  )
+  try {
+    await send(
+      'Input.dispatchMouseEvent',
+      { type: 'mouseReleased', x, y, button, buttons: 0, clickCount },
+      sessionId
+    )
+  } catch (error) {
+    await send(
+      'Input.dispatchMouseEvent',
+      { type: 'mouseReleased', x, y, button, buttons: 0, clickCount },
+      sessionId
+    ).catch(() => {})
+    throw error
+  }
 }
 
 export async function dispatchHover(
@@ -108,7 +117,12 @@ export async function dispatchKey(
   sessionId?: string
 ): Promise<void> {
   await keyDown(send, info, modifiers, sessionId)
-  await keyUp(send, info, modifiers, sessionId)
+  try {
+    await keyUp(send, info, modifiers, sessionId)
+  } catch (error) {
+    await keyUp(send, info, modifiers, sessionId).catch(() => {})
+    throw error
+  }
 }
 
 export async function insertText(send: CdpSend, text: string, sessionId?: string): Promise<void> {
@@ -130,9 +144,9 @@ export async function mouseMove(
   y: number,
   sessionId?: string
 ): Promise<void> {
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, buttons: state.buttons }, sessionId)
   state.x = x
   state.y = y
-  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, buttons: state.buttons }, sessionId)
 }
 
 export async function mouseDown(
@@ -141,12 +155,13 @@ export async function mouseDown(
   button: MouseButton = 'left',
   sessionId?: string
 ): Promise<void> {
-  state.buttons |= BUTTON_BITS[button]
+  const buttons = state.buttons | BUTTON_BITS[button]
   await send(
     'Input.dispatchMouseEvent',
-    { type: 'mousePressed', x: state.x, y: state.y, button, buttons: state.buttons, clickCount: 1 },
+    { type: 'mousePressed', x: state.x, y: state.y, button, buttons, clickCount: 1 },
     sessionId
   )
+  state.buttons = buttons
 }
 
 export async function mouseUp(
@@ -155,12 +170,13 @@ export async function mouseUp(
   button: MouseButton = 'left',
   sessionId?: string
 ): Promise<void> {
-  state.buttons &= ~BUTTON_BITS[button]
+  const buttons = state.buttons & ~BUTTON_BITS[button]
   await send(
     'Input.dispatchMouseEvent',
-    { type: 'mouseReleased', x: state.x, y: state.y, button, buttons: state.buttons, clickCount: 1 },
+    { type: 'mouseReleased', x: state.x, y: state.y, button, buttons, clickCount: 1 },
     sessionId
   )
+  state.buttons = buttons
 }
 
 export async function mouseWheel(

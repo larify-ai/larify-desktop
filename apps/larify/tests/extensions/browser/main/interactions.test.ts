@@ -99,6 +99,19 @@ describe("interactions sessionId threading", () => {
     expect(calls.filter((call) => call.method === "Input.insertText")).toHaveLength(1)
   })
 
+  it("does not wait or fail on cancellation after the final character", async () => {
+    const { ctx } = makeCtx()
+    const controller = new AbortController()
+    vi.mocked(ctx.send).mockImplementation(async (method) => {
+      if (method === "Input.insertText") controller.abort()
+      return { result: { value: undefined } }
+    })
+
+    await expect(
+      typeInto(ctx, "ref_1", "a", false, 10_000, controller.signal),
+    ).resolves.toBeUndefined()
+  })
+
   it("does not report check success when the element remains unchecked", async () => {
     const { ctx } = makeCtx()
     vi.mocked(ctx.send).mockImplementation(async (method, params) => {

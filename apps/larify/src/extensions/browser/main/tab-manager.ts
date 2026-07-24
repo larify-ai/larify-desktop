@@ -11,12 +11,16 @@ export class BrowserTabManager {
   private tabs = new Map<number, BrowserTab>()
   private activeId: number | null = null
   private nextId = 1
+  private nextTemporaryId = -1
   private bounds: Rectangle = { x: 0, y: 0, width: 0, height: 0 }
   private visible = false
   private onChange?: (state: BrowserState) => void
   private readonly host: BrowserWindow
   private readonly viewParent = new Map<number, BrowserWindow>()
   private readonly closing = new Map<number, Promise<void>>()
+  private readonly temporaryTabs = new Map<number, BrowserTab>()
+  private readonly temporaryCancels = new Map<number, (error: Error) => void>()
+  private readonly temporaryOperations = new Set<Promise<unknown>>()
   private readonly recorder = new Recorder()
   private destroyTask: Promise<void> | null = null
   private destroying = false
@@ -66,6 +70,43 @@ export class BrowserTabManager {
     this.applyLayout()
     this.emit()
     return tab.id
+  }
+
+  async withTemporaryTab<T>(
+    url: string,
+    callback: (tab: BrowserTab) => Promise<T>
+  ): Promise<T> {
+    if (this.destroying) throw new Error("browser tab manager is destroyed")
+    const tab = new BrowserTab(this.nextTemporaryId--, PARTITION)
+    tab.view.webContents.setWindowOpenHandler(() => ({ action: "deny" }))
+    const operation = this.runTemporaryTab(tab, url, callback)
+    this.temporaryOperations.add(operation)
+    try {
+      return await operation
+    } finally {
+      this.temporaryOperations.delete(operation)
+    }
+  }
+
+  private async runTemporaryTab<T>(
+    tab: BrowserTab,
+    url: string,
+    callback: (tab: BrowserTab) => Promise<T>
+  ): Promise<T> {
+    let cancel!: (error: Error) => void
+    const destroyed = new Promise<never>((_resolve, reject) => {
+      cancel = reject
+    })
+    this.temporaryTabs.set(tab.id, tab)
+    this.temporaryCancels.set(tab.id, cancel)
+    try {
+      if (url && !tab.navigate(url)) throw new Error(`invalid url: ${url}`)
+      return await Promise.race([callback(tab), destroyed])
+    } finally {
+      this.temporaryCancels.delete(tab.id)
+      this.temporaryTabs.delete(tab.id)
+      if (!tab.view.webContents.isDestroyed()) tab.destroy()
+    }
   }
 
   setActive(id: number): void {
@@ -179,6 +220,12 @@ export class BrowserTabManager {
 
   private async destroyResources(): Promise<void> {
     this.window.removeListener("closed", this.handleWindowClosed)
+    const destroyedError = new Error("browser tab manager was destroyed")
+    for (const cancel of this.temporaryCancels.values()) cancel(destroyedError)
+    for (const tab of this.temporaryTabs.values()) {
+      if (!tab.view.webContents.isDestroyed()) tab.destroy()
+    }
+    await Promise.allSettled([...this.temporaryOperations])
     await Promise.allSettled([...this.closing.values()])
     await this.recorder.destroy()
     for (const tab of this.tabs.values()) {

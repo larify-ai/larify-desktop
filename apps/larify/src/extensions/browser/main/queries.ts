@@ -13,17 +13,25 @@ const IS_VISIBLE_JS = `function() {
   if (!this.isConnected) return false;
   const rect = this.getBoundingClientRect();
   if (rect.width <= 0 || rect.height <= 0) return false;
-  for (let node = this; node && node.nodeType === 1; node = node.parentElement) {
+  for (let node = this; node && node.nodeType === 1;) {
     const style = node.ownerDocument.defaultView.getComputedStyle(node);
     if (style.visibility === 'hidden' || style.display === 'none' || parseFloat(style.opacity) <= 0) {
       return false;
     }
+    const root = node.getRootNode && node.getRootNode();
+    node = node.parentElement || (root && root.host) || null;
   }
   return true;
 }`
 const IS_ENABLED_JS = `function() {
   if (this.matches && this.matches(':disabled')) return false;
-  if (this.closest && this.closest('[aria-disabled="true"],[inert]')) return false;
+  for (let node = this; node && node.nodeType === 1;) {
+    if (node.hasAttribute('inert') || (node.getAttribute('aria-disabled') || '').toLowerCase() === 'true') {
+      return false;
+    }
+    const root = node.getRootNode && node.getRootNode();
+    node = node.parentElement || (root && root.host) || null;
+  }
   return !this.disabled;
 }`
 

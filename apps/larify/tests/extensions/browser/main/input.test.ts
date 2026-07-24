@@ -1,11 +1,15 @@
 import { describe, expect, it, vi } from "vitest"
 import {
   boxModelCenter,
+  dispatchClick,
+  dispatchKey,
   keyDown,
   mouseDown,
+  mouseMove,
   mouseUp,
   newMouseState,
 } from "../../../../src/extensions/browser/main/input"
+import { namedKeyInfo } from "../../../../src/extensions/browser/main/keymap"
 
 describe("boxModelCenter", () => {
   it("averages the four content-quad corners", () => {
@@ -65,5 +69,62 @@ describe("mouse buttons bitmask state machine", () => {
 
     expect(seen).toEqual([1, 3, 2])
     expect(state.buttons).toBe(2)
+  })
+
+  it("rolls back a button press when CDP rejects it", async () => {
+    const state = newMouseState()
+    const send = vi.fn(async () => {
+      throw new Error("CDP unavailable")
+    })
+
+    await expect(mouseDown(send as never, state, "left")).rejects.toThrow("CDP unavailable")
+    expect(state.buttons).toBe(0)
+  })
+
+  it("keeps a button pressed when CDP rejects its release", async () => {
+    const state = newMouseState()
+    state.buttons = 1
+    const send = vi.fn(async () => {
+      throw new Error("CDP unavailable")
+    })
+
+    await expect(mouseUp(send as never, state, "left")).rejects.toThrow("CDP unavailable")
+    expect(state.buttons).toBe(1)
+  })
+
+  it("commits pointer coordinates only after CDP accepts the movement", async () => {
+    const state = newMouseState()
+    const send = vi.fn().mockRejectedValue(new Error("move failed"))
+
+    await expect(mouseMove(send as never, state, 50, 60)).rejects.toThrow("move failed")
+    expect(state).toEqual({ x: 0, y: 0, buttons: 0 })
+  })
+})
+
+describe("one-shot input cleanup", () => {
+  it("retries mouse release after a post-press release failure and preserves the error", async () => {
+    const types: string[] = []
+    const send = vi.fn(async (_method: string, params: { type?: string }) => {
+      types.push(params.type ?? "")
+      if (params.type === "mouseReleased") throw new Error("release failed")
+      return {}
+    })
+
+    await expect(dispatchClick(send as never, 10, 20)).rejects.toThrow("release failed")
+    expect(types.filter((type) => type === "mouseReleased")).toHaveLength(2)
+  })
+
+  it("retries key release after keyUp fails and preserves the error", async () => {
+    const types: string[] = []
+    const send = vi.fn(async (_method: string, params: { type?: string }) => {
+      types.push(params.type ?? "")
+      if (params.type === "keyUp") throw new Error("key up failed")
+      return {}
+    })
+
+    await expect(dispatchKey(send as never, namedKeyInfo("shift"))).rejects.toThrow(
+      "key up failed",
+    )
+    expect(types.filter((type) => type === "keyUp")).toHaveLength(2)
   })
 })

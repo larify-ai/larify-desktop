@@ -8,6 +8,8 @@ import { prepareToolOutput } from "../../../main/utils/tool-output"
 import type { BrowserService } from "./browser-service"
 import type { BrowserTab } from "./tab"
 import { waitMs } from "./waits"
+import { pageContentOutput, webFetchTools } from "./web-fetch"
+import { webSearchTools } from "./web-search"
 
 const idSchema = z.number().int().positive().describe("Browser tab id")
 const elementTargetSchema = z
@@ -197,7 +199,13 @@ export function createBrowserToolkit(service: BrowserServiceProvider): Toolkit {
             const id = resolved.createTab(ctx.sessionId)
             const tab = getTab(service, ctx.sessionId, id)
             try {
-              if (url) await tab.navigateAndWait(url)
+              if (url) {
+                await runUntilAbort(
+                  () => tab.navigateAndWait(url),
+                  ctx.signal,
+                  "browser navigation",
+                )
+              }
             } catch (error) {
               await resolved.close(ctx.sessionId, id)
               throw error
@@ -263,7 +271,7 @@ export function createBrowserToolkit(service: BrowserServiceProvider): Toolkit {
           const { id } = args
           return withTab(service, ctx.sessionId, id, async (tab) => {
             const page = await tab.read()
-            return spill(page.content, { url: page.url, title: page.title })
+            return pageContentOutput(page)
           })
         },
       }),
@@ -342,6 +350,8 @@ export function createBrowserToolkit(service: BrowserServiceProvider): Toolkit {
           })
         },
       }),
+      ...webFetchTools(() => resolveService(service)),
+      ...webSearchTools(() => resolveService(service)),
       ...queryTools(service),
       ...interactionTools(service),
       ...waitTools(service),
@@ -498,13 +508,21 @@ function interactionTools(service: BrowserServiceProvider): Toolkit["tools"] {
         const { id, selector, newTab } = args
         return withTab(service, ctx.sessionId, id, async (tab) => {
           if (newTab) {
-            const href = await tab.elementHref(selector)
+            const href = await runUntilAbort(
+              () => tab.elementHref(selector),
+              ctx.signal,
+              "browser link lookup",
+            )
             if (!href) throw new Error(`element '${selector}' has no link target`)
             const resolved = resolveService(service)
             const newTabId = resolved.createTab(ctx.sessionId)
             const created = getTab(service, ctx.sessionId, newTabId)
             try {
-              await created.navigateAndWait(href)
+              await runUntilAbort(
+                () => created.navigateAndWait(href),
+                ctx.signal,
+                "browser navigation",
+              )
             } catch (error) {
               await resolved.close(ctx.sessionId, newTabId)
               throw error

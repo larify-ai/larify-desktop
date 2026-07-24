@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest"
-import { resolveAxSession, scanCursor } from "../../../../src/extensions/browser/main/snapshotCapture"
+import {
+  captureSnapshot,
+  resolveAxSession,
+  scanCursor,
+} from "../../../../src/extensions/browser/main/snapshotCapture"
 
 describe("resolveAxSession", () => {
   it("returns bare params for the top frame", () => {
@@ -12,6 +16,26 @@ describe("resolveAxSession", () => {
 
   it("threads the frameId as a param for same-process frames", () => {
     expect(resolveAxSession("F2", new Map())).toEqual({ params: { frameId: "F2" } })
+  })
+})
+
+describe("captureSnapshot selector errors", () => {
+  it("reports malformed CSS as invalid instead of a missing element", async () => {
+    const send = vi.fn(async (method: string) => {
+      if (method === "Runtime.evaluate") {
+        return {
+          result: {},
+          exceptionDetails: {
+            exception: { description: "SyntaxError: invalid selector" },
+          },
+        }
+      }
+      return {}
+    })
+
+    await expect(
+      captureSnapshot(send as never, new Map(), 1, { selector: "input[" }),
+    ).rejects.toThrow("selector 'input[' is invalid")
   })
 })
 

@@ -199,6 +199,31 @@ describe("Recorder guards", () => {
     expect(destroyWindow).toHaveBeenCalledOnce()
   })
 
+  it("does not start a replacement recording after destroy begins", async () => {
+    const recorder = new Recorder()
+    let finishStopping!: () => void
+    const stopping = new Promise<{ path: string; bytes: number }>((resolve) => {
+      finishStopping = () => resolve({ path: "old.webm", bytes: 1 })
+    })
+    const destroyWindow = vi.fn()
+    ;(recorder as unknown as { stopping: unknown; win: unknown }).stopping = stopping
+    ;(recorder as unknown as { stopping: unknown; win: unknown }).win = {
+      isDestroyed: () => false,
+      destroy: destroyWindow,
+    }
+    const start = vi.spyOn(recorder, "start")
+
+    const restarting = recorder.restart({} as never, "new.webm")
+    const restartAssertion = expect(restarting).rejects.toThrow("recorder is destroyed")
+    const destroying = recorder.destroy()
+    finishStopping()
+
+    await expect(destroying).resolves.toBeUndefined()
+    await restartAssertion
+    expect(start).not.toHaveBeenCalled()
+    expect(destroyWindow).toHaveBeenCalledOnce()
+  })
+
   it("finalizes an active recording before destroying its window", async () => {
     const recorder = new Recorder()
     const destroy = vi.fn()

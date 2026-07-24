@@ -22,46 +22,110 @@ export function useBrowser(): UseBrowser {
   const [state, setState] = useState<BrowserState>(EMPTY)
   const suppressAutoCreateRef = useRef(false)
   const [loadedSessionId, setLoadedSessionId] = useState<string | null>(null)
+  const loadedSessionIdRef = useRef<string | null>(null)
   const [workbenchVisible, setWorkbenchVisible] = useState(false)
   const currentSessionIdRef = useRef(sessionId)
+  const nextStateSequenceRef = useRef(0)
+  const appliedStateSequenceRef = useRef(0)
+  const stateLoadFailuresRef = useRef(0)
+  const stateLoadRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [stateLoadRetry, setStateLoadRetry] = useState<{ sessionId: string; sequence: number } | null>(
+    null,
+  )
+  const ensureFailuresRef = useRef(0)
+  const [ensureRetry, setEnsureRetry] = useState(0)
+
+  const clearStateLoadRetry = useCallback((): void => {
+    if (stateLoadRetryTimerRef.current) clearTimeout(stateLoadRetryTimerRef.current)
+    stateLoadRetryTimerRef.current = null
+    stateLoadFailuresRef.current = 0
+  }, [])
+
+  const scheduleStateLoadRetry = useCallback((requestedSessionId: string): void => {
+    if (currentSessionIdRef.current !== requestedSessionId) return
+    if (loadedSessionIdRef.current === requestedSessionId) return
+    if (stateLoadRetryTimerRef.current) return
+    const failure = Math.min(stateLoadFailuresRef.current + 1, 8)
+    stateLoadFailuresRef.current = failure
+    stateLoadRetryTimerRef.current = setTimeout(() => {
+      stateLoadRetryTimerRef.current = null
+      if (currentSessionIdRef.current !== requestedSessionId) return
+      setStateLoadRetry((current) => ({
+        sessionId: requestedSessionId,
+        sequence: current?.sessionId === requestedSessionId ? current.sequence + 1 : 1,
+      }))
+    }, Math.min(250 * 2 ** (failure - 1), 30_000))
+  }, [])
 
   const refreshState = useCallback(async (): Promise<void> => {
     const requestedSessionId = sessionId
+    const requestSequence = ++nextStateSequenceRef.current
     const value = await window.bridge.invoke("browser:getState", sessionId)
     if (currentSessionIdRef.current !== requestedSessionId) return
+    if (requestSequence < appliedStateSequenceRef.current) return
+    clearStateLoadRetry()
+    appliedStateSequenceRef.current = requestSequence
     const next = (value as BrowserState | null) ?? EMPTY
+    loadedSessionIdRef.current = sessionId
     setLoadedSessionId(sessionId)
     setState(next)
-  }, [sessionId])
+  }, [clearStateLoadRetry, sessionId])
 
   useEffect(() => {
     let alive = true
     currentSessionIdRef.current = sessionId
     suppressAutoCreateRef.current = false
+    clearStateLoadRetry()
+    setStateLoadRetry(null)
+    ensureFailuresRef.current = 0
+    setEnsureRetry(0)
+    loadedSessionIdRef.current = null
     setLoadedSessionId(null)
     setState(EMPTY)
-    void window.bridge.invoke("browser:getState", sessionId).then((value) => {
-      if (!alive) return
-      const next = (value as BrowserState | null) ?? EMPTY
-      setLoadedSessionId(sessionId)
-      setState(next)
-    })
+    const requestSequence = ++nextStateSequenceRef.current
+    void window.bridge
+      .invoke("browser:getState", sessionId)
+      .then((value) => {
+        if (!alive) return
+        if (requestSequence < appliedStateSequenceRef.current) return
+        clearStateLoadRetry()
+        appliedStateSequenceRef.current = requestSequence
+        const next = (value as BrowserState | null) ?? EMPTY
+        loadedSessionIdRef.current = sessionId
+        setLoadedSessionId(sessionId)
+        setState(next)
+      })
+      .catch(() => {
+        if (alive) scheduleStateLoadRetry(sessionId)
+      })
     const off = window.bridge.on("browser:state", (value) => {
       const event = value as { sessionId?: string; state?: BrowserState }
       if (event.sessionId !== sessionId || !event.state) return
+      clearStateLoadRetry()
+      setStateLoadRetry(null)
+      appliedStateSequenceRef.current = ++nextStateSequenceRef.current
+      loadedSessionIdRef.current = sessionId
       setLoadedSessionId(sessionId)
       setState(event.state)
     })
     return () => {
       alive = false
+      if (stateLoadRetryTimerRef.current) clearTimeout(stateLoadRetryTimerRef.current)
+      stateLoadRetryTimerRef.current = null
       off()
     }
-  }, [sessionId])
+  }, [clearStateLoadRetry, scheduleStateLoadRetry, sessionId])
 
   useEffect(() => {
     if (!workbenchVisible) return
-    void refreshState()
-  }, [refreshState, workbenchVisible])
+    void refreshState().catch(() => scheduleStateLoadRetry(sessionId))
+  }, [refreshState, scheduleStateLoadRetry, sessionId, workbenchVisible])
+
+  useEffect(() => {
+    if (stateLoadRetry?.sessionId !== sessionId) return
+    if (loadedSessionId === sessionId) return
+    void refreshState().catch(() => scheduleStateLoadRetry(sessionId))
+  }, [loadedSessionId, refreshState, scheduleStateLoadRetry, sessionId, stateLoadRetry])
 
   useEffect(() => {
     const onActive = (event: Event): void => {
@@ -79,8 +143,27 @@ export function useBrowser(): UseBrowser {
     if (loadedSessionId !== sessionId) return
     if (state.tabs.length > 0) return
     if (suppressAutoCreateRef.current) return
-    void window.bridge.invoke("browser:ensureTab", sessionId)
-  }, [loadedSessionId, sessionId, state.tabs.length, workbenchVisible])
+    let alive = true
+    let retry: ReturnType<typeof setTimeout> | undefined
+    void window.bridge
+      .invoke("browser:ensureTab", sessionId)
+      .then(() => {
+        if (!alive || currentSessionIdRef.current !== sessionId) return
+        ensureFailuresRef.current = 0
+      })
+      .catch(() => {
+        if (!alive || currentSessionIdRef.current !== sessionId) return
+        const failure = Math.min(ensureFailuresRef.current + 1, 8)
+        ensureFailuresRef.current = failure
+        retry = setTimeout(() => {
+          if (alive) setEnsureRetry((value) => value + 1)
+        }, Math.min(250 * 2 ** (failure - 1), 30_000))
+      })
+    return () => {
+      alive = false
+      if (retry) clearTimeout(retry)
+    }
+  }, [ensureRetry, loadedSessionId, sessionId, state.tabs.length, workbenchVisible])
 
   const actions = useMemo(
     () => ({

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { JSDOM } from 'jsdom'
 
 const h = vi.hoisted(() => ({
   resolveRefToObjectId: vi.fn(),
@@ -13,7 +14,13 @@ vi.mock('../../../../src/extensions/browser/main/interactions', () => ({
   callOn: h.callOn
 }))
 
-import { getBox, getBoxWithSession, getCount } from '../../../../src/extensions/browser/main/queries'
+import {
+  getBox,
+  getBoxWithSession,
+  getCount,
+  isEnabled,
+  isVisible
+} from '../../../../src/extensions/browser/main/queries'
 
 describe('getBoxWithSession', () => {
   const ctx = {
@@ -127,5 +134,55 @@ describe('getCount', () => {
     await expect(getCount({ send: send as never }, 'input[')).rejects.toThrow(
       "selector 'input[' is invalid"
     )
+  })
+})
+
+describe('isVisible across shadow roots', () => {
+  it('treats an element inside an opacity-zero host as hidden', async () => {
+    const dom = new JSDOM('<div id="host" style="opacity: 0"></div>', {
+      runScripts: 'outside-only'
+    })
+    const host = dom.window.document.querySelector('#host')!
+    const target = host.attachShadow({ mode: 'open' }).appendChild(
+      dom.window.document.createElement('button')
+    )
+    target.getBoundingClientRect = () =>
+      ({ x: 0, y: 0, width: 20, height: 10 }) as DOMRect
+    h.resolveRefToObjectId.mockResolvedValue({ objectId: 'OID' })
+    h.callOn.mockImplementation(async (_send, _objectId, declaration) => {
+      const fn = dom.window.Function(`return (${String(declaration)})`)() as (
+        this: Element
+      ) => unknown
+      return fn.call(target)
+    })
+    const ctx = { send: vi.fn(), refMap: new Map() }
+
+    await expect(isVisible(ctx, '#target')).resolves.toBe(false)
+    dom.window.close()
+  })
+})
+
+describe('isEnabled across shadow roots', () => {
+  it.each([
+    ['inert', ''],
+    ['aria-disabled', 'true']
+  ])('treats an input inside a %s host as disabled', async (attribute, value) => {
+    const dom = new JSDOM('<div id="host"></div>', { runScripts: 'outside-only' })
+    const host = dom.window.document.querySelector('#host')!
+    host.setAttribute(attribute, value)
+    const target = host.attachShadow({ mode: 'open' }).appendChild(
+      dom.window.document.createElement('input')
+    )
+    h.resolveRefToObjectId.mockResolvedValue({ objectId: 'OID' })
+    h.callOn.mockImplementation(async (_send, _objectId, declaration) => {
+      const fn = dom.window.Function(`return (${String(declaration)})`)() as (
+        this: Element
+      ) => unknown
+      return fn.call(target)
+    })
+    const ctx = { send: vi.fn(), refMap: new Map() }
+
+    await expect(isEnabled(ctx, '#target')).resolves.toBe(false)
+    dom.window.close()
   })
 })

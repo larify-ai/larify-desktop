@@ -15,14 +15,17 @@ type BrowserHook = ReturnType<typeof useBrowser>
 interface Deferred<T> {
   promise: Promise<T>
   resolve(value: T): void
+  reject(error: unknown): void
 }
 
 const deferred = <T,>(): Deferred<T> => {
   let resolve!: (value: T) => void
-  const promise = new Promise<T>((done) => {
+  let reject!: (error: unknown) => void
+  const promise = new Promise<T>((done, fail) => {
     resolve = done
+    reject = fail
   })
-  return { promise, resolve }
+  return { promise, resolve, reject }
 }
 
 function Probe({
@@ -206,6 +209,248 @@ describe("useBrowser", () => {
       listeners[0]({ sessionId: "session-a", state: ownState })
     })
     expect(onState).toHaveBeenLastCalledWith(ownState)
+  })
+
+  it("does not let an older getState response overwrite a newer state event", async () => {
+    const onState = vi.fn()
+    await act(async () => root.render(createElement(Probe, { onState })))
+    const freshState = {
+      tabs: [{ id: 2, title: "fresh" }],
+      activeId: 2,
+    } as BrowserState
+
+    await act(async () => {
+      listeners[0]({ sessionId: "session-a", state: freshState })
+      stateRequest.resolve({ tabs: [], activeId: null })
+    })
+
+    expect(onState).toHaveBeenLastCalledWith(freshState)
+  })
+
+  it("recovers from a failed initial state request through a later state event", async () => {
+    const onState = vi.fn()
+    await act(async () => root.render(createElement(Probe, { onState })))
+    await act(async () => {
+      stateRequest.reject(new Error("IPC unavailable"))
+      await Promise.resolve()
+    })
+    const recovered = {
+      tabs: [{ id: 3, title: "recovered" }],
+      activeId: 3,
+    } as BrowserState
+
+    await act(async () => {
+      listeners[0]({ sessionId: "session-a", state: recovered })
+    })
+
+    expect(onState).toHaveBeenLastCalledWith(recovered)
+  })
+
+  it("retries state loading after the initial and visible requests both fail", async () => {
+    vi.useFakeTimers()
+    let available = false
+    invoke.mockImplementation((channel: string) => {
+      if (channel === "browser:getState") {
+        return available
+          ? Promise.resolve({ tabs: [], activeId: null })
+          : Promise.reject(new Error("IPC unavailable"))
+      }
+      return Promise.resolve(undefined)
+    })
+    await act(async () => root.render(createElement(Probe, { onState: vi.fn() })))
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent("larify:workbench-active", { detail: "browser" }))
+      await Promise.resolve()
+    })
+    expect(invoke.mock.calls.filter(([channel]) => channel === "browser:getState")).toHaveLength(2)
+    expect(invoke.mock.calls.filter(([channel]) => channel === "browser:ensureTab")).toHaveLength(0)
+
+    available = true
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250)
+    })
+
+    expect(invoke.mock.calls.filter(([channel]) => channel === "browser:getState")).toHaveLength(3)
+    expect(invoke.mock.calls.filter(([channel]) => channel === "browser:ensureTab")).toHaveLength(1)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000)
+    })
+    expect(invoke.mock.calls.filter(([channel]) => channel === "browser:getState")).toHaveLength(3)
+    vi.useRealTimers()
+  })
+
+  it("applies an older successful request when a newer refresh fails", async () => {
+    const refreshRequest = deferred<unknown>()
+    let getStateCalls = 0
+    invoke.mockImplementation((channel: string) => {
+      if (channel !== "browser:getState") return Promise.resolve(undefined)
+      return ++getStateCalls === 1 ? stateRequest.promise : refreshRequest.promise
+    })
+    const onState = vi.fn()
+    await act(async () => root.render(createElement(Probe, { onState })))
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent("larify:workbench-active", { detail: "browser" }))
+    })
+    const olderSuccess = {
+      tabs: [{ id: 7, title: "older success" }],
+      activeId: 7,
+    } as BrowserState
+
+    await act(async () => {
+      refreshRequest.reject(new Error("refresh failed"))
+      stateRequest.resolve(olderSuccess)
+      await Promise.resolve()
+    })
+
+    expect(onState).toHaveBeenLastCalledWith(olderSuccess)
+  })
+
+  it("retries ensureTab twice after transient failures", async () => {
+    vi.useFakeTimers()
+    invoke.mockImplementation((channel: string) => {
+      if (channel === "browser:getState") return stateRequest.promise
+      if (channel === "browser:ensureTab") return Promise.reject(new Error("ensure failed"))
+      return Promise.resolve(undefined)
+    })
+    await act(async () => root.render(createElement(Probe, { onState: vi.fn() })))
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent("larify:workbench-active", { detail: "browser" }))
+      stateRequest.resolve({ tabs: [], activeId: null })
+      await Promise.resolve()
+    })
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250)
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500)
+    })
+
+    expect(
+      invoke.mock.calls.filter(([channel]) => channel === "browser:ensureTab"),
+    ).toHaveLength(3)
+    vi.useRealTimers()
+  })
+
+  it("keeps retrying ensureTab with bounded backoff until the service recovers", async () => {
+    vi.useFakeTimers()
+    let available = false
+    invoke.mockImplementation((channel: string) => {
+      if (channel === "browser:getState") return stateRequest.promise
+      if (channel === "browser:ensureTab") {
+        return available ? Promise.resolve(undefined) : Promise.reject(new Error("ensure failed"))
+      }
+      return Promise.resolve(undefined)
+    })
+    await act(async () => root.render(createElement(Probe, { onState: vi.fn() })))
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent("larify:workbench-active", { detail: "browser" }))
+      stateRequest.resolve({ tabs: [], activeId: null })
+      await Promise.resolve()
+    })
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250)
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500)
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000)
+    })
+    expect(
+      invoke.mock.calls.filter(([channel]) => channel === "browser:ensureTab"),
+    ).toHaveLength(4)
+
+    available = true
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000)
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000)
+    })
+    expect(
+      invoke.mock.calls.filter(([channel]) => channel === "browser:ensureTab"),
+    ).toHaveLength(5)
+    vi.useRealTimers()
+  })
+
+  it("does not let an old session success reset the current session retry backoff", async () => {
+    vi.useFakeTimers()
+    const oldEnsure = deferred<unknown>()
+    const stateRequests = new Map<string, Deferred<unknown>>()
+    let sessionBEnsureCalls = 0
+    invoke.mockImplementation((channel: string, requestedSessionId: string) => {
+      if (channel === "browser:getState") {
+        const request = deferred<unknown>()
+        stateRequests.set(requestedSessionId, request)
+        return request.promise
+      }
+      if (channel === "browser:ensureTab") {
+        if (requestedSessionId === "session-a") return oldEnsure.promise
+        sessionBEnsureCalls++
+        return Promise.reject(new Error("ensure failed"))
+      }
+      return Promise.resolve(undefined)
+    })
+    await act(async () => root.render(createElement(Probe, { onState: vi.fn() })))
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent("larify:workbench-active", { detail: "browser" }))
+      stateRequests.get("session-a")!.resolve({ tabs: [], activeId: null })
+    })
+    await act(async () => {
+      setAgentSessionId("session-b")
+    })
+    await act(async () => {
+      stateRequests.get("session-b")!.resolve({ tabs: [], activeId: null })
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250)
+    })
+    expect(sessionBEnsureCalls).toBe(2)
+
+    await act(async () => {
+      oldEnsure.resolve(undefined)
+      await Promise.resolve()
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500)
+    })
+    expect(sessionBEnsureCalls).toBe(3)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250)
+    })
+    expect(sessionBEnsureCalls).toBe(3)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(750)
+    })
+    expect(sessionBEnsureCalls).toBe(4)
+    vi.useRealTimers()
+  })
+
+  it("cancels a scheduled ensureTab retry when the hook unmounts", async () => {
+    vi.useFakeTimers()
+    invoke.mockImplementation((channel: string) => {
+      if (channel === "browser:getState") return stateRequest.promise
+      if (channel === "browser:ensureTab") return Promise.reject(new Error("ensure failed"))
+      return Promise.resolve(undefined)
+    })
+    await act(async () => root.render(createElement(Probe, { onState: vi.fn() })))
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent("larify:workbench-active", { detail: "browser" }))
+      stateRequest.resolve({ tabs: [], activeId: null })
+      await Promise.resolve()
+    })
+    expect(
+      invoke.mock.calls.filter(([channel]) => channel === "browser:ensureTab"),
+    ).toHaveLength(1)
+
+    await act(async () => root.unmount())
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(
+      invoke.mock.calls.filter(([channel]) => channel === "browser:ensureTab"),
+    ).toHaveLength(1)
+    vi.useRealTimers()
   })
 
   it("does not let an old session refresh overwrite the current session", async () => {

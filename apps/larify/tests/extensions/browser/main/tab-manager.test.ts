@@ -9,6 +9,7 @@ const h = vi.hoisted(() => ({
 vi.mock("electron", () => {
   class FakeWebContents {
     url = "about:blank"
+    closed = false
     windowOpenHandler?: (details: { url: string }) => { action: string }
     on(): void {}
     setWindowOpenHandler(handler: (details: { url: string }) => { action: string }): void {
@@ -28,7 +29,12 @@ vi.mock("electron", () => {
       return false
     }
     reload(): void {}
-    close(): void {}
+    isDestroyed(): boolean {
+      return this.closed
+    }
+    close(): void {
+      this.closed = true
+    }
     navigationHistory = {
       canGoBack: () => false,
       canGoForward: () => false,
@@ -195,6 +201,63 @@ describe("BrowserTabManager", () => {
     await manager.close(b)
     expect(manager.state().tabs.map((tab) => tab.id)).toEqual([a, c])
     expect(manager.state().activeId).toBe(c)
+  })
+
+  it("keeps temporary tabs out of UI state and destroys them after use", async () => {
+    const manager = new BrowserTabManager(fakeWindow())
+    const changes: unknown[] = []
+    manager.bindChange((state) => changes.push(state))
+    let temporaryTab: import("../../../../src/extensions/browser/main/tab").BrowserTab | undefined
+
+    const value = await manager.withTemporaryTab("https://example.com", async (tab) => {
+      temporaryTab = tab
+      expect(tab.id).toBe(-1)
+      expect(manager.state()).toEqual({ tabs: [], activeId: null })
+      expect((tab.view as unknown as { parent: unknown }).parent).toBeNull()
+      return 42
+    })
+
+    expect(value).toBe(42)
+    expect(changes).toEqual([])
+    expect(temporaryTab?.view.webContents.close).toBeDefined()
+    expect((temporaryTab?.view.webContents as unknown as { closed: boolean }).closed).toBe(true)
+    expect(manager.createTab()).toBe(1)
+  })
+
+  it("rejects an invalid temporary-tab URL and still destroys the tab", async () => {
+    const manager = new BrowserTabManager(fakeWindow())
+    const callback = vi.fn(async () => undefined)
+
+    await expect(manager.withTemporaryTab("not a valid url", callback)).rejects.toThrow(
+      "invalid url",
+    )
+
+    expect(callback).not.toHaveBeenCalled()
+    expect((h.views.at(-1) as unknown as { webContents: { closed: boolean } }).webContents.closed).toBe(
+      true,
+    )
+    expect(manager.state()).toEqual({ tabs: [], activeId: null })
+  })
+
+  it("destroys and rejects an in-flight temporary tab when the manager is destroyed", async () => {
+    const manager = new BrowserTabManager(fakeWindow())
+    let callbackStarted!: () => void
+    const started = new Promise<void>((resolve) => {
+      callbackStarted = resolve
+    })
+    const operation = manager.withTemporaryTab("https://example.com", async () => {
+      callbackStarted()
+      await new Promise<void>(() => {})
+    })
+    await started
+    const temporaryView = h.views[0] as {
+      webContents: { closed: boolean }
+    }
+
+    await manager.destroy()
+
+    await expect(operation).rejects.toThrow("browser tab manager was destroyed")
+    expect(temporaryView.webContents.closed).toBe(true)
   })
 
   it("stops a recording before destroying its tab", async () => {

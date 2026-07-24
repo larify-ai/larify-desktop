@@ -117,13 +117,28 @@ export async function drag(ctx: Interactions, source: string, target: string): P
   ): Promise<unknown> => ctx.send('Input.dispatchMouseEvent', { type, x, y, ...extra }, sessionId)
   await mouse('mouseMoved', s.x, s.y, {}, s.sessionId)
   await mouse('mousePressed', s.x, s.y, { button: 'left', buttons: 1, clickCount: 1 }, s.sessionId)
-  for (let i = 1; i <= 10; i++) {
-    const cx = s.x + ((t.x - s.x) * i) / 10
-    const cy = s.y + ((t.y - s.y) * i) / 10
-    await mouse('mouseMoved', cx, cy, { button: 'left', buttons: 1 }, s.sessionId)
-    await sleep(10)
+  let x = s.x
+  let y = s.y
+  try {
+    for (let i = 1; i <= 10; i++) {
+      const cx = s.x + ((t.x - s.x) * i) / 10
+      const cy = s.y + ((t.y - s.y) * i) / 10
+      await mouse('mouseMoved', cx, cy, { button: 'left', buttons: 1 }, s.sessionId)
+      x = cx
+      y = cy
+      await sleep(10)
+    }
+    await mouse('mouseReleased', t.x, t.y, { button: 'left', buttons: 0, clickCount: 1 }, s.sessionId)
+  } catch (error) {
+    await mouse(
+      'mouseReleased',
+      x,
+      y,
+      { button: 'left', buttons: 0, clickCount: 1 },
+      s.sessionId
+    ).catch(() => {})
+    throw error
   }
-  await mouse('mouseReleased', t.x, t.y, { button: 'left', buttons: 0, clickCount: 1 }, s.sessionId)
 }
 
 export async function fill(ctx: Interactions, selector: string, text: string): Promise<void> {
@@ -169,12 +184,14 @@ export async function type(
       sessionId
     )
   }
-  for (const ch of text) {
+  const chars = [...text]
+  for (let i = 0; i < chars.length; i++) {
+    const ch = chars[i]
     if (signal?.aborted) throw new Error("typing was cancelled")
     if (ch === '\n' || ch === '\r') await dispatchKey(ctx.send, namedKeyInfo('enter'), 0, sessionId)
     else if (ch === '\t') await dispatchKey(ctx.send, namedKeyInfo('tab'), 0, sessionId)
     else await insertText(ctx.send, ch, sessionId)
-    if (delayMs > 0) await sleepWhileActive(delayMs, signal)
+    if (delayMs > 0 && i < chars.length - 1) await sleepWhileActive(delayMs, signal)
   }
 }
 

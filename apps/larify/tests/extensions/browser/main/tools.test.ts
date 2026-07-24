@@ -43,10 +43,8 @@ function tool(name: string, service = createService()) {
   const rawExecute = found.execute as unknown as (input: unknown, options: unknown) => Promise<unknown>
   return {
     inputSchema,
-    execute: (
-      input: unknown,
-      options: { context: { sessionId: string; cwd: string }; abortSignal?: AbortSignal },
-    ) => rawExecute(inputSchema.parse(input), { ...options, toolCallId: "test", messages: [] }),
+    execute: (input: unknown, options: { context: { sessionId: string; cwd: string }; abortSignal?: AbortSignal }) =>
+      rawExecute(inputSchema.parse(input), { ...options, toolCallId: "test", messages: [] }),
   }
 }
 
@@ -92,26 +90,35 @@ describe("browser toolkit", () => {
         "type",
         "upload",
         "wait_for",
+        "web_fetch",
+        "web_search",
       ].sort(),
     )
   })
 
+  it("marks web search and fetch as eager browser tools", () => {
+    const tools = createBrowserToolkit(createService()).tools
+    expect(tools.web_search?.metadata).toMatchObject({ icon: "browser", eager: true })
+    expect(tools.web_fetch?.metadata).toMatchObject({ icon: "browser", eager: true })
+  })
+
   it("rejects unknown fields in public browser schemas", () => {
-    expect(parseToolInput("create_tab", { url: "https://example.com", shell: "cmd.exe" }).success).toBe(
-      false,
-    )
-    expect(parseToolInput("navigate", { id: 1, url: "https://example.com", tabId: 1 }).success).toBe(
-      false,
-    )
+    expect(parseToolInput("create_tab", { url: "https://example.com", shell: "cmd.exe" }).success).toBe(false)
+    expect(parseToolInput("navigate", { id: 1, url: "https://example.com", tabId: 1 }).success).toBe(false)
     expect(parseToolInput("navigate", { id: 1 }).success).toBe(false)
     expect(parseToolInput("navigate", { id: 1, action: "back" }).success).toBe(true)
     expect(parseToolInput("click", { id: 1, selector: "button", wait: true }).success).toBe(false)
     expect(parseToolInput("query_element", { id: 1, selector: "button", query: "attr" }).success).toBe(false)
+    expect(parseToolInput("query_element", { id: 1, selector: "button", query: "text", name: "href" }).success).toBe(
+      false,
+    )
     expect(
-      parseToolInput("query_element", { id: 1, selector: "button", query: "text", name: "href" }).success,
-    ).toBe(false)
-    expect(
-      parseToolInput("query_element", { id: 1, selector: "button", query: "text", properties: ["color"] }).success,
+      parseToolInput("query_element", {
+        id: 1,
+        selector: "button",
+        query: "text",
+        properties: ["color"],
+      }).success,
     ).toBe(false)
     expect(parseToolInput("query_element", { id: 1, selector: "button", query: "count" }).success).toBe(false)
     expect(parseToolInput("element_action", { id: 1, selector: "button", action: "click" }).success).toBe(false)
@@ -131,10 +138,18 @@ describe("browser toolkit", () => {
     expect(parseToolInput("wait_for", { id: 1, selector: "button", state: "load" }).success).toBe(false)
     expect(parseToolInput("wait_for", { id: 1, condition: "download", path: "D:\\file.txt" }).success).toBe(false)
     expect(parseToolInput("type", { id: 1, selector: "input", text: "hello", delayMs: 100 }).success).toBe(false)
-    expect(parseToolInput("cdp_call", { id: 1, method: "Runtime.evaluate", timeoutMs: 1000 }).success).toBe(
-      false,
-    )
+    expect(parseToolInput("cdp_call", { id: 1, method: "Runtime.evaluate", timeoutMs: 1000 }).success).toBe(false)
     expect(parseToolInput("read_page", { id: 1, title: "Read page" }).success).toBe(false)
+    expect(parseToolInput("web_search", { query: "test", domain: "example.com" }).success).toBe(false)
+    expect(parseToolInput("web_fetch", { url: "" }).success).toBe(false)
+    expect(parseToolInput("web_search", { query: "" }).success).toBe(false)
+    expect(parseToolInput("web_search", {}).success).toBe(false)
+    expect(
+      parseToolInput("web_search", {
+        query: "test",
+        pageUrl: "https://www.bing.com/search?q=test",
+      }).success,
+    ).toBe(false)
   })
 
   it("uses interaction-focused snapshot defaults", () => {
@@ -286,9 +301,10 @@ describe("browser toolkit", () => {
       tab: vi.fn(() => ({ waitForSelector })),
     } as unknown as BrowserService
 
-    await expect(
-      tool("wait_for", service).execute({ id: 1, selector: "button", timeout: 1.5 }, ctx),
-    ).resolves.toEqual({ selector: "button", state: "visible" })
+    await expect(tool("wait_for", service).execute({ id: 1, selector: "button", timeout: 1.5 }, ctx)).resolves.toEqual({
+      selector: "button",
+      state: "visible",
+    })
 
     expect(waitForSelector).toHaveBeenCalledWith("button", "visible", 1500, undefined)
   })
@@ -394,6 +410,26 @@ describe("browser toolkit", () => {
     expect(service.close).toHaveBeenCalledWith(ctx.context.sessionId, 1)
   })
 
+  it("closes a newly created tab when create_tab navigation is aborted", async () => {
+    const tab = { navigateAndWait: vi.fn(() => new Promise<void>(() => {})) }
+    const service = {
+      ...createService(),
+      createTab: vi.fn(() => 1),
+      close: vi.fn(async () => undefined),
+      tab: vi.fn(() => tab),
+    } as unknown as BrowserService
+    const controller = new AbortController()
+    const pending = tool("create_tab", service).execute(
+      { url: "https://example.com" },
+      { ...ctx, abortSignal: controller.signal },
+    )
+
+    controller.abort()
+
+    await expect(pending).resolves.toEqual({ error: "browser navigation was cancelled" })
+    expect(service.close).toHaveBeenCalledWith("session-1", 1)
+  })
+
   it("returns undefined from eval_js without an internal serialization error", async () => {
     const service = {
       ...createService(),
@@ -420,13 +456,7 @@ describe("browser toolkit", () => {
         { ...ctx, abortSignal: controller.signal },
       ),
     ).resolves.toEqual({ content: JSON.stringify(value, null, 2) })
-    expect(sendCdp).toHaveBeenCalledWith(
-      "Runtime.evaluate",
-      undefined,
-      undefined,
-      undefined,
-      controller.signal,
-    )
+    expect(sendCdp).toHaveBeenCalledWith("Runtime.evaluate", undefined, undefined, undefined, controller.signal)
   })
 
   it("returns cdp_call errors with tab state", async () => {
@@ -524,28 +554,42 @@ describe("browser toolkit", () => {
       tab: vi.fn(() => tab),
     } as unknown as BrowserService
 
-    await expect(tool("query_element", service).execute({ id: 1, selector: "button", query: "text" }, ctx)).resolves.toEqual({
+    await expect(
+      tool("query_element", service).execute({ id: 1, selector: "button", query: "text" }, ctx),
+    ).resolves.toEqual({
       content: "visible text",
     })
-    await expect(tool("query_element", service).execute({ id: 1, selector: "button", query: "html" }, ctx)).resolves.toEqual({
+    await expect(
+      tool("query_element", service).execute({ id: 1, selector: "button", query: "html" }, ctx),
+    ).resolves.toEqual({
       content: "<button>Submit</button>",
     })
-    await expect(tool("query_element", service).execute({ id: 1, selector: "input", query: "value" }, ctx)).resolves.toEqual({
+    await expect(
+      tool("query_element", service).execute({ id: 1, selector: "input", query: "value" }, ctx),
+    ).resolves.toEqual({
       value: "typed",
     })
-    await expect(tool("query_element", service).execute({ id: 1, selector: "button", query: "box" }, ctx)).resolves.toEqual({
+    await expect(
+      tool("query_element", service).execute({ id: 1, selector: "button", query: "box" }, ctx),
+    ).resolves.toEqual({
       x: 1,
       y: 2,
       width: 3,
       height: 4,
     })
-    await expect(tool("query_element", service).execute({ id: 1, selector: "button", query: "visible" }, ctx)).resolves.toEqual({
+    await expect(
+      tool("query_element", service).execute({ id: 1, selector: "button", query: "visible" }, ctx),
+    ).resolves.toEqual({
       visible: true,
     })
-    await expect(tool("query_element", service).execute({ id: 1, selector: "button", query: "enabled" }, ctx)).resolves.toEqual({
+    await expect(
+      tool("query_element", service).execute({ id: 1, selector: "button", query: "enabled" }, ctx),
+    ).resolves.toEqual({
       enabled: false,
     })
-    await expect(tool("query_element", service).execute({ id: 1, selector: "input", query: "checked" }, ctx)).resolves.toEqual({
+    await expect(
+      tool("query_element", service).execute({ id: 1, selector: "input", query: "checked" }, ctx),
+    ).resolves.toEqual({
       checked: true,
     })
     await expect(
@@ -554,7 +598,9 @@ describe("browser toolkit", () => {
       name: "role",
       value: "button",
     })
-    await expect(tool("query_element", service).execute({ id: 1, selector: "button", query: "styles" }, ctx)).resolves.toEqual({
+    await expect(
+      tool("query_element", service).execute({ id: 1, selector: "button", query: "styles" }, ctx),
+    ).resolves.toEqual({
       content: JSON.stringify(styles, null, 2),
     })
   })
@@ -626,14 +672,13 @@ describe("browser toolkit", () => {
       source: "#a",
       target: "#b",
     })
-    await expect(tool("upload", service).execute({ id: 1, selector: "input", files: ["D:\\a.txt"] }, ctx)).resolves.toEqual({
+    await expect(
+      tool("upload", service).execute({ id: 1, selector: "input", files: ["D:\\a.txt"] }, ctx),
+    ).resolves.toEqual({
       uploaded: 1,
     })
     await expect(
-      tool("download", service).execute(
-        { id: 1, selector: "a", path: "D:\\Downloads\\file.txt", timeout: 45 },
-        ctx,
-      ),
+      tool("download", service).execute({ id: 1, selector: "a", path: "D:\\Downloads\\file.txt", timeout: 45 }, ctx),
     ).resolves.toEqual({
       path: "D:\\Downloads\\file.txt",
     })
@@ -643,12 +688,7 @@ describe("browser toolkit", () => {
     ).resolves.toEqual({
       path: "D:\\Downloads\\file.txt",
     })
-    expect(tab.download).toHaveBeenCalledWith(
-      "a",
-      "D:\\Downloads\\default.txt",
-      1_800_000,
-      undefined,
-    )
+    expect(tab.download).toHaveBeenCalledWith("a", "D:\\Downloads\\default.txt", 1_800_000, undefined)
   })
 
   it("passes the tool cancellation signal to downloads", async () => {
@@ -664,12 +704,7 @@ describe("browser toolkit", () => {
       { ...ctx, abortSignal: controller.signal },
     )
 
-    expect(tab.download).toHaveBeenCalledWith(
-      "a",
-      "D:\\Downloads\\file.txt",
-      1_800_000,
-      controller.signal,
-    )
+    expect(tab.download).toHaveBeenCalledWith("a", "D:\\Downloads\\file.txt", 1_800_000, controller.signal)
   })
 
   it("returns interaction errors without throwing", async () => {
@@ -704,11 +739,17 @@ describe("browser toolkit", () => {
       recordRestart: vi.fn(async () => undefined),
     } as unknown as BrowserService
 
-    const screenshot = (await tool("screenshot", service).execute({ id: 1 }, ctx)) as { path: string; bytes: number }
+    const screenshot = (await tool("screenshot", service).execute({ id: 1 }, ctx)) as {
+      path: string
+      bytes: number
+    }
     expect(screenshot.bytes).toBe(image.length)
     expect(existsSync(screenshot.path)).toBe(true)
 
-    const pdfResult = (await tool("pdf", service).execute({ id: 1 }, ctx)) as { path: string; bytes: number }
+    const pdfResult = (await tool("pdf", service).execute({ id: 1 }, ctx)) as {
+      path: string
+      bytes: number
+    }
     expect(pdfResult.bytes).toBe(pdf.length)
     expect(existsSync(pdfResult.path)).toBe(true)
 
@@ -740,10 +781,7 @@ describe("browser toolkit", () => {
       recordStopIfCurrent: vi.fn(async () => ({ path: recordPath, bytes: 42 })),
     } as unknown as BrowserService
 
-    const pending = tool("record_start", service).execute(
-      { id: 1, path: recordPath, duration: 1 },
-      ctx,
-    )
+    const pending = tool("record_start", service).execute({ id: 1, path: recordPath, duration: 1 }, ctx)
     await vi.advanceTimersByTimeAsync(1000)
     const result = await pending
 
@@ -765,10 +803,7 @@ describe("browser toolkit", () => {
       }),
     } as unknown as BrowserService
 
-    const pending = tool("record_start", service).execute(
-      { id: 1, path: recordPath, duration: 1 },
-      ctx,
-    )
+    const pending = tool("record_start", service).execute({ id: 1, path: recordPath, duration: 1 }, ctx)
     await vi.advanceTimersByTimeAsync(1000)
     const result = await pending
 
@@ -793,10 +828,53 @@ describe("browser toolkit", () => {
       tab: vi.fn((_sessionId: string, id: number) => (id === 1 ? source : target)),
     } as unknown as BrowserService
 
-    await expect(
-      tool("click", service).execute({ id: 1, selector: "a", newTab: true }, ctx),
-    ).resolves.toEqual({ error: "ERR_NAME_NOT_RESOLVED" })
+    await expect(tool("click", service).execute({ id: 1, selector: "a", newTab: true }, ctx)).resolves.toEqual({
+      error: "ERR_NAME_NOT_RESOLVED",
+    })
     expect(service.close).toHaveBeenCalledWith("session-1", 2)
+  })
+
+  it("closes a new click tab when its navigation is aborted", async () => {
+    const source = { elementHref: vi.fn(async () => "https://example.com/next") }
+    const target = { navigateAndWait: vi.fn(() => new Promise<void>(() => {})) }
+    const service = {
+      ...createService(),
+      createTab: vi.fn(() => 2),
+      close: vi.fn(async () => undefined),
+      tab: vi.fn((_sessionId: string, id: number) => (id === 1 ? source : target)),
+    } as unknown as BrowserService
+    const controller = new AbortController()
+    const pending = tool("click", service).execute(
+      { id: 1, selector: "a", newTab: true },
+      { ...ctx, abortSignal: controller.signal },
+    )
+    await vi.waitFor(() => {
+      expect(service.createTab).toHaveBeenCalledWith("session-1")
+    })
+
+    controller.abort()
+
+    await expect(pending).resolves.toEqual({ error: "browser navigation was cancelled" })
+    expect(service.close).toHaveBeenCalledWith("session-1", 2)
+  })
+
+  it("cancels click newTab while resolving the link without creating a tab", async () => {
+    const source = { elementHref: vi.fn(() => new Promise<string>(() => {})) }
+    const service = {
+      ...createService(),
+      createTab: vi.fn(() => 2),
+      tab: vi.fn(() => source),
+    } as unknown as BrowserService
+    const controller = new AbortController()
+    const pending = tool("click", service).execute(
+      { id: 1, selector: "a", newTab: true },
+      { ...ctx, abortSignal: controller.signal },
+    )
+
+    controller.abort()
+
+    await expect(pending).resolves.toEqual({ error: "browser link lookup was cancelled" })
+    expect(service.createTab).not.toHaveBeenCalled()
   })
 
   it("does not stop a replacement recording when an old duration expires", async () => {
@@ -809,10 +887,7 @@ describe("browser toolkit", () => {
       recordStopIfCurrent: vi.fn(async () => null),
     } as unknown as BrowserService
 
-    const pending = tool("record_start", service).execute(
-      { id: 1, path: recordPath, duration: 1 },
-      ctx,
-    )
+    const pending = tool("record_start", service).execute({ id: 1, path: recordPath, duration: 1 }, ctx)
     await vi.advanceTimersByTimeAsync(1000)
 
     await expect(pending).resolves.toEqual({ recording: false, path: recordPath })
@@ -832,10 +907,7 @@ describe("browser toolkit", () => {
       }),
     } as unknown as BrowserService
 
-    const pending = tool("record_start", service).execute(
-      { id: 1, path: recordPath, duration: 1 },
-      ctx,
-    )
+    const pending = tool("record_start", service).execute({ id: 1, path: recordPath, duration: 1 }, ctx)
     await vi.advanceTimersByTimeAsync(1000)
 
     await expect(pending).resolves.toEqual({
@@ -922,10 +994,12 @@ describe("browser toolkit", () => {
       action: "down",
       button: "left",
     })
-    await expect(tool("mouse_button", service).execute({ id: 1, action: "up", button: "right" }, ctx)).resolves.toEqual({
-      action: "up",
-      button: "right",
-    })
+    await expect(tool("mouse_button", service).execute({ id: 1, action: "up", button: "right" }, ctx)).resolves.toEqual(
+      {
+        action: "up",
+        button: "right",
+      },
+    )
     await expect(tool("mouse_wheel", service).execute({ id: 1, dy: 100 }, ctx)).resolves.toEqual({
       dx: 0,
       dy: 100,

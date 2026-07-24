@@ -39,6 +39,7 @@ vi.mock("electron", () => {
     loadURLCalls: string[] = []
     deferLoad = false
     pendingLoads: Array<() => void> = []
+    destroyed = false
     session = new FakeSession()
     debugger = {
       isAttached: () => true,
@@ -89,6 +90,7 @@ vi.mock("electron", () => {
     }
 
     getURL(): string {
+      if (this.destroyed) throw new Error("Object has been destroyed")
       return this.url
     }
 
@@ -102,7 +104,12 @@ vi.mock("electron", () => {
 
     reload(): void {}
     close(): void {
+      this.destroyed = true
       this.emit("destroyed")
+    }
+
+    isDestroyed(): boolean {
+      return this.destroyed
     }
     navigationHistory = {
       canGoBack: () => false,
@@ -169,7 +176,7 @@ function webContents(tab: BrowserTab): {
   }
 }
 
-function downloadItem(path = "D:\\Downloads\\file.txt"): {
+function downloadItem(path = "D:\\Downloads\\file.txt", finishOnCancel = true): {
   cancel: ReturnType<typeof vi.fn>
   setSavePath: (nextPath: string) => void
   once: (event: string, cb: (...args: unknown[]) => void) => void
@@ -179,7 +186,9 @@ function downloadItem(path = "D:\\Downloads\\file.txt"): {
   let savePath = path
   let doneCb: ((event: unknown, state: string) => void) | undefined
   return {
-    cancel: vi.fn(),
+    cancel: vi.fn(() => {
+      if (finishOnCancel) queueMicrotask(() => doneCb?.({}, "cancelled"))
+    }),
     setSavePath: vi.fn((nextPath: string) => {
       savePath = nextPath
     }),
@@ -341,6 +350,33 @@ describe("BrowserTab", () => {
     await Promise.resolve()
 
     expect(tab.state().favIconUrl).toBe("")
+  })
+
+  it("does not access destroyed webContents when a favicon fetch finishes late", async () => {
+    let finishFetch!: (value: unknown) => void
+    h.fetchMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finishFetch = resolve
+        }),
+    )
+    const tab = new BrowserTab(1, "p")
+    webContents(tab).url = "https://example.com"
+    const pending = (
+      tab as unknown as {
+        setFavIcon(favicons: string[]): Promise<void>
+      }
+    ).setFavIcon(["https://example.com/favicon.ico"])
+    await vi.waitFor(() => expect(finishFetch).toBeTypeOf("function"))
+
+    tab.destroy()
+    finishFetch({
+      ok: true,
+      arrayBuffer: async () => new Uint8Array([1]).buffer,
+      headers: { get: () => "image/png" },
+    })
+
+    await expect(pending).resolves.toBeUndefined()
   })
 
   it("marks loading as soon as main-frame navigation starts", () => {
@@ -514,6 +550,60 @@ describe("BrowserTab", () => {
     expect(item.cancel).toHaveBeenCalledOnce()
   })
 
+  it("waits for Electron to close an active download before reporting cancellation", async () => {
+    const tab = new BrowserTab(1, "p")
+    const controller = new AbortController()
+    const promise = tab.download("a", "D:\\Downloads\\file.txt", 3000, controller.signal)
+    const item = downloadItem("D:\\Downloads\\file.txt", false)
+    webContents(tab).session.emit("will-download", {}, item, tab.view.webContents)
+    controller.abort()
+    expect(item.cancel).toHaveBeenCalledOnce()
+    const beforeDone = await Promise.race([
+      promise.then(
+        () => "resolved",
+        () => "rejected",
+      ),
+      new Promise<string>((resolve) => setTimeout(() => resolve("pending"), 10)),
+    ])
+    expect(beforeDone).toBe("pending")
+
+    item.triggerDone("cancelled")
+    await expect(promise).rejects.toThrow("download was cancelled")
+  })
+
+  it("rejects cleanly when DownloadItem.cancel throws during tab destruction", async () => {
+    const tab = new BrowserTab(1, "p")
+    const promise = tab.download("a", "D:\\Downloads\\file.txt", 3000)
+    const item = downloadItem("D:\\Downloads\\file.txt", false)
+    item.cancel.mockImplementation(() => {
+      throw new Error("cancel exploded")
+    })
+    webContents(tab).session.emit("will-download", {}, item, tab.view.webContents)
+
+    expect(() => tab.destroy()).not.toThrow()
+    await expect(promise).rejects.toThrow(
+      "tab was closed during download; failed to cancel download: cancel exploded",
+    )
+  })
+
+  it("fails when Electron does not confirm download cancellation", async () => {
+    vi.useFakeTimers()
+    const tab = new BrowserTab(1, "p")
+    const controller = new AbortController()
+    const promise = tab.download("a", "D:\\Downloads\\file.txt", 3000, controller.signal)
+    const item = downloadItem("D:\\Downloads\\file.txt", false)
+    webContents(tab).session.emit("will-download", {}, item, tab.view.webContents)
+
+    controller.abort()
+    const assertion = expect(promise).rejects.toThrow(
+      "download was cancelled; download cancellation was not confirmed within 5s",
+    )
+    await vi.advanceTimersByTimeAsync(5000)
+
+    await assertion
+    vi.useRealTimers()
+  })
+
   it("does not report networkidle while a request seen before the wait is pending", async () => {
     vi.useFakeTimers()
     const tab = new BrowserTab(1, "p")
@@ -647,6 +737,20 @@ describe("BrowserTab", () => {
     vi.useRealTimers()
   })
 
+  it.each(["load", "domcontentloaded", "networkidle"] as const)(
+    "rejects a pending %s wait promptly when the tab is destroyed",
+    async (state) => {
+      const tab = new BrowserTab(1, "p")
+      await Promise.resolve()
+      webContents(tab).loading = state !== "networkidle"
+
+      const pending = tab.waitForLoad(state, 30_000)
+      tab.destroy()
+
+      await expect(pending).rejects.toThrow("tab was closed while waiting for load")
+    },
+  )
+
   it("rejects a navigation whose loadURL promise never settles", async () => {
     vi.useFakeTimers()
     const tab = new BrowserTab(1, "p")
@@ -695,6 +799,180 @@ describe("BrowserTab", () => {
     await assertion
     expect(tab.state().error).toEqual({ code: -105, description: "ERR_NAME_NOT_RESOLVED" })
   })
+
+  it("rejects a redirected navigation when the final URL fails to load", async () => {
+    const tab = new BrowserTab(1, "p")
+    const wc = webContents(tab)
+    wc.deferLoad = true
+
+    const pending = tab.navigateAndWait("https://redirect.example")
+    const assertion = expect(pending).rejects.toThrow("ERR_NAME_NOT_RESOLVED")
+    await vi.waitFor(() => {
+      expect(
+        (wc as unknown as { handlers: Record<string, unknown[]> }).handlers["did-fail-load"],
+      ).toHaveLength(2)
+    })
+    wc.emit("did-start-navigation", {
+      url: "https://final.example",
+      isMainFrame: true,
+      isSameDocument: false,
+    })
+    wc.loading = false
+    wc.emit("did-fail-load", {}, -105, "ERR_NAME_NOT_RESOLVED", "https://final.example", true)
+
+    await assertion
+    expect(tab.state().error).toEqual({ code: -105, description: "ERR_NAME_NOT_RESOLVED" })
+  })
+
+  it("records a failed history navigation to a different URL", () => {
+    const tab = new BrowserTab(1, "p")
+    const wc = webContents(tab)
+    wc.url = "https://current.example"
+    wc.emit("did-navigate")
+    const raw = wc as unknown as {
+      navigationHistory: { canGoBack(): boolean; goBack(): void }
+    }
+    raw.navigationHistory.canGoBack = () => true
+    raw.navigationHistory.goBack = () => {
+      wc.emit("did-start-navigation", {
+        url: "https://previous.example",
+        isMainFrame: true,
+        isSameDocument: false,
+      })
+    }
+
+    tab.goBack()
+    wc.emit("did-fail-load", {}, -105, "ERR_NAME_NOT_RESOLVED", "https://previous.example", true)
+
+    expect(tab.state().error).toEqual({ code: -105, description: "ERR_NAME_NOT_RESOLVED" })
+  })
+
+  it("does not report an older navigation as successful after a newer navigation wins", async () => {
+    const tab = new BrowserTab(1, "p")
+    const wc = webContents(tab)
+    wc.deferLoad = true
+
+    const older = tab.navigateAndWait("https://older.example")
+    await vi.waitFor(() => expect(wc.pendingLoads).toHaveLength(1))
+    const newer = tab.navigateAndWait("https://newer.example")
+    await vi.waitFor(() => expect(wc.pendingLoads).toHaveLength(2))
+
+    wc.pendingLoads[1]()
+    await expect(newer).resolves.toBeUndefined()
+    wc.pendingLoads[0]()
+    await expect(older).rejects.toThrow("navigation was superseded")
+  })
+
+  it("does not let a superseded fire-and-forget navigation overwrite newer state", async () => {
+    const tab = new BrowserTab(1, "p")
+    const wc = webContents(tab)
+    wc.deferLoad = true
+    const changes: unknown[] = []
+    tab.bindChange(() => changes.push(tab.state()))
+
+    expect(tab.navigate("https://older.example")).toBe(true)
+    await vi.waitFor(() => expect(wc.pendingLoads).toHaveLength(1))
+    tab.reload()
+    wc.emit("did-navigate")
+    wc.pendingLoads[0]()
+    await Promise.resolve()
+
+    expect(tab.state().error).toBeNull()
+    expect(changes.at(-1)).toMatchObject({ error: null })
+  })
+
+  it("does not let an older same-url navigation clear the newer pending state", async () => {
+    vi.useFakeTimers()
+    const tab = new BrowserTab(1, "p")
+    const wc = webContents(tab)
+    wc.deferLoad = true
+
+    expect(tab.navigate("https://same.example")).toBe(true)
+    await vi.waitFor(() => expect(wc.pendingLoads).toHaveLength(1))
+    expect(tab.navigate("https://same.example")).toBe(true)
+    await vi.waitFor(() => expect(wc.pendingLoads).toHaveLength(2))
+
+    wc.pendingLoads[0]()
+    await vi.advanceTimersByTimeAsync(101)
+
+    expect(tab.state()).toMatchObject({
+      url: "https://same.example",
+      loading: true,
+      error: null,
+    })
+    vi.useRealTimers()
+  })
+
+  it.each(["back", "forward", "reload"] as const)(
+    "supersedes an older navigation when %s starts",
+    async (action) => {
+      const tab = new BrowserTab(1, "p")
+      const wc = webContents(tab)
+      wc.deferLoad = true
+      const raw = wc as unknown as {
+        navigationHistory: {
+          canGoBack(): boolean
+          canGoForward(): boolean
+          goBack(): void
+          goForward(): void
+        }
+        reload(): void
+      }
+      raw.navigationHistory.canGoBack = () => true
+      raw.navigationHistory.canGoForward = () => true
+      raw.navigationHistory.goBack = () => wc.emit("did-finish-load")
+      raw.navigationHistory.goForward = () => wc.emit("did-finish-load")
+      raw.reload = () => wc.emit("did-finish-load")
+
+      const older = tab.navigateAndWait("https://older.example")
+      const olderAssertion = expect(older).rejects.toThrow("navigation was superseded")
+      await vi.waitFor(() => expect(wc.pendingLoads).toHaveLength(1))
+      const newer =
+        action === "back"
+          ? tab.goBackAndWait()
+          : action === "forward"
+            ? tab.goForwardAndWait()
+            : tab.reloadAndWait()
+      wc.pendingLoads[0]()
+
+      await expect(newer).resolves.toBeUndefined()
+      await olderAssertion
+    },
+  )
+
+  it.each(["back", "forward", "reload"] as const)(
+    "supersedes an older navigation when non-waiting %s starts",
+    async (action) => {
+      const tab = new BrowserTab(1, "p")
+      const wc = webContents(tab)
+      wc.deferLoad = true
+      const raw = wc as unknown as {
+        navigationHistory: {
+          canGoBack(): boolean
+          canGoForward(): boolean
+          goBack(): void
+          goForward(): void
+        }
+        reload(): void
+      }
+      raw.navigationHistory.canGoBack = () => true
+      raw.navigationHistory.canGoForward = () => true
+      raw.navigationHistory.goBack = () => wc.emit("did-finish-load")
+      raw.navigationHistory.goForward = () => wc.emit("did-finish-load")
+      raw.reload = () => wc.emit("did-finish-load")
+
+      const older = tab.navigateAndWait("https://older.example")
+      const olderAssertion = expect(older).rejects.toThrow("navigation was superseded")
+      await vi.waitFor(() => expect(wc.pendingLoads).toHaveLength(1))
+
+      if (action === "back") tab.goBack()
+      else if (action === "forward") tab.goForward()
+      else tab.reload()
+      wc.pendingLoads[0]()
+
+      await olderAssertion
+    },
+  )
 
   it("records a timeout instead of leaking an unhandled rejection from navigate", async () => {
     vi.useFakeTimers()

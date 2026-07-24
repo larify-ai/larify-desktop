@@ -146,6 +146,8 @@ export class Recorder {
   private stopping: Promise<{ path: string; bytes: number }> | null = null
   private stoppingGeneration: number | null = null
   private nextGeneration = 1
+  private destroyTask: Promise<void> | null = null
+  private destroying = false
 
   private async ensureWindow(): Promise<BrowserWindow> {
     if (this.win && !this.win.isDestroyed()) return this.win
@@ -197,6 +199,7 @@ export class Recorder {
   }
 
   async start(tab: BrowserTab, path: string): Promise<number> {
+    if (this.destroying) throw new Error('recorder is destroyed')
     this.discardDestroyedWindow()
     if (this.active || this.starting || this.stopping)
       throw new Error('a recording is already in progress')
@@ -301,10 +304,14 @@ export class Recorder {
   }
 
   async restart(tab: BrowserTab, path: string): Promise<number> {
+    if (this.destroying) throw new Error('recorder is destroyed')
     await this.startDone
+    if (this.destroying) throw new Error('recorder is destroyed')
     this.discardDestroyedWindow()
     if (this.stopping) await this.stopping
+    if (this.destroying) throw new Error('recorder is destroyed')
     if (this.active) await this.stop()
+    if (this.destroying) throw new Error('recorder is destroyed')
     return this.start(tab, path)
   }
 
@@ -324,7 +331,14 @@ export class Recorder {
     return this.stop()
   }
 
-  async destroy(): Promise<void> {
+  destroy(): Promise<void> {
+    if (this.destroyTask) return this.destroyTask
+    this.destroying = true
+    this.destroyTask = this.destroyResources()
+    return this.destroyTask
+  }
+
+  private async destroyResources(): Promise<void> {
     await this.startDone
     if (this.stopping) await this.stopping.catch(() => {})
     else if (this.active) await this.stop().catch(() => {})

@@ -29,6 +29,7 @@ import { parseKeyChord } from "./keymap"
 
 const DIALOG_OVERRIDE =
   "window.alert=function(){};window.confirm=function(){return true;};window.prompt=function(){return null;};"
+const DOWNLOAD_CANCEL_CONFIRM_TIMEOUT = 5000
 
 function sameOrigin(a: string, b: string): boolean {
   try {
@@ -67,7 +68,7 @@ function withTimeout<T>(
 function waitForWebContentsLoadEvent(
   wc: WebContents,
   timeoutMs = 30000,
-  expectedUrl?: string,
+  acceptsFailedUrl?: (url: string) => boolean,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const cleanup = (): void => {
@@ -88,7 +89,7 @@ function waitForWebContentsLoadEvent(
       isMainFrame: boolean,
     ): void => {
       if (!isMainFrame) return
-      if (expectedUrl && url && (normalizeUrl(url) ?? url) !== expectedUrl) return
+      if (url && acceptsFailedUrl && !acceptsFailedUrl(normalizeUrl(url) ?? url)) return
       cleanup()
       reject(new Error(`navigation failed (${code}): ${description}${url ? `: ${url}` : ""}`))
     }
@@ -145,9 +146,9 @@ function waitForWebContentsNotLoading(wc: WebContents, timeoutMs = 30000, stable
 async function waitForWebContentsLoad(
   wc: WebContents,
   timeoutMs = 30000,
-  expectedUrl?: string,
+  acceptsFailedUrl?: (url: string) => boolean,
 ): Promise<void> {
-  await waitForWebContentsLoadEvent(wc, timeoutMs, expectedUrl)
+  await waitForWebContentsLoadEvent(wc, timeoutMs, acceptsFailedUrl)
   await waitForWebContentsNotLoading(wc, timeoutMs)
 }
 
@@ -168,6 +169,8 @@ export class BrowserTab {
   private currentUrl = ""
   private pendingUrl = ""
   private navigationTask: Promise<void> | null = null
+  private navigationGeneration = 0
+  private readonly activeNavigationUrls = new Set<string>()
   private favIconUrl = ""
   private favIconRequest = 0
   private error: BrowserTabError | null = null
@@ -203,8 +206,10 @@ export class BrowserTab {
   navigate(url: string): boolean {
     const target = normalizeUrl(url)
     if (!target) return false
-    void this.startNavigation(target).catch((error) => {
-      if (this.pendingUrl === target) {
+    const task = this.startNavigation(target)
+    const generation = this.navigationGeneration
+    void task.catch((error) => {
+      if (generation === this.navigationGeneration && this.pendingUrl === target) {
         this.pendingUrl = ""
         this.error = {
           code: -1,
@@ -218,18 +223,18 @@ export class BrowserTab {
 
   goBack(): void {
     if (this.view.webContents.navigationHistory.canGoBack()) {
-      this.view.webContents.navigationHistory.goBack()
+      this.runNavigationAction(() => this.view.webContents.navigationHistory.goBack())
     }
   }
 
   goForward(): void {
     if (this.view.webContents.navigationHistory.canGoForward()) {
-      this.view.webContents.navigationHistory.goForward()
+      this.runNavigationAction(() => this.view.webContents.navigationHistory.goForward())
     }
   }
 
   reload(): void {
-    this.view.webContents.reload()
+    this.runNavigationAction(() => this.view.webContents.reload())
   }
 
   async navigateAndWait(url: string): Promise<void> {
@@ -243,16 +248,22 @@ export class BrowserTab {
   }
 
   private startNavigation(target: string): Promise<void> {
+    const generation = this.beginNavigation(target)
     this.pendingUrl = target
     this.onChange?.()
     const task = this.cdpReady.then(async () => {
-      const loaded = waitForWebContentsLoad(this.view.webContents, 30000, target)
+      const loaded = waitForWebContentsLoad(
+        this.view.webContents,
+        30000,
+        (url) => this.activeNavigationUrls.has(url),
+      )
       await Promise.all([
         this.view.webContents.loadURL(target).catch(() => {
           // load failure is captured in state via did-fail-load
         }),
         loaded,
       ])
+      this.assertNavigationCurrent(generation, target)
       if (this.pendingUrl === target) {
         this.pendingUrl = ""
         this.onChange?.()
@@ -269,23 +280,39 @@ export class BrowserTab {
     const wc = this.view.webContents
     if (!wc.navigationHistory.canGoBack()) return
     const loaded = waitForWebContentsLoad(wc)
-    wc.navigationHistory.goBack()
+    const generation = this.runNavigationAction(() => wc.navigationHistory.goBack())
     await loaded
+    this.assertNavigationCurrent(generation)
   }
 
   async goForwardAndWait(): Promise<void> {
     const wc = this.view.webContents
     if (!wc.navigationHistory.canGoForward()) return
     const loaded = waitForWebContentsLoad(wc)
-    wc.navigationHistory.goForward()
+    const generation = this.runNavigationAction(() => wc.navigationHistory.goForward())
     await loaded
+    this.assertNavigationCurrent(generation)
   }
 
   async reloadAndWait(): Promise<void> {
     const wc = this.view.webContents
     const loaded = waitForWebContentsLoad(wc)
-    wc.reload()
+    const generation = this.runNavigationAction(() => wc.reload())
     await loaded
+    this.assertNavigationCurrent(generation)
+  }
+
+  private runNavigationAction(action: () => void): number {
+    const generation = this.beginNavigation()
+    action()
+    return generation
+  }
+
+  private beginNavigation(expectedUrl?: string): number {
+    const generation = ++this.navigationGeneration
+    this.activeNavigationUrls.clear()
+    if (expectedUrl) this.activeNavigationUrls.add(expectedUrl)
+    return generation
   }
 
   state(): BrowserTabState {
@@ -459,6 +486,7 @@ export class BrowserTab {
       let started = false
       let settled = false
       let item: DownloadItem | null = null
+      let cancellationError: Error | null = null
       let timer!: ReturnType<typeof setTimeout>
       const cleanup = (): void => {
         clearTimeout(timer)
@@ -475,8 +503,32 @@ export class BrowserTab {
       }
       const cancel = (error: Error): void => {
         const activeItem = item
-        fail(error)
-        activeItem?.cancel()
+        if (!activeItem) {
+          fail(error)
+          return
+        }
+        if (cancellationError) return
+        cancellationError = error
+        clearTimeout(timer)
+        signal?.removeEventListener("abort", onAbort)
+        timer = setTimeout(() => {
+          fail(
+            new Error(
+              `${error.message}; download cancellation was not confirmed within ${waits.formatTimeout(DOWNLOAD_CANCEL_CONFIRM_TIMEOUT)}`,
+            ),
+          )
+        }, DOWNLOAD_CANCEL_CONFIRM_TIMEOUT)
+        try {
+          activeItem.cancel()
+        } catch (cancelError) {
+          fail(
+            new Error(
+              `${error.message}; failed to cancel download: ${
+                cancelError instanceof Error ? cancelError.message : String(cancelError)
+              }`,
+            ),
+          )
+        }
       }
       const onAbort = (): void => cancel(new Error("download was cancelled"))
       const succeed = (value: string): void => {
@@ -492,7 +544,8 @@ export class BrowserTab {
         wc.session.off("will-download", onWillDownload)
         downloadItem.setSavePath(normalize(path))
         downloadItem.once("done", (_doneEvent, state) => {
-          if (state === "completed") succeed(downloadItem.getSavePath())
+          if (cancellationError) fail(cancellationError)
+          else if (state === "completed") succeed(downloadItem.getSavePath())
           else fail(new Error(`download failed: ${state}`))
         })
       }
@@ -619,11 +672,13 @@ export class BrowserTab {
   ): Promise<void> {
     if (state === "networkidle") return this.waitForNetworkIdle(timeoutMs)
     const wc = this.view.webContents
+    if (wc.isDestroyed()) throw new Error("tab was closed while waiting for load")
     if (!wc.isLoading()) return
     await new Promise<void>((resolve, reject) => {
       const removeListener = (): void => {
         if (state === "domcontentloaded") wc.off("dom-ready", onLoaded)
         else wc.off("did-finish-load", onLoaded)
+        wc.off("destroyed", onDestroyed)
       }
       const cleanup = (): void => {
         clearTimeout(timer)
@@ -633,12 +688,17 @@ export class BrowserTab {
         cleanup()
         resolve()
       }
+      const onDestroyed = (): void => {
+        cleanup()
+        reject(new Error("tab was closed while waiting for load"))
+      }
       const timer = setTimeout(() => {
         cleanup()
         reject(new Error(`wait_for_load ${state} timed out after ${waits.formatTimeout(timeoutMs)}`))
       }, timeoutMs)
       if (state === "domcontentloaded") wc.on("dom-ready", onLoaded)
       else wc.on("did-finish-load", onLoaded)
+      wc.once("destroyed", onDestroyed)
     })
   }
 
@@ -699,12 +759,15 @@ export class BrowserTab {
     const syncUrl = (): void => {
       this.currentUrl = wc.getURL()
       this.pendingUrl = ""
+      this.activeNavigationUrls.clear()
       emit()
     }
 
     wc.on("will-prevent-unload", (event) => event.preventDefault())
     wc.on("did-start-navigation", (details) => {
       if (!details.isMainFrame || details.isSameDocument) return
+      const navigationUrl = normalizeUrl(details.url) ?? details.url
+      if (navigationUrl) this.activeNavigationUrls.add(navigationUrl)
       this.error = null
       this.resetPageState()
       if (!sameOrigin(details.url, this.currentUrl)) {
@@ -717,7 +780,7 @@ export class BrowserTab {
     wc.on("did-navigate-in-page", syncUrl)
     wc.on("page-title-updated", emit)
     wc.on("page-favicon-updated", (_event, favicons) => {
-      void this.setFavIcon(favicons)
+      void this.setFavIcon(favicons).catch(() => {})
       emit()
     })
     wc.on("did-start-loading", emit)
@@ -725,8 +788,10 @@ export class BrowserTab {
     wc.on("did-fail-load", (_event, errorCode, errorDescription, failedUrl, isMainFrame) => {
       if (!isMainFrame || errorCode === -3) return
       const normalizedFailedUrl = normalizeUrl(failedUrl) ?? failedUrl
-      if (this.pendingUrl && normalizedFailedUrl !== this.pendingUrl) return
-      if (!this.pendingUrl && this.currentUrl && normalizedFailedUrl !== this.currentUrl) return
+      if (
+        this.activeNavigationUrls.size > 0 &&
+        !this.activeNavigationUrls.has(normalizedFailedUrl)
+      ) return
       this.pendingUrl = ""
       this.error = { code: errorCode, description: errorDescription }
       emit()
@@ -846,8 +911,16 @@ export class BrowserTab {
     }
   }
 
+  private assertNavigationCurrent(generation: number, target?: string): void {
+    if (generation !== this.navigationGeneration) {
+      throw new Error(`navigation was superseded${target ? `: ${target}` : ""}`)
+    }
+  }
+
   private async waitForNetworkIdle(timeoutMs: number): Promise<void> {
     await this.cdpReady
+    const wc = this.view.webContents
+    if (wc.isDestroyed()) throw new Error("tab was closed while waiting for load")
     return new Promise<void>((resolve, reject) => {
       let idle: ReturnType<typeof setTimeout> | null = null
       let settled = false
@@ -855,6 +928,7 @@ export class BrowserTab {
         clearTimeout(deadline)
         if (idle) clearTimeout(idle)
         this.networkWaiters.delete(check)
+        wc.off("destroyed", onDestroyed)
       }
       const arm = (): void => {
         if (idle) clearTimeout(idle)
@@ -873,6 +947,12 @@ export class BrowserTab {
           idle = null
         }
       }
+      const onDestroyed = (): void => {
+        if (settled) return
+        settled = true
+        cleanup()
+        reject(new Error("tab was closed while waiting for load"))
+      }
       const deadline = setTimeout(() => {
         if (settled) return
         settled = true
@@ -880,6 +960,7 @@ export class BrowserTab {
         reject(new Error(`wait_for_load networkidle timed out after ${waits.formatTimeout(timeoutMs)}`))
       }, timeoutMs)
       this.networkWaiters.add(check)
+      wc.once("destroyed", onDestroyed)
       check()
     })
   }
@@ -923,7 +1004,7 @@ export class BrowserTab {
     if (!sourceUrl) return
 
     const dataUrl = await faviconDataUrl(sourceUrl)
-    if (request !== this.favIconRequest || wc.getURL() !== pageUrl) return
+    if (request !== this.favIconRequest || wc.isDestroyed() || wc.getURL() !== pageUrl) return
     if (dataUrl) {
       this.favIconUrl = dataUrl
       this.onChange?.()
@@ -933,7 +1014,12 @@ export class BrowserTab {
     const fallbackUrl = faviconOriginFallback(pageUrl)
     if (!fallbackUrl || fallbackUrl === sourceUrl) return
     const fallbackDataUrl = await faviconDataUrl(fallbackUrl)
-    if (request !== this.favIconRequest || wc.getURL() !== pageUrl || !fallbackDataUrl) return
+    if (
+      request !== this.favIconRequest ||
+      wc.isDestroyed() ||
+      wc.getURL() !== pageUrl ||
+      !fallbackDataUrl
+    ) return
     this.favIconUrl = fallbackDataUrl
     this.onChange?.()
   }

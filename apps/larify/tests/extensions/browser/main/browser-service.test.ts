@@ -210,4 +210,29 @@ describe("BrowserService", () => {
     await destroying
     expect(() => service.createTab("session-b")).toThrow("browser service is destroyed")
   })
+
+  it("waits for a manager when global and session destruction start in the same tick", async () => {
+    const service = new BrowserService({} as never)
+    service.createTab("session-a")
+    const manager = h.managers[0] as FakeBrowserTabManager
+    let finishDestroy!: () => void
+    manager.destroy.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          finishDestroy = resolve
+        }),
+    )
+
+    const destroyingAll = service.destroy()
+    const destroyingSession = service.destroySession("session-a")
+    const beforeManagerFinishes = await Promise.race([
+      destroyingAll.then(() => "done"),
+      new Promise<string>((resolve) => setTimeout(() => resolve("pending"), 10)),
+    ])
+
+    expect(beforeManagerFinishes).toBe("pending")
+    expect(destroyingSession).toBe(destroyingAll)
+    finishDestroy()
+    await Promise.all([destroyingAll, destroyingSession])
+  })
 })

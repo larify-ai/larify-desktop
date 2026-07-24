@@ -69,6 +69,29 @@ describe("WorkbenchTabs", () => {
     expect(container.querySelectorAll('[aria-label="关闭"]')).toHaveLength(1)
   })
 
+  it("releases focus before closing a tab", async () => {
+    const onClose = vi.fn()
+
+    await act(async () => {
+      root.render(
+        createElement(WorkbenchTabs, {
+          tabs: [{ active: true, id: "one", title: "One" }],
+          onClose,
+          onSelect: vi.fn(),
+        }),
+      )
+    })
+
+    const closeButton = container.querySelector<HTMLButtonElement>(".larify-workbench-tab-close")!
+    closeButton.focus()
+    expect(document.activeElement).toBe(closeButton)
+
+    closeButton.click()
+
+    expect(document.activeElement).not.toBe(closeButton)
+    expect(onClose).toHaveBeenCalledWith("one")
+  })
+
   it("reports tab reorder when pointer dragging over another tab", async () => {
     const onReorder = vi.fn()
     const onSelect = vi.fn()

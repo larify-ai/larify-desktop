@@ -211,6 +211,7 @@ export function WorkbenchTabs({
                   className="larify-workbench-tab-close"
                   onClick={(event) => {
                     event.stopPropagation()
+                    event.currentTarget.blur()
                     onClose?.(tab.id)
                   }}
                   onPointerDown={(event) => event.stopPropagation()}

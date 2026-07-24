@@ -10,6 +10,7 @@ import {
   type CursorInfo,
   type LinkTarget
 } from './snapshot'
+import { randomUUID } from 'node:crypto'
 
 export type CdpSend = (method: string, params?: object, sessionId?: string) => Promise<unknown>
 
@@ -48,8 +49,10 @@ async function resolveSelectorIds(send: CdpSend, selector: string): Promise<Set<
   return ids
 }
 
-const CURSOR_SCAN_JS = `
+function cursorScanJs(marker: string): string {
+  return `
 (function() {
+    var marker = ${JSON.stringify(marker)};
     var results = [];
     if (!document.body) return results;
 
@@ -106,7 +109,7 @@ const CURSOR_SCAN_JS = `
             }
         }
 
-        el.setAttribute('data-__ab-ci', String(results.length));
+        el.setAttribute(marker, String(results.length));
         results.push({
             text: text,
             tagName: tagName,
@@ -120,8 +123,11 @@ const CURSOR_SCAN_JS = `
     }
     return results;
 })()`
+}
 
-const CURSOR_CLEANUP_JS = `(function(){var els=document.querySelectorAll('[data-__ab-ci]');for(var i=0;i<els.length;i++)els[i].removeAttribute('data-__ab-ci');return els.length;})()`
+function cursorCleanupJs(marker: string): string {
+  return `(function(){var marker=${JSON.stringify(marker)};var els=document.querySelectorAll('['+marker+']');for(var i=0;i<els.length;i++)els[i].removeAttribute(marker);return els.length;})()`
+}
 
 interface CursorHit {
   text: string
@@ -152,10 +158,11 @@ function toCursorInfo(hit: CursorHit): CursorInfo {
 
 export async function scanCursor(send: CdpSend, sessionId?: string): Promise<CursorMap> {
   const map: CursorMap = new Map()
+  const marker = `data-__larify_cursor_${randomUUID().replaceAll('-', '')}`
   try {
     const evalRes = (await send(
       'Runtime.evaluate',
-      { expression: CURSOR_SCAN_JS, returnByValue: true },
+      { expression: cursorScanJs(marker), returnByValue: true },
       sessionId
     )) as { result?: { value?: CursorHit[] } }
     const hits = evalRes.result?.value
@@ -165,7 +172,7 @@ export async function scanCursor(send: CdpSend, sessionId?: string): Promise<Cur
     }
     const found = (await send(
       'DOM.querySelectorAll',
-      { nodeId: doc.root.nodeId, selector: '[data-__ab-ci]' },
+      { nodeId: doc.root.nodeId, selector: `[${marker}]` },
       sessionId
     )) as { nodeIds: number[] }
     const descs = await Promise.all(
@@ -178,7 +185,7 @@ export async function scanCursor(send: CdpSend, sessionId?: string): Promise<Cur
         ?.node
       if (!dnode || dnode.backendNodeId === undefined) continue
       const attrs = dnode.attributes ?? []
-      const ciPos = attrs.indexOf('data-__ab-ci')
+      const ciPos = attrs.indexOf(marker)
       if (ciPos < 0 || ciPos % 2 !== 0) continue
       const hit = hits[Number(attrs[ciPos + 1])]
       if (hit) map.set(dnode.backendNodeId, toCursorInfo(hit))
@@ -187,7 +194,7 @@ export async function scanCursor(send: CdpSend, sessionId?: string): Promise<Cur
     // ignore
   } finally {
     try {
-      await send('Runtime.evaluate', { expression: CURSOR_CLEANUP_JS }, sessionId)
+      await send('Runtime.evaluate', { expression: cursorCleanupJs(marker) }, sessionId)
     } catch {
       // ignore
     }

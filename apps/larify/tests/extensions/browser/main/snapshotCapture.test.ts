@@ -16,7 +16,7 @@ describe("resolveAxSession", () => {
 })
 
 describe("scanCursor", () => {
-  it("maps hits by backendNodeId and skips markers found at an odd attribute index", async () => {
+  it("uses one unique marker for scan, lookup, attribute parsing, and cleanup", async () => {
     const hits = [
       {
         text: "Go",
@@ -28,16 +28,25 @@ describe("scanCursor", () => {
         hiddenInputChecked: null,
       },
     ]
+    let marker = ""
+    const expressions: string[] = []
     const send = vi.fn(async (method: string, params?: Record<string, unknown>) => {
       if (method === "Runtime.evaluate") {
+        const expression = String(params?.expression)
+        expressions.push(expression)
+        const match = expression.match(/var marker = "(data-__larify_cursor_[a-f0-9]+)"/)
+        if (match) marker = match[1]
         return (params as { returnByValue?: boolean })?.returnByValue ? { result: { value: hits } } : {}
       }
       if (method === "DOM.getDocument") return { root: { nodeId: 1 } }
-      if (method === "DOM.querySelectorAll") return { nodeIds: [10, 11] }
+      if (method === "DOM.querySelectorAll") {
+        expect(params?.selector).toBe(`[${marker}]`)
+        return { nodeIds: [10, 11] }
+      }
       if (method === "DOM.describeNode") {
         return (params as { nodeId?: number }).nodeId === 10
-          ? { node: { backendNodeId: 100, attributes: ["data-__ab-ci", "0", "type", "button"] } }
-          : { node: { backendNodeId: 101, attributes: ["value", "data-__ab-ci"] } }
+          ? { node: { backendNodeId: 100, attributes: [marker, "0", "type", "button"] } }
+          : { node: { backendNodeId: 101, attributes: ["value", marker] } }
       }
       return {}
     })
@@ -47,5 +56,29 @@ describe("scanCursor", () => {
     expect(map.size).toBe(1)
     expect(map.get(100)).toMatchObject({ kind: "clickable", text: "Go" })
     expect(map.has(101)).toBe(false)
+    expect(expressions.at(-1)).toContain(`var marker="${marker}"`)
+    expect(expressions.join("\n")).not.toContain("data-__ab-ci")
+  })
+
+  it("gives concurrent scans different markers", async () => {
+    const selectors: string[] = []
+    const send = vi.fn(async (method: string, params?: Record<string, unknown>) => {
+      if (method === "Runtime.evaluate") {
+        return (params as { returnByValue?: boolean })?.returnByValue
+          ? { result: { value: [{ text: "", hasOnClick: true }] } }
+          : {}
+      }
+      if (method === "DOM.getDocument") return { root: { nodeId: 1 } }
+      if (method === "DOM.querySelectorAll") {
+        selectors.push(String(params?.selector))
+        return { nodeIds: [] }
+      }
+      return {}
+    })
+
+    await Promise.all([scanCursor(send as never), scanCursor(send as never)])
+
+    expect(selectors).toHaveLength(2)
+    expect(selectors[0]).not.toBe(selectors[1])
   })
 })

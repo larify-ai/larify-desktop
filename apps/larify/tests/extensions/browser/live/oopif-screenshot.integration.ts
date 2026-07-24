@@ -75,7 +75,8 @@ async function main(): Promise<void> {
         html,body{margin:0;min-height:1800px;background:#00ffff}
         iframe{position:absolute;left:150px;top:700px;width:400px;height:300px;
           border:10px solid #c80000;transform:scale(1.25);transform-origin:top left}
-      </style><iframe src="${childUrl}"></iframe><script>scrollTo(0,500)</script>`
+      </style><div id="legacy" data-__ab-ci="keep" style="cursor:pointer">Legacy</div>
+      <iframe src="${childUrl}"></iframe><script>scrollTo(0,500)</script>`
     )
 
     await app.whenReady()
@@ -86,6 +87,18 @@ async function main(): Promise<void> {
     await tab.navigateAndWait(url(rootServer, 'localhost'))
 
     const ref = await waitForRef(tab)
+    const markerState = await tab.evalJs(`() => ({
+      legacy: document.querySelector('#legacy').getAttribute('data-__ab-ci'),
+      temporary: Array.from(document.querySelectorAll('*')).some((element) =>
+        Array.from(element.attributes).some((attribute) =>
+          attribute.name.startsWith('data-__larify_cursor_')))
+    })`)
+    if (
+      (markerState as { legacy?: string; temporary?: boolean }).legacy !== 'keep' ||
+      (markerState as { legacy?: string; temporary?: boolean }).temporary
+    ) {
+      throw new Error(`cursor marker cleanup corrupted the page: ${JSON.stringify(markerState)}`)
+    }
     const screenshot = await tab.screenshot({ selector: ref, format: 'png' })
     const size = assertGreenCorners(screenshot.data)
     const scaleFactor = screen.getPrimaryDisplay().scaleFactor

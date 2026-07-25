@@ -728,7 +728,7 @@ function AssistantChat({
                               })
                             }}
                           >
-                            {expandedSessionCwds.has(groupCwd) ? "收起显示" : "展开显示"}
+                            {expandedSessionCwds.has(groupCwd) ? "收起" : "展开"}
                           </PromptInputActionMenuItem>
                         ) : null}
                       </div>

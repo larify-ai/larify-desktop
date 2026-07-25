@@ -10,7 +10,7 @@ export function wrapWithTitle(tool: Tool): Tool {
     ...tool,
     inputSchema: z
       .object({
-        title: z.string().min(1).describe("Short user-facing phrase describing the step"),
+        title: z.string().min(1).describe("Short user-facing phrase describing the step, as brief as possible"),
         args: tool.inputSchema as z.ZodTypeAny,
       })
       .strict(),

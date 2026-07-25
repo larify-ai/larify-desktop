@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { ipcTransport } from "../../../../src/extensions/assistant/renderer/lib/transport"
+import { createIpcTransport } from "../../../../src/extensions/assistant/renderer/lib/transport"
+
+const ipcTransport = createIpcTransport(() => "/workspace")
 
 describe("assistant transport", () => {
   afterEach(() => {
@@ -37,6 +39,7 @@ describe("assistant transport", () => {
       runId: "run-1",
       sessionId: "session-1",
       messages: [],
+      cwd: "/workspace",
     })
     expect([...listeners.values()].every((entries) => entries.size === 0)).toBe(true)
   })

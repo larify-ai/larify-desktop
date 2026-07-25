@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises"
+import { access, mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import type { UIMessage } from "ai"
 import { larifyPath } from "../../../main/utils/app-paths"
@@ -8,6 +8,7 @@ export interface StoredSession {
   createdAt: number
   updatedAt: number
   messages: UIMessage[]
+  cwd?: string
 }
 
 export interface SessionMeta {
@@ -18,8 +19,8 @@ export interface SessionMeta {
 }
 
 export interface SessionStore {
-  loadSession: (id: string) => Promise<UIMessage[]>
-  saveSession: (id: string, messages: UIMessage[]) => Promise<StoredSession>
+  loadSession: (id: string) => Promise<{ messages: UIMessage[]; cwd: string } | null>
+  saveSession: (id: string, messages: UIMessage[], cwd: string) => Promise<StoredSession>
   listSessions: () => Promise<SessionMeta[]>
 }
 
@@ -56,13 +57,16 @@ const createTitle = (messages: UIMessage[]): string | undefined => {
   return title || undefined
 }
 
-export function createSessionStore(root = larifyPath("sessions")): SessionStore {
+export function createSessionStore(
+  root = larifyPath("sessions"),
+  defaultCwd = larifyPath("workspace"),
+): SessionStore {
   const sessionDir = (id: string): string => join(root, safeSessionId(id))
   const messagesPath = (id: string): string => join(sessionDir(id), "messages.json")
   const metaPath = (id: string): string => join(sessionDir(id), "meta.json")
   const saves = new Map<string, Promise<void>>()
 
-  const runSave = async (id: string, messages: UIMessage[]): Promise<StoredSession> => {
+  const runSave = async (id: string, messages: UIMessage[], cwd: string): Promise<StoredSession> => {
     const now = Date.now()
     const previous = await readJson<StoredSession>(messagesPath(id))
     const stored: StoredSession = {
@@ -70,12 +74,14 @@ export function createSessionStore(root = larifyPath("sessions")): SessionStore 
       createdAt: previous?.createdAt ?? now,
       updatedAt: now,
       messages,
+      cwd: cwd || defaultCwd,
     }
+    const previousMeta = await readJson<SessionMeta>(metaPath(id))
     const meta: SessionMeta = {
       id,
       createdAt: stored.createdAt,
       updatedAt: stored.updatedAt,
-      title: previous ? (await readJson<SessionMeta>(metaPath(id)))?.title : createTitle(messages),
+      title: previousMeta?.title ?? createTitle(messages),
     }
 
     await writeJson(messagesPath(id), stored)
@@ -86,14 +92,15 @@ export function createSessionStore(root = larifyPath("sessions")): SessionStore 
   return {
     async loadSession(id) {
       const stored = await readJson<StoredSession>(messagesPath(id))
-      return stored?.messages ?? []
+      if (!stored) return null
+      return { messages: stored.messages, cwd: stored.cwd || defaultCwd }
     },
 
-    async saveSession(id, messages) {
+    async saveSession(id, messages, cwd) {
       const previous = saves.get(id) ?? Promise.resolve()
       const next = previous
         .catch(() => undefined)
-        .then(() => runSave(id, messages))
+        .then(() => runSave(id, messages, cwd))
       const tracked = next.then(
         () => undefined,
         () => undefined,
@@ -117,7 +124,15 @@ export function createSessionStore(root = larifyPath("sessions")): SessionStore 
       const metas = await Promise.all(
         entries
           .filter((entry) => entry.isDirectory())
-          .map((entry) => readJson<SessionMeta>(join(root, entry.name, "meta.json"))),
+          .map(async (entry) => {
+            try {
+              await access(join(root, entry.name, "messages.json"))
+            } catch (error) {
+              if ((error as NodeJS.ErrnoException).code === "ENOENT") return null
+              throw error
+            }
+            return readJson<SessionMeta>(join(root, entry.name, "meta.json"))
+          }),
       )
       return metas
         .filter((meta): meta is SessionMeta => meta !== null)

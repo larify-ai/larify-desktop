@@ -1,5 +1,5 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react"
-import { ArrowUpIcon, FolderIcon, PlusIcon, SquareIcon } from "lucide-react"
+import { ArrowUpIcon, FolderIcon, FolderPlusIcon, PlusIcon, SquareIcon } from "lucide-react"
 import { Chat, useChat } from "@ai-sdk/react"
 import type { FileUIPart, UIMessage } from "ai"
 import { formatDistanceToNow } from "date-fns"
@@ -36,7 +36,7 @@ import { Spinner } from "@renderer/components/ui/spinner"
 import { getAgentSessionId, setAgentSessionId } from "@renderer/lib/agent-session"
 import { MessageView } from "./message-view"
 import { conversationToText } from "../lib/conversation-copy"
-import { ipcTransport } from "../lib/transport"
+import { createIpcTransport } from "../lib/transport"
 
 const MemoizedMessageView = memo(MessageView)
 
@@ -58,7 +58,7 @@ const labels = {
   placeholder: "描述任务...",
   add: "添加附件",
   addAttachment: "附件",
-
+  workspace: "工作目录",
   history: "历史任务",
   noTasks: "暂无任务",
   unnamedTask: "未命名任务",
@@ -79,6 +79,8 @@ export function AssistantPanel(): React.JSX.Element {
   const [sessionId, setSessionIdState] = useState<string>(() => getAgentSessionId())
   const [messagesBySessionId, setMessagesBySessionId] = useState<Record<string, UIMessage[]>>({})
   const messagesBySessionIdRef = useRef(messagesBySessionId)
+  const [cwdBySessionId, setCwdBySessionId] = useState<Record<string, string>>({})
+  const cwdBySessionIdRef = useRef(cwdBySessionId)
   const chatsBySessionIdRef = useRef<Record<string, Chat<UIMessage>>>({})
   const selectedSessionIdRef = useRef(sessionId)
   const [sessions, setSessions] = useState<SessionMeta[]>([])
@@ -100,10 +102,15 @@ export function AssistantPanel(): React.JSX.Element {
     setMessagesBySessionId(messagesBySessionIdRef.current)
   }
 
-  const saveSessionMessages = (id: string, messages: UIMessage[]): void => {
+  const cacheSessionCwd = (id: string, cwd: string): void => {
+    cwdBySessionIdRef.current = { ...cwdBySessionIdRef.current, [id]: cwd }
+    setCwdBySessionId(cwdBySessionIdRef.current)
+  }
+
+  const saveSessionMessages = (id: string, messages: UIMessage[], cwd: string): void => {
     cacheSessionMessages(id, messages)
     void window.bridge
-      .invoke("agent:session-save", id, messages)
+      .invoke("agent:session-save", id, messages, cwd)
       .then(() => window.dispatchEvent(new Event("agent:sessions-changed")))
       .catch((error) => console.error("[agent:session-save]", error))
   }
@@ -112,8 +119,9 @@ export function AssistantPanel(): React.JSX.Element {
     const chat = new Chat<UIMessage>({
       id,
       messages,
-      transport: ipcTransport,
-      onFinish: ({ messages: finishedMessages }) => saveSessionMessages(id, finishedMessages),
+      transport: createIpcTransport(() => cwdBySessionIdRef.current[id] ?? ""),
+      onFinish: ({ messages: finishedMessages }) =>
+        saveSessionMessages(id, finishedMessages, cwdBySessionIdRef.current[id] ?? ""),
     })
     chatsBySessionIdRef.current[id] = chat
     return chat
@@ -134,7 +142,7 @@ export function AssistantPanel(): React.JSX.Element {
     }
   }
 
-  const loadSession = async (id: string): Promise<UIMessage[]> => {
+  const loadSession = async (id: string): Promise<{ messages: UIMessage[]; cwd: string }> => {
     const existing = chatsBySessionIdRef.current[id]
     const messageCount = existing?.messages.length ?? 0
     const applyLoadedMessages = (messages: UIMessage[]): void => {
@@ -148,14 +156,15 @@ export function AssistantPanel(): React.JSX.Element {
       createChat(id, messages)
     }
     try {
-      const loaded = await window.bridge.invoke("agent:session-load", id)
-      const messages = (loaded as UIMessage[]) ?? []
-      applyLoadedMessages(messages)
-      return messages
+      const loaded = await window.bridge.invoke("agent:session-load", id) as { messages: UIMessage[]; cwd: string }
+      const result = loaded ?? { messages: [], cwd: '' }
+      applyLoadedMessages(result.messages)
+      cacheSessionCwd(id, result.cwd)
+      return result
     } catch (error) {
       console.error("[agent:session-load]", error)
       applyLoadedMessages([])
-      return []
+      return { messages: [], cwd: '' }
     }
   }
 
@@ -163,15 +172,18 @@ export function AssistantPanel(): React.JSX.Element {
     const handleNewSession = (): void => {
       const id = crypto.randomUUID()
       selectedSessionIdRef.current = id
-      ensureChat(id, [])
-      setSessionId(id)
-      cacheSessionMessages(id, [])
+      void loadSession(id).then(() => {
+        if (selectedSessionIdRef.current === id) setSessionId(id)
+      })
     }
     const handleSelectSession = (event: Event): void => {
       const id = (event as CustomEvent<string>).detail
       if (!id) return
       selectedSessionIdRef.current = id
-      if (Object.hasOwn(messagesBySessionIdRef.current, id)) {
+      if (
+        Object.hasOwn(messagesBySessionIdRef.current, id) &&
+        Object.hasOwn(cwdBySessionIdRef.current, id)
+      ) {
         setSessionId(id)
         return
       }
@@ -183,8 +195,10 @@ export function AssistantPanel(): React.JSX.Element {
     window.addEventListener("agent:new-session", handleNewSession)
     window.addEventListener("agent:select-session", handleSelectSession)
     window.addEventListener("agent:sessions-changed", refreshSessions)
-    void refreshSessions()
-    void loadSession(sessionId)
+    queueMicrotask(() => {
+      void refreshSessions()
+      void loadSession(sessionId)
+    })
     return () => {
       window.removeEventListener("agent:new-session", handleNewSession)
       window.removeEventListener("agent:select-session", handleSelectSession)
@@ -192,12 +206,17 @@ export function AssistantPanel(): React.JSX.Element {
     }
   }, [])
 
+  // The ref is an imperative Chat cache; ensureChat does not derive rendered UI from it.
+  // eslint-disable-next-line react-hooks/refs
   const chat = ensureChat(sessionId, messagesBySessionId[sessionId] ?? [])
+  const cwd = cwdBySessionId[sessionId] ?? ""
 
   return (
     <AssistantChat
       key={sessionId}
       chat={chat}
+      cwd={cwd}
+      onSetCwd={(value) => cacheSessionCwd(sessionId, value)}
       onSaveSession={saveSessionMessages}
       sessions={sessions}
     />
@@ -254,16 +273,22 @@ function DirectoryAttachmentMenuItem(): React.JSX.Element {
 
 function AssistantChat({
   chat,
+  cwd,
+  onSetCwd,
   onSaveSession,
   sessions,
 }: {
   chat: Chat<UIMessage>
-  onSaveSession: (id: string, messages: UIMessage[]) => void
+  cwd: string
+  onSetCwd: (cwd: string) => void
+  onSaveSession: (id: string, messages: UIMessage[], cwd: string) => void
   sessions: SessionMeta[]
 }): React.JSX.Element {
   const { messages, sendMessage, status, stop } = useChat({ chat, throttle: 50 })
   const messagesRef = useRef(messages)
-  messagesRef.current = messages
+  useEffect(() => {
+    messagesRef.current = messages
+  }, [messages])
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
       if (event.ctrlKey && event.altKey && !event.shiftKey && !event.metaKey && event.code === "KeyC") {
@@ -312,8 +337,8 @@ function AssistantChat({
     if (!pendingInitialSaveRef.current) return
     if (messages.length <= submittedMessageCountRef.current) return
     pendingInitialSaveRef.current = false
-    onSaveSession(chat.id, messages)
-  }, [chat.id, messages, onSaveSession])
+    onSaveSession(chat.id, messages, cwd)
+  }, [chat.id, cwd, messages, onSaveSession])
 
   const handleSubmit = (message: PromptInputMessage): void => {
     if (isLive || submittingRef.current) return
@@ -333,7 +358,7 @@ function AssistantChat({
   const handleStop = (): void => {
     if (stoppingRef.current) return
     stoppingRef.current = true
-    if (messages.length > 0) onSaveSession(chat.id, messages)
+    if (messages.length > 0) onSaveSession(chat.id, messages, cwd)
     void stop()
   }
 
@@ -453,6 +478,23 @@ function AssistantChat({
                 className="rounded-2xl shadow-none"
                 style={{ width: menuMetrics.width }}
               >
+                <div className="px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground">
+                  {labels.workspace}
+                </div>
+                <PromptInputActionMenuItem
+                  className="gap-2"
+                  onSelect={() => {
+                    void window.bridge.invoke("dialog:pick-directories").then((paths) => {
+                      const p = (paths as string[])?.[0]
+                      if (p) {
+                        onSetCwd(p)
+                      }
+                    })
+                  }}
+                >
+                  <FolderPlusIcon className="size-4 shrink-0" />
+                  <span className="truncate">{cwd}</span>
+                </PromptInputActionMenuItem>
                 <div className="px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground">
                   {labels.add}
                 </div>

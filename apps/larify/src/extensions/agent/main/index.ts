@@ -43,12 +43,16 @@ const extension: Extension = {
     const controllers = new Map<string, AbortController>()
     const sessions = createSessionStore()
 
-    ipcMain.handle("agent:session-load", (_event, sessionId: string) => {
-      return sessions.loadSession(sessionId).then(sanitizeAndValidateMessages)
+    ipcMain.handle("agent:session-load", async (_event, sessionId: string) => {
+      const result = await sessions.loadSession(sessionId)
+      return {
+        messages: await sanitizeAndValidateMessages(result?.messages ?? []),
+        cwd: result?.cwd || larifyWorkspacePath(),
+      }
     })
 
-    ipcMain.handle("agent:session-save", async (_event, sessionId: string, messages: UIMessage[]) => {
-      return sessions.saveSession(sessionId, await sanitizeAndValidateMessages(messages))
+    ipcMain.handle("agent:session-save", async (_event, sessionId: string, messages: UIMessage[], cwd: string) => {
+      return sessions.saveSession(sessionId, await sanitizeAndValidateMessages(messages), cwd)
     })
 
     ipcMain.handle("agent:session-list", () => {
@@ -63,7 +67,7 @@ const extension: Extension = {
         registry.addToolkit(createAgentToolkit(registry))
         const validMessages = await sanitizeAndValidateMessages(messages)
         const modelMessages = await convertToModelMessages(prepareMessagesForModel(validMessages))
-        const cwd = requestCwd ?? larifyWorkspacePath()
+        const cwd = requestCwd || larifyWorkspacePath()
         const tools = registry.toolSet()
         const reader = runAgent({
           messages: modelMessages,

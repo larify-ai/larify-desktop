@@ -1,6 +1,6 @@
 import type { ChatTransport, UIMessage, UIMessageChunk } from "ai"
 
-export const ipcTransport: ChatTransport<UIMessage> = {
+export const createIpcTransport = (getCwd: () => string): ChatTransport<UIMessage> => ({
   async sendMessages({ chatId, messages, abortSignal }) {
     const runId = crypto.randomUUID()
     return new ReadableStream<UIMessageChunk>({
@@ -46,7 +46,12 @@ export const ipcTransport: ChatTransport<UIMessage> = {
         void Promise.resolve()
           .then(() => {
             if (closed) return
-            return window.bridge.invoke("agent:run", { runId, sessionId: chatId, messages })
+            return window.bridge.invoke("agent:run", {
+              runId,
+              sessionId: chatId,
+              messages,
+              cwd: getCwd(),
+            })
           })
           .catch(fail)
       },
@@ -55,4 +60,4 @@ export const ipcTransport: ChatTransport<UIMessage> = {
   async reconnectToStream() {
     return null
   },
-}
+})

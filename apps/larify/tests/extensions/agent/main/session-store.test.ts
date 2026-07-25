@@ -23,7 +23,7 @@ describe("session store", () => {
         },
       ]
 
-      const saved = await store.saveSession("chat/one", messages)
+      const saved = await store.saveSession("chat/one", messages, "/workspace/proj")
       const loaded = await store.loadSession("chat/one")
       const meta = JSON.parse(
         await readFile(join(root, "chat%2Fone", "meta.json"), "utf8"),
@@ -31,10 +31,53 @@ describe("session store", () => {
       const sessions = await store.listSessions()
 
       expect(saved.id).toBe("chat/one")
-      expect(loaded).toEqual(messages)
+      expect(loaded).toEqual({ messages, cwd: "/workspace/proj" })
       expect(meta).toMatchObject({ id: "chat/one", title: "hello" })
       expect(meta.updatedAt).toBe(saved.updatedAt)
       expect(sessions).toEqual([meta])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it("returns the default cwd when old meta has no cwd", async () => {
+    const root = await mkdtemp(join(tmpdir(), "larify-sessions-"))
+    try {
+      const store = createSessionStore(root, "/default/workspace")
+      const messages: UIMessage[] = [
+        { id: "u1", role: "user", parts: [{ type: "text", text: "hi" }] },
+      ]
+
+      // simulate an old meta.json without cwd
+      const sessionDir = join(root, encodeURIComponent("s1"))
+      await mkdir(sessionDir, { recursive: true })
+      await writeFile(
+        join(sessionDir, "messages.json"),
+        JSON.stringify({ id: "s1", createdAt: 100, updatedAt: 200, messages }),
+      )
+      await writeFile(
+        join(sessionDir, "meta.json"),
+        JSON.stringify({ id: "s1", createdAt: 100, updatedAt: 200, title: "hi" }),
+      )
+
+      const loaded = await store.loadSession("s1")
+      expect(loaded).toEqual({ messages, cwd: "/default/workspace" })
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it("does not list metadata-only sessions", async () => {
+    const root = await mkdtemp(join(tmpdir(), "larify-sessions-"))
+    try {
+      const store = createSessionStore(root)
+      const sessionDir = join(root, encodeURIComponent("empty"))
+      await mkdir(sessionDir, { recursive: true })
+      await writeFile(
+        join(sessionDir, "meta.json"),
+        JSON.stringify({ id: "empty", createdAt: 100, updatedAt: 200 }),
+      )
+      expect(await store.listSessions()).toEqual([])
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -52,11 +95,13 @@ describe("session store", () => {
       ]
 
       await Promise.all([
-        store.saveSession("chat/one", first),
-        store.saveSession("chat/one", second),
+        store.saveSession("chat/one", first, "/cwd1"),
+        store.saveSession("chat/one", second, "/cwd2"),
       ])
 
-      expect(await store.loadSession("chat/one")).toEqual(second)
+      const loaded = await store.loadSession("chat/one")
+      expect(loaded?.messages).toEqual(second)
+      expect(loaded?.cwd).toBe("/cwd2")
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -72,12 +117,13 @@ describe("session store", () => {
         { id: "user-1", role: "user", parts: [{ type: "text", text: "recovered" }] },
       ]
 
-      await expect(store.saveSession("chat", messages)).rejects.toThrow()
+      await expect(store.saveSession("chat", messages, "/cwd")).rejects.toThrow()
       await rm(root)
       await mkdir(root)
 
-      await expect(store.saveSession("chat", messages)).resolves.toMatchObject({ id: "chat" })
-      expect(await store.loadSession("chat")).toEqual(messages)
+      await expect(store.saveSession("chat", messages, "/cwd")).resolves.toMatchObject({ id: "chat" })
+      const loaded = await store.loadSession("chat")
+      expect(loaded).toEqual({ messages, cwd: "/cwd" })
     } finally {
       await rm(parent, { recursive: true, force: true })
     }

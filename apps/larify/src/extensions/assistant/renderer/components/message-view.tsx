@@ -47,9 +47,12 @@ function UserMessageContent({ children }: { children: ReactNode }): React.JSX.El
   }, [children, expanded])
 
   return (
-    <div className="relative ml-auto w-fit max-w-full">
+    <div className="ml-auto w-fit max-w-full">
       <MessageContent className="select-text">
-        <div ref={contentRef} className={expanded ? "pr-5" : "max-h-[3.75rem] overflow-hidden pr-5"}>
+        <div
+          ref={contentRef}
+          className={expanded ? "" : "max-h-[3.75rem] overflow-hidden"}
+        >
           {children}
         </div>
       </MessageContent>
@@ -57,9 +60,10 @@ function UserMessageContent({ children }: { children: ReactNode }): React.JSX.El
         <button
           type="button"
           aria-label={expanded ? "收起消息" : "展开消息"}
-          className="absolute right-1.5 bottom-1.5 z-10 flex size-6 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-background/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="mt-1 ml-auto flex w-fit items-center gap-0.5 text-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           onClick={() => setExpanded((value) => !value)}
         >
+          {expanded ? "收起" : "展开"}
           {expanded ? <ChevronUpIcon className="size-3.5" /> : <ChevronDownIcon className="size-3.5" />}
         </button>
       )}

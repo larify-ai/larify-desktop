@@ -51,6 +51,7 @@ import { createIpcTransport } from "../lib/transport"
 const MemoizedMessageView = memo(MessageView)
 const RECENT_CWDS_KEY = "larify.recentCwds"
 const MAX_RECENT_CWDS = 5
+const MAX_SESSIONS_PER_CWD = 5
 
 type LocalAttachment = FileUIPart & { id: string }
 
@@ -292,6 +293,7 @@ export function AssistantPanel(): React.JSX.Element {
       key={sessionId}
       chat={chat}
       cwd={cwd}
+      defaultCwd={defaultCwdRef.current}
       onSetCwd={(value) => selectSessionCwd(sessionId, value)}
       recentCwds={recentCwds}
       onSaveSession={saveSessionMessages}
@@ -351,6 +353,7 @@ function DirectoryAttachmentMenuItem(): React.JSX.Element {
 function AssistantChat({
   chat,
   cwd,
+  defaultCwd,
   onSetCwd,
   recentCwds,
   onSaveSession,
@@ -358,6 +361,7 @@ function AssistantChat({
 }: {
   chat: Chat<UIMessage>
   cwd: string
+  defaultCwd: string
   onSetCwd: (cwd: string) => void
   recentCwds: string[]
   onSaveSession: (id: string, messages: UIMessage[], cwd: string) => void
@@ -393,6 +397,8 @@ function AssistantChat({
   })
   const [actionMenuOpen, setActionMenuOpen] = useState(false)
   const [workspaceHistoryOpen, setWorkspaceHistoryOpen] = useState(false)
+  const [collapsedSessionCwds, setCollapsedSessionCwds] = useState<Set<string>>(new Set())
+  const [expandedSessionCwds, setExpandedSessionCwds] = useState<Set<string>>(new Set())
   const [inputText, setInputText] = useState("")
   const [attachmentCount, setAttachmentCount] = useState(0)
   const isLive = status === "streaming" || status === "submitted"
@@ -454,6 +460,16 @@ function AssistantChat({
   }
 
   const otherWorkspaces = recentCwds.filter((path) => path !== cwd)
+  const sessionGroups = Array.from(
+    sessions.reduce((groups, session) => {
+      const key = session.cwd || defaultCwd
+      if (!key) return groups
+      const group = groups.get(key)
+      if (group) group.push(session)
+      else groups.set(key, [session])
+      return groups
+    }, new Map<string, SessionMeta[]>()),
+  )
 
   const handleInputKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>): void => {
     if (
@@ -647,29 +663,75 @@ function AssistantChat({
                       {labels.noTasks}
                     </PromptInputActionMenuItem>
                   ) : (
-                    sessions.map((session) => (
-                      <PromptInputActionMenuItem
-                        key={session.id}
-                        onSelect={() => selectSession(session.id)}
-                        className="gap-2"
-                      >
-                        <span className="flex min-w-0 flex-1 items-center gap-1.5 truncate">
+                    sessionGroups.map(([groupCwd, groupSessions]) => (
+                      <div key={groupCwd}>
+                        <PromptInputActionMenuItem
+                          className="gap-2 text-muted-foreground"
+                          title={groupCwd}
+                          onSelect={(event) => {
+                            event.preventDefault()
+                            setCollapsedSessionCwds((current) => {
+                              const next = new Set(current)
+                              if (next.has(groupCwd)) next.delete(groupCwd)
+                              else next.add(groupCwd)
+                              return next
+                            })
+                          }}
+                        >
+                          <FolderIcon className="size-4 shrink-0" />
                           <span className="min-w-0 flex-1 truncate">
-                            {session.title || labels.unnamedTask}
+                            {getPathFilename(groupCwd)}
                           </span>
-                          {session.cwd ? (
-                            <span
-                              className="max-w-28 shrink-0 truncate text-xs text-muted-foreground"
-                              title={session.cwd}
-                            >
-                              · {getPathFilename(session.cwd)}
+                          {collapsedSessionCwds.has(groupCwd) ? (
+                            <ChevronDownIcon className="size-4 shrink-0" />
+                          ) : (
+                            <ChevronUpIcon className="size-4 shrink-0" />
+                          )}
+                        </PromptInputActionMenuItem>
+                        {!collapsedSessionCwds.has(groupCwd)
+                          ? groupSessions
+                              .slice(
+                                0,
+                                expandedSessionCwds.has(groupCwd)
+                                  ? groupSessions.length
+                                  : MAX_SESSIONS_PER_CWD,
+                              )
+                              .map((session) => (
+                          <PromptInputActionMenuItem
+                            key={session.id}
+                            onSelect={() => selectSession(session.id)}
+                            className={`gap-2 pl-8 ${
+                              session.id === chat.id ? "bg-accent text-accent-foreground" : ""
+                            }`}
+                            aria-current={session.id === chat.id ? "page" : undefined}
+                          >
+                            <span className="min-w-0 flex-1 truncate">
+                              {session.title || labels.unnamedTask}
                             </span>
-                          ) : null}
-                        </span>
-                        <span className="shrink-0 text-xs text-muted-foreground">
-                          {formatRelativeTime(session.updatedAt)}
-                        </span>
-                      </PromptInputActionMenuItem>
+                            <span className="shrink-0 text-xs text-muted-foreground">
+                              {formatRelativeTime(session.updatedAt)}
+                            </span>
+                          </PromptInputActionMenuItem>
+                              ))
+                          : null}
+                        {!collapsedSessionCwds.has(groupCwd) &&
+                        groupSessions.length > MAX_SESSIONS_PER_CWD ? (
+                          <PromptInputActionMenuItem
+                            className="pl-8 text-xs text-muted-foreground"
+                            onSelect={(event) => {
+                              event.preventDefault()
+                              setExpandedSessionCwds((current) => {
+                                const next = new Set(current)
+                                if (next.has(groupCwd)) next.delete(groupCwd)
+                                else next.add(groupCwd)
+                                return next
+                              })
+                            }}
+                          >
+                            {expandedSessionCwds.has(groupCwd) ? "收起显示" : "展开显示"}
+                          </PromptInputActionMenuItem>
+                        ) : null}
+                      </div>
                     ))
                   )}
                 </div>

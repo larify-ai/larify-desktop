@@ -280,6 +280,8 @@ function AssistantChat({
   const submittingRef = useRef(false)
   const stoppingRef = useRef(false)
   const submittedMessageCountRef = useRef(0)
+  const inputHistoryIndexRef = useRef<number | null>(null)
+  const inputDraftRef = useRef("")
   const [menuMetrics, setMenuMetrics] = useState({
     alignOffset: -12,
     sideOffset: 0,
@@ -290,7 +292,15 @@ function AssistantChat({
   const [attachmentCount, setAttachmentCount] = useState(0)
   const isLive = status === "streaming" || status === "submitted"
   const canSubmit = inputText.trim().length > 0 || attachmentCount > 0 || isLive
-
+  const inputHistory = messages
+    .filter((message) => message.role === "user")
+    .map((message) =>
+      message.parts
+        .filter((part) => part.type === "text")
+        .map((part) => part.text)
+        .join(""),
+    )
+    .filter(Boolean)
 
   useEffect(() => {
     if (isLive) return
@@ -312,6 +322,8 @@ function AssistantChat({
     if (text || files.length > 0) {
       submittingRef.current = true
       setInputText("")
+      inputHistoryIndexRef.current = null
+      inputDraftRef.current = ""
       pendingInitialSaveRef.current = true
       submittedMessageCountRef.current = messages.length
       void sendMessage({ text, files })
@@ -327,6 +339,56 @@ function AssistantChat({
 
   const selectSession = (id: string): void => {
     window.dispatchEvent(new CustomEvent("agent:select-session", { detail: id }))
+  }
+
+  const handleInputKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>): void => {
+    if (
+      event.altKey ||
+      event.ctrlKey ||
+      event.metaKey ||
+      event.shiftKey ||
+      event.currentTarget.selectionStart !== event.currentTarget.selectionEnd
+    ) {
+      return
+    }
+
+    const textarea = event.currentTarget
+    const moveCursorToEnd = (value: string): void => {
+      requestAnimationFrame(() => textarea.setSelectionRange(value.length, value.length))
+    }
+
+    if (event.key === "ArrowUp" && !textarea.value.slice(0, textarea.selectionStart).includes("\n")) {
+      if (inputHistory.length === 0) return
+      event.preventDefault()
+      const currentIndex = inputHistoryIndexRef.current
+      if (currentIndex === null) inputDraftRef.current = inputText
+      const nextIndex = currentIndex === null ? inputHistory.length - 1 : Math.max(0, currentIndex - 1)
+      const value = inputHistory[nextIndex]
+      inputHistoryIndexRef.current = nextIndex
+      setInputText(value)
+      moveCursorToEnd(value)
+      return
+    }
+
+    if (
+      event.key === "ArrowDown" &&
+      inputHistoryIndexRef.current !== null &&
+      !textarea.value.slice(textarea.selectionEnd).includes("\n")
+    ) {
+      event.preventDefault()
+      const nextIndex = inputHistoryIndexRef.current + 1
+      if (nextIndex < inputHistory.length) {
+        const value = inputHistory[nextIndex]
+        inputHistoryIndexRef.current = nextIndex
+        setInputText(value)
+        moveCursorToEnd(value)
+      } else {
+        const value = inputDraftRef.current
+        inputHistoryIndexRef.current = null
+        setInputText(value)
+        moveCursorToEnd(value)
+      }
+    }
   }
 
   useLayoutEffect(() => {
@@ -364,7 +426,11 @@ function AssistantChat({
           <PromptInputTextarea
             placeholder={labels.placeholder}
             value={inputText}
-            onChange={(event) => setInputText(event.target.value)}
+            onChange={(event) => {
+              inputHistoryIndexRef.current = null
+              setInputText(event.target.value)
+            }}
+            onKeyDown={handleInputKeyDown}
             className="max-h-48 min-h-12 overflow-y-auto pl-3"
           />
         </PromptInputBody>

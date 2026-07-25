@@ -33,11 +33,17 @@ function UserMessageContent({ children }: { children: ReactNode }): React.JSX.El
   useLayoutEffect(() => {
     const content = contentRef.current
     if (!content || expanded) return
-    const measure = (): void => setOverflowing(content.scrollHeight > content.clientHeight + 1)
+    const measure = (): void => {
+      const next = content.scrollHeight > content.clientHeight + 1
+      setOverflowing((current) => (current === next ? current : next))
+    }
     measure()
-    const observer = new ResizeObserver(measure)
-    observer.observe(content)
-    return () => observer.disconnect()
+    window.addEventListener("resize", measure)
+    window.addEventListener("pointerup", measure)
+    return () => {
+      window.removeEventListener("resize", measure)
+      window.removeEventListener("pointerup", measure)
+    }
   }, [children, expanded])
 
   return (

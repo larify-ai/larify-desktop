@@ -265,6 +265,55 @@ html {
   border-radius: 0;
 }
 
+.larify-file-diff .diff-table-scroll-container {
+  width: max-content !important;
+  min-width: 100%;
+  overflow: visible !important;
+}
+
+.larify-file-diff .unified-diff-table {
+  width: max-content !important;
+  min-width: 100%;
+}
+
+.larify-file-diff .diff-line-content-item {
+  padding-left: 0 !important;
+}
+
+.larify-file-diff .diff-line-content-operator {
+  display: none !important;
+}
+
+.larify-file-diff .diff-line-num {
+  width: 48px !important;
+  min-width: 48px !important;
+  max-width: 48px !important;
+  padding-inline: 8px;
+}
+
+.larify-file-diff .diff-line-num > .flex {
+  justify-content: flex-end;
+}
+
+.larify-file-diff .diff-line-num > .flex > span {
+  width: auto;
+}
+
+.larify-file-diff
+  .diff-line-num
+  > .flex
+  > span:not([data-line-old-num]):not([data-line-new-num]),
+.larify-file-diff
+  .diff-line-num
+  > .flex
+  > span[data-line-old-num]:has(~ span[data-line-new-num]) {
+  display: none;
+}
+
+.larify-file-diff [data-state="hunk"] {
+  display: none;
+}
+
 .larify-message-markdown [data-streamdown="code-block"] {
   position: relative;
   margin-block: 0.5rem;

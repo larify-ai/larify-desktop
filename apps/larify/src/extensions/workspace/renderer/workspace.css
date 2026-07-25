@@ -1,0 +1,38 @@
+.workspace-editor .part.editor::after {
+  box-shadow: none !important;
+}
+
+.workspace-editor .editor-group-watermark .shortcuts,
+.workspace-editor .editor-actions {
+  display: none !important;
+}
+
+.workspace-editor .editor-group-watermark .letterpress {
+  width: 64px !important;
+}
+
+.workspace-editor .editor-group-watermark .watermark-container {
+  gap: 8px !important;
+}
+
+.workspace-tree-icon {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 16px;
+  height: 16px;
+  justify-content: center;
+  overflow: visible;
+  width: 16px;
+}
+
+.show-file-icons .workspace-tree-icon::before {
+  font-size: 14px;
+  line-height: 16px;
+}
+
+.workspace-editor .editor-group-watermark .watermark-container::after {
+  color: var(--vscode-foreground);
+  content: '开始编辑';
+  font-size: 18px;
+  font-weight: 500;
+}

@@ -115,7 +115,7 @@ function ShellBody({ app }: { app: App }): React.JSX.Element {
         className="min-h-0 flex-1"
         style={{ "--sidebar-width": "3rem" } as CSSProperties}
       >
-        <Sidebar collapsible="none" className="shadow-[inset_-1px_0_0_var(--color-border-strong)]">
+        <Sidebar collapsible="none" className="border-r border-border-strong">
           <SidebarContent className="items-center gap-0 overflow-x-hidden overflow-y-auto pt-2">
             <SidebarMenu className={sidebarMenuClass}>
               <SidebarMenuItem>

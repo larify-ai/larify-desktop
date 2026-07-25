@@ -23,7 +23,6 @@ export function FileDiff({ meta }: { meta: DiffMeta }): React.JSX.Element {
           }}
           diffViewMode={DiffModeEnum.Unified}
           diffViewHighlight
-          diffViewWrap
           diffViewTheme={resolvedTheme === "light" ? "light" : "dark"}
         />
       </div>

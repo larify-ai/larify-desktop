@@ -58,6 +58,7 @@ const labels = {
   placeholder: "描述任务...",
   add: "添加附件",
   addAttachment: "附件",
+
   history: "历史任务",
   noTasks: "暂无任务",
   unnamedTask: "未命名任务",

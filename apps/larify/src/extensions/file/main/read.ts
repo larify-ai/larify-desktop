@@ -22,7 +22,7 @@ const inputSchema = z.object({
       (value) =>
         Math.max(MIN_READ_UNITS, Math.min(value, MAX_READ_UNITS)) * READ_CHARACTER_UNIT,
     )
-    .describe("Read size in thousands of characters, not lines; values are clamped to 5-100"),
+    .describe("Number of 1,000-character units to read (for example, 5 reads 5,000 characters); clamped to 5-100"),
   scroll: z.enum(["down", "up"]).default("down").describe("Read down or up from the start position"),
 }).strict()
 

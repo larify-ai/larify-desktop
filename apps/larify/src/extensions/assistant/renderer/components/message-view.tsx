@@ -111,10 +111,11 @@ export function MessageView({
       )
     if (isToolUIPart(part))
       {
-        const toolName = getToolName(part)
         const toolMeta = asDiffMeta(part.output)
         const icon = toolIcon(part.toolMetadata)
         const { title, args } = toolCall(part.input)
+        if (!title) return null
+        const toolName = getToolName(part)
         const showErrorAsOutput = part.state === "output-error" && !debugToolErrors
         const state = showErrorAsOutput ? "output-available" : part.state
         const output = showErrorAsOutput ? part.errorText : part.output

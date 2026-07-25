@@ -51,7 +51,7 @@ export function WorkspaceView(): React.JSX.Element {
   const explorerRef = useRef<ImperativePanelHandle>(null)
   const [explorerCollapsed, setExplorerCollapsed] = useState(false)
   const [changesOnly, setChangesOnly] = useState(false)
-  const { entries, loadDirectory, openFolder, root } = useWorkspaceExplorer()
+  const { entries, loadDirectory, root } = useWorkspaceExplorer()
 
   return (
     <ResizablePanelGroup direction="horizontal" className="bg-background">
@@ -108,9 +108,7 @@ export function WorkspaceView(): React.JSX.Element {
               </div>
             </div>
           ) : (
-            <div className="grid flex-1 place-items-center p-6 text-center">
-              <Button onClick={() => void openFolder()}>打开文件夹</Button>
-            </div>
+            <div className="flex-1" />
           )}
         </div>
       </ResizablePanel>

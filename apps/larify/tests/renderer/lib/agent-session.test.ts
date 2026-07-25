@@ -62,4 +62,30 @@ describe("agent session state", () => {
       root?.unmount()
     })
   })
+
+  it("updates React subscribers when the session cwd changes", async () => {
+    const session = await import("../../../src/renderer/src/lib/agent-session")
+    const host = document.createElement("div")
+    document.body.append(host)
+    let root: Root | null = null
+
+    function Probe(): ReactElement {
+      return createElement("div", null, session.useAgentSessionCwd())
+    }
+
+    await act(async () => {
+      root = createRoot(host)
+      root.render(createElement(Probe))
+    })
+
+    await act(async () => {
+      session.setAgentSessionCwd("D:\\Workspace\\larify-desktop")
+    })
+
+    expect(host.textContent).toBe("D:\\Workspace\\larify-desktop")
+
+    await act(async () => {
+      root?.unmount()
+    })
+  })
 })

@@ -51,9 +51,10 @@ workspaceGlobal.workspaceEditorReady ??= (() => {
     undefined,
     {
       configurationDefaults: {
+        'breadcrumbs.enabled': false,
         'editor.minimap.enabled': false,
         'window.menuBarVisibility': 'hidden',
-        'workbench.iconTheme': 'vs-seti',
+        'workbench.iconTheme': 'ayu',
         'workbench.startupEditor': 'none'
       }
     }
@@ -68,7 +69,7 @@ export const monacoReady = workspaceGlobal.workspaceEditorReady.then(async () =>
   ])
   await Promise.all([
     editorGroupsService.whenReady,
-    themeService.setFileIconTheme('vs-seti', undefined)
+    themeService.setFileIconTheme('ayu', undefined)
   ])
   await Promise.all(
     editorGroupsService.groups.flatMap((group) =>

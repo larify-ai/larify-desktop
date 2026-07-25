@@ -18,16 +18,27 @@
 .workspace-tree-icon {
   align-items: center;
   display: inline-flex;
-  flex: 0 0 16px;
-  height: 16px;
+  flex: 0 0 18px;
+  height: 18px;
   justify-content: center;
   overflow: visible;
-  width: 16px;
+  width: 18px;
 }
 
 .show-file-icons .workspace-tree-icon::before {
+  background-position: center !important;
+  background-size: 16px 16px !important;
   font-size: 14px;
-  line-height: 16px;
+  height: 18px !important;
+  line-height: 18px;
+  width: 18px !important;
+}
+
+.workspace-editor .monaco-icon-label.file-icon::before {
+  background-position: center !important;
+  background-size: 16px 16px !important;
+  min-width: 18px;
+  width: 18px !important;
 }
 
 .workspace-editor .editor-group-watermark .watermark-container::after {

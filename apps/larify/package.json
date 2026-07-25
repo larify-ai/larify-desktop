@@ -37,7 +37,6 @@
     "@codingame/monaco-vscode-textmate-service-override": "^36.0.0",
     "@codingame/monaco-vscode-theme-defaults-default-extension": "^36.0.0",
     "@codingame/monaco-vscode-theme-service-override": "^36.0.0",
-    "@codingame/monaco-vscode-theme-seti-default-extension": "^36.0.0",
     "@codingame/monaco-vscode-typescript-basics-default-extension": "^36.0.0",
     "@codingame/monaco-vscode-views-service-override": "^36.0.0",
     "@electron-toolkit/preload": "^3.0.2",

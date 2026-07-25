@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { EmitArgsWithName } from 'chokidar'
-import { monacoReady } from './monaco'
+import { useAgentSessionCwd } from '@renderer/lib/agent-session'
 import { workspaceClient } from './workspace-client'
 import type { TreeEntry } from './workspace-tree'
 
@@ -44,20 +44,37 @@ const replaceDirectoryChildren = (
 export function useWorkspaceExplorer(): {
   entries: TreeEntry[]
   loadDirectory(directory: TreeEntry): Promise<void>
-  openFolder(): Promise<void>
   root: string | null
 } {
+  const cwd = useAgentSessionCwd()
   const [root, setRoot] = useState<string | null>(null)
   const [entries, setEntries] = useState<TreeEntry[]>([])
+  const openQueue = useRef(Promise.resolve())
 
-  const openFolder = useCallback(async (): Promise<void> => {
-    const [selected] = (await window.bridge.invoke('dialog:pick-directories')) as string[]
-    if (!selected) return
-    await monacoReady
-    const openedRoot = await workspaceClient.open(selected)
-    setRoot(openedRoot)
-    setEntries(toTreeEntries(await workspaceClient.readDirectory()))
-  }, [])
+  useEffect(() => {
+    if (!cwd) return
+    let cancelled = false
+    const open = openQueue.current
+      .catch(() => undefined)
+      .then(async () => {
+        if (cancelled) return
+        const openedRoot = await workspaceClient.open(cwd)
+        const children = await workspaceClient.readDirectory()
+        if (cancelled) return
+        setRoot(openedRoot)
+        setEntries(toTreeEntries(children))
+      })
+    openQueue.current = open
+    void open.catch((error) => {
+      if (cancelled) return
+      setRoot(null)
+      setEntries([])
+      console.error('[workspace:open]', error)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [cwd])
 
   const loadDirectory = useCallback(async (directory: TreeEntry): Promise<void> => {
     const children = toTreeEntries(await workspaceClient.readDirectory(directory.path))
@@ -84,5 +101,5 @@ export function useWorkspaceExplorer(): {
     }
   }, [root])
 
-  return { entries, loadDirectory, openFolder, root }
+  return { entries, loadDirectory, root }
 }

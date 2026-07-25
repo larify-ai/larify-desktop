@@ -5,10 +5,14 @@ import {
 } from '@codingame/monaco-vscode-api/extensions'
 import darkModernUrl from '@codingame/monaco-vscode-theme-defaults-default-extension/resources/dark_modern.json?url'
 import lightModernUrl from '@codingame/monaco-vscode-theme-defaults-default-extension/resources/light_modern.json?url'
-import setiFontUrl from '@codingame/monaco-vscode-theme-seti-default-extension/resources/seti.woff?url'
-import setiThemeUrl from '@codingame/monaco-vscode-theme-seti-default-extension/resources/vs-seti-icon-theme.json?url'
+import ayuThemeUrl from './assets/ayu-icons/ayu-icons.json?url'
 
 const browserUrl = (url: string): string => new URL(url, globalThis.location.href).href
+const ayuIconUrls = import.meta.glob<string>('./assets/ayu-icons/icons/*', {
+  eager: true,
+  import: 'default',
+  query: '?url'
+})
 
 const manifest = {
   name: 'workspace-themes',
@@ -40,19 +44,19 @@ const extension = registerExtension(manifest, undefined, {
 extension.registerFileUrl('themes/dark-modern.json', browserUrl(darkModernUrl), 'application/json')
 extension.registerFileUrl('themes/light-modern.json', browserUrl(lightModernUrl), 'application/json')
 
-const setiExtension = registerExtension(
+const ayuExtension = registerExtension(
   {
-    name: 'workspace-seti-icons',
-    displayName: 'Workspace Seti Icons',
+    name: 'workspace-ayu-icons',
+    displayName: 'Workspace Ayu Icons',
     version: '1.0.0',
     publisher: 'workspace',
     engines: { vscode: '*' },
     contributes: {
       iconThemes: [
         {
-          id: 'vs-seti',
-          label: 'Seti',
-          path: './icons/vs-seti-icon-theme.json'
+          id: 'ayu',
+          label: 'Ayu',
+          path: './ayu-icons.json'
         }
       ]
     }
@@ -60,13 +64,13 @@ const setiExtension = registerExtension(
   undefined,
   { system: true }
 ) as RegisterLocalExtensionResult
-setiExtension.registerFileUrl(
-  'icons/vs-seti-icon-theme.json',
-  browserUrl(setiThemeUrl),
-  'application/json'
-)
-setiExtension.registerFileUrl('icons/seti.woff', browserUrl(setiFontUrl), 'font/woff')
+ayuExtension.registerFileUrl('ayu-icons.json', browserUrl(ayuThemeUrl), 'application/json')
+for (const [path, url] of Object.entries(ayuIconUrls)) {
+  const name = path.slice(path.lastIndexOf('/') + 1)
+  const mime = name.endsWith('.svg') ? 'image/svg+xml' : 'image/png'
+  ayuExtension.registerFileUrl(`icons/${name}`, browserUrl(url), mime)
+}
 
 export const whenWorkspaceThemesReady = async (): Promise<void> => {
-  await Promise.all([extension.whenReady(), setiExtension.whenReady()])
+  await Promise.all([extension.whenReady(), ayuExtension.whenReady()])
 }

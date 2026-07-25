@@ -43,7 +43,11 @@ import {
 } from "@renderer/components/ai-elements/attachments"
 import { Spinner } from "@renderer/components/ui/spinner"
 import { DropdownMenuSeparator } from "@renderer/components/ui/dropdown-menu"
-import { getAgentSessionId, setAgentSessionId } from "@renderer/lib/agent-session"
+import {
+  getAgentSessionId,
+  setAgentSessionCwd,
+  setAgentSessionId,
+} from "@renderer/lib/agent-session"
 import { MessageView } from "./message-view"
 import { conversationToText } from "../lib/conversation-copy"
 import { createIpcTransport } from "../lib/transport"
@@ -106,6 +110,7 @@ export function AssistantPanel(): React.JSX.Element {
   const cwdBySessionIdRef = useRef(cwdBySessionId)
   const cwdRevisionRef = useRef<Record<string, number>>({})
   const defaultCwdRef = useRef("")
+  const [defaultCwd, setDefaultCwd] = useState("")
   const [recentCwds, setRecentCwds] = useState<string[]>(readRecentCwds)
   const recentCwdsRef = useRef(recentCwds)
   const chatsBySessionIdRef = useRef<Record<string, Chat<UIMessage>>>({})
@@ -114,6 +119,7 @@ export function AssistantPanel(): React.JSX.Element {
 
   const setSessionId = (id: string): void => {
     setAgentSessionId(id)
+    setAgentSessionCwd(cwdBySessionIdRef.current[id] ?? "")
     setSessionIdState(id)
   }
 
@@ -132,6 +138,7 @@ export function AssistantPanel(): React.JSX.Element {
   const cacheSessionCwd = (id: string, cwd: string): void => {
     cwdBySessionIdRef.current = { ...cwdBySessionIdRef.current, [id]: cwd }
     setCwdBySessionId(cwdBySessionIdRef.current)
+    if (selectedSessionIdRef.current === id) setAgentSessionCwd(cwd)
   }
 
   const rememberRecentCwd = (cwd: string): void => {
@@ -217,6 +224,7 @@ export function AssistantPanel(): React.JSX.Element {
       }
       const result = loaded ?? { messages: [], cwd: "", defaultCwd: "" }
       defaultCwdRef.current = result.defaultCwd
+      setDefaultCwd(result.defaultCwd)
       rememberRecentCwd(result.defaultCwd)
       const cwd =
         result.messages.length === 0
@@ -293,7 +301,7 @@ export function AssistantPanel(): React.JSX.Element {
       key={sessionId}
       chat={chat}
       cwd={cwd}
-      defaultCwd={defaultCwdRef.current}
+      defaultCwd={defaultCwd}
       onSetCwd={(value) => selectSessionCwd(sessionId, value)}
       recentCwds={recentCwds}
       onSaveSession={saveSessionMessages}

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import iconv from "iconv-lite"
 import { afterAll, describe, expect, it } from "vitest"
-import { readFileTool } from "../../../../src/extensions/file/main/read"
+import { readFileTool, readFileWindow } from "../../../../src/extensions/file/main/read"
 import { readAtFor } from "../../../../src/extensions/file/main/state"
 import { splitLines } from "../../../../src/main/utils/text"
 import { callTool, freshSession } from "./harness"
@@ -63,10 +63,9 @@ let seq = 0
 const actual = (content: string | Buffer, params: Params): Promise<string> => {
   const file = path.join(root, `f${seq++}.txt`)
   writeFileSync(file, content)
-  return callTool<string>(
-    readFileTool,
+  return readFileWindow(
     { file_path: file, ...params },
-    { sessionId: freshSession() },
+    { sessionId: freshSession(), cwd: root },
   )
 }
 

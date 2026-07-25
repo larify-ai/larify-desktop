@@ -14,6 +14,7 @@ export interface StoredSession {
 export interface SessionMeta {
   id: string
   title?: string
+  cwd?: string
   createdAt: number
   updatedAt: number
 }
@@ -82,6 +83,7 @@ export function createSessionStore(
       createdAt: stored.createdAt,
       updatedAt: stored.updatedAt,
       title: previousMeta?.title ?? createTitle(messages),
+      cwd: stored.cwd,
     }
 
     await writeJson(messagesPath(id), stored)

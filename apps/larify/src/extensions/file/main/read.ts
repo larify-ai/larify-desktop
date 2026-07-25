@@ -2,14 +2,23 @@ import { stat } from "node:fs/promises"
 import path from "node:path"
 import { z } from "zod"
 import { defineTool } from "../../../shared/tool"
+import type { ToolRunContext } from "../../../shared/tool"
 import { normalizedChunks } from "./stream"
 import { markRead } from "./state"
+
+const MIN_READ_CHARACTERS = 5_000
+const MAX_READ_CHARACTERS = 100_000
 
 const inputSchema = z.object({
   file_path: z.string().describe("Absolute path to the file"),
   line: z.number().int().positive().optional().describe("Start line (1-based)"),
   column: z.number().int().positive().default(1).describe("Start character within the start line (1-based)"),
-  limit: z.number().int().positive().max(100_000).default(50_000).describe("Maximum number of characters to read"),
+  limit: z
+    .number()
+    .int()
+    .default(50_000)
+    .transform((value) => Math.max(MIN_READ_CHARACTERS, Math.min(value, MAX_READ_CHARACTERS)))
+    .describe("Maximum characters to read, not lines; values are clamped to 5,000-100,000"),
   scroll: z.enum(["down", "up"]).default("down").describe("Read down or up from the start position"),
 }).strict()
 
@@ -75,34 +84,38 @@ async function readWindow(target: string, from: number, to: number): Promise<Win
   return { text, start: start ?? position, continueFrom: null }
 }
 
+type ReadFileArgs = z.infer<typeof inputSchema>
+
+export async function readFileWindow(args: ReadFileArgs, ctx: ToolRunContext): Promise<string> {
+  const { file_path, line, column, limit, scroll } = args
+  const target = path.resolve(ctx.cwd, file_path)
+  const stats = await stat(target)
+
+  const anchor =
+    line !== undefined
+      ? await anchorIndex(target, line, column)
+      : scroll === "up"
+        ? await textLength(target)
+        : 0
+  const from = scroll === "up" ? Math.max(0, anchor - limit) : anchor
+  const to = scroll === "up" ? anchor : anchor + limit
+  const window = await readWindow(target, from, to)
+  markRead(ctx.sessionId, target, stats.mtimeMs)
+
+  return [
+    from > 0 ? `(Omitted before ${describePosition(window.start)}.)` : null,
+    window.text,
+    window.continueFrom
+      ? `(Continue from ${describePosition(window.continueFrom)}.)`
+      : null,
+  ]
+    .filter((part) => part !== null)
+    .join("\n")
+}
+
 export const readFileTool = defineTool({
   description: "Read a text file.",
   metadata: { icon: "read", eager: true },
   inputSchema,
-  execute: async (args, ctx) => {
-    const { file_path, line, column, limit, scroll } = args
-    const target = path.resolve(ctx.cwd, file_path)
-    const stats = await stat(target)
-
-    const anchor =
-      line !== undefined
-        ? await anchorIndex(target, line, column)
-        : scroll === "up"
-          ? await textLength(target)
-          : 0
-    const from = scroll === "up" ? Math.max(0, anchor - limit) : anchor
-    const to = scroll === "up" ? anchor : anchor + limit
-    const window = await readWindow(target, from, to)
-    markRead(ctx.sessionId, target, stats.mtimeMs)
-
-    return [
-      from > 0 ? `(Omitted before ${describePosition(window.start)}.)` : null,
-      window.text,
-      window.continueFrom
-        ? `(Continue from ${describePosition(window.continueFrom)}.)`
-        : null,
-    ]
-      .filter((part) => part !== null)
-      .join("\n")
-  },
+  execute: readFileWindow,
 })

@@ -9,7 +9,6 @@ const parse = (tool: unknown, input: unknown) =>
 
 describe("每个 limit 都有上界", () => {
   const cases = [
-    { name: "read", tool: readFileTool, base: { file_path: "a.txt" }, max: 100_000 },
     { name: "ls", tool: lsTool, base: {}, max: 1000 },
     { name: "glob", tool: globFilesTool, base: { pattern: "*" }, max: 1000 },
     { name: "grep", tool: grepFilesTool, base: { pattern: "x" }, max: 1000 },
@@ -21,4 +20,11 @@ describe("每个 limit 都有上界", () => {
       expect(() => parse(tool, { ...base, limit: max + 1 })).toThrow()
     })
   }
+
+  it("read clamps limits to its supported range", () => {
+    expect(parse(readFileTool, { file_path: "a.txt", limit: -1 })).toMatchObject({ limit: 5_000 })
+    expect(parse(readFileTool, { file_path: "a.txt", limit: 100_001 })).toMatchObject({
+      limit: 100_000,
+    })
+  })
 })

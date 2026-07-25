@@ -1,5 +1,14 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react"
-import { ArrowUpIcon, FolderIcon, FolderPlusIcon, PlusIcon, SquareIcon } from "lucide-react"
+import {
+  ArrowUpIcon,
+  ChevronDownIcon,
+  ChevronUpIcon,
+  FolderIcon,
+  FolderOpenIcon,
+  FolderPlusIcon,
+  PlusIcon,
+  SquareIcon,
+} from "lucide-react"
 import { Chat, useChat } from "@ai-sdk/react"
 import type { FileUIPart, UIMessage } from "ai"
 import { formatDistanceToNow } from "date-fns"
@@ -33,12 +42,15 @@ import {
   Attachments,
 } from "@renderer/components/ai-elements/attachments"
 import { Spinner } from "@renderer/components/ui/spinner"
+import { DropdownMenuSeparator } from "@renderer/components/ui/dropdown-menu"
 import { getAgentSessionId, setAgentSessionId } from "@renderer/lib/agent-session"
 import { MessageView } from "./message-view"
 import { conversationToText } from "../lib/conversation-copy"
 import { createIpcTransport } from "../lib/transport"
 
 const MemoizedMessageView = memo(MessageView)
+const RECENT_CWDS_KEY = "larify.recentCwds"
+const MAX_RECENT_CWDS = 5
 
 type LocalAttachment = FileUIPart & { id: string }
 
@@ -66,9 +78,19 @@ const labels = {
 
 interface SessionMeta {
   id: string
+  cwd?: string
   createdAt: number
   updatedAt: number
   title?: string
+}
+
+const readRecentCwds = (): string[] => {
+  try {
+    const value = JSON.parse(localStorage.getItem(RECENT_CWDS_KEY) ?? "[]")
+    return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []
+  } catch {
+    return []
+  }
 }
 
 const formatRelativeTime = (value: number): string => {
@@ -81,6 +103,10 @@ export function AssistantPanel(): React.JSX.Element {
   const messagesBySessionIdRef = useRef(messagesBySessionId)
   const [cwdBySessionId, setCwdBySessionId] = useState<Record<string, string>>({})
   const cwdBySessionIdRef = useRef(cwdBySessionId)
+  const cwdRevisionRef = useRef<Record<string, number>>({})
+  const defaultCwdRef = useRef("")
+  const [recentCwds, setRecentCwds] = useState<string[]>(readRecentCwds)
+  const recentCwdsRef = useRef(recentCwds)
   const chatsBySessionIdRef = useRef<Record<string, Chat<UIMessage>>>({})
   const selectedSessionIdRef = useRef(sessionId)
   const [sessions, setSessions] = useState<SessionMeta[]>([])
@@ -105,6 +131,30 @@ export function AssistantPanel(): React.JSX.Element {
   const cacheSessionCwd = (id: string, cwd: string): void => {
     cwdBySessionIdRef.current = { ...cwdBySessionIdRef.current, [id]: cwd }
     setCwdBySessionId(cwdBySessionIdRef.current)
+  }
+
+  const rememberRecentCwd = (cwd: string): void => {
+    if (!cwd) return
+    const defaultCwd = defaultCwdRef.current
+    const ordered = [cwd, ...recentCwdsRef.current.filter((item) => item !== cwd)]
+    const regular = ordered.filter((item) => item !== defaultCwd)
+    const next =
+      defaultCwd && ordered.includes(defaultCwd)
+        ? [...regular.slice(0, MAX_RECENT_CWDS - 1), defaultCwd]
+        : regular.slice(0, MAX_RECENT_CWDS)
+    recentCwdsRef.current = next
+    setRecentCwds(next)
+    try {
+      localStorage.setItem(RECENT_CWDS_KEY, JSON.stringify(next))
+    } catch {
+      return
+    }
+  }
+
+  const selectSessionCwd = (id: string, cwd: string): void => {
+    cwdRevisionRef.current[id] = (cwdRevisionRef.current[id] ?? 0) + 1
+    cacheSessionCwd(id, cwd)
+    rememberRecentCwd(cwd)
   }
 
   const saveSessionMessages = (id: string, messages: UIMessage[], cwd: string): void => {
@@ -142,7 +192,10 @@ export function AssistantPanel(): React.JSX.Element {
     }
   }
 
-  const loadSession = async (id: string): Promise<{ messages: UIMessage[]; cwd: string }> => {
+  const loadSession = async (
+    id: string,
+  ): Promise<{ messages: UIMessage[]; cwd: string; defaultCwd: string }> => {
+    const cwdRevision = cwdRevisionRef.current[id] ?? 0
     const existing = chatsBySessionIdRef.current[id]
     const messageCount = existing?.messages.length ?? 0
     const applyLoadedMessages = (messages: UIMessage[]): void => {
@@ -156,25 +209,48 @@ export function AssistantPanel(): React.JSX.Element {
       createChat(id, messages)
     }
     try {
-      const loaded = await window.bridge.invoke("agent:session-load", id) as { messages: UIMessage[]; cwd: string }
-      const result = loaded ?? { messages: [], cwd: '' }
+      const loaded = await window.bridge.invoke("agent:session-load", id) as {
+        messages: UIMessage[]
+        cwd: string
+        defaultCwd: string
+      }
+      const result = loaded ?? { messages: [], cwd: "", defaultCwd: "" }
+      defaultCwdRef.current = result.defaultCwd
+      rememberRecentCwd(result.defaultCwd)
+      const cwd =
+        result.messages.length === 0
+          ? recentCwdsRef.current[0] ?? result.cwd
+          : result.cwd
       applyLoadedMessages(result.messages)
-      cacheSessionCwd(id, result.cwd)
-      return result
+      if ((cwdRevisionRef.current[id] ?? 0) === cwdRevision) {
+        cacheSessionCwd(id, cwd)
+        rememberRecentCwd(cwd)
+      }
+      return { ...result, cwd }
     } catch (error) {
       console.error("[agent:session-load]", error)
       applyLoadedMessages([])
-      return { messages: [], cwd: '' }
+      return { messages: [], cwd: "", defaultCwd: defaultCwdRef.current }
     }
   }
 
   useEffect(() => {
     const handleNewSession = (): void => {
       const id = crypto.randomUUID()
+      const previousSessionId = selectedSessionIdRef.current
       selectedSessionIdRef.current = id
-      void loadSession(id).then(() => {
-        if (selectedSessionIdRef.current === id) setSessionId(id)
-      })
+      const cwd =
+        recentCwdsRef.current[0] ?? cwdBySessionIdRef.current[previousSessionId]
+      if (!cwd) {
+        void loadSession(id).then(() => {
+          if (selectedSessionIdRef.current === id) setSessionId(id)
+        })
+        return
+      }
+      cacheSessionMessages(id, [])
+      cacheSessionCwd(id, cwd)
+      ensureChat(id, [])
+      setSessionId(id)
     }
     const handleSelectSession = (event: Event): void => {
       const id = (event as CustomEvent<string>).detail
@@ -216,7 +292,8 @@ export function AssistantPanel(): React.JSX.Element {
       key={sessionId}
       chat={chat}
       cwd={cwd}
-      onSetCwd={(value) => cacheSessionCwd(sessionId, value)}
+      onSetCwd={(value) => selectSessionCwd(sessionId, value)}
+      recentCwds={recentCwds}
       onSaveSession={saveSessionMessages}
       sessions={sessions}
     />
@@ -275,12 +352,14 @@ function AssistantChat({
   chat,
   cwd,
   onSetCwd,
+  recentCwds,
   onSaveSession,
   sessions,
 }: {
   chat: Chat<UIMessage>
   cwd: string
   onSetCwd: (cwd: string) => void
+  recentCwds: string[]
   onSaveSession: (id: string, messages: UIMessage[], cwd: string) => void
   sessions: SessionMeta[]
 }): React.JSX.Element {
@@ -313,9 +392,11 @@ function AssistantChat({
     width: 320,
   })
   const [actionMenuOpen, setActionMenuOpen] = useState(false)
+  const [workspaceHistoryOpen, setWorkspaceHistoryOpen] = useState(false)
   const [inputText, setInputText] = useState("")
   const [attachmentCount, setAttachmentCount] = useState(0)
   const isLive = status === "streaming" || status === "submitted"
+  const workspaceLocked = messages.length > 0 || isLive
   const canSubmit = inputText.trim().length > 0 || attachmentCount > 0 || isLive
   const inputHistory = messages
     .filter((message) => message.role === "user")
@@ -365,6 +446,14 @@ function AssistantChat({
   const selectSession = (id: string): void => {
     window.dispatchEvent(new CustomEvent("agent:select-session", { detail: id }))
   }
+
+  const pickWorkspace = async (): Promise<void> => {
+    const paths = await window.bridge.invoke("dialog:pick-directories")
+    const path = Array.isArray(paths) ? paths[0] : undefined
+    if (typeof path === "string" && path) onSetCwd(path)
+  }
+
+  const otherWorkspaces = recentCwds.filter((path) => path !== cwd)
 
   const handleInputKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>): void => {
     if (
@@ -461,7 +550,13 @@ function AssistantChat({
         </PromptInputBody>
         <PromptInputFooter className="justify-between">
           <PromptInputTools>
-            <PromptInputActionMenu open={actionMenuOpen} onOpenChange={setActionMenuOpen}>
+            <PromptInputActionMenu
+              open={actionMenuOpen}
+              onOpenChange={(open) => {
+                setActionMenuOpen(open)
+                if (!open) setWorkspaceHistoryOpen(false)
+              }}
+            >
               <div ref={menuTriggerRef}>
                 <PromptInputActionMenuTrigger
                   style={{ borderRadius: 9999 }}
@@ -481,19 +576,62 @@ function AssistantChat({
                 <div className="px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground">
                   {labels.workspace}
                 </div>
+                {!workspaceLocked && workspaceHistoryOpen ? (
+                  <>
+                    {otherWorkspaces.map((path) => (
+                      <PromptInputActionMenuItem
+                        key={path}
+                        className="gap-2"
+                        title={path}
+                        onSelect={(event) => {
+                          event.preventDefault()
+                          setWorkspaceHistoryOpen(false)
+                          onSetCwd(path)
+                        }}
+                      >
+                        <FolderIcon className="size-4 shrink-0" />
+                        <span className="truncate">{path}</span>
+                      </PromptInputActionMenuItem>
+                    ))}
+                    <PromptInputActionMenuItem
+                      className="gap-2"
+                      onSelect={(event) => {
+                        event.preventDefault()
+                        setWorkspaceHistoryOpen(false)
+                        void pickWorkspace()
+                      }}
+                    >
+                      <FolderOpenIcon className="size-4 shrink-0" />
+                      选择其他目录
+                    </PromptInputActionMenuItem>
+                    <DropdownMenuSeparator />
+                  </>
+                ) : null}
                 <PromptInputActionMenuItem
                   className="gap-2"
-                  onSelect={() => {
-                    void window.bridge.invoke("dialog:pick-directories").then((paths) => {
-                      const p = (paths as string[])?.[0]
-                      if (p) {
-                        onSetCwd(p)
-                      }
-                    })
+                  disabled={workspaceLocked}
+                  onSelect={(event) => {
+                    event.preventDefault()
+                    if (otherWorkspaces.length === 0) {
+                      void pickWorkspace()
+                      return
+                    }
+                    setWorkspaceHistoryOpen((open) => !open)
                   }}
                 >
-                  <FolderPlusIcon className="size-4 shrink-0" />
-                  <span className="truncate">{cwd}</span>
+                  {workspaceLocked ? (
+                    <FolderIcon className="size-4 shrink-0" />
+                  ) : (
+                    <FolderPlusIcon className="size-4 shrink-0" />
+                  )}
+                  <span className="min-w-0 flex-1 truncate">{cwd}</span>
+                  {!workspaceLocked && otherWorkspaces.length > 0 ? (
+                    workspaceHistoryOpen ? (
+                      <ChevronUpIcon className="size-4" />
+                    ) : (
+                      <ChevronDownIcon className="size-4" />
+                    )
+                  ) : null}
                 </PromptInputActionMenuItem>
                 <div className="px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground">
                   {labels.add}
@@ -515,8 +653,18 @@ function AssistantChat({
                         onSelect={() => selectSession(session.id)}
                         className="gap-2"
                       >
-                        <span className="min-w-0 flex-1 truncate">
-                          {session.title || labels.unnamedTask}
+                        <span className="flex min-w-0 flex-1 items-center gap-1.5 truncate">
+                          <span className="min-w-0 flex-1 truncate">
+                            {session.title || labels.unnamedTask}
+                          </span>
+                          {session.cwd ? (
+                            <span
+                              className="max-w-28 shrink-0 truncate text-xs text-muted-foreground"
+                              title={session.cwd}
+                            >
+                              · {getPathFilename(session.cwd)}
+                            </span>
+                          ) : null}
                         </span>
                         <span className="shrink-0 text-xs text-muted-foreground">
                           {formatRelativeTime(session.updatedAt)}

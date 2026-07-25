@@ -3,12 +3,18 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import iconv from "iconv-lite"
-import { readFileTool } from "../../../../src/extensions/file/main/read"
+import { readFileWindow } from "../../../../src/extensions/file/main/read"
 import { readAtFor } from "../../../../src/extensions/file/main/state"
-import { callTool, freshSession } from "./harness"
+import { freshSession } from "./harness"
 
-const read = (input: Record<string, unknown>, ctx?: { sessionId?: string; cwd?: string }) =>
-  callTool<string>(readFileTool, input, ctx)
+const read = (
+  input: { file_path: string; line?: number; column?: number; limit?: number; scroll?: "down" | "up" },
+  ctx?: { sessionId?: string; cwd?: string },
+): Promise<string> =>
+  readFileWindow(
+    { column: 1, limit: 50_000, scroll: "down", ...input },
+    { sessionId: ctx?.sessionId ?? "test", cwd: ctx?.cwd ?? tmpdir() },
+  )
 
 let root: string
 let tenPath: string

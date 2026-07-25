@@ -45,9 +45,11 @@ const extension: Extension = {
 
     ipcMain.handle("agent:session-load", async (_event, sessionId: string) => {
       const result = await sessions.loadSession(sessionId)
+      const defaultCwd = larifyWorkspacePath()
       return {
         messages: await sanitizeAndValidateMessages(result?.messages ?? []),
-        cwd: result?.cwd || larifyWorkspacePath(),
+        cwd: result?.cwd || defaultCwd,
+        defaultCwd,
       }
     })
 

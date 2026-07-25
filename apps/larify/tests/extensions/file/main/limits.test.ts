@@ -23,7 +23,7 @@ describe("每个 limit 都有上界", () => {
 
   it("read clamps limits to its supported range", () => {
     expect(parse(readFileTool, { file_path: "a.txt", limit: -1 })).toMatchObject({ limit: 5_000 })
-    expect(parse(readFileTool, { file_path: "a.txt", limit: 100_001 })).toMatchObject({
+    expect(parse(readFileTool, { file_path: "a.txt", limit: 101 })).toMatchObject({
       limit: 100_000,
     })
   })

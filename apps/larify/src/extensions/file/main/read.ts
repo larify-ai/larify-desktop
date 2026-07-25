@@ -6,8 +6,9 @@ import type { ToolRunContext } from "../../../shared/tool"
 import { normalizedChunks } from "./stream"
 import { markRead } from "./state"
 
-const MIN_READ_CHARACTERS = 5_000
-const MAX_READ_CHARACTERS = 100_000
+const READ_CHARACTER_UNIT = 1_000
+const MIN_READ_UNITS = 5
+const MAX_READ_UNITS = 100
 
 const inputSchema = z.object({
   file_path: z.string().describe("Absolute path to the file"),
@@ -16,9 +17,12 @@ const inputSchema = z.object({
   limit: z
     .number()
     .int()
-    .default(50_000)
-    .transform((value) => Math.max(MIN_READ_CHARACTERS, Math.min(value, MAX_READ_CHARACTERS)))
-    .describe("Maximum characters to read, not lines; values are clamped to 5,000-100,000"),
+    .default(50)
+    .transform(
+      (value) =>
+        Math.max(MIN_READ_UNITS, Math.min(value, MAX_READ_UNITS)) * READ_CHARACTER_UNIT,
+    )
+    .describe("Read size in thousands of characters, not lines; values are clamped to 5-100"),
   scroll: z.enum(["down", "up"]).default("down").describe("Read down or up from the start position"),
 }).strict()
 

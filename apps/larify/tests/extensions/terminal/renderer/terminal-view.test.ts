@@ -4,7 +4,12 @@ import { createElement, type ReactNode } from "react"
 import { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { setAgentSessionId } from "../../../../src/renderer/src/lib/agent-session"
+import {
+  setAgentSessionCwd,
+  setAgentSessionId,
+} from "../../../../src/renderer/src/lib/agent-session"
+
+const TEST_CWD = "D:\\Workspace\\larify-desktop"
 
 const fitMocks: Array<ReturnType<typeof vi.fn>> = []
 const terminalMocks: Array<{
@@ -119,6 +124,7 @@ describe("TerminalView", () => {
   beforeEach(() => {
     globalThis.IS_REACT_ACT_ENVIRONMENT = true
     localStorage.clear()
+    setAgentSessionCwd(TEST_CWD)
     fitMocks.length = 0
     terminalMocks.length = 0
     stateRequests = {}
@@ -272,7 +278,11 @@ describe("TerminalView", () => {
     })
 
     expect(firstTerminal.dispose).toHaveBeenCalledTimes(1)
-    expect(window.bridge.invoke).not.toHaveBeenCalledWith("terminal:create", "session-empty")
+    expect(window.bridge.invoke).not.toHaveBeenCalledWith(
+      "terminal:create",
+      "session-empty",
+      { cwd: TEST_CWD },
+    )
   })
 
   it("auto-creates an empty terminal only when the terminal workbench is visible", async () => {
@@ -287,7 +297,11 @@ describe("TerminalView", () => {
       window.dispatchEvent(new CustomEvent("larify:workbench-active", { detail: "terminal" }))
     })
 
-    expect(window.bridge.invoke).not.toHaveBeenCalledWith("terminal:create", "session-auto-create")
+    expect(window.bridge.invoke).not.toHaveBeenCalledWith(
+      "terminal:create",
+      "session-auto-create",
+      { cwd: TEST_CWD },
+    )
 
     await act(async () => {
       stateRequests["session-auto-create"].resolve({
@@ -297,7 +311,11 @@ describe("TerminalView", () => {
       })
     })
 
-    expect(window.bridge.invoke).toHaveBeenCalledWith("terminal:create", "session-auto-create")
+    expect(window.bridge.invoke).toHaveBeenCalledWith(
+      "terminal:create",
+      "session-auto-create",
+      { cwd: TEST_CWD },
+    )
   })
 
   it("still allows auto-create after the initial state load fails", async () => {
@@ -316,7 +334,11 @@ describe("TerminalView", () => {
       stateRequests["session-getstate-fail"].reject(new Error("getState failed"))
     })
 
-    expect(window.bridge.invoke).toHaveBeenCalledWith("terminal:create", "session-getstate-fail")
+    expect(window.bridge.invoke).toHaveBeenCalledWith(
+      "terminal:create",
+      "session-getstate-fail",
+      { cwd: TEST_CWD },
+    )
   })
 
   it("closes the workbench instead of recreating a terminal when the last tab closes", async () => {
@@ -358,7 +380,11 @@ describe("TerminalView", () => {
 
     expect(window.bridge.invoke).toHaveBeenCalledWith("terminal:close", "session-close-last", 1)
     expect(closeEvents).toEqual(["terminal"])
-    expect(window.bridge.invoke).not.toHaveBeenCalledWith("terminal:create", "session-close-last")
+    expect(window.bridge.invoke).not.toHaveBeenCalledWith(
+      "terminal:create",
+      "session-close-last",
+      { cwd: TEST_CWD },
+    )
     window.removeEventListener("larify:workbench-close", onCloseWorkbench)
   })
 

@@ -3,6 +3,7 @@ import {
   ArrowUpIcon,
   ChevronDownIcon,
   ChevronUpIcon,
+  FolderClockIcon,
   FolderIcon,
   FolderOpenIcon,
   FolderPlusIcon,
@@ -686,7 +687,7 @@ function AssistantChat({
                             })
                           }}
                         >
-                          <FolderIcon className="size-4 shrink-0" />
+                          <FolderClockIcon className="size-4 shrink-0" />
                           <span className="min-w-0 flex-1 truncate">
                             {getPathFilename(groupCwd)}
                           </span>

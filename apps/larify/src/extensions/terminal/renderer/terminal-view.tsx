@@ -5,7 +5,7 @@ import { Unicode11Addon } from "@xterm/addon-unicode11"
 import { Terminal as XTerm, type ITheme } from "@xterm/xterm"
 import { SquareTerminalIcon } from "lucide-react"
 import { WorkbenchTabsLayout, type WorkbenchTab } from "@renderer/components/workbench"
-import { useAgentSessionId } from "@renderer/lib/agent-session"
+import { useAgentSessionCwd, useAgentSessionId } from "@renderer/lib/agent-session"
 import type {
   SessionTerminalsState,
   TerminalDataEvent,
@@ -98,6 +98,7 @@ const disposeEntries = (entries: Map<number, TerminalEntry>): void => {
 
 export function TerminalView(): React.JSX.Element {
   const sessionId = useAgentSessionId()
+  const cwd = useAgentSessionCwd()
   const { resolvedTheme } = useTheme()
   const [state, setState] = useState<SessionTerminalsState>(() => EMPTY_STATE(sessionId))
   const containerRef = useRef<HTMLDivElement>(null)
@@ -133,8 +134,9 @@ export function TerminalView(): React.JSX.Element {
   }, [state.activeId])
 
   const createTerminal = useCallback(async (): Promise<number> => {
-    return (await window.bridge.invoke("terminal:create", sessionId)) as number
-  }, [sessionId])
+    if (!cwd) throw new Error("Session working directory is not ready")
+    return (await window.bridge.invoke("terminal:create", sessionId, { cwd })) as number
+  }, [cwd, sessionId])
 
   const sendResize = useCallback(
     (terminalId: number, entry: TerminalEntry, cols: number, rows: number): void => {

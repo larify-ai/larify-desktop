@@ -5,7 +5,9 @@
 
 @custom-variant dark (&:is(.dark *));
 
-:root {
+:root,
+.light,
+.dark .light {
   color-scheme: light;
   --traffic-light-inset: 70px;
   --titlebar-h: env(titlebar-area-height, 2rem);

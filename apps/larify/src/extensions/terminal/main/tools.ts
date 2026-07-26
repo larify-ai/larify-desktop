@@ -19,6 +19,8 @@ function waitForIdle(
   return new Promise((resolve) => {
     let settled = false
     let idleTimer: NodeJS.Timeout | null = null
+    let unbindData = (): void => {}
+    let unbindExit = (): void => {}
     const idleMs = Math.max(0, idleSeconds * 1000)
     const timeoutMs = Math.max(0, timeoutSeconds * 1000)
 
@@ -28,7 +30,8 @@ function waitForIdle(
       if (idleTimer) clearTimeout(idleTimer)
       if (timeoutTimer) clearTimeout(timeoutTimer)
       signal?.removeEventListener('abort', finish)
-      unbind()
+      unbindData()
+      unbindExit()
       resolve(false)
     }
 
@@ -37,9 +40,13 @@ function waitForIdle(
       idleTimer = setTimeout(finish, idleMs)
     }
 
-    const unbind = service.bindData((eventSessionId, eventTerminalId) => {
+    unbindData = service.bindData((eventSessionId, eventTerminalId) => {
       if (eventSessionId !== sessionId || eventTerminalId !== terminalId) return
       armIdleTimer()
+    })
+    unbindExit = service.bindExit((eventSessionId, eventTerminalId) => {
+      if (eventSessionId !== sessionId || eventTerminalId !== terminalId) return
+      finish()
     })
     const timeoutTimer = timeoutMs > 0 ? setTimeout(finish, timeoutMs) : null
     signal?.addEventListener('abort', finish, { once: true })
@@ -49,6 +56,25 @@ function waitForIdle(
 
 const SETTLE_MS = 1000
 
+function linkedAbortController(signal?: AbortSignal): {
+  controller: AbortController
+  dispose: () => void
+} {
+  const controller = new AbortController()
+  const abort = (): void => controller.abort()
+  if (signal?.aborted) abort()
+  else signal?.addEventListener('abort', abort, { once: true })
+  return {
+    controller,
+    dispose: () => {
+      signal?.removeEventListener('abort', abort)
+      controller.abort()
+    }
+  }
+}
+
+type CommandWaitOutcome = 'finished' | 'exited' | 'pending'
+
 function waitForCommandFinished(
   service: TerminalService,
   sessionId: string,
@@ -56,15 +82,15 @@ function waitForCommandFinished(
   timeoutSeconds: number,
   signal?: AbortSignal,
   idleSeconds = 0
-): Promise<boolean> {
-  if (signal?.aborted) return Promise.resolve(false)
+): Promise<CommandWaitOutcome> {
+  if (signal?.aborted) return Promise.resolve('pending')
   return new Promise((resolve) => {
     let settled = false
     let started = false
     let settleTimer: NodeJS.Timeout | null = null
     let idleTimer: NodeJS.Timeout | null = null
     const idleMs = Math.max(0, idleSeconds * 1000)
-    const finish = (completed: boolean): void => {
+    const finish = (outcome: CommandWaitOutcome): void => {
       if (settled) return
       settled = true
       if (settleTimer) clearTimeout(settleTimer)
@@ -75,18 +101,18 @@ function waitForCommandFinished(
       unbindExit()
       unbindStarted()
       unbindData()
-      resolve(completed)
+      resolve(outcome)
     }
 
     const armSettle = (): void => {
       if (settleTimer) clearTimeout(settleTimer)
-      settleTimer = setTimeout(() => finish(true), SETTLE_MS)
+      settleTimer = setTimeout(() => finish('finished'), SETTLE_MS)
     }
 
     const armIdle = (): void => {
       if (!started || idleMs <= 0) return
       if (idleTimer) clearTimeout(idleTimer)
-      idleTimer = setTimeout(() => finish(false), idleMs)
+      idleTimer = setTimeout(() => finish('pending'), idleMs)
     }
 
     const unbindFinished = service.bindCommandFinished((eventSessionId, eventTerminalId) => {
@@ -115,11 +141,14 @@ function waitForCommandFinished(
 
     const unbindExit = service.bindExit((eventSessionId, eventTerminalId) => {
       if (eventSessionId !== sessionId || eventTerminalId !== terminalId) return
-      finish(true)
+      finish('exited')
     })
-    const onAbort = (): void => finish(false)
+    const onAbort = (): void => finish('pending')
     signal?.addEventListener('abort', onAbort, { once: true })
-    const timeoutTimer = setTimeout(() => finish(false), Math.max(0, timeoutSeconds * 1000))
+    const timeoutTimer = setTimeout(
+      () => finish('pending'),
+      Math.max(0, timeoutSeconds * 1000)
+    )
   })
 }
 
@@ -178,12 +207,15 @@ const readSchema = z.object({
 
 const terminalResult = (
   snapshot: TerminalAgentSnapshot,
-  commandFinishEventReceived: boolean,
+  outcome: CommandWaitOutcome,
   log?: { path?: string }
 ): { status: string; snapshot: TerminalAgentSnapshot; log_path?: string } => {
-  const status = commandFinishEventReceived
-    ? 'shell integration command finish event received'
-    : 'command may still be running or waiting for input'
+  const status =
+    outcome === 'finished'
+      ? 'shell integration command finish event received'
+      : outcome === 'exited'
+        ? 'terminal exited before a shell integration command finish event'
+        : 'command may still be running or waiting for input'
   if (!log?.path) return { status, snapshot }
   return {
     status,
@@ -211,8 +243,16 @@ export function createTerminalToolkit(service: TerminalService): Toolkit {
         metadata: { icon: 'terminal', eager: true },
         inputSchema: createSchema,
         execute: async (args, ctx) => {
-          const terminalId = service.create(ctx.sessionId, args)
-          return service.terminalState(ctx.sessionId, terminalId)
+          const terminalId = await service.createReady(
+            ctx.sessionId,
+            { cwd: args.cwd ?? ctx.cwd },
+            ctx.signal
+          )
+          const state = service.terminalState(ctx.sessionId, terminalId)
+          if (!state || state.exitCode !== null) {
+            throw new Error(`Terminal "${terminalId}" exited during startup.`)
+          }
+          return state
         }
       }),
       close: defineTool({
@@ -243,19 +283,33 @@ export function createTerminalToolkit(service: TerminalService): Toolkit {
             const submittedInput = data.endsWith('\r')
             const shouldWaitForCommand =
               (submittedInput || (!data && state.commandRunning)) && Boolean(state.shellIntegration)
-            const commandWait = shouldWaitForCommand
-              ? waitForCommandFinished(service, ctx.sessionId, id, timeout, ctx.signal, idle)
+            const commandWaitAbort = shouldWaitForCommand
+              ? linkedAbortController(ctx.signal)
               : null
-            const log = await service.startRun(ctx.sessionId, id)
-            if (!log) throw new Error(`Terminal "${id}" not found.`)
-            if (data) service.write(ctx.sessionId, id, data)
-            let completed = false
-            if (commandWait) completed = await commandWait
-            else await waitForIdle(service, ctx.sessionId, id, idle, timeout, ctx.signal)
-            await service.flushRunHistory(ctx.sessionId, id)
-            const snapshot = await service.agentSnapshot(ctx.sessionId, id)
-            if (!snapshot) throw new Error(`Terminal "${id}" not found.`)
-            return terminalResult(snapshot, completed, log)
+            const commandWait = commandWaitAbort
+              ? waitForCommandFinished(
+                  service,
+                  ctx.sessionId,
+                  id,
+                  timeout,
+                  commandWaitAbort.controller.signal,
+                  idle
+                )
+              : null
+            try {
+              const log = await service.startRun(ctx.sessionId, id)
+              if (!log) throw new Error(`Terminal "${id}" not found.`)
+              if (data) service.write(ctx.sessionId, id, data)
+              let outcome: CommandWaitOutcome = 'pending'
+              if (commandWait) outcome = await commandWait
+              else await waitForIdle(service, ctx.sessionId, id, idle, timeout, ctx.signal)
+              await service.flushRunHistory(ctx.sessionId, id)
+              const snapshot = await service.agentSnapshot(ctx.sessionId, id)
+              if (!snapshot) throw new Error(`Terminal "${id}" not found.`)
+              return terminalResult(snapshot, outcome, log)
+            } finally {
+              commandWaitAbort?.dispose()
+            }
           })
         }
       }),
@@ -269,9 +323,9 @@ export function createTerminalToolkit(service: TerminalService): Toolkit {
             const state = service.terminalState(ctx.sessionId, id)
             if (!state) throw new Error(`Terminal "${id}" not found.`)
             const waitForCommand = state.shellIntegration && state.commandRunning && timeout > 0
-            const completed = waitForCommand
+            const outcome = waitForCommand
               ? await waitForCommandFinished(service, ctx.sessionId, id, timeout, ctx.signal)
-              : false
+              : 'pending'
             if (!waitForCommand) {
               await waitForIdle(service, ctx.sessionId, id, idle, timeout, ctx.signal)
             }
@@ -281,7 +335,7 @@ export function createTerminalToolkit(service: TerminalService): Toolkit {
             const latestState = service.terminalState(ctx.sessionId, id)
             return terminalResult(
               snapshot,
-              Boolean(completed && !latestState?.commandRunning),
+              outcome === 'finished' && latestState?.commandRunning ? 'pending' : outcome,
               log ?? undefined
             )
           })

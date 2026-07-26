@@ -10,6 +10,7 @@ import type {
   SessionTerminalsState,
   TerminalDataEvent,
   TerminalExitEvent,
+  TerminalSnapshot,
 } from "../shared/types"
 import "@xterm/xterm/css/xterm.css"
 import "./terminal-view.css"
@@ -27,14 +28,23 @@ const EMPTY_STATE = (sessionId: string): SessionTerminalsState => ({
 const readCssVar = (name: string): string =>
   getComputedStyle(document.documentElement).getPropertyValue(name).trim()
 
+const readCssVarOr = (name: string, fallback: string): string =>
+  readCssVar(name) || readCssVar(fallback)
+
 const terminalTheme = (): ITheme => ({
-  background: readCssVar("--background"),
+  background: readCssVarOr("--workbench-content", "--background"),
   brightYellow: readCssVar("--foreground"),
   foreground: readCssVar("--foreground"),
   cursor: readCssVar("--foreground"),
   selectionBackground: readCssVar("--primary"),
   selectionForeground: readCssVar("--primary-foreground"),
   selectionInactiveBackground: readCssVar("--muted-foreground"),
+  scrollbarSliderBackground: readCssVar("--larify-scrollbar-thumb"),
+  scrollbarSliderHoverBackground: readCssVar("--larify-scrollbar-thumb-hover"),
+  scrollbarSliderActiveBackground: readCssVarOr(
+    "--larify-scrollbar-thumb-active",
+    "--larify-scrollbar-thumb-hover",
+  ),
   yellow: readCssVar("--foreground"),
 })
 
@@ -63,7 +73,9 @@ const asState = (value: unknown, sessionId: string): SessionTerminalsState => {
 const copySelection = (term: XTerm): boolean => {
   const selection = term.getSelection()
   if (!selection) return false
-  void navigator.clipboard?.writeText(selection)
+  void navigator.clipboard
+    ?.writeText(selection)
+    .catch((error) => console.error("[terminal:copy]", error))
   term.clearSelection()
   return true
 }
@@ -96,19 +108,36 @@ const disposeEntries = (entries: Map<number, TerminalEntry>): void => {
   entries.clear()
 }
 
+const disposeMissingEntries = (
+  entries: Map<number, TerminalEntry> | undefined,
+  terminals: SessionTerminalsState["terminals"],
+): void => {
+  if (!entries) return
+  const alive = new Set(terminals.map((terminal) => terminal.id))
+  for (const [id, entry] of entries) {
+    if (alive.has(id)) continue
+    if (entry.resizeTimer) clearTimeout(entry.resizeTimer)
+    entry.term.dispose()
+    entry.host.remove()
+    entries.delete(id)
+  }
+}
+
 export function TerminalView(): React.JSX.Element {
   const sessionId = useAgentSessionId()
   const cwd = useAgentSessionCwd()
   const { resolvedTheme } = useTheme()
   const [state, setState] = useState<SessionTerminalsState>(() => EMPTY_STATE(sessionId))
+  const [loadedSessionId, setLoadedSessionId] = useState<string | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const activeIdRef = useRef<number | null>(null)
+  const fitFrameRef = useRef<number | null>(null)
   const entriesBySessionRef = useRef(new Map<string, Map<number, TerminalEntry>>())
   const loadingSessionRef = useRef<string | null>(null)
   const suppressAutoCreateRef = useRef(false)
   const [theme, setTheme] = useState<ITheme>(() => terminalTheme())
-  const [loadedSessionId, setLoadedSessionId] = useState<string | null>(null)
   const [workbenchVisible, setWorkbenchVisible] = useState(false)
+  const stateIsCurrent = state.sessionId === sessionId
 
   const entriesForSession = useCallback((id: string): Map<number, TerminalEntry> => {
     let entries = entriesBySessionRef.current.get(id)
@@ -130,8 +159,8 @@ export function TerminalView(): React.JSX.Element {
   )
 
   useEffect(() => {
-    activeIdRef.current = state.activeId
-  }, [state.activeId])
+    activeIdRef.current = stateIsCurrent ? state.activeId : null
+  }, [state.activeId, stateIsCurrent])
 
   const createTerminal = useCallback(async (): Promise<number> => {
     if (!cwd) throw new Error("Session working directory is not ready")
@@ -231,6 +260,14 @@ export function TerminalView(): React.JSX.Element {
     }
   }, [currentEntries])
 
+  const scheduleFit = useCallback((): void => {
+    if (fitFrameRef.current !== null) return
+    fitFrameRef.current = requestAnimationFrame(() => {
+      fitFrameRef.current = null
+      fitActive()
+    })
+  }, [fitActive])
+
   const ensureEntry = useCallback(
     (terminalId: number, exitCode: number | null): void => {
       const container = containerRef.current
@@ -302,15 +339,27 @@ export function TerminalView(): React.JSX.Element {
         entry.pendingData = []
         if (entries.get(terminalId) !== entry) return
         for (const event of pending) applyData(entry, event)
+        requestAnimationFrame(() => {
+          if (entries.get(terminalId) !== entry) return
+          fitActive()
+          sendResize(terminalId, entry, term.cols, term.rows)
+          flushResize(terminalId, entry)
+        })
       }
       void window.bridge
         .invoke("terminal:snapshot", sessionId, terminalId)
         .then((snapshot) => {
-          if (!entries.get(terminalId)) return
-          const restore = snapshot as { data: string; seq: number } | null
+          if (entries.get(terminalId) !== entry) return
+          const restore = snapshot as TerminalSnapshot | null
           if (!restore) {
             finishRestoring()
             return
+          }
+          entry.suppressResize = true
+          try {
+            entry.term.resize(restore.cols, restore.rows)
+          } finally {
+            entry.suppressResize = false
           }
           entry.term.write(restore.data, () => {
             entry.lastSeq = restore.seq
@@ -332,12 +381,6 @@ export function TerminalView(): React.JSX.Element {
         event.preventDefault()
         if (!copySelection(term)) pasteClipboard(term)
       })
-      requestAnimationFrame(fitActive)
-      requestAnimationFrame(() => {
-        fitActive()
-        sendResize(terminalId, entry, term.cols, term.rows)
-        flushResize(terminalId, entry)
-      })
     },
     [currentEntries, fitActive, flushResize, scheduleResize, sendResize, sessionId, theme],
   )
@@ -345,30 +388,44 @@ export function TerminalView(): React.JSX.Element {
   useEffect(() => {
     let cancelled = false
     loadingSessionRef.current = sessionId
-    setLoadedSessionId(null)
-    setState(EMPTY_STATE(sessionId))
     void window.bridge
       .invoke("terminal:getState", sessionId)
       .then((value) => {
         if (cancelled || loadingSessionRef.current !== sessionId) return
         loadingSessionRef.current = null
-        setLoadedSessionId(sessionId)
         setState(asState(value, sessionId))
+        setLoadedSessionId(sessionId)
       })
       .catch((error) => {
         console.error("[terminal:getState]", error)
         if (cancelled || loadingSessionRef.current !== sessionId) return
         loadingSessionRef.current = null
+        setState(EMPTY_STATE(sessionId))
         setLoadedSessionId(sessionId)
       })
 
-      const offState = window.bridge.on("terminal:state", (payload) => {
-        const next = payload as SessionTerminalsState
-        if (next.sessionId !== sessionId) return
-        if (loadingSessionRef.current === sessionId) loadingSessionRef.current = null
+    const offState = window.bridge.on("terminal:state", (payload) => {
+      const next = payload as SessionTerminalsState
+      if (next.sessionId !== sessionId) {
+        const entries = peekEntries(next.sessionId)
+        disposeMissingEntries(entries, next.terminals)
+        if (entries?.size === 0) entriesBySessionRef.current.delete(next.sessionId)
+        return
+      }
+      if (loadingSessionRef.current === sessionId) {
+        loadingSessionRef.current = null
         setLoadedSessionId(sessionId)
-        setState(next)
-      })
+      }
+      setState(next)
+    })
+    return () => {
+      cancelled = true
+      if (loadingSessionRef.current === sessionId) loadingSessionRef.current = null
+      offState()
+    }
+  }, [peekEntries, sessionId])
+
+  useEffect(() => {
     const offData = window.bridge.on("terminal:data", (payload) => {
       const event = payload as TerminalDataEvent
       const entry = peekEntries(event.sessionId)?.get(event.terminalId)
@@ -381,18 +438,16 @@ export function TerminalView(): React.JSX.Element {
     })
     const offExit = window.bridge.on("terminal:exit", (payload) => {
       const event = payload as TerminalExitEvent
-      peekEntries(event.sessionId)
-        ?.get(event.terminalId)
-        ?.term.write(`\r\n[process exited: ${event.exitCode}]\r\n`)
+      const entry = peekEntries(event.sessionId)?.get(event.terminalId)
+      if (!entry) return
+      entry.exited = true
+      entry.term.write(`\r\n[process exited: ${event.exitCode}]\r\n`)
     })
     return () => {
-      cancelled = true
-      if (loadingSessionRef.current === sessionId) loadingSessionRef.current = null
-      offState()
       offData()
       offExit()
     }
-  }, [peekEntries, sessionId])
+  }, [peekEntries])
 
   useEffect(() => {
     const onActive = (event: Event): void => {
@@ -408,12 +463,26 @@ export function TerminalView(): React.JSX.Element {
   useEffect(() => {
     if (!workbenchVisible) return
     if (loadedSessionId !== sessionId) return
+    if (state.sessionId !== sessionId) return
+    if (loadingSessionRef.current === sessionId) return
     if (state.terminals.length > 0) return
     if (suppressAutoCreateRef.current) return
     void createTerminal().catch((error) => console.error("[terminal:create]", error))
-  }, [createTerminal, loadedSessionId, sessionId, state.terminals.length, workbenchVisible])
+  }, [
+    createTerminal,
+    loadedSessionId,
+    sessionId,
+    state.sessionId,
+    state.terminals.length,
+    workbenchVisible,
+  ])
 
   useEffect(() => {
+    for (const sessionEntries of entriesBySessionRef.current.values()) {
+      for (const entry of sessionEntries.values()) entry.host.style.visibility = "hidden"
+    }
+    if (!stateIsCurrent) return
+
     const entries = currentEntries()
     for (const terminal of state.terminals) {
       ensureEntry(terminal.id, terminal.exitCode)
@@ -423,28 +492,17 @@ export function TerminalView(): React.JSX.Element {
 
     const alive = new Set(state.terminals.map((terminal) => terminal.id))
     const isLoadingEmptyState = loadingSessionRef.current === state.sessionId && alive.size === 0
-    if (!isLoadingEmptyState) {
-      for (const [id, entry] of entries) {
-        if (!alive.has(id)) {
-          if (entry.resizeTimer) clearTimeout(entry.resizeTimer)
-          entry.term.dispose()
-          entry.host.remove()
-          entries.delete(id)
-        }
-      }
-    }
+    if (!isLoadingEmptyState) disposeMissingEntries(entries, state.terminals)
 
-    for (const sessionEntries of entriesBySessionRef.current.values()) {
-      for (const entry of sessionEntries.values()) entry.host.style.visibility = "hidden"
-    }
     for (const [id, entry] of entries) {
       entry.host.style.visibility = id === state.activeId ? "visible" : "hidden"
     }
-    requestAnimationFrame(fitActive)
-  }, [currentEntries, ensureEntry, fitActive, state])
+    scheduleFit()
+  }, [currentEntries, ensureEntry, scheduleFit, state, stateIsCurrent])
 
   useEffect(() => {
-    setTheme(terminalTheme())
+    const frame = requestAnimationFrame(() => setTheme(terminalTheme()))
+    return () => cancelAnimationFrame(frame)
   }, [resolvedTheme])
 
   useEffect(() => {
@@ -456,10 +514,14 @@ export function TerminalView(): React.JSX.Element {
   useEffect(() => {
     const container = containerRef.current
     if (!container) return
-    const observer = new ResizeObserver(() => requestAnimationFrame(fitActive))
+    const observer = new ResizeObserver(scheduleFit)
     observer.observe(container)
-    return () => observer.disconnect()
-  }, [fitActive])
+    return () => {
+      observer.disconnect()
+      if (fitFrameRef.current !== null) cancelAnimationFrame(fitFrameRef.current)
+      fitFrameRef.current = null
+    }
+  }, [scheduleFit])
 
   useEffect(() => {
     const onPointerDown = (event: PointerEvent): void => {
@@ -482,7 +544,7 @@ export function TerminalView(): React.JSX.Element {
     }
   }, [])
 
-  const tabs = state.terminals.map<WorkbenchTab>((terminal) => ({
+  const tabs = (stateIsCurrent ? state.terminals : []).map<WorkbenchTab>((terminal) => ({
     active: terminal.id === state.activeId,
     closable: true,
     icon: TERMINAL_ICON,
@@ -499,10 +561,19 @@ export function TerminalView(): React.JSX.Element {
       tabs={tabs}
       onCreate={() => void createTerminal().catch((error) => console.error("[terminal:create]", error))}
       onClose={(id) => void closeTerminal(Number(id))}
-      onReorder={(id, _fromIndex, toIndex) => void reorderTerminal(Number(id), toIndex)}
-      onSelect={(id) => void setActive(Number(id))}
+      onReorder={(id, _fromIndex, toIndex) =>
+        void reorderTerminal(Number(id), toIndex).catch((error) =>
+          console.error("[terminal:reorder]", error),
+        )
+      }
+      onSelect={(id) =>
+        void setActive(Number(id)).catch((error) => console.error("[terminal:setActive]", error))
+      }
     >
-      <div ref={containerRef} className="larify-terminal-surface absolute inset-0 overflow-hidden bg-background" />
+      <div
+        ref={containerRef}
+        className="larify-terminal-surface absolute inset-0 overflow-hidden bg-workbench-content"
+      />
     </WorkbenchTabsLayout>
   )
 }

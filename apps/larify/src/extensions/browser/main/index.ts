@@ -20,7 +20,7 @@ const extension: Extension = {
     }
 
     const unregisterIpc = registerBrowserIpc(getService)
-    context.subscriptions.push(app.register("tool", "browser", createBrowserToolkit(getService)))
+    app.register("tool", "browser", createBrowserToolkit(getService))
     context.subscriptions.push({
       dispose: async () => {
         unregisterIpc()

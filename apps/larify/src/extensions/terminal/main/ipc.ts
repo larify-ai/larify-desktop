@@ -1,4 +1,4 @@
-import { BrowserWindow, ipcMain } from "electron"
+import { ipcMain, type BrowserWindow } from "electron"
 import type { TerminalService } from "./terminal-service"
 import type { TerminalCreateOptions, TerminalSnapshot } from "../shared/types"
 
@@ -38,12 +38,15 @@ const rendererCreateOptions = (opts: TerminalCreateOptions): TerminalCreateOptio
   rows: opts.rows,
 })
 
-export function registerTerminalIpc(service: TerminalService): () => void {
+export function registerTerminalIpc(
+  service: TerminalService,
+  window: BrowserWindow,
+): () => void {
   const batchers = new Map<string, DataBatcher>()
 
   const send = (channel: string, payload: unknown): void => {
-    for (const window of BrowserWindow.getAllWindows()) {
-      if (!window.isDestroyed()) window.webContents.send(channel, payload)
+    if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
+      window.webContents.send(channel, payload)
     }
   }
 

@@ -7,7 +7,7 @@
   --workbench-tab-max-width: calc(var(--spacing) * 60);
   --workbench-tab-min-width: calc(var(--spacing) * 21);
   align-items: center;
-  background: var(--sidebar);
+  background: var(--workbench-chrome);
   color: var(--foreground);
   display: flex;
   height: var(--workbench-tab-bar-height);
@@ -43,7 +43,7 @@
 
 .larify-workbench-tab {
   align-items: center;
-  background: var(--sidebar);
+  background: var(--workbench-chrome);
   border: 0;
   border-radius: 10px 10px 0 0;
   color: var(--muted-foreground);
@@ -96,14 +96,14 @@
 }
 
 .larify-workbench-tab-active {
-  background: var(--background);
+  background: var(--card);
   color: var(--foreground);
   overflow: visible;
   z-index: 3;
 }
 
 .larify-workbench-tab-active::before {
-  background: var(--background);
+  background: var(--card);
   border-radius: 10px 10px 0 0;
   content: "";
   inset: 0 0 calc(var(--workbench-tab-bottom-fill) * -1);
@@ -197,12 +197,12 @@
 }
 
 .larify-workbench-tab-corner-left {
-  background: radial-gradient(circle at 0 0, var(--sidebar) 0 11.5px, var(--background) 12px);
+  background: radial-gradient(circle at 0 0, var(--workbench-chrome) 0 11.5px, var(--card) 12px);
   left: -12px;
 }
 
 .larify-workbench-tab-corner-right {
-  background: radial-gradient(circle at 100% 0, var(--sidebar) 0 11.5px, var(--background) 12px);
+  background: radial-gradient(circle at 100% 0, var(--workbench-chrome) 0 11.5px, var(--card) 12px);
   right: -12px;
 }
 

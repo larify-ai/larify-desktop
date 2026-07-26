@@ -433,6 +433,46 @@ describe("TerminalManager", () => {
       .toContain("line 2500")
   })
 
+  it("removes an exited terminal even when finalizing its run fails", async () => {
+    const { TerminalManager } = await importManager()
+    const manager = new TerminalManager("session-1")
+    const id = manager.create()
+
+    await manager.startRun(id)
+    terminals[0].setRunOutput(makeLines(2500))
+    await manager.flushRunHistory(id)
+    vi.spyOn(terminals[0], "takeAllRemaining").mockRejectedValue(new Error("finalize failed"))
+    terminals[0].emitExit(1)
+
+    await expect.poll(() => manager.state().terminals).toEqual([])
+    expect(terminals[0].dispose).toHaveBeenCalled()
+  })
+
+  it("treats close as successful when an exit removes the terminal first", async () => {
+    const { TerminalManager } = await importManager()
+    const manager = new TerminalManager("session-1")
+    const id = manager.create()
+
+    const log = await manager.startRun(id)
+    terminals[0].setRunOutput(makeLines(2500))
+    await manager.flushRunHistory(id)
+    expect(log?.path).toBeDefined()
+
+    let finishFinalizing!: () => void
+    const finalizing = new Promise<null>((resolve) => {
+      finishFinalizing = () => resolve(null)
+    })
+    vi.spyOn(terminals[0], "takeAllRemaining").mockReturnValue(finalizing)
+
+    terminals[0].emitExit(0)
+    await vi.waitFor(() => expect(terminals[0].takeAllRemaining).toHaveBeenCalled())
+    const closing = manager.close(id)
+    finishFinalizing()
+
+    await expect(closing).resolves.toBeUndefined()
+    expect(manager.state().terminals).toEqual([])
+  })
+
   it("finalizes the run to the full log before closing a terminal", async () => {
     const { readFile } = await import("node:fs/promises")
     const { TerminalManager } = await importManager()
@@ -449,6 +489,22 @@ describe("TerminalManager", () => {
     expect(contents).toContain("line 2500")
   })
 
+  it("removes a terminal even when finalizing its run fails during close", async () => {
+    const { TerminalManager } = await importManager()
+    const manager = new TerminalManager("session-1")
+    const id = manager.create()
+
+    await manager.startRun(id)
+    terminals[0].setRunOutput(makeLines(2500))
+    await manager.flushRunHistory(id)
+    vi.spyOn(terminals[0], "takeAllRemaining").mockRejectedValue(new Error("finalize failed"))
+
+    await expect(manager.close(id)).rejects.toThrow("finalize failed")
+    expect(manager.state().terminals).toEqual([])
+    expect(terminals[0].close).toHaveBeenCalled()
+    expect(terminals[0].dispose).toHaveBeenCalled()
+  })
+
   it("finalizes the run to the full log before destroying terminals", async () => {
     const { readFile } = await import("node:fs/promises")
     const { TerminalManager } = await importManager()
@@ -463,6 +519,54 @@ describe("TerminalManager", () => {
     const contents = await readFile(log!.path, "utf8")
     expect(contents).toContain("line 1\n")
     expect(contents).toContain("line 2500")
+  })
+
+  it("destroys terminals even when finalizing a run fails", async () => {
+    const { TerminalManager } = await importManager()
+    const manager = new TerminalManager("session-1")
+    const id = manager.create()
+
+    await manager.startRun(id)
+    terminals[0].setRunOutput(makeLines(2500))
+    await manager.flushRunHistory(id)
+    vi.spyOn(terminals[0], "takeAllRemaining").mockRejectedValue(new Error("finalize failed"))
+
+    await expect(manager.destroy()).rejects.toThrow("finalize failed")
+    expect(manager.state().terminals).toEqual([])
+    expect(terminals[0].kill).toHaveBeenCalled()
+    expect(terminals[0].dispose).toHaveBeenCalled()
+  })
+
+  it("waits for every run to finish finalizing before destroying terminals", async () => {
+    const { TerminalManager } = await importManager()
+    const manager = new TerminalManager("session-1")
+    const first = manager.create()
+    const second = manager.create()
+
+    await manager.startRun(first)
+    terminals[0].setRunOutput(makeLines(2500))
+    await manager.flushRunHistory(first)
+    await manager.startRun(second)
+    terminals[1].setRunOutput(makeLines(2500))
+    await manager.flushRunHistory(second)
+
+    let finishSecond!: () => void
+    vi.spyOn(terminals[0], "takeAllRemaining").mockRejectedValue(new Error("first failed"))
+    vi.spyOn(terminals[1], "takeAllRemaining").mockImplementation(
+      () => new Promise((resolve) => {
+        finishSecond = () => resolve(null)
+      }),
+    )
+
+    const destroying = manager.destroy()
+    await vi.waitFor(() => expect(finishSecond).toBeTypeOf("function"))
+    expect(terminals[0].kill).not.toHaveBeenCalled()
+    expect(terminals[1].kill).not.toHaveBeenCalled()
+
+    finishSecond()
+    await expect(destroying).rejects.toThrow("first failed")
+    expect(terminals[0].kill).toHaveBeenCalled()
+    expect(terminals[1].kill).toHaveBeenCalled()
   })
 
   it("finalizes the previous run when a new run starts", async () => {

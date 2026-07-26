@@ -6,7 +6,13 @@ import { TerminalView } from "./terminal-view"
 const extension: Extension = {
   activate(app) {
     app.register("view", "terminal", {
-      sidebar: { icon: SquareTerminalIcon, id: "terminal", label: "终端", order: 10, placement: "content" },
+      sidebar: {
+        icon: SquareTerminalIcon,
+        id: "terminal",
+        label: "终端",
+        order: 10,
+        placement: "content",
+      },
       render: () => <TerminalView />,
     } satisfies View)
   },

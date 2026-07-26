@@ -27,7 +27,7 @@ export function SettingsPane(): React.JSX.Element {
 
   return (
     <div className="flex h-full min-h-0 w-full">
-      <aside className="w-36 shrink-0 bg-(--workbench-chrome)">
+      <aside className="w-36 shrink-0 bg-workbench-chrome">
         <nav aria-label="设置" className="p-2">
           <ul className="flex flex-col gap-1">
             {SECTIONS.map((item) => {
@@ -53,7 +53,7 @@ export function SettingsPane(): React.JSX.Element {
           </ul>
         </nav>
       </aside>
-      <main className="flex min-w-0 flex-1 flex-col overflow-hidden bg-(--workbench-content)">
+      <main className="flex min-w-0 flex-1 flex-col overflow-hidden bg-workbench-content">
         <header className="flex h-14 shrink-0 items-center border-b px-6">
           <h2 className="text-sm font-medium">{current.name}</h2>
         </header>

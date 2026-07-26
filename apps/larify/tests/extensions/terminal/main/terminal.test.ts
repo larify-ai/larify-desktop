@@ -322,6 +322,82 @@ describe("Terminal", () => {
     expect(terminal.state().shellIntegration).toBeUndefined()
   })
 
+  it("cancels the Unix forced-kill fallback after the process exits", async () => {
+    vi.useFakeTimers()
+    const platform = Object.getOwnPropertyDescriptor(process, "platform")
+    Object.defineProperty(process, "platform", { configurable: true, value: "linux" })
+    const processKill = vi.spyOn(process, "kill")
+    const fakePty = createFakePty()
+    spawnMock.mockReturnValue(fakePty)
+
+    try {
+      const { Terminal } = await importTerminal()
+      const terminal = new Terminal(1, { shell: "sh", cwd })
+
+      terminal.close()
+      expect(fakePty.kill).toHaveBeenCalledWith("SIGTERM")
+
+      fakePty.emitExit(0)
+      vi.advanceTimersByTime(500)
+
+      expect(processKill).not.toHaveBeenCalled()
+      expect(fakePty.kill).not.toHaveBeenCalledWith("SIGKILL")
+      terminal.dispose()
+    } finally {
+      if (platform) Object.defineProperty(process, "platform", platform)
+      vi.useRealTimers()
+    }
+  })
+
+  it("keeps the Unix forced-kill fallback after renderer state is disposed", async () => {
+    vi.useFakeTimers()
+    const platform = Object.getOwnPropertyDescriptor(process, "platform")
+    Object.defineProperty(process, "platform", { configurable: true, value: "linux" })
+    const processKill = vi.spyOn(process, "kill").mockReturnValue(true)
+    const fakePty = createFakePty()
+    spawnMock.mockReturnValue(fakePty)
+
+    try {
+      const { Terminal } = await importTerminal()
+      const terminal = new Terminal(1, { shell: "sh", cwd })
+
+      terminal.close()
+      terminal.dispose()
+      vi.advanceTimersByTime(500)
+
+      expect(processKill).toHaveBeenCalledWith(fakePty.pid, 0)
+      expect(fakePty.kill).toHaveBeenCalledWith("SIGKILL")
+    } finally {
+      if (platform) Object.defineProperty(process, "platform", platform)
+      vi.useRealTimers()
+    }
+  })
+
+  it("falls back to an immediate kill when Unix SIGTERM fails", async () => {
+    const platform = Object.getOwnPropertyDescriptor(process, "platform")
+    Object.defineProperty(process, "platform", { configurable: true, value: "linux" })
+    const fakePty = createFakePty()
+    fakePty.kill
+      .mockImplementationOnce(() => {
+        throw new Error("SIGTERM failed")
+      })
+      .mockImplementationOnce(() => {})
+    spawnMock.mockReturnValue(fakePty)
+
+    try {
+      const { Terminal } = await importTerminal()
+      const terminal = new Terminal(1, { shell: "sh", cwd })
+
+      terminal.close()
+
+      expect(fakePty.kill).toHaveBeenNthCalledWith(1, "SIGTERM")
+      expect(fakePty.kill).toHaveBeenNthCalledWith(2)
+      terminal.dispose()
+    } finally {
+      if (platform) Object.defineProperty(process, "platform", platform)
+    }
+  })
+
   it("emits shell command completion from VS Code OSC 633 markers", async () => {
     const fakePty = createFakePty()
     spawnMock.mockReturnValue(fakePty)
@@ -496,6 +572,25 @@ describe("Terminal", () => {
 
     expect(first?.lines.length).toBeGreaterThan(0)
     expect(second?.lines).toEqual(first?.lines)
+  })
+
+  it("stops waiting for shell integration when the terminal exits", async () => {
+    vi.useFakeTimers()
+    const fakePty = createFakePty()
+    spawnMock.mockReturnValue(fakePty)
+    const { Terminal } = await importTerminal()
+    const terminal = new Terminal(1, { shell: "sh", cwd })
+
+    try {
+      const ready = terminal.waitForShellIntegration(60_000)
+      fakePty.emitExit(1)
+      await vi.advanceTimersByTimeAsync(250)
+
+      await expect(ready).resolves.toBe(false)
+    } finally {
+      terminal.dispose()
+      vi.useRealTimers()
+    }
   })
 
   it("dispose() tears down the headless terminal once and is idempotent", async () => {

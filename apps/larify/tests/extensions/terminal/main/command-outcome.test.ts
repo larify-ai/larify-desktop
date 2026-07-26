@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest"
+import type { TerminalService } from "../../../../src/extensions/terminal/main/terminal-service"
 
 const spawnMock = vi.fn()
 const logRoot = mkdtempSync(join(tmpdir(), "larify-outcome-"))
@@ -24,6 +25,7 @@ const OSC = {
 let emit: ((data: string) => void) | undefined
 let fireExit: ((event: { exitCode: number }) => void) | undefined
 let written: string[]
+type ToolkitCall = <T>(name: string, input: Record<string, unknown>) => Promise<T>
 
 beforeEach(() => {
   written = []
@@ -44,7 +46,7 @@ beforeEach(() => {
 
 afterAll(() => rmSync(logRoot, { force: true, recursive: true }))
 
-async function boot() {
+async function boot(): Promise<{ service: TerminalService; call: ToolkitCall; id: number }> {
   const { TerminalService } = await import("../../../../src/extensions/terminal/main/terminal-service")
   const { createTerminalToolkit } = await import("../../../../src/extensions/terminal/main/tools")
   const service = new TerminalService()
@@ -59,17 +61,18 @@ async function boot() {
       context: { sessionId: "outcome", cwd: logRoot },
     })
   }
-  const id = (await call<{ id: number }>("create", { cwd: logRoot })).id
+  const creating = call<{ id: number }>("create", { cwd: logRoot })
   emit?.(OSC.prompt)
+  const id = (await creating).id
   await new Promise((resolve) => setTimeout(resolve, 50))
   return { service, call, id }
 }
 
 const runCommand = async (
-  call: <T>(name: string, input: Record<string, unknown>) => Promise<T>,
+  call: ToolkitCall,
   id: number,
   exitCode: string,
-) => {
+): Promise<{ status: string }> => {
   const pending = call<{ status: string }>("write", {
     id,
     input: "some command",
@@ -174,7 +177,7 @@ describe("waiting only happens when a finish signal can actually arrive", () => 
         context: { sessionId: "silent", cwd: logRoot },
       })
     }
-    const id = (await call<{ id: number }>("create", { cwd: logRoot })).id
+    const id = service.create("silent", { cwd: logRoot })
     const startedAt = Date.now()
 
     await call("write", { id, input: "echo hi", submit: true, timeout: 8, idle: 1 })
@@ -200,7 +203,7 @@ describe("a terminal whose shell has exited leaves the list", () => {
   it("still answers the write whose own command ended the shell", async () => {
     const { service, call, id } = await boot()
 
-    const pending = call<{ snapshot: { screen: string } }>("write", {
+    const pending = call<{ status: string; snapshot: { screen: string } }>("write", {
       id,
       input: "exit",
       submit: true,
@@ -211,7 +214,9 @@ describe("a terminal whose shell has exited leaves the list", () => {
     emit?.(`${OSC.started}goodbye\r\n`)
     fireExit?.({ exitCode: 0 })
 
-    expect((await pending).snapshot.screen).toContain("goodbye")
+    const result = await pending
+    expect(result.status).toBe("terminal exited before a shell integration command finish event")
+    expect(result.snapshot.screen).toContain("goodbye")
     await new Promise((resolve) => setTimeout(resolve, 400))
     expect(await call<unknown[]>("list", {})).toHaveLength(0)
     await service.destroy()

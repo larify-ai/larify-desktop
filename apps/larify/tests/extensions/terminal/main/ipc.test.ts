@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import type { SessionTerminalsState, TerminalCreateOptions } from "../../../../src/extensions/terminal/shared/types"
+import type { SessionTerminalsState } from "../../../../src/extensions/terminal/shared/types"
 
 const electronMock = vi.hoisted(() => {
   const handlers = new Map<string, (...args: unknown[]) => unknown>()
@@ -7,6 +7,7 @@ const electronMock = vi.hoisted(() => {
   const window = {
     isDestroyed: vi.fn(() => false),
     webContents: {
+      isDestroyed: vi.fn(() => false),
       send: vi.fn((channel: string, payload: unknown) => sends.push({ channel, payload })),
     },
   }
@@ -22,23 +23,21 @@ const electronMock = vi.hoisted(() => {
         handlers.delete(channel)
       }),
     },
-    BrowserWindow: {
-      getAllWindows: vi.fn(() => [window]),
-    },
   }
 })
 
 vi.mock("electron", () => ({
-  BrowserWindow: electronMock.BrowserWindow,
   ipcMain: electronMock.ipcMain,
 }))
 
-async function importIpc() {
+async function importIpc(): Promise<
+  typeof import("../../../../src/extensions/terminal/main/ipc")
+> {
   return import("../../../../src/extensions/terminal/main/ipc")
 }
 
 class FakeTerminalService {
-  create = vi.fn((_sessionId: string, _opts?: TerminalCreateOptions) => 7)
+  create = vi.fn(() => 7)
   write = vi.fn()
   resize = vi.fn()
   close = vi.fn()
@@ -102,8 +101,10 @@ beforeEach(() => {
   electronMock.sends.length = 0
   electronMock.ipcMain.handle.mockClear()
   electronMock.ipcMain.removeHandler.mockClear()
-  electronMock.BrowserWindow.getAllWindows.mockClear()
-  electronMock.window.isDestroyed.mockClear()
+  electronMock.window.isDestroyed.mockReset()
+  electronMock.window.isDestroyed.mockReturnValue(false)
+  electronMock.window.webContents.isDestroyed.mockReset()
+  electronMock.window.webContents.isDestroyed.mockReturnValue(false)
   electronMock.window.webContents.send.mockClear()
 })
 
@@ -112,7 +113,7 @@ describe("registerTerminalIpc", () => {
     const { registerTerminalIpc } = await importIpc()
     const service = new FakeTerminalService()
 
-    registerTerminalIpc(service as never)
+    registerTerminalIpc(service as never, electronMock.window as never)
 
     expect(electronMock.ipcMain.handle).toHaveBeenCalledTimes(9)
     expect(electronMock.handlers.get("terminal:create")?.({}, "session-1", { title: "Shell", cwd: "/tmp" })).toBe(7)
@@ -149,7 +150,7 @@ describe("registerTerminalIpc", () => {
   it("drops renderer-supplied shell, args, and env when creating a terminal", async () => {
     const { registerTerminalIpc } = await importIpc()
     const service = new FakeTerminalService()
-    registerTerminalIpc(service as never)
+    registerTerminalIpc(service as never, electronMock.window as never)
 
     electronMock.handlers.get("terminal:create")?.({}, "session-1", {
       cwd: "/tmp",
@@ -172,7 +173,7 @@ describe("registerTerminalIpc", () => {
   it("sends state events to renderer windows", async () => {
     const { registerTerminalIpc } = await importIpc()
     const service = new FakeTerminalService()
-    registerTerminalIpc(service as never)
+    registerTerminalIpc(service as never, electronMock.window as never)
 
     service.emitChange({ sessionId: "session-1", terminals: [], activeId: null })
 
@@ -181,11 +182,33 @@ describe("registerTerminalIpc", () => {
     ])
   })
 
+  it("does not send events after the main window is destroyed", async () => {
+    const { registerTerminalIpc } = await importIpc()
+    const service = new FakeTerminalService()
+    registerTerminalIpc(service as never, electronMock.window as never)
+    electronMock.window.isDestroyed.mockReturnValue(true)
+
+    service.emitChange({ sessionId: "session-1", terminals: [], activeId: null })
+
+    expect(electronMock.sends).toEqual([])
+  })
+
+  it("does not send events after the renderer web contents is destroyed", async () => {
+    const { registerTerminalIpc } = await importIpc()
+    const service = new FakeTerminalService()
+    registerTerminalIpc(service as never, electronMock.window as never)
+    electronMock.window.webContents.isDestroyed.mockReturnValue(true)
+
+    service.emitChange({ sessionId: "session-1", terminals: [], activeId: null })
+
+    expect(electronMock.sends).toEqual([])
+  })
+
   it("batches data events before sending them to the renderer", async () => {
     vi.useFakeTimers()
     const { registerTerminalIpc } = await importIpc()
     const service = new FakeTerminalService()
-    registerTerminalIpc(service as never)
+    registerTerminalIpc(service as never, electronMock.window as never)
 
     service.emitData("session-1", 7, "a", 5, 6)
     service.emitData("session-1", 7, "b", 6, 7)
@@ -206,7 +229,7 @@ describe("registerTerminalIpc", () => {
     vi.useFakeTimers()
     const { registerTerminalIpc } = await importIpc()
     const service = new FakeTerminalService()
-    registerTerminalIpc(service as never)
+    registerTerminalIpc(service as never, electronMock.window as never)
 
     service.emitData("session-1", 7, "pending")
     service.emitExit("session-1", 7, 0)
@@ -231,7 +254,7 @@ describe("registerTerminalIpc", () => {
     vi.useFakeTimers()
     const { registerTerminalIpc } = await importIpc()
     const service = new FakeTerminalService()
-    registerTerminalIpc(service as never)
+    registerTerminalIpc(service as never, electronMock.window as never)
 
     service.emitData("session-1", 7, "pending", 0, 7)
     await electronMock.handlers.get("terminal:destroySession")?.({}, "session-1")
@@ -253,7 +276,7 @@ describe("registerTerminalIpc", () => {
   it("unbinds service listeners and removes handlers on dispose", async () => {
     const { registerTerminalIpc } = await importIpc()
     const service = new FakeTerminalService()
-    const dispose = registerTerminalIpc(service as never)
+    const dispose = registerTerminalIpc(service as never, electronMock.window as never)
 
     dispose()
 

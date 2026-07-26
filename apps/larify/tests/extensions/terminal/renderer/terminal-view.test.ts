@@ -15,6 +15,7 @@ const fitMocks: Array<ReturnType<typeof vi.fn>> = []
 const terminalMocks: Array<{
   dispose: ReturnType<typeof vi.fn>
   focus: ReturnType<typeof vi.fn>
+  onData: ReturnType<typeof vi.fn>
   onResize: ReturnType<typeof vi.fn>
   resize: ReturnType<typeof vi.fn>
   write: ReturnType<typeof vi.fn>
@@ -61,6 +62,7 @@ vi.mock("@xterm/xterm", () => ({
       terminalMocks.push({
         dispose: this.dispose,
         focus: this.focus,
+        onData: this.onData,
         onResize: this.onResize,
         resize: this.resize,
         write: this.write,
@@ -204,6 +206,38 @@ describe("TerminalView", () => {
     expect(container.querySelector('[data-testid="tabs"]')?.textContent).toBe("B")
   })
 
+  it("stops forwarding input as soon as the terminal exit event arrives", async () => {
+    const { TerminalView } = await import("../../../../src/extensions/terminal/renderer/terminal-view")
+
+    setAgentSessionId("session-a")
+    await act(async () => {
+      root.render(createElement(TerminalView))
+    })
+    await act(async () => {
+      stateRequests["session-a"].resolve({
+        sessionId: "session-a",
+        activeId: 1,
+        terminals: [{ id: 1, pid: 10, title: "A", cwd: "/", shell: "sh", exitCode: null }],
+      })
+    })
+
+    const input = terminalMocks[0].onData.mock.calls[0][0] as (data: string) => void
+    const invoke = vi.mocked(window.bridge.invoke)
+    invoke.mockClear()
+
+    await act(async () => {
+      listeners["terminal:exit"]({
+        sessionId: "session-a",
+        terminalId: 1,
+        exitCode: 0,
+      })
+      input("ignored")
+    })
+
+    expect(invoke).not.toHaveBeenCalledWith("terminal:write", "session-a", 1, "ignored")
+    expect(terminalMocks[0].write).toHaveBeenCalledWith("\r\n[process exited: 0]\r\n")
+  })
+
   it("keeps terminal entries mounted when switching sessions", async () => {
     const { TerminalView } = await import("../../../../src/extensions/terminal/renderer/terminal-view")
 
@@ -249,6 +283,114 @@ describe("TerminalView", () => {
     expect(firstTerminal.dispose).not.toHaveBeenCalled()
     expect(terminalMocks).toHaveLength(2)
     expect(container.querySelector('[data-testid="tabs"]')?.textContent).toBe("A")
+    expect(
+      vi.mocked(window.bridge.on).mock.calls.filter(([channel]) => channel === "terminal:data"),
+    ).toHaveLength(1)
+  })
+
+  it("disposes removed terminal entries from a background session", async () => {
+    const { TerminalView } = await import("../../../../src/extensions/terminal/renderer/terminal-view")
+
+    setAgentSessionId("session-a")
+    await act(async () => {
+      root.render(createElement(TerminalView))
+    })
+    await act(async () => {
+      stateRequests["session-a"].resolve({
+        sessionId: "session-a",
+        activeId: 1,
+        terminals: [{ id: 1, pid: 10, title: "A", cwd: "/", shell: "sh", exitCode: null }],
+      })
+    })
+
+    const firstTerminal = terminalMocks[0]
+
+    await act(async () => {
+      setAgentSessionId("session-b")
+    })
+    await act(async () => {
+      stateRequests["session-b"].resolve({
+        sessionId: "session-b",
+        activeId: 2,
+        terminals: [{ id: 2, pid: 20, title: "B", cwd: "/", shell: "sh", exitCode: null }],
+      })
+    })
+    await act(async () => {
+      listeners["terminal:state"]?.({
+        sessionId: "session-a",
+        activeId: null,
+        terminals: [],
+      })
+    })
+
+    expect(firstTerminal.dispose).toHaveBeenCalledTimes(1)
+    expect(terminalMocks[1].dispose).not.toHaveBeenCalled()
+  })
+
+  it("does not apply the previous session state while the next session is loading", async () => {
+    const { TerminalView } = await import("../../../../src/extensions/terminal/renderer/terminal-view")
+
+    setAgentSessionId("session-a")
+    await act(async () => {
+      root.render(createElement(TerminalView))
+    })
+    await act(async () => {
+      stateRequests["session-a"].resolve({
+        sessionId: "session-a",
+        activeId: 1,
+        terminals: [{ id: 1, pid: 10, title: "A", cwd: "/", shell: "sh", exitCode: null }],
+      })
+    })
+
+    await act(async () => {
+      setAgentSessionId("session-b")
+    })
+
+    expect(container.querySelector('[data-testid="tabs"]')?.textContent).toBe("")
+    expect(terminalMocks).toHaveLength(1)
+  })
+
+  it("does not resize a terminal closed before its deferred initial fit", async () => {
+    const { TerminalView } = await import("../../../../src/extensions/terminal/renderer/terminal-view")
+    const frames: FrameRequestCallback[] = []
+    Object.defineProperty(window, "requestAnimationFrame", {
+      configurable: true,
+      value: (callback: FrameRequestCallback) => {
+        frames.push(callback)
+        return frames.length
+      },
+    })
+
+    setAgentSessionId("session-1")
+    await act(async () => {
+      root.render(createElement(TerminalView))
+    })
+    await act(async () => {
+      stateRequests["session-1"].resolve({
+        sessionId: "session-1",
+        activeId: 1,
+        terminals: [{ id: 1, pid: 10, title: "A", cwd: "/", shell: "sh", exitCode: null }],
+      })
+    })
+    await act(async () => {
+      listeners["terminal:state"]?.({
+        sessionId: "session-1",
+        activeId: null,
+        terminals: [],
+      })
+    })
+
+    await act(async () => {
+      for (const frame of frames) frame(0)
+    })
+
+    expect(window.bridge.invoke).not.toHaveBeenCalledWith(
+      "terminal:resize",
+      "session-1",
+      1,
+      expect.any(Number),
+      expect.any(Number),
+    )
   })
 
   it("disposes stale entries when the loaded terminal state is empty", async () => {
@@ -469,6 +611,7 @@ describe("TerminalView", () => {
 
     expect(window.bridge.invoke).toHaveBeenCalledWith("terminal:snapshot", "session-live", 1)
     expect(window.bridge.invoke).not.toHaveBeenCalledWith("terminal:attach", "session-live", 1)
+    expect(terminalMocks[0].resize).toHaveBeenCalledWith(80, 24)
     expect(terminalMocks[0].write.mock.calls.map((call) => call[0])).toEqual(["snapshot", "live"])
   })
 
@@ -515,6 +658,58 @@ describe("TerminalView", () => {
     })
 
     expect(terminalMocks[0].write.mock.calls.map((call) => call[0])).toEqual(["snapshot", "live"])
+  })
+
+  it("ignores a stale snapshot after a same-session terminal id is reused", async () => {
+    const firstSnapshot = deferred<unknown>()
+    vi.mocked(window.bridge.invoke).mockImplementation((channel: string, sessionId: string) => {
+      if (channel === "terminal:getState") {
+        stateRequests[sessionId] = deferred()
+        return stateRequests[sessionId].promise
+      }
+      if (channel === "terminal:snapshot") {
+        return terminalMocks.length === 1
+          ? firstSnapshot.promise
+          : Promise.resolve({ data: "new", cols: 80, rows: 24, seq: 3 })
+      }
+      return Promise.resolve()
+    })
+    const { TerminalView } = await import("../../../../src/extensions/terminal/renderer/terminal-view")
+
+    setAgentSessionId("session-reused-id")
+    await act(async () => {
+      root.render(createElement(TerminalView))
+    })
+    await act(async () => {
+      stateRequests["session-reused-id"].resolve({
+        sessionId: "session-reused-id",
+        activeId: 1,
+        terminals: [{ id: 1, pid: 10, title: "OLD", cwd: "/", shell: "sh", exitCode: null }],
+      })
+    })
+    await act(async () => {
+      listeners["terminal:state"]?.({
+        sessionId: "session-reused-id",
+        activeId: null,
+        terminals: [],
+      })
+    })
+    await act(async () => {
+      listeners["terminal:state"]?.({
+        sessionId: "session-reused-id",
+        activeId: 1,
+        terminals: [{ id: 1, pid: 20, title: "NEW", cwd: "/", shell: "sh", exitCode: null }],
+      })
+    })
+    await act(async () => {
+      firstSnapshot.resolve({ data: "stale", cols: 120, rows: 40, seq: 5 })
+    })
+
+    expect(terminalMocks).toHaveLength(2)
+    expect(terminalMocks[0].dispose).toHaveBeenCalled()
+    expect(terminalMocks[0].write).not.toHaveBeenCalled()
+    expect(terminalMocks[0].resize).not.toHaveBeenCalledWith(120, 40)
+    expect(terminalMocks[1].write).toHaveBeenCalledWith("new", expect.any(Function))
   })
 
   it("applies live output even when the snapshot restore returns null", async () => {

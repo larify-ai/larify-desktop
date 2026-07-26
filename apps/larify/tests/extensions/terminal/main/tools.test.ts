@@ -7,6 +7,7 @@ const ctx = { context: { sessionId: "session-1", cwd: "D:\\Workspace" } }
 
 function createService(): TerminalService {
   return {
+    createReady: vi.fn(),
     terminalState: vi.fn(),
     startRun: vi.fn(),
     write: vi.fn(),
@@ -21,7 +22,16 @@ function createService(): TerminalService {
   } as unknown as TerminalService
 }
 
-function tool(name: string, service: TerminalService) {
+function tool(
+  name: string,
+  service: TerminalService,
+): {
+  inputSchema: z.ZodTypeAny
+  execute: (
+    input: unknown,
+    options: { context: { sessionId: string; cwd: string } },
+  ) => Promise<unknown>
+} {
   const found = createTerminalToolkit(service).tools[name]
   if (!found) throw new Error(`Tool ${name} not found`)
   const inputSchema = found.inputSchema as unknown as z.ZodTypeAny
@@ -33,7 +43,11 @@ function tool(name: string, service: TerminalService) {
   }
 }
 
-function parseToolInput(name: string, input: unknown, service = createService()) {
+function parseToolInput(
+  name: string,
+  input: unknown,
+  service = createService(),
+): ReturnType<z.ZodTypeAny["safeParse"]> {
   return tool(name, service).inputSchema.safeParse(input)
 }
 
@@ -45,6 +59,78 @@ describe("terminal schemas", () => {
     expect(parseToolInput("write", { id: 1, input: "echo hi", shell: "cmd.exe" }).success).toBe(false)
     expect(parseToolInput("write", { id: 1, input: "\u001b[B", shell: "cmd.exe" }).success).toBe(false)
     expect(parseToolInput("read", { id: 1, shell: "cmd.exe" }).success).toBe(false)
+  })
+})
+
+describe("create", () => {
+  it("waits for an agent terminal to be ready", async () => {
+    const service = createService()
+    vi.mocked(service.createReady).mockResolvedValue(1)
+    vi.mocked(service.terminalState).mockReturnValue({
+      id: 1,
+      pid: 100,
+      title: "powershell",
+      cwd: "D:\\Workspace",
+      shell: "powershell.exe",
+      shellIntegration: true,
+      exitCode: null,
+    })
+
+    await expect(tool("create", service).execute({}, ctx)).resolves.toMatchObject({ id: 1 })
+    expect(service.createReady).toHaveBeenCalledWith(
+      "session-1",
+      { cwd: "D:\\Workspace" },
+      undefined,
+    )
+  })
+
+  it("prefers an explicitly supplied working directory", async () => {
+    const service = createService()
+    vi.mocked(service.createReady).mockResolvedValue(1)
+    vi.mocked(service.terminalState).mockReturnValue({
+      id: 1,
+      pid: 100,
+      title: "powershell",
+      cwd: "D:\\Other",
+      shell: "powershell.exe",
+      exitCode: null,
+    })
+
+    await tool("create", service).execute({ cwd: "D:\\Other" }, ctx)
+
+    expect(service.createReady).toHaveBeenCalledWith(
+      "session-1",
+      { cwd: "D:\\Other" },
+      undefined,
+    )
+  })
+
+  it("reports when the shell exits during startup", async () => {
+    const service = createService()
+    vi.mocked(service.createReady).mockResolvedValue(1)
+    vi.mocked(service.terminalState).mockReturnValue(null)
+
+    await expect(tool("create", service).execute({}, ctx)).rejects.toThrow(
+      'Terminal "1" exited during startup.',
+    )
+  })
+
+  it("reports when the created terminal is already exited", async () => {
+    const service = createService()
+    vi.mocked(service.createReady).mockResolvedValue(1)
+    vi.mocked(service.terminalState).mockReturnValue({
+      id: 1,
+      pid: 100,
+      title: "powershell",
+      cwd: "D:\\Workspace",
+      shell: "powershell.exe",
+      shellIntegration: false,
+      exitCode: 1,
+    })
+
+    await expect(tool("create", service).execute({}, ctx)).rejects.toThrow(
+      'Terminal "1" exited during startup.',
+    )
   })
 })
 
@@ -436,7 +522,41 @@ describe("write", () => {
     ).resolves.toMatchObject({ status: "shell integration command finish event received" })
   })
 
-  it("resolves when a running command ends by the terminal exiting with no shell-integration 'D'", async () => {
+  it("unbinds command listeners when starting the run fails", async () => {
+    const service = createService()
+    const unbindFinished = vi.fn()
+    const unbindStarted = vi.fn()
+    const unbindData = vi.fn()
+    const unbindExit = vi.fn()
+    vi.mocked(service.terminalState).mockReturnValue({
+      id: 1,
+      pid: 100,
+      title: "powershell",
+      cwd: "D:\\Workspace",
+      shell: "powershell.exe",
+      shellIntegration: true,
+      exitCode: null,
+    })
+    vi.mocked(service.bindCommandFinished).mockReturnValue(unbindFinished)
+    vi.mocked(service.bindCommandStarted).mockReturnValue(unbindStarted)
+    vi.mocked(service.bindData).mockReturnValue(unbindData)
+    vi.mocked(service.bindExit).mockReturnValue(unbindExit)
+    vi.mocked(service.startRun).mockResolvedValue(null)
+
+    await expect(
+      tool("write", service).execute(
+        { id: 1, input: "echo done", submit: true, timeout: 300 },
+        ctx,
+      ),
+    ).rejects.toThrow('Terminal "1" not found.')
+
+    expect(unbindFinished).toHaveBeenCalledOnce()
+    expect(unbindStarted).toHaveBeenCalledOnce()
+    expect(unbindData).toHaveBeenCalledOnce()
+    expect(unbindExit).toHaveBeenCalledOnce()
+  })
+
+  it("reports when a running command ends by terminal exit without shell-integration 'D'", async () => {
     const service = createService()
     let exit: ((sessionId: string, terminalId: number) => void) | undefined
     vi.mocked(service.terminalState).mockReturnValue({
@@ -460,7 +580,10 @@ describe("write", () => {
 
     await expect(
       tool("write", service).execute({ id: 1, input: "exit", submit: true, timeout: 300 }, ctx),
-    ).resolves.toMatchObject({ status: "shell integration command finish event received", snapshot: { screen: "done" } })
+    ).resolves.toMatchObject({
+      status: "terminal exited before a shell integration command finish event",
+      snapshot: { screen: "done" },
+    })
     expect(service.bindExit).toHaveBeenCalled()
   })
 
@@ -548,6 +671,32 @@ describe("read", () => {
     expect(service.agentSnapshot).toHaveBeenCalledWith("session-1", 1)
   })
 
+  it("stops idle waiting when the terminal exits", async () => {
+    const service = createService()
+    let exit: ((sessionId: string, terminalId: number) => void) | undefined
+    const unbindExit = vi.fn()
+    vi.mocked(service.terminalState).mockReturnValue({
+      id: 1,
+      pid: 100,
+      title: "powershell",
+      cwd: "D:\\Workspace",
+      shell: "powershell.exe",
+      exitCode: null,
+    })
+    vi.mocked(service.bindExit).mockImplementation((callback) => {
+      exit = callback
+      return unbindExit
+    })
+    vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: "done" })
+
+    const reading = tool("read", service).execute({ id: 1, timeout: 300, idle: 30 }, ctx)
+    await vi.waitFor(() => expect(exit).toBeTypeOf("function"))
+    exit?.("session-1", 1)
+
+    await expect(reading).resolves.toMatchObject({ snapshot: { screen: "done" } })
+    expect(unbindExit).toHaveBeenCalledOnce()
+  })
+
   it("returns log_path when terminal history was written", async () => {
     const service = createService()
     vi.mocked(service.terminalState).mockReturnValue({
@@ -613,5 +762,35 @@ describe("read", () => {
       snapshot: { screen: "done" },
     })
     expect(service.bindCommandFinished).toHaveBeenCalled()
+  })
+
+  it("does not report an old finish event after another command has started", async () => {
+    vi.useFakeTimers()
+    const service = createService()
+    let commandFinished: ((sessionId: string, terminalId: number) => void) | undefined
+    vi.mocked(service.terminalState).mockReturnValue({
+      id: 1,
+      pid: 100,
+      title: "powershell",
+      cwd: "D:\\Workspace",
+      shell: "powershell.exe",
+      shellIntegration: true,
+      commandRunning: true,
+      exitCode: null,
+    })
+    vi.mocked(service.bindCommandFinished).mockImplementation((callback) => {
+      commandFinished = callback
+      return () => {}
+    })
+    vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: "next command" })
+
+    const reading = tool("read", service).execute({ id: 1, timeout: 30, idle: 0 }, ctx)
+    commandFinished?.("session-1", 1, {})
+    await vi.advanceTimersByTimeAsync(1000)
+
+    await expect(reading).resolves.toMatchObject({
+      status: "command may still be running or waiting for input",
+    })
+    vi.useRealTimers()
   })
 })

@@ -45,7 +45,7 @@ async function boot() {
       abortSignal: signal,
     })
   }
-  const id = (await call<{ id: number }>("create", { cwd: logRoot })).id
+  const id = service.create("abort", { cwd: logRoot })
   return { service, call, id }
 }
 

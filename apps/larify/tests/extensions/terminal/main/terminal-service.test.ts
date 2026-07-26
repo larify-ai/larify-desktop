@@ -1,6 +1,6 @@
-import { mkdirSync, rmSync } from "node:fs"
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest"
 import type { SessionTerminalsState, TerminalCreateOptions } from "../../../../src/extensions/terminal/shared/types"
 
@@ -8,6 +8,7 @@ const workspace = join(tmpdir(), "larify-terminal-service-workspace")
 const existingCwd = join(tmpdir(), "larify-terminal-service-existing")
 const managers: FakeManager[] = []
 const whichSync = vi.fn()
+const waitForShellIntegrationMock = vi.fn(() => Promise.resolve(true))
 const originalShell = process.env.SHELL
 
 vi.mock("which", () => ({
@@ -41,6 +42,7 @@ vi.mock("../../../../src/main/utils/app-paths", () => ({
 
 class FakeManager {
   readonly sessionId: string
+  exitCode: number | null = null
   create = vi.fn(() => 1)
   write = vi.fn()
   withWriterLock = vi.fn((_terminalId: number, fn: () => Promise<unknown>) => fn())
@@ -50,6 +52,7 @@ class FakeManager {
   reorder = vi.fn()
   snapshot = vi.fn(() => "snapshot")
   destroy = vi.fn()
+  waitForShellIntegration = waitForShellIntegrationMock
   private changeCallbacks = new Set<(state: SessionTerminalsState) => void>()
   private dataCallbacks = new Set<(terminalId: number, data: string, start: number, end: number) => void>()
   private exitCallbacks = new Set<(terminalId: number, exitCode: number) => void>()
@@ -90,6 +93,26 @@ class FakeManager {
     return { sessionId: this.sessionId, terminals: [], activeId: null }
   }
 
+  terminalState(terminalId: number): {
+    id: number
+    pid: number
+    title: string
+    cwd: string
+    shell: string
+    exitCode: number | null
+  } | null {
+    const options = this.create.mock.calls.at(-1)?.[0]
+    if (!options) return null
+    return {
+      id: terminalId,
+      pid: 1000 + terminalId,
+      title: options.title ?? "Terminal",
+      cwd: options.cwd ?? existingCwd,
+      shell: options.shell ?? "sh",
+      exitCode: this.exitCode,
+    }
+  }
+
   emitChange(): void {
     for (const callback of this.changeCallbacks) callback(this.state())
   }
@@ -117,6 +140,8 @@ async function importService(): Promise<
 beforeEach(() => {
   managers.length = 0
   whichSync.mockReset()
+  waitForShellIntegrationMock.mockReset()
+  waitForShellIntegrationMock.mockResolvedValue(true)
   process.env.SHELL = originalShell
   rmSync(workspace, { force: true, recursive: true })
   mkdirSync(existingCwd, { recursive: true })
@@ -163,6 +188,17 @@ describe("TerminalService", () => {
     expect(() =>
       service.create("session-1", { cwd: join(tmpdir(), "larify-cwd-does-not-exist-xyz") }),
     ).toThrow("Working directory does not exist")
+  })
+
+  it("rejects an existing file as the working directory", async () => {
+    const file = join(existingCwd, "not-a-directory")
+    writeFileSync(file, "")
+    const { TerminalService } = await importService()
+    const service = new TerminalService()
+
+    expect(() => service.create("session-1", { cwd: file })).toThrow(
+      "Working directory is not a directory",
+    )
   })
 
   it("does not resurrect a manager for operations after the session is destroyed", async () => {
@@ -261,6 +297,92 @@ describe("TerminalService", () => {
         VSCODE_NONCE: expect.any(String),
       }),
     }))
+  })
+
+  it("reuses and removes copied shell integration resources", async () => {
+    const { TerminalService } = await importService()
+    const service = new TerminalService()
+
+    service.create("session-1", { shell: "/bin/bash", cwd: existingCwd })
+    service.create("session-1", { shell: "/bin/bash", cwd: existingCwd })
+
+    const firstPath = managers[0].create.mock.calls[0][0].shellArgs?.[1]
+    const secondPath = managers[0].create.mock.calls[1][0].shellArgs?.[1]
+    expect(firstPath).toBe(secondPath)
+    expect(firstPath && existsSync(firstPath)).toBe(true)
+
+    await service.destroy()
+
+    expect(firstPath && existsSync(dirname(firstPath))).toBe(false)
+  })
+
+  it("removes copied shell integration resources when manager destruction fails", async () => {
+    const { TerminalService } = await importService()
+    const service = new TerminalService()
+
+    service.create("session-1", { shell: "/bin/bash", cwd: existingCwd })
+    const scriptPath = managers[0].create.mock.calls[0][0].shellArgs?.[1]
+    managers[0].destroy.mockRejectedValue(new Error("destroy failed"))
+
+    await expect(service.destroy()).rejects.toThrow("destroy failed")
+    expect(scriptPath && existsSync(dirname(scriptPath))).toBe(false)
+  })
+
+  it("closes a newly created terminal when readiness is aborted", async () => {
+    const controller = new AbortController()
+    waitForShellIntegrationMock.mockImplementation(
+      (_id: number, _timeout: number, signal?: AbortSignal) =>
+        new Promise<boolean>((resolve) => {
+          signal?.addEventListener("abort", () => resolve(false), { once: true })
+        }),
+    )
+    const { TerminalService } = await importService()
+    const service = new TerminalService()
+
+    const creating = service.createReady(
+      "session-1",
+      { shell: "/bin/bash", cwd: existingCwd },
+      controller.signal,
+    )
+    await vi.waitFor(() => expect(managers).toHaveLength(1))
+    controller.abort()
+
+    await expect(creating).rejects.toMatchObject({ name: "AbortError" })
+    expect(managers[0].close).toHaveBeenCalledWith(1)
+  })
+
+  it("closes a newly created terminal when readiness fails", async () => {
+    waitForShellIntegrationMock.mockRejectedValue(new Error("readiness failed"))
+    const { TerminalService } = await importService()
+    const service = new TerminalService()
+
+    await expect(
+      service.createReady("session-1", { shell: "/bin/bash", cwd: existingCwd }),
+    ).rejects.toThrow("readiness failed")
+    expect(managers[0].close).toHaveBeenCalledWith(1)
+  })
+
+  it("rejects a terminal that exits while shell integration is starting", async () => {
+    let finishReadiness!: (ready: boolean) => void
+    waitForShellIntegrationMock.mockImplementation(
+      () =>
+        new Promise<boolean>((resolve) => {
+          finishReadiness = resolve
+        }),
+    )
+    const { TerminalService } = await importService()
+    const service = new TerminalService()
+
+    const creating = service.createReady("session-1", {
+      shell: "/bin/bash",
+      cwd: existingCwd,
+    })
+    await vi.waitFor(() => expect(finishReadiness).toBeTypeOf("function"))
+    managers[0].exitCode = 1
+    finishReadiness(false)
+
+    await expect(creating).rejects.toThrow('Terminal "1" exited during startup.')
+    expect(managers[0].close).toHaveBeenCalledWith(1)
   })
 
   it("injects zsh shell integration through ZDOTDIR", async () => {

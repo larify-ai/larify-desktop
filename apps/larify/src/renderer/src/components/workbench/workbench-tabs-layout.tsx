@@ -24,7 +24,7 @@ export function WorkbenchTabsLayout({
   onSelect,
 }: WorkbenchTabsLayoutProps): React.JSX.Element {
   return (
-    <div className="flex h-full min-h-0 flex-col bg-background">
+    <div className="flex h-full min-h-0 flex-col bg-workbench-chrome">
       <WorkbenchTabs
         draggable={draggable}
         newLabel={newLabel}
@@ -34,7 +34,7 @@ export function WorkbenchTabsLayout({
         onReorder={onReorder}
         onSelect={onSelect}
       />
-      <div className="relative min-h-0 flex-1 overflow-hidden bg-background">{children}</div>
+      <div className="relative min-h-0 flex-1 overflow-hidden bg-workbench-content">{children}</div>
     </div>
   )
 }

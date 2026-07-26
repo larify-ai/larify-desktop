@@ -67,9 +67,12 @@ export class TerminalManager {
     terminal.bindExit((exitCode) => {
       for (const listener of this.exitListeners) listener(terminal.id, exitCode)
       void this.writerLock(String(terminal.id), async () => {
-        await this.finalizeRun(terminal.id)
-        this.forget(terminal.id)
-        this.emit()
+        try {
+          await this.finalizeRun(terminal.id)
+        } finally {
+          this.forget(terminal.id)
+          this.emit()
+        }
       })
         .catch(() => {})
         .finally(() => terminal.dispose())
@@ -197,6 +200,10 @@ export class TerminalManager {
     return this.terminals.get(id)?.state() ?? null
   }
 
+  waitForShellIntegration(id: number, timeoutMs: number, signal?: AbortSignal): Promise<boolean> {
+    return this.terminals.get(id)?.waitForShellIntegration(timeoutMs, signal) ?? Promise.resolve(false)
+  }
+
   private forget(id: number): void {
     const index = [...this.terminals.keys()].indexOf(id)
     if (index < 0) return
@@ -210,15 +217,19 @@ export class TerminalManager {
   }
 
   async close(id: number): Promise<void> {
-    await this.withWriterLock(id, async () => {
+    if (!this.terminals.has(id)) return
+    await this.writerLock(String(id), async () => {
       const terminal = this.terminals.get(id)
       if (!terminal) return
 
-      await this.finalizeRun(id)
-      terminal.close()
-      terminal.dispose()
-      this.forget(id)
-      this.emit()
+      try {
+        await this.finalizeRun(id)
+      } finally {
+        terminal.close()
+        terminal.dispose()
+        this.forget(id)
+        this.emit()
+      }
     })
   }
 
@@ -231,7 +242,9 @@ export class TerminalManager {
   }
 
   async destroy(): Promise<void> {
-    await Promise.all([...this.terminals.keys()].map((id) => this.finalizeRun(id)))
+    const results = await Promise.allSettled(
+      [...this.terminals.keys()].map((id) => this.finalizeRun(id))
+    )
     for (const terminal of this.terminals.values()) {
       terminal.kill()
       terminal.dispose()
@@ -240,6 +253,12 @@ export class TerminalManager {
     this.activeRuns.clear()
     this.activeId = null
     this.emit()
+
+    const failures = results
+      .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+      .map((result) => result.reason)
+    if (failures.length === 1) throw failures[0]
+    if (failures.length > 1) throw new AggregateError(failures, 'Failed to finalize terminal runs.')
   }
 
   private emit(): void {

@@ -1,7 +1,7 @@
 .larify-terminal-surface .xterm,
 .larify-terminal-surface .xterm-screen,
 .larify-terminal-surface .xterm-viewport {
-  background: var(--background) !important;
+  background: var(--workbench-content, var(--background)) !important;
 }
 
 .larify-terminal-surface .xterm {
@@ -19,6 +19,11 @@
   display: none;
   height: 0;
   width: 0;
+}
+
+.larify-terminal-surface .xterm-scrollable-element > .scrollbar.vertical,
+.larify-terminal-surface .xterm-scrollable-element > .scrollbar.vertical > .slider {
+  width: var(--larify-scrollbar-size) !important;
 }
 
 .larify-terminal-surface .xterm-scrollable-element > .scrollbar.horizontal {

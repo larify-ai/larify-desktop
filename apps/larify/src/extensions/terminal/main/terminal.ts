@@ -52,10 +52,12 @@ export class Terminal {
   private exited = false
   private pendingExit: number | null = null
   private exitTimer: NodeJS.Timeout | null = null
+  private forcedKillTimer: NodeJS.Timeout | null = null
   private dataListeners = new Set<Listener<[string, number, number]>>()
   private exitListeners = new Set<Listener<[number]>>()
   private commandFinishedListeners = new Set<Listener<[ShellCommandFinishedEvent]>>()
   private commandStartedListeners = new Set<Listener<[]>>()
+  private shellIntegrationListeners = new Set<Listener<[boolean]>>()
   private runStartMarker: IMarker | undefined
   private savedMarker: IMarker | undefined
 
@@ -104,6 +106,8 @@ export class Terminal {
       for (const listener of this.dataListeners) listener(data, start, end)
     })
     this.pty.onExit(({ exitCode }) => {
+      if (this.forcedKillTimer) clearTimeout(this.forcedKillTimer)
+      this.forcedKillTimer = null
       if (this.disposed) return
       this.pendingExit = exitCode
       this.scheduleExit()
@@ -124,6 +128,31 @@ export class Terminal {
 
   bindCommandStarted(callback: () => void): () => void {
     return addListener(this.commandStartedListeners, callback)
+  }
+
+  waitForShellIntegration(timeoutMs: number, signal?: AbortSignal): Promise<boolean> {
+    if (this.shellIntegrationSeen) return Promise.resolve(true)
+    if (this.disposed || signal?.aborted) return Promise.resolve(false)
+    return new Promise((resolve) => {
+      let settled = false
+      let unbindIntegration = (): void => {}
+      let unbindExit = (): void => {}
+      const finish = (ready: boolean): void => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        signal?.removeEventListener('abort', onAbort)
+        unbindIntegration()
+        unbindExit()
+        resolve(ready)
+      }
+      const onAbort = (): void => finish(false)
+      unbindIntegration = addListener(this.shellIntegrationListeners, finish)
+      unbindExit = addListener(this.exitListeners, () => finish(false))
+      const timer = setTimeout(() => finish(false), timeoutMs)
+      timer.unref()
+      signal?.addEventListener('abort', onAbort, { once: true })
+    })
   }
 
   async snapshot(): Promise<TerminalSnapshot> {
@@ -236,9 +265,11 @@ export class Terminal {
     try {
       this.pty.kill('SIGTERM')
     } catch {
+      this.kill()
       return
     }
-    setTimeout(() => {
+    this.forcedKillTimer = setTimeout(() => {
+      this.forcedKillTimer = null
       try {
         process.kill(pid, 0)
         this.pty.kill('SIGKILL')
@@ -250,6 +281,8 @@ export class Terminal {
 
   kill(): void {
     if (this.exitTimer) clearTimeout(this.exitTimer)
+    if (this.forcedKillTimer) clearTimeout(this.forcedKillTimer)
+    this.forcedKillTimer = null
     try {
       this.pty.kill()
     } catch {
@@ -276,6 +309,8 @@ export class Terminal {
     this.exitListeners.clear()
     this.commandFinishedListeners.clear()
     this.commandStartedListeners.clear()
+    for (const listener of this.shellIntegrationListeners) listener(false)
+    this.shellIntegrationListeners.clear()
     this.headless.dispose()
   }
 
@@ -325,7 +360,11 @@ export class Terminal {
   }
 
   private handleVSCodeShellIntegration(data: string): void {
-    this.shellIntegrationSeen = true
+    if (!this.shellIntegrationSeen) {
+      this.shellIntegrationSeen = true
+      for (const listener of this.shellIntegrationListeners) listener(true)
+      this.shellIntegrationListeners.clear()
+    }
     const [command, ...args] = data.split(';')
     if (command === 'C' || command === 'E') {
       const wasRunning = this.commandRunning

@@ -21,8 +21,8 @@ const fileToolkit: Toolkit = {
 }
 
 const extension: Extension = {
-  activate(app, context) {
-    context.subscriptions.push(app.register("tool", "file", fileToolkit))
+  activate(app) {
+    app.register("tool", "file", fileToolkit)
   },
 }
 

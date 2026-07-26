@@ -1,6 +1,6 @@
-import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import which from 'which'
 import { larifyTempPath, larifyWorkspacePath, resourcePath } from '../../../main/utils/app-paths'
@@ -33,6 +33,7 @@ const ZSH_INTEGRATION_SCRIPTS = [
   ['shell-integration/shellIntegration-rc.zsh', '.zshrc'],
   ['shell-integration/shellIntegration-login.zsh', '.zlogin']
 ] as const
+const SHELL_INTEGRATION_READY_TIMEOUT_MS = 10_000
 
 function shellCandidates(): string[] {
   if (process.platform === 'win32') {
@@ -64,7 +65,13 @@ function fallbackShell(): string {
 
 function resolveCwd(cwd?: string): string {
   if (cwd === undefined) return DEFAULT_WORKSPACE
-  if (!existsSync(cwd)) throw new Error(`Working directory does not exist: ${cwd}`)
+  let directory = false
+  try {
+    directory = statSync(cwd).isDirectory()
+  } catch {
+    throw new Error(`Working directory does not exist: ${cwd}`)
+  }
+  if (!directory) throw new Error(`Working directory is not a directory: ${cwd}`)
   return cwd
 }
 
@@ -95,64 +102,6 @@ function powerShellLiteral(value: string): string {
   return `'${value.replaceAll("'", "''")}'`
 }
 
-function bashIntegrationScript(): string {
-  const dir = createUniqueDir(larifyTempPath('shell-integration', 'bash'))
-  chmodSync(dir, 0o700)
-  const scriptPath = join(dir, 'shellIntegration-bash.sh')
-  writeIntegrationScript(BASH_INTEGRATION_SCRIPT, scriptPath)
-  return scriptPath
-}
-
-function zshIntegrationDir(): string {
-  const dir = createUniqueDir(larifyTempPath('shell-integration', 'zsh'))
-  chmodSync(dir, 0o1700)
-  for (const [source, target] of ZSH_INTEGRATION_SCRIPTS) {
-    writeIntegrationScript(source, join(dir, target))
-  }
-  return dir
-}
-
-function shellIntegrationOptions(shell: string): Pick<TerminalCreateOptions, 'shellArgs' | 'shellEnv'> {
-  if (isPowerShell(shell)) {
-    const integrationScript = resourcePath(POWERSHELL_INTEGRATION_SCRIPT)
-    return {
-      shellArgs: [
-        '-NoLogo',
-        '-ExecutionPolicy',
-        'Bypass',
-        '-NoExit',
-        '-Command',
-        `${POWERSHELL_UTF8_BOOTSTRAP}; . ${powerShellLiteral(integrationScript)}`
-      ],
-      shellEnv: {
-        VSCODE_NONCE: randomUUID(),
-        VSCODE_STABLE: '1'
-      }
-    }
-  }
-  if (isBash(shell)) {
-    return {
-      shellArgs: ['--init-file', bashIntegrationScript()],
-      shellEnv: {
-        VSCODE_INJECTION: '1',
-        VSCODE_NONCE: randomUUID()
-      }
-    }
-  }
-  if (isZsh(shell)) {
-    return {
-      shellArgs: ['-i'],
-      shellEnv: {
-        USER_ZDOTDIR: process.env.ZDOTDIR || homedir(),
-        VSCODE_INJECTION: '1',
-        VSCODE_NONCE: randomUUID(),
-        ZDOTDIR: zshIntegrationDir()
-      }
-    }
-  }
-  return {}
-}
-
 export class TerminalService {
   private readonly managers = new SessionScopedManagers(
     (sessionId) => this.createManager(sessionId),
@@ -163,6 +112,8 @@ export class TerminalService {
   private exitListeners = new Set<Listener<[string, number, number]>>()
   private commandFinishedListeners = new Set<Listener<[string, number, ShellCommandFinishedEvent]>>()
   private commandStartedListeners = new Set<Listener<[string, number]>>()
+  private bashIntegrationPath: string | undefined
+  private zshIntegrationPath: string | undefined
 
   bindChange(callback: (state: SessionTerminalsState) => void): () => void {
     return addListener(this.changeListeners, callback)
@@ -192,7 +143,7 @@ export class TerminalService {
 
   create(sessionId: string, opts?: TerminalCreateOptions): number {
     const shell = resolveShell(opts?.shell)
-    const integration = shellIntegrationOptions(shell)
+    const integration = this.shellIntegrationOptions(shell)
     return this.managers.get(sessionId).create({
       ...opts,
       shell,
@@ -201,6 +152,37 @@ export class TerminalService {
       shellArgs: [...(opts?.shellArgs ?? []), ...(integration.shellArgs ?? [])],
       shellEnv: { ...opts?.shellEnv, ...integration.shellEnv }
     })
+  }
+
+  async createReady(
+    sessionId: string,
+    opts?: TerminalCreateOptions,
+    signal?: AbortSignal
+  ): Promise<number> {
+    const terminalId = this.create(sessionId, opts)
+    try {
+      const state = this.terminalState(sessionId, terminalId)
+      if (state && isShellIntegrationSupported(state.shell)) {
+        await this.manager(sessionId)?.waitForShellIntegration(
+          terminalId,
+          SHELL_INTEGRATION_READY_TIMEOUT_MS,
+          signal
+        )
+      }
+    } catch (error) {
+      await this.close(sessionId, terminalId)
+      throw error
+    }
+    if (signal?.aborted) {
+      await this.close(sessionId, terminalId)
+      throw signal.reason instanceof Error ? signal.reason : new Error('Terminal creation was aborted.')
+    }
+    const readyState = this.terminalState(sessionId, terminalId)
+    if (!readyState || readyState.exitCode !== null) {
+      await this.close(sessionId, terminalId)
+      throw new Error(`Terminal "${terminalId}" exited during startup.`)
+    }
+    return terminalId
   }
 
   write(sessionId: string, terminalId: number, data: string): void {
@@ -258,11 +240,101 @@ export class TerminalService {
   }
 
   async destroy(): Promise<void> {
-    await this.managers.destroyAll()
+    try {
+      await this.managers.destroyAll()
+    } finally {
+      this.cleanupShellIntegration()
+    }
   }
 
   private manager(sessionId: string): TerminalManager | undefined {
     return this.managers.peek(sessionId)
+  }
+
+  private shellIntegrationOptions(
+    shell: string
+  ): Pick<TerminalCreateOptions, 'shellArgs' | 'shellEnv'> {
+    if (isPowerShell(shell)) {
+      const integrationScript = resourcePath(POWERSHELL_INTEGRATION_SCRIPT)
+      return {
+        shellArgs: [
+          '-NoLogo',
+          '-ExecutionPolicy',
+          'Bypass',
+          '-NoExit',
+          '-Command',
+          `${POWERSHELL_UTF8_BOOTSTRAP}; . ${powerShellLiteral(integrationScript)}`
+        ],
+        shellEnv: {
+          VSCODE_NONCE: randomUUID(),
+          VSCODE_STABLE: '1'
+        }
+      }
+    }
+    if (isBash(shell)) {
+      return {
+        shellArgs: ['--init-file', this.bashIntegrationScript()],
+        shellEnv: {
+          VSCODE_INJECTION: '1',
+          VSCODE_NONCE: randomUUID()
+        }
+      }
+    }
+    if (isZsh(shell)) {
+      return {
+        shellArgs: ['-i'],
+        shellEnv: {
+          USER_ZDOTDIR: process.env.ZDOTDIR || homedir(),
+          VSCODE_INJECTION: '1',
+          VSCODE_NONCE: randomUUID(),
+          ZDOTDIR: this.zshIntegrationDir()
+        }
+      }
+    }
+    return {}
+  }
+
+  private bashIntegrationScript(): string {
+    if (this.bashIntegrationPath) return this.bashIntegrationPath
+    const dir = createUniqueDir(larifyTempPath('shell-integration', 'bash'))
+    try {
+      chmodSync(dir, 0o700)
+      const scriptPath = join(dir, 'shellIntegration-bash.sh')
+      writeIntegrationScript(BASH_INTEGRATION_SCRIPT, scriptPath)
+      this.bashIntegrationPath = scriptPath
+      return scriptPath
+    } catch (error) {
+      rmSync(dir, { force: true, recursive: true })
+      throw error
+    }
+  }
+
+  private zshIntegrationDir(): string {
+    if (this.zshIntegrationPath) return this.zshIntegrationPath
+    const dir = createUniqueDir(larifyTempPath('shell-integration', 'zsh'))
+    try {
+      chmodSync(dir, 0o1700)
+      for (const [source, target] of ZSH_INTEGRATION_SCRIPTS) {
+        writeIntegrationScript(source, join(dir, target))
+      }
+      this.zshIntegrationPath = dir
+      return dir
+    } catch (error) {
+      rmSync(dir, { force: true, recursive: true })
+      throw error
+    }
+  }
+
+  private cleanupShellIntegration(): void {
+    const paths = [
+      this.bashIntegrationPath && dirname(this.bashIntegrationPath),
+      this.zshIntegrationPath
+    ]
+    this.bashIntegrationPath = undefined
+    this.zshIntegrationPath = undefined
+    for (const path of paths) {
+      if (path) rmSync(path, { force: true, recursive: true })
+    }
   }
 
   private createManager(sessionId: string): TerminalManager {

@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest"
+import type { TerminalService } from "../../../../src/extensions/terminal/main/terminal-service"
 
 const spawnMock = vi.fn()
 const logRoot = mkdtempSync(join(tmpdir(), "larify-cmdwait-"))
@@ -35,7 +36,9 @@ function createFakePty(): FakePty {
     onData(cb) {
       onData = cb
     },
-    onExit() {},
+    onExit(callback) {
+      void callback
+    },
     emit(data) {
       onData?.(data)
     },
@@ -60,7 +63,11 @@ afterAll(() => {
   rmSync(logRoot, { force: true, recursive: true })
 })
 
-async function makeToolkit() {
+async function makeToolkit(): Promise<{
+  service: TerminalService
+  call: <T>(name: string, input: Record<string, unknown>) => Promise<T>
+  id: number
+}> {
   const { TerminalService } = await import("../../../../src/extensions/terminal/main/terminal-service")
   const { createTerminalToolkit } = await import("../../../../src/extensions/terminal/main/tools")
   const service = new TerminalService()
@@ -76,8 +83,9 @@ async function makeToolkit() {
       abortSignal: undefined,
     })
   }
-  const id = (await call<{ id: number }>("create", { cwd: logRoot })).id
+  const creating = call<{ id: number }>("create", { cwd: logRoot })
   fakePty.emit(OSC.prompt)
+  const id = (await creating).id
   await new Promise((resolve) => setTimeout(resolve, 50))
   return { service, call, id }
 }

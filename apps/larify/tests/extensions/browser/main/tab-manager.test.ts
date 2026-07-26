@@ -276,6 +276,25 @@ describe("BrowserTabManager", () => {
     expect(manager.state().tabs).toEqual([])
   })
 
+  it("still closes a tab when stopping its recording fails", async () => {
+    const manager = new BrowserTabManager(fakeWindow())
+    const id = manager.createTab()
+    const tab = manager.get(id)!
+    const destroy = vi.spyOn(tab, "destroy")
+    ;(
+      manager as unknown as {
+        recorder: { stopIfRecordingTab: (tabId: number) => Promise<void> }
+      }
+    ).recorder.stopIfRecordingTab = vi.fn(async () => {
+      throw new Error("failed to write recording")
+    })
+
+    await expect(manager.close(id)).resolves.toBeUndefined()
+
+    expect(destroy).toHaveBeenCalledOnce()
+    expect(manager.state()).toEqual({ tabs: [], activeId: null })
+  })
+
   it("coalesces concurrent closes of the same tab", async () => {
     const manager = new BrowserTabManager(fakeWindow())
     const id = manager.createTab()

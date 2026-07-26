@@ -87,7 +87,7 @@ async function poll(
   for (;;) {
     if (signal?.aborted) throw abortError()
     try {
-      if (await check()) return
+      if (await waitForOperationOrAbort(check(), signal)) return
     } catch (error) {
       if (error instanceof EvaluationError || isTerminalCdpError(error)) throw error
     }

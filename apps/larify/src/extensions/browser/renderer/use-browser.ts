@@ -83,16 +83,12 @@ export function useBrowser(): UseBrowser {
     currentSessionIdRef.current = sessionId
     suppressAutoCreateRef.current = false
     clearStateLoadRetry()
-    setStateLoadRetry(null)
     ensureFailuresRef.current = 0
-    setEnsureRetry(0)
     loadedSessionIdRef.current = null
     stateRef.current = EMPTY
     closingTabIdsRef.current.clear()
     pendingCloseIdsRef.current.clear()
     closeDispatchedRef.current = false
-    setLoadedSessionId(null)
-    setState(EMPTY)
     const requestSequence = ++nextStateSequenceRef.current
     void window.bridge
       .invoke("browser:getState", sessionId)
@@ -243,7 +239,11 @@ export function useBrowser(): UseBrowser {
     [sessionId],
   )
 
-  const active = useMemo(() => state.tabs.find((tab) => tab.id === state.activeId) ?? null, [state])
+  const visibleState = loadedSessionId === sessionId ? state : EMPTY
+  const active = useMemo(
+    () => visibleState.tabs.find((tab) => tab.id === visibleState.activeId) ?? null,
+    [visibleState],
+  )
 
-  return { state, active, ...actions }
+  return { state: visibleState, active, ...actions }
 }

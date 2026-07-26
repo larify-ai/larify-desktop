@@ -22,9 +22,11 @@ export function BrowserViewport({ children, visible }: BrowserViewportProps): Re
   useEffect(() => {
     const element = ref.current
     if (!element) return
+    let frame: number | null = null
     void window.bridge.invoke("browser:setVisible", sessionId, false)
 
-    const report = (): void => {
+    const reportNow = (): void => {
+      frame = null
       const rect = element.getBoundingClientRect()
       setViewportHasSize(rect.width > 0 && rect.height > 0)
       void window.bridge.invoke("browser:setBounds", sessionId, {
@@ -35,11 +37,16 @@ export function BrowserViewport({ children, visible }: BrowserViewportProps): Re
       })
     }
 
-    report()
+    const report = (): void => {
+      if (frame === null) frame = requestAnimationFrame(reportNow)
+    }
+
+    reportNow()
     const observer = new ResizeObserver(report)
     observer.observe(element)
     window.addEventListener("resize", report)
     return () => {
+      if (frame !== null) cancelAnimationFrame(frame)
       observer.disconnect()
       window.removeEventListener("resize", report)
       void window.bridge.invoke("browser:setVisible", sessionId, false)
@@ -68,7 +75,7 @@ export function BrowserViewport({ children, visible }: BrowserViewportProps): Re
   }, [sessionId, visible, viewportHasSize, workbenchKnown, workbenchVisible])
 
   return (
-    <div ref={ref} className="relative min-h-0 flex-1 overflow-hidden bg-background">
+    <div ref={ref} className="relative min-h-0 flex-1 overflow-hidden bg-(--workbench-content)">
       {children}
     </div>
   )

@@ -69,6 +69,16 @@ describe("poll retries transient evaluation failures", () => {
     await expect(pending).rejects.toThrow("aborted")
   })
 
+  it("cancels while the current page evaluation is still pending", async () => {
+    const controller = new AbortController()
+    const send = vi.fn(() => new Promise<never>(() => {}))
+    const pending = waitForSelector(send as never, ".missing", "visible", 50_000, controller.signal)
+
+    controller.abort()
+
+    await expect(pending).rejects.toThrow("aborted")
+  })
+
   it("keeps polling when a page evaluation throws, then resolves once it succeeds", async () => {
     let calls = 0
     const send = vi.fn(async () => {

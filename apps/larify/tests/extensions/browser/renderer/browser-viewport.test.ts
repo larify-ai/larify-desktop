@@ -10,11 +10,20 @@ import { setAgentSessionId } from "../../../../src/renderer/src/lib/agent-sessio
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
 class FakeResizeObserver {
-  constructor(private readonly cb: ResizeObserverCallback) {}
+  static instance: FakeResizeObserver | null = null
+
+  constructor(private readonly cb: ResizeObserverCallback) {
+    FakeResizeObserver.instance = this
+  }
   observe(target: Element): void {
     this.cb([{ target } as ResizeObserverEntry], this as unknown as ResizeObserver)
   }
-  disconnect(): void {}
+  disconnect(): void {
+    if (FakeResizeObserver.instance === this) FakeResizeObserver.instance = null
+  }
+  notify(target: Element): void {
+    this.cb([{ target } as ResizeObserverEntry], this as unknown as ResizeObserver)
+  }
 }
 
 describe("BrowserViewport", () => {
@@ -53,6 +62,7 @@ describe("BrowserViewport", () => {
     await act(async () => root.unmount())
     container.remove()
     vi.restoreAllMocks()
+    FakeResizeObserver.instance = null
   })
 
   it("keeps the native browser view hidden until active workbench and bounds are known", async () => {
@@ -76,5 +86,23 @@ describe("BrowserViewport", () => {
       y: 40,
     })
     expect(invoke).toHaveBeenCalledWith("browser:setVisible", "session-a", true)
+  })
+
+  it("coalesces resize reports even when requestAnimationFrame returns zero", async () => {
+    const callbacks: FrameRequestCallback[] = []
+    const requestFrame = vi
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation((callback) => {
+        callbacks.push(callback)
+        return 0
+      })
+
+    await act(async () => root.render(createElement(BrowserViewport, { visible: true })))
+    const viewport = container.firstElementChild!
+    FakeResizeObserver.instance!.notify(viewport)
+    FakeResizeObserver.instance!.notify(viewport)
+
+    expect(requestFrame).toHaveBeenCalledOnce()
+    expect(callbacks).toHaveLength(1)
   })
 })

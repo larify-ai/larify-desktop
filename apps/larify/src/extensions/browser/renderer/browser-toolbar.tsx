@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import { ArrowLeftIcon, ArrowRightIcon, RotateCwIcon } from "lucide-react"
 import { Button } from "@renderer/components/ui/button"
 import { Input } from "@renderer/components/ui/input"
@@ -45,13 +45,21 @@ export function BrowserToolbar({
   onNavigate,
   onReload,
 }: BrowserToolbarProps): React.JSX.Element {
-  const [editing, setEditing] = useState<string | null>(null)
+  const [editing, setEditing] = useState<{ key: string; value: string } | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const navigationRevisionRef = useRef(0)
   const fullUrl = tab ? decodeForDisplay(tab.url) : ""
   const displayUrl = simplifyForDisplay(fullUrl)
   const editUrl = fullUrl.startsWith("file://") ? displayUrl : fullUrl
-  const value = editing ?? displayUrl
-  const isEditing = editing !== null
+  const tabKey = tab ? `${tab.id}:${tab.url}` : ""
+  const tabKeyRef = useRef(tabKey)
+  const isEditing = editing?.key === tabKey
+  const value = isEditing ? editing.value : displayUrl
+
+  useLayoutEffect(() => {
+    tabKeyRef.current = tabKey
+    navigationRevisionRef.current += 1
+  }, [tabKey])
 
   useEffect(() => {
     if (!isEditing) return
@@ -59,12 +67,8 @@ export function BrowserToolbar({
     inputRef.current?.select()
   }, [isEditing])
 
-  useEffect(() => {
-    setEditing(null)
-  }, [tab?.id, tab?.url])
-
   return (
-    <div className="flex h-11 shrink-0 items-center gap-1 border-b border-border bg-background px-2">
+    <div className="flex h-11 shrink-0 items-center gap-1 bg-card px-2">
       <Button aria-label="后退" disabled={!tab?.canGoBack} onClick={onBack} size="icon-sm" variant="ghost">
         <ArrowLeftIcon />
       </Button>
@@ -75,7 +79,7 @@ export function BrowserToolbar({
         <RotateCwIcon className={cn(tab?.loading && "animate-spin")} />
       </Button>
       <div className="relative min-w-0 flex-1">
-        {editing === null ? (
+        {!isEditing ? (
           <button
             className={cn(
               "flex h-8 w-full min-w-0 items-center rounded-md bg-muted/40 px-3 text-left text-sm shadow-none",
@@ -85,7 +89,10 @@ export function BrowserToolbar({
             )}
             disabled={!tab}
             type="button"
-            onClick={() => setEditing(editUrl)}
+            onClick={() => {
+              navigationRevisionRef.current += 1
+              setEditing({ key: tabKey, value: editUrl })
+            }}
           >
             <span className="truncate">{value || "输入 URL"}</span>
           </button>
@@ -100,18 +107,30 @@ export function BrowserToolbar({
             placeholder="输入 URL"
             spellCheck={false}
             value={value}
-            onBlur={() => setEditing(null)}
-            onChange={(event) => setEditing(event.target.value)}
+            onBlur={() => {
+              navigationRevisionRef.current += 1
+              setEditing(null)
+            }}
+            onChange={(event) => {
+              navigationRevisionRef.current += 1
+              setEditing({ key: tabKey, value: event.target.value })
+            }}
             onKeyDown={(event) => {
               if (event.key !== "Enter") return
               const input = event.currentTarget
               const next = input.value
+              const revision = ++navigationRevisionRef.current
+              const isCurrent = (): boolean =>
+                revision === navigationRevisionRef.current && tabKeyRef.current === tabKey
               void onNavigate(next)
                 .then((navigated) => {
+                  if (!isCurrent()) return
                   if (navigated) input.blur()
-                  else setEditing(next)
+                  else setEditing({ key: tabKey, value: next })
                 })
-                .catch(() => setEditing(next))
+                .catch(() => {
+                  if (isCurrent()) setEditing({ key: tabKey, value: next })
+                })
             }}
           />
         )}

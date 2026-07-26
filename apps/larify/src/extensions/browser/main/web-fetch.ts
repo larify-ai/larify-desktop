@@ -34,6 +34,7 @@ export async function executeWebFetch(
   input: z.infer<typeof webFetchInputSchema>,
   ctx: ToolRunContext
 ): Promise<Record<string, unknown>> {
+  if (ctx.signal?.aborted) throw new Error('Web fetch was cancelled.')
   const relativePath = resolve(ctx.cwd, input.url)
   const url = existsSync(relativePath) ? normalizeUrl(relativePath) : normalizeUrl(input.url)
   if (!url) throw new Error(`Invalid URL or file path: ${input.url}`)

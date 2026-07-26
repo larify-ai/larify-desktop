@@ -99,10 +99,10 @@ export async function executeWebSearch(
   input: z.infer<typeof webSearchInputSchema>,
   ctx: ToolRunContext
 ): Promise<WebSearchResponse> {
+  if (ctx.signal?.aborted) throw new Error('Web search was cancelled.')
   const url = input.pageUrl ?? buildBingSearchUrl(input.query!)
 
   return service.withTemporaryTab(ctx.sessionId, url, async (tab) => {
-    if (ctx.signal?.aborted) throw new Error('Web search was cancelled.')
     await waitForOperationOrAbort(tab.waitForNavigation(), ctx.signal, 'Web search was cancelled.')
 
     const parsed = (await waitForOperationOrAbort(

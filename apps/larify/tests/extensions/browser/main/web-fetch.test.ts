@@ -168,4 +168,21 @@ describe('web fetch', () => {
 
     await expect(pending).rejects.toThrow('Web fetch was cancelled.')
   })
+
+  it('does not create a temporary tab when already cancelled', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const service = {
+      withTemporaryTab: vi.fn()
+    } as unknown as BrowserService
+
+    await expect(
+      executeWebFetch(
+        service,
+        { url: 'https://example.com' },
+        { sessionId: 'session-1', cwd: 'D:\\Workspace', signal: controller.signal }
+      )
+    ).rejects.toThrow('Web fetch was cancelled.')
+    expect(service.withTemporaryTab).not.toHaveBeenCalled()
+  })
 })

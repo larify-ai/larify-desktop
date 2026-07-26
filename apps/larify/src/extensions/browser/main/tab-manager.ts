@@ -130,7 +130,7 @@ export class BrowserTabManager {
   }
 
   private async closeTab(id: number, tab: BrowserTab): Promise<void> {
-    await this.recorder.stopIfRecordingTab(id)
+    await this.recorder.stopIfRecordingTab(id).catch(() => {})
     const order = [...this.tabs.keys()]
     const index = order.indexOf(id)
     this.viewParent.get(id)?.contentView.removeChildView(tab.view)

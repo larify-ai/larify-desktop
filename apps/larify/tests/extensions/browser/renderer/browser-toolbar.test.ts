@@ -20,6 +20,11 @@ const tab: BrowserTabState = {
   url: "",
 }
 
+const enterText = (input: HTMLInputElement, value: string): void => {
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, value)
+  input.dispatchEvent(new Event("input", { bubbles: true }))
+}
+
 describe("BrowserToolbar", () => {
   let container: HTMLDivElement
   let root: Root
@@ -122,5 +127,83 @@ describe("BrowserToolbar", () => {
 
     expect(input.value).toBe("example.com")
     expect(document.activeElement).toBe(input)
+  })
+
+  it("discards the address draft when the active tab changes", async () => {
+    const props = {
+      onBack: vi.fn(),
+      onForward: vi.fn(),
+      onNavigate: vi.fn().mockResolvedValue(true),
+      onReload: vi.fn(),
+    }
+    await act(async () => {
+      root.render(createElement(BrowserToolbar, { ...props, tab }))
+    })
+    await act(async () => {
+      container.querySelector("button:not([aria-label])")!.dispatchEvent(
+        new MouseEvent("click", { bubbles: true }),
+      )
+    })
+    await act(async () => {
+      const input = container.querySelector("input")!
+      input.value = "draft.example"
+      input.dispatchEvent(new Event("input", { bubbles: true }))
+    })
+
+    await act(async () => {
+      root.render(
+        createElement(BrowserToolbar, {
+          ...props,
+          tab: { ...tab, id: 2, url: "https://example.com/path" },
+        }),
+      )
+    })
+
+    expect(container.querySelector("input")).toBeNull()
+    expect(container.querySelector("button:not([aria-label])")?.textContent).toBe(
+      "example.com/path",
+    )
+  })
+
+  it("does not let an old navigation failure overwrite newer input", async () => {
+    let rejectNavigation!: (reason?: unknown) => void
+    const onNavigate = vi.fn(
+      () =>
+        new Promise<boolean>((_resolve, reject) => {
+          rejectNavigation = reject
+        }),
+    )
+    await act(async () => {
+      root.render(
+        createElement(BrowserToolbar, {
+          onBack: vi.fn(),
+          onForward: vi.fn(),
+          onNavigate,
+          onReload: vi.fn(),
+          tab,
+        }),
+      )
+    })
+    await act(async () => {
+      container.querySelector("button:not([aria-label])")!.dispatchEvent(
+        new MouseEvent("click", { bubbles: true }),
+      )
+    })
+    const input = container.querySelector("input")!
+    await act(async () => {
+      enterText(input, "first.example")
+    })
+    await act(async () => {
+      input.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Enter" }))
+    })
+    await act(async () => {
+      enterText(input, "second.example")
+    })
+    await act(async () => {
+      rejectNavigation(new Error("navigation failed"))
+      await Promise.resolve()
+    })
+
+    expect(input.value).toBe("second.example")
   })
 })

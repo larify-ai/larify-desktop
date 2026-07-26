@@ -773,18 +773,21 @@ function captureTools(service: BrowserServiceProvider): Toolkit["tools"] {
         const { id, path, duration } = args
         return withTab(service, ctx.sessionId, id, async (tab) => {
           const target = resolveToolPath(ctx.cwd, path)
+          if (ctx.signal?.aborted) throw new Error("recording was cancelled")
           const generation = await resolveService(service).recordStart(ctx.sessionId, tab, target)
           if (duration === undefined) return { recording: true, path: target }
           await waitMs(duration * 1000, ctx.signal)
           try {
-            return (
+            const result =
               (await resolveService(service).recordStopIfCurrent(ctx.sessionId, generation)) ?? {
                 recording: false,
                 path: target,
               }
-            )
+            if (ctx.signal?.aborted) throw new Error("recording was cancelled")
+            return result
           } catch (error) {
             if (error instanceof Error && error.message === "no recording in progress") {
+              if (ctx.signal?.aborted) throw new Error("recording was cancelled")
               return { recording: false, path: target }
             }
             throw error

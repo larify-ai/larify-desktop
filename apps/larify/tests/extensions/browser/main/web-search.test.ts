@@ -289,4 +289,19 @@ describe('web search', () => {
 
     await expect(pending).rejects.toThrow('Web search was cancelled.')
   })
+
+  it('does not create a temporary tab when already cancelled', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const service = serviceWithTemporaryTab({})
+
+    await expect(
+      executeWebSearch(
+        service,
+        { query: 'test', selectors },
+        { sessionId: 'session-1', cwd: 'D:\\Workspace', signal: controller.signal }
+      )
+    ).rejects.toThrow('Web search was cancelled.')
+    expect(service.withTemporaryTab).not.toHaveBeenCalled()
+  })
 })

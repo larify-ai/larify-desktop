@@ -958,7 +958,7 @@ describe("browser toolkit", () => {
     vi.useRealTimers()
   })
 
-  it("stops the recording promptly when the tool is aborted during the duration wait", async () => {
+  it("stops the recording promptly and reports cancellation when aborted during the duration wait", async () => {
     const recordPath = join(tmpdir(), "larify-record-abort-test.webm")
     const service = {
       ...createService(),
@@ -967,15 +967,37 @@ describe("browser toolkit", () => {
       recordStopIfCurrent: vi.fn(async () => ({ path: recordPath, bytes: 7 })),
     } as unknown as BrowserService
     const controller = new AbortController()
-    controller.abort()
 
-    const result = await tool("record_start", service).execute(
+    const pending = tool("record_start", service).execute(
       { id: 1, path: recordPath, duration: 600 },
       { context: { sessionId: "session-1", cwd: "D:\\Workspace" }, abortSignal: controller.signal },
     )
+    await vi.waitFor(() => expect(service.recordStart).toHaveBeenCalledOnce())
+    controller.abort()
+    const result = await pending
 
     expect(service.recordStopIfCurrent).toHaveBeenCalledWith("session-1", 1)
-    expect(result).toEqual({ path: recordPath, bytes: 7 })
+    expect(result).toEqual({ error: "recording was cancelled" })
+  })
+
+  it("does not start recording when the tool is already aborted", async () => {
+    const service = {
+      ...createService(),
+      tab: vi.fn(() => ({})),
+      recordStart: vi.fn(async () => 1),
+      recordStopIfCurrent: vi.fn(),
+    } as unknown as BrowserService
+    const controller = new AbortController()
+    controller.abort()
+
+    await expect(
+      tool("record_start", service).execute(
+        { id: 1, path: join(tmpdir(), "larify-record-pre-abort-test.webm"), duration: 600 },
+        { context: { sessionId: "session-1", cwd: "D:\\Workspace" }, abortSignal: controller.signal },
+      ),
+    ).resolves.toEqual({ error: "recording was cancelled" })
+    expect(service.recordStart).not.toHaveBeenCalled()
+    expect(service.recordStopIfCurrent).not.toHaveBeenCalled()
   })
 
   it("rejects a record duration over the 600s cap", () => {

@@ -24,7 +24,13 @@ import {
   XCircleIcon,
 } from "lucide-react";
 import type { ComponentProps, ReactNode } from "react";
-import { createContext, isValidElement, useContext, useEffect, useState } from "react";
+import {
+  createContext,
+  isValidElement,
+  useCallback,
+  useContext,
+  useState,
+} from "react";
 
 import { CodeBlock } from "./code-block";
 
@@ -32,20 +38,31 @@ export type ToolProps = ComponentProps<typeof Collapsible>;
 
 const ToolOpenContext = createContext(false);
 
-export const Tool = ({ className, defaultOpen, open, onOpenChange, ...props }: ToolProps) => {
+export const Tool = ({
+  className,
+  defaultOpen,
+  open,
+  onOpenChange,
+  ...props
+}: ToolProps) => {
   const [internalOpen, setInternalOpen] = useState(Boolean(defaultOpen));
   const currentOpen = open ?? internalOpen;
-
-  useEffect(() => {
-    if (defaultOpen) setInternalOpen(true);
-  }, [defaultOpen]);
+  const handleOpenChange = useCallback(
+    (nextOpen: boolean) => {
+      if (open === undefined) {
+        setInternalOpen(nextOpen);
+      }
+      onOpenChange?.(nextOpen);
+    },
+    [onOpenChange, open],
+  );
 
   return (
     <ToolOpenContext.Provider value={currentOpen}>
       <Collapsible
         className={cn("group not-prose w-full rounded-md border", className)}
         open={currentOpen}
-        onOpenChange={onOpenChange ?? setInternalOpen}
+        onOpenChange={handleOpenChange}
         {...props}
       />
     </ToolOpenContext.Provider>
@@ -69,13 +86,13 @@ export type ToolHeaderProps = {
   icon?: string;
   className?: string;
 } & (
-    | { type: ToolUIPart["type"]; state: ToolUIPart["state"]; toolName?: never }
-    | {
+  | { type: ToolUIPart["type"]; state: ToolUIPart["state"]; toolName?: never }
+  | {
       type: DynamicToolUIPart["type"];
       state: DynamicToolUIPart["state"];
       toolName: string;
     }
-  );
+);
 
 const statusLabels: Record<ToolPart["state"], string> = {
   "approval-requested": "Awaiting Approval",
@@ -121,7 +138,7 @@ export const ToolHeader = ({
     <CollapsibleTrigger
       className={cn(
         "flex w-full min-w-0 items-center justify-between gap-4 p-3",
-        className
+        className,
       )}
       {...props}
     >
@@ -142,14 +159,18 @@ export const ToolHeader = ({
 
 export type ToolContentProps = ComponentProps<typeof CollapsibleContent>;
 
-export const ToolContent = ({ children, className, ...props }: ToolContentProps) => {
+export const ToolContent = ({
+  children,
+  className,
+  ...props
+}: ToolContentProps) => {
   const open = useContext(ToolOpenContext);
 
   return (
     <CollapsibleContent
       className={cn(
         "data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 space-y-4 p-4 text-popover-foreground outline-none data-[state=closed]:animate-out data-[state=open]:animate-in",
-        className
+        className,
       )}
       {...props}
     >
@@ -163,9 +184,15 @@ export type ToolInputProps = ComponentProps<"div"> & {
 };
 
 const cleanToolInput = (input: ToolPart["input"]) => {
-  if (input && typeof input === "object" && !Array.isArray(input) && "title" in input) {
-    const { title: _title, ...rest } = input as Record<string, unknown>;
-    return rest;
+  if (
+    input &&
+    typeof input === "object" &&
+    !Array.isArray(input) &&
+    "title" in input
+  ) {
+    return Object.fromEntries(
+      Object.entries(input).filter(([key]) => key !== "title"),
+    );
   }
   return input;
 };
@@ -195,18 +222,19 @@ export const ToolOutput = ({
   errorText,
   ...props
 }: ToolOutputProps) => {
-  if (!(output || errorText)) {
+  if (output == null && !errorText) {
     return null;
   }
 
-  let Output = <div>{output as ReactNode}</div>;
-
-  if (typeof output === "object" && !isValidElement(output)) {
-    Output = (
-      <CodeBlock code={JSON.stringify(output, null, 2)} language="json" />
-    );
+  let Output: ReactNode;
+  if (isValidElement(output)) {
+    Output = output;
   } else if (typeof output === "string") {
     Output = <CodeBlock code={output} language="json" />;
+  } else {
+    Output = (
+      <CodeBlock code={JSON.stringify(output, null, 2) ?? ""} language="json" />
+    );
   }
 
   return (
@@ -219,7 +247,7 @@ export const ToolOutput = ({
           "max-h-80 overflow-auto rounded-md text-xs [&_table]:w-full",
           errorText
             ? "bg-destructive/10 text-destructive"
-            : "bg-muted/50 text-foreground"
+            : "bg-muted/50 text-foreground",
         )}
       >
         {errorText && <div>{errorText}</div>}

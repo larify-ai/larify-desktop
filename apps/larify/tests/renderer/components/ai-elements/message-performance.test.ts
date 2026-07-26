@@ -6,7 +6,16 @@ import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { UIMessage } from "ai"
 import { MessageView } from "../../../../src/extensions/assistant/renderer/components/message-view"
-import { Tool, ToolContent } from "../../../../src/renderer/src/components/ai-elements/tool"
+import {
+  MessageBranch,
+  MessageBranchContent,
+} from "../../../../src/renderer/src/components/ai-elements/message"
+import {
+  Tool,
+  ToolContent,
+  ToolHeader,
+  ToolOutput,
+} from "../../../../src/renderer/src/components/ai-elements/tool"
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
@@ -115,5 +124,90 @@ describe("message rendering performance guards", () => {
 
     expect(container.textContent).toContain("expensive output")
     expect(mount).toHaveBeenCalledTimes(1)
+  })
+
+  it("keeps an uncontrolled tool interactive when observing open changes", async () => {
+    const onOpenChange = vi.fn()
+
+    await act(async () => {
+      root.render(
+        createElement(
+          Tool,
+          { onOpenChange },
+          createElement(ToolHeader, {
+            state: "output-available",
+            title: "Tool",
+            type: "tool-test",
+          }),
+          createElement(ToolContent, null, "tool output"),
+        ),
+      )
+    })
+
+    expect(container.textContent).not.toContain("tool output")
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>("button")?.click()
+    })
+
+    expect(onOpenChange).toHaveBeenCalledWith(true)
+    expect(container.textContent).toContain("tool output")
+  })
+
+  it.each([
+    [false, "false"],
+    [0, "0"],
+  ])("renders falsy tool output %s", async (output, expected) => {
+    await act(async () => {
+      root.render(
+        createElement(ToolOutput, {
+          errorText: undefined,
+          output,
+        }),
+      )
+    })
+
+    expect(container.textContent).toContain("Result")
+    expect(container.textContent).toContain(expected)
+  })
+
+  it("normalizes non-element and empty message branches", async () => {
+    await act(async () => {
+      root.render(
+        createElement(
+          MessageBranch,
+          null,
+          createElement(MessageBranchContent, null, null, "plain text"),
+        ),
+      )
+    })
+
+    expect(container.textContent).toBe("plain text")
+  })
+
+  it("selects the last available branch when the active branch is removed", async () => {
+    const renderBranches = async (count: number): Promise<void> => {
+      await act(async () => {
+        root.render(
+          createElement(
+            MessageBranch,
+            { defaultBranch: 1 },
+            createElement(
+              MessageBranchContent,
+              null,
+              ...Array.from({ length: count }, (_, index) =>
+                createElement("span", { key: index }, `branch ${index}`),
+              ),
+            ),
+          ),
+        )
+      })
+    }
+
+    await renderBranches(2)
+    expect(container.textContent).toContain("branch 1")
+
+    await renderBranches(1)
+    expect(container.querySelector(".block")?.textContent).toBe("branch 0")
   })
 })

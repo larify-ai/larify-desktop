@@ -137,15 +137,13 @@ const highlighterCache = new Map<
 
 // Token cache
 const tokensCache = new Map<string, TokenizedCode>();
+const tokenizationInFlight = new Set<string>();
 
 // Subscribers for async token updates
 const subscribers = new Map<string, Set<(result: TokenizedCode) => void>>();
 
-const getTokensCacheKey = (code: string, language: BundledLanguage) => {
-  const start = code.slice(0, 100);
-  const end = code.length > 100 ? code.slice(-100) : "";
-  return `${language}:${code.length}:${start}:${end}`;
-};
+const getTokensCacheKey = (code: string, language: BundledLanguage) =>
+  `${language}\0${code}`;
 
 const getHighlighter = (
   language: BundledLanguage
@@ -158,6 +156,11 @@ const getHighlighter = (
   const highlighterPromise = createHighlighter({
     langs: [language],
     themes: ["github-light", "github-dark"],
+  }).catch((error) => {
+    if (highlighterCache.get(language) === highlighterPromise) {
+      highlighterCache.delete(language);
+    }
+    throw error;
   });
 
   highlighterCache.set(language, highlighterPromise);
@@ -203,6 +206,11 @@ export const highlightCode = (
     subscribers.get(tokensCacheKey)?.add(callback);
   }
 
+  if (tokenizationInFlight.has(tokensCacheKey)) {
+    return null;
+  }
+  tokenizationInFlight.add(tokensCacheKey);
+
   // Start highlighting in background - fire-and-forget async pattern
   getHighlighter(language)
     // oxlint-disable-next-line eslint-plugin-promise(prefer-await-to-then)
@@ -235,11 +243,13 @@ export const highlightCode = (
         }
         subscribers.delete(tokensCacheKey);
       }
+      tokenizationInFlight.delete(tokensCacheKey);
     })
     // oxlint-disable-next-line eslint-plugin-promise(prefer-await-to-then), eslint-plugin-promise(prefer-await-to-callbacks)
     .catch((error) => {
       console.error("Failed to highlight code:", error);
       subscribers.delete(tokensCacheKey);
+      tokenizationInFlight.delete(tokensCacheKey);
     });
 
   return null;
@@ -390,33 +400,28 @@ export const CodeBlockContent = ({
   );
 
   // Async highlighting result (populated after shiki loads)
-  const [asyncTokens, setAsyncTokens] = useState<TokenizedCode | null>(null);
-  const asyncKeyRef = useRef({ code, language });
-
-  // Invalidate stale async tokens synchronously during render
-  if (
-    asyncKeyRef.current.code !== code ||
-    asyncKeyRef.current.language !== language
-  ) {
-    asyncKeyRef.current = { code, language };
-    setAsyncTokens(null);
-  }
+  const tokenKey = getTokensCacheKey(code, language);
+  const [asyncResult, setAsyncResult] = useState<{
+    key: string;
+    tokens: TokenizedCode;
+  } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
 
     highlightCode(code, language, (result) => {
       if (!cancelled) {
-        setAsyncTokens(result);
+        setAsyncResult({ key: tokenKey, tokens: result });
       }
     });
 
     return () => {
       cancelled = true;
     };
-  }, [code, language]);
+  }, [code, language, tokenKey]);
 
-  const tokenized = asyncTokens ?? syncTokens;
+  const tokenized =
+    asyncResult?.key === tokenKey ? asyncResult.tokens : syncTokens;
 
   return (
     <div className="relative overflow-auto">

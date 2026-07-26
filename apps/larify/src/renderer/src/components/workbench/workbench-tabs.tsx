@@ -1,8 +1,8 @@
-import { useMemo, useRef, useState, type ReactNode } from "react"
-import { PlusIcon, XIcon } from "lucide-react"
-import { Button } from "../ui/button"
-import { cn } from "../../lib/utils"
-import "./workbench-tabs.css"
+import { useMemo, useRef, useState, type ReactNode } from 'react'
+import { PlusIcon, XIcon } from 'lucide-react'
+import { Button } from '../ui/button'
+import { cn } from '../../lib/utils'
+import './workbench-tabs.css'
 
 export interface WorkbenchTab {
   active?: boolean
@@ -31,6 +31,7 @@ interface DragMeasure {
 }
 
 interface DragState {
+  draggedWidth: number
   id: string
   offsetX: number
   originIndex: number
@@ -39,12 +40,12 @@ interface DragState {
 
 export function WorkbenchTabs({
   draggable = false,
-  newLabel = "新建",
+  newLabel = '新建',
   tabs,
   onClose,
   onCreate,
   onReorder,
-  onSelect,
+  onSelect
 }: WorkbenchTabsProps): React.JSX.Element {
   const [dragState, setDragState] = useState<DragState | null>(null)
   const didDragRef = useRef(false)
@@ -54,19 +55,22 @@ export function WorkbenchTabs({
   const dragBoundsRef = useRef<{ left: number; right: number } | null>(null)
   const dragStateRef = useRef<DragState | null>(null)
   const tabIndexes = useMemo(() => new Map(tabs.map((tab, index) => [tab.id, index])), [tabs])
+  const hasActiveTab = tabs.some((tab) => tab.active)
 
   const measureTabs = (): DragMeasure[] => {
     if (!scrollRef.current) return []
-    return Array.from(scrollRef.current.querySelectorAll<HTMLElement>(".larify-workbench-tab")).map((element) => {
-      const rect = element.getBoundingClientRect()
-      return {
-        centerX: rect.left + rect.width / 2,
-        id: element.dataset.tabId ?? "",
-        left: rect.left,
-        right: rect.right,
-        width: rect.width,
-      }
-    }).filter((measure) => measure.id.length > 0)
+    return Array.from(scrollRef.current.querySelectorAll<HTMLElement>('.larify-workbench-tab'))
+      .map((element) => {
+        const rect = element.getBoundingClientRect()
+        return {
+          centerX: rect.left + rect.width / 2,
+          id: element.dataset.tabId ?? '',
+          left: rect.left,
+          right: rect.right,
+          width: rect.width
+        }
+      })
+      .filter((measure) => measure.id.length > 0)
   }
 
   const clampDragOffset = (draggingId: string, offsetX: number): number => {
@@ -81,7 +85,9 @@ export function WorkbenchTabs({
 
   const getTargetIndex = (draggingId: string, currentCenterX: number): number => {
     const measures = dragMeasuresRef.current
-    return measures.filter((measure) => measure.id !== draggingId && currentCenterX >= measure.centerX).length
+    return measures.filter(
+      (measure) => measure.id !== draggingId && currentCenterX >= measure.centerX
+    ).length
   }
 
   const stopDragging = (): void => {
@@ -104,22 +110,35 @@ export function WorkbenchTabs({
     if (tabId === state.id) return `translateX(${state.offsetX}px) translateY(-1px)`
 
     const index = tabIndexes.get(tabId)
-    const dragged = dragMeasuresRef.current.find((measure) => measure.id === state.id)
-    if (index === undefined || !dragged || state.originIndex === state.targetIndex) return undefined
-    if (state.targetIndex > state.originIndex && index > state.originIndex && index <= state.targetIndex) {
-      return `translateX(-${dragged.width}px)`
+    if (index === undefined || state.originIndex === state.targetIndex) return undefined
+    if (
+      state.targetIndex > state.originIndex &&
+      index > state.originIndex &&
+      index <= state.targetIndex
+    ) {
+      return `translateX(-${state.draggedWidth}px)`
     }
-    if (state.targetIndex < state.originIndex && index >= state.targetIndex && index < state.originIndex) {
-      return `translateX(${dragged.width}px)`
+    if (
+      state.targetIndex < state.originIndex &&
+      index >= state.targetIndex &&
+      index < state.originIndex
+    ) {
+      return `translateX(${state.draggedWidth}px)`
     }
     return undefined
   }
 
   return (
     <div className="larify-workbench-tabs" data-theme-source="workbench">
-      {tabs.some((tab) => tab.active) ? <span aria-hidden className="larify-workbench-tabs-active-base" /> : null}
-      <div className="larify-workbench-tabs-scroll larify-scrollbar-hidden" ref={scrollRef} role="tablist">
-        {tabs.map((tab) => {
+      {hasActiveTab ? (
+        <span aria-hidden className="larify-workbench-tabs-active-base" />
+      ) : null}
+      <div
+        className="larify-workbench-tabs-scroll larify-scrollbar-hidden"
+        ref={scrollRef}
+        role="tablist"
+      >
+        {tabs.map((tab, index) => {
           const active = tab.active === true
           const closable = tab.closable ?? true
           const dragging = dragState?.id === tab.id
@@ -129,17 +148,17 @@ export function WorkbenchTabs({
             <div
               aria-selected={active}
               className={cn(
-                "larify-workbench-tab",
-                active && "larify-workbench-tab-active",
-                dragging && "larify-workbench-tab-dragging",
-                dragState && !dragging && "larify-workbench-tab-sorting",
+                'larify-workbench-tab',
+                active && 'larify-workbench-tab-active',
+                dragging && 'larify-workbench-tab-dragging',
+                dragState && !dragging && 'larify-workbench-tab-sorting'
               )}
               data-tab-id={tab.id}
               key={tab.id}
               style={
                 transform
                   ? {
-                      transform,
+                      transform
                     }
                   : undefined
               }
@@ -155,9 +174,18 @@ export function WorkbenchTabs({
                 if (!draggable || event.button !== 0) return
                 const originIndex = tabIndexes.get(tab.id)
                 if (originIndex === undefined) return
-                dragMeasuresRef.current = measureTabs()
+                const measures = measureTabs()
+                const draggedWidth =
+                  measures.find((measure) => measure.id === tab.id)?.width ?? 0
+                dragMeasuresRef.current = measures
                 dragBoundsRef.current = scrollRef.current?.getBoundingClientRect() ?? null
-                const state = { id: tab.id, offsetX: 0, originIndex, targetIndex: originIndex }
+                const state = {
+                  draggedWidth,
+                  id: tab.id,
+                  offsetX: 0,
+                  originIndex,
+                  targetIndex: originIndex
+                }
                 dragStateRef.current = state
                 setDragState(state)
                 dragStartPointRef.current = { x: event.clientX, y: event.clientY }
@@ -173,7 +201,9 @@ export function WorkbenchTabs({
                 const offsetX = clampDragOffset(state.id, deltaX)
                 didDragRef.current = true
                 const dragged = dragMeasuresRef.current.find((measure) => measure.id === state.id)
-                const targetIndex = dragged ? getTargetIndex(state.id, dragged.centerX + offsetX) : state.targetIndex
+                const targetIndex = dragged
+                  ? getTargetIndex(state.id, dragged.centerX + offsetX)
+                  : state.targetIndex
                 const nextState = { ...state, offsetX, targetIndex }
                 dragStateRef.current = nextState
                 setDragState(nextState)
@@ -191,12 +221,35 @@ export function WorkbenchTabs({
                 didDragRef.current = false
               }}
               role="tab"
-              tabIndex={0}
+              tabIndex={active || (!hasActiveTab && index === 0) ? 0 : -1}
               title={tab.title}
               onKeyDown={(event) => {
-                if (event.key !== "Enter" && event.key !== " ") return
+                if (event.target !== event.currentTarget) return
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault()
+                  onSelect(tab.id)
+                  return
+                }
+                const offset =
+                  event.key === 'ArrowLeft'
+                    ? -1
+                    : event.key === 'ArrowRight'
+                      ? 1
+                      : event.key === 'Home'
+                        ? -index
+                        : event.key === 'End'
+                          ? tabs.length - 1 - index
+                          : 0
+                if (offset === 0) return
                 event.preventDefault()
-                onSelect(tab.id)
+                const nextIndex = (index + offset + tabs.length) % tabs.length
+                const next = tabs[nextIndex]
+                if (!next) return
+                onSelect(next.id)
+                scrollRef.current
+                  ?.querySelectorAll<HTMLElement>('.larify-workbench-tab')
+                  .item(nextIndex)
+                  .focus()
               }}
             >
               {tab.icon ? (
@@ -223,8 +276,14 @@ export function WorkbenchTabs({
               ) : null}
               {active ? (
                 <>
-                  <span aria-hidden className="larify-workbench-tab-corner larify-workbench-tab-corner-left" />
-                  <span aria-hidden className="larify-workbench-tab-corner larify-workbench-tab-corner-right" />
+                  <span
+                    aria-hidden
+                    className="larify-workbench-tab-corner larify-workbench-tab-corner-left"
+                  />
+                  <span
+                    aria-hidden
+                    className="larify-workbench-tab-corner larify-workbench-tab-corner-right"
+                  />
                 </>
               ) : null}
             </div>

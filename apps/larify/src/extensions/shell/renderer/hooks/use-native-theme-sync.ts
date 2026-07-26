@@ -1,19 +1,21 @@
-import { useEffect } from "react"
-import { useTheme } from "next-themes"
+import { useEffect } from 'react'
+import { useTheme } from 'next-themes'
 
 export function useNativeThemeSync(): void {
   const { theme, resolvedTheme } = useTheme()
 
   useEffect(() => {
-    if (theme === "light" || theme === "dark" || theme === "system") {
-      window.bridge?.invoke?.("theme:set", theme)
+    if (theme === 'light' || theme === 'dark' || theme === 'system') {
+      void window.bridge.invoke('theme:set', theme).catch(() => {})
     }
   }, [theme])
 
   useEffect(() => {
-    window.bridge?.invoke?.(
-      "titlebar:set-symbol",
-      resolvedTheme === "light" ? "#0a0a0a" : "#fafafa",
-    )
+    const foreground = getComputedStyle(document.documentElement)
+      .getPropertyValue('--foreground')
+      .trim()
+    if (foreground) {
+      void window.bridge.invoke('titlebar:set-symbol', foreground).catch(() => {})
+    }
   }, [resolvedTheme])
 }

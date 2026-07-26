@@ -13,6 +13,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const panelExpand = vi.fn()
+const panelCollapse = vi.fn()
 
 vi.mock('next-themes', () => ({
   ThemeProvider: ({ children }: { children: ReactNode }) => children
@@ -48,7 +49,7 @@ vi.mock('@renderer/components/ui/resizable', () => ({
     createElement('div', null, children),
   ResizablePanel: forwardRef(function MockPanel({ children }: { children: ReactNode }, ref) {
     useImperativeHandle(ref, () => ({
-      collapse: vi.fn(),
+      collapse: panelCollapse,
       expand: panelExpand,
       getId: () => 'workbench',
       getSize: () => 68,
@@ -68,6 +69,11 @@ describe('Shell workbench lifecycle', () => {
   beforeEach(() => {
     globalThis.IS_REACT_ACT_ENVIRONMENT = true
     panelExpand.mockClear()
+    panelCollapse.mockClear()
+    Object.defineProperty(window, 'bridge', {
+      configurable: true,
+      value: { invoke: vi.fn().mockResolvedValue(undefined) }
+    })
     container = document.createElement('div')
     document.body.appendChild(container)
     root = createRoot(container)
@@ -76,6 +82,7 @@ describe('Shell workbench lifecycle', () => {
   afterEach(() => {
     act(() => root.unmount())
     container.remove()
+    Reflect.deleteProperty(window, 'bridge')
     vi.restoreAllMocks()
   })
 
@@ -106,15 +113,18 @@ describe('Shell workbench lifecycle', () => {
     await act(async () => root.render(createElement(Shell, { app: app as never })))
     const button = container.querySelector<HTMLButtonElement>('button[aria-label="终端"]')
     expect(button).not.toBeNull()
+    panelCollapse.mockClear()
 
     await act(async () => button!.click())
     expect(mounts).toBe(1)
     expect(unmounts).toBe(0)
+    expect(panelCollapse).not.toHaveBeenCalled()
     expect(panelExpand).toHaveBeenCalledWith()
 
     await act(async () => button!.click())
     expect(mounts).toBe(1)
     expect(unmounts).toBe(0)
+    expect(panelCollapse).toHaveBeenCalledWith()
 
     await act(async () => button!.click())
     expect(mounts).toBe(1)

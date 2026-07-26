@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const h = vi.hoisted(() => {
   const appHandlers = new Map<string, () => void>()
+  const nativeThemeHandlers = new Map<string, () => void>()
   const ipcHandlers = new Map<string, (...args: unknown[]) => unknown>()
   const windows: FakeWindow[] = []
   const openExternal = vi.fn().mockResolvedValue(undefined)
@@ -25,13 +26,14 @@ const h = vi.hoisted(() => {
     destroy = vi.fn(() => {
       this.destroyed = true
     })
+    setTitleBarOverlay = vi.fn()
     isDestroyed = (): boolean => this.destroyed
 
     static getAllWindows = (): FakeWindow[] => windows.filter((window) => !window.destroyed)
     static fromWebContents = (): null => null
   }
 
-  return { appHandlers, ipcHandlers, openExternal, windows, FakeWindow }
+  return { appHandlers, ipcHandlers, nativeThemeHandlers, openExternal, windows, FakeWindow }
 })
 
 vi.mock('electron', () => ({
@@ -52,7 +54,12 @@ vi.mock('electron', () => ({
       h.ipcHandlers.set(channel, handler),
     removeHandler: (channel: string) => h.ipcHandlers.delete(channel)
   },
-  nativeTheme: { themeSource: 'system' },
+  nativeTheme: {
+    shouldUseDarkColors: false,
+    themeSource: 'system',
+    on: (event: string, listener: () => void) => h.nativeThemeHandlers.set(event, listener),
+    removeListener: (event: string) => h.nativeThemeHandlers.delete(event)
+  },
   BrowserWindow: h.FakeWindow,
   dialog: { showOpenDialog: vi.fn() }
 }))
@@ -65,6 +72,7 @@ describe('shell main window lifecycle', () => {
   beforeEach(() => {
     h.appHandlers.clear()
     h.ipcHandlers.clear()
+    h.nativeThemeHandlers.clear()
     h.openExternal.mockClear()
     h.openExternal.mockResolvedValue(undefined)
     h.windows.length = 0
@@ -146,5 +154,24 @@ describe('shell main window lifecycle', () => {
 
     expect(handler({ url: 'https://example.com' })).toEqual({ action: 'deny' })
     await expect(Promise.resolve()).resolves.toBeUndefined()
+  })
+
+  it('updates title-bar symbols when the system theme changes', () => {
+    const subscriptions: Array<{ dispose(): void }> = []
+    extension.activate(
+      { register: vi.fn(() => ({ dispose: vi.fn() })) } as never,
+      { subscriptions, manifest: {} } as never
+    )
+
+    h.nativeThemeHandlers.get('updated')!()
+
+    expect(h.windows[0].setTitleBarOverlay).toHaveBeenCalledWith({
+      color: 'rgba(0,0,0,0)',
+      height: 32,
+      symbolColor: '#000000'
+    })
+
+    for (const subscription of subscriptions) subscription.dispose()
+    expect(h.nativeThemeHandlers.has('updated')).toBe(false)
   })
 })

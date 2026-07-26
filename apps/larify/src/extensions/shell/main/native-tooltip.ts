@@ -34,21 +34,15 @@ const tooltipDocument = `<!doctype html>
           opacity 120ms ease-out,
           transform 120ms ease-out;
       }
-      #arrow-positioner {
-        position: absolute;
-        top: calc(50% - 5px);
-        left: 0;
-        transform: translateY(50%) rotate(90deg) translateX(-50%);
-        transform-origin: 0 0;
-      }
       #arrow {
-        display: block;
-        width: 10px;
+        position: absolute;
+        top: 50%;
+        left: -6px;
+        width: 6px;
         height: 10px;
-        transform: translateY(calc(-50% - 2px)) rotate(45deg);
-        border-radius: 2px;
+        transform: translateY(-50%);
+        clip-path: polygon(100% 0, 100% 100%, 0 50%);
         background: var(--tooltip-background);
-        fill: var(--tooltip-background);
       }
       #label {
         overflow: hidden;
@@ -63,11 +57,7 @@ const tooltipDocument = `<!doctype html>
   </head>
   <body>
     <span id="tooltip">
-      <span id="arrow-positioner">
-        <svg id="arrow" viewBox="0 0 30 10" preserveAspectRatio="none">
-          <polygon points="0,0 30,0 15,10"></polygon>
-        </svg>
-      </span>
+      <span id="arrow"></span>
       <span id="label"></span>
     </span>
   </body>

@@ -5,6 +5,16 @@ import type { Extension } from 'kernel'
 import { NativeTooltip, type NativeTooltipOptions } from './native-tooltip'
 
 const isMac = process.platform === 'darwin'
+const titleBarSymbolColor = (): string => (nativeTheme.shouldUseDarkColors ? '#ffffff' : '#000000')
+
+function syncTitleBar(window: BrowserWindow): void {
+  if (isMac || window.isDestroyed()) return
+  window.setTitleBarOverlay({
+    color: 'rgba(0,0,0,0)',
+    symbolColor: titleBarSymbolColor(),
+    height: 32
+  })
+}
 
 function isExternalUrl(value: string): boolean {
   try {
@@ -43,7 +53,7 @@ function createWindow(): BrowserWindow {
       : {
           titleBarOverlay: {
             color: 'rgba(0,0,0,0)',
-            symbolColor: nativeTheme.shouldUseDarkColors ? '#ffffffcc' : '#000000e5',
+            symbolColor: titleBarSymbolColor(),
             height: 32
           }
         }),
@@ -114,15 +124,9 @@ const extension: Extension = {
     ipcMain.handle('theme:set', (_e, theme) => {
       if (theme === 'light' || theme === 'dark' || theme === 'system') {
         nativeTheme.themeSource = theme
+        const window = BrowserWindow.fromWebContents(_e.sender)
+        if (window) syncTitleBar(window)
       }
-    })
-    ipcMain.handle('titlebar:set-symbol', (event, symbolColor) => {
-      if (isMac || typeof symbolColor !== 'string') return
-      BrowserWindow.fromWebContents(event.sender)?.setTitleBarOverlay({
-        color: 'rgba(0,0,0,0)',
-        symbolColor,
-        height: 32
-      })
     })
     ipcMain.handle('tooltip:show', (event, options: NativeTooltipOptions) => {
       const owner = BrowserWindow.fromWebContents(event.sender) ?? getWindow()
@@ -139,7 +143,6 @@ const extension: Extension = {
     context.subscriptions.push({
       dispose: () => {
         ipcMain.removeHandler('theme:set')
-        ipcMain.removeHandler('titlebar:set-symbol')
         ipcMain.removeHandler('tooltip:show')
         ipcMain.removeHandler('tooltip:hide')
         ipcMain.removeHandler('dialog:pick-directories')
@@ -149,10 +152,15 @@ const extension: Extension = {
     const onActivate = (): void => {
       if (!win || win.isDestroyed()) getWindow()
     }
+    const onNativeThemeUpdated = (): void => {
+      for (const window of BrowserWindow.getAllWindows()) syncTitleBar(window)
+    }
     app.on('activate', onActivate)
+    nativeTheme.on('updated', onNativeThemeUpdated)
     context.subscriptions.push({
       dispose: () => {
         app.removeListener('activate', onActivate)
+        nativeTheme.removeListener('updated', onNativeThemeUpdated)
       }
     })
   }

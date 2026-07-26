@@ -24,6 +24,14 @@ export default defineConfig({
       }
     },
     plugins: [react(), tailwindcss()],
+    build: {
+      rollupOptions: {
+        input: {
+          index: resolve('src/renderer/index.html'),
+          performance: resolve('src/renderer/performance.html')
+        }
+      }
+    },
     worker: {
       format: 'es'
     }

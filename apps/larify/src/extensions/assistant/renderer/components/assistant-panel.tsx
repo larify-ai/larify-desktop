@@ -406,7 +406,7 @@ function AssistantChat({
   })
   const [actionMenuOpen, setActionMenuOpen] = useState(false)
   const [workspaceHistoryOpen, setWorkspaceHistoryOpen] = useState(false)
-  const [collapsedSessionCwds, setCollapsedSessionCwds] = useState<Set<string>>(new Set())
+  const [openSessionCwds, setOpenSessionCwds] = useState<Set<string>>(new Set())
   const [expandedSessionCwds, setExpandedSessionCwds] = useState<Set<string>>(new Set())
   const [inputText, setInputText] = useState("")
   const [attachmentCount, setAttachmentCount] = useState(0)
@@ -535,53 +535,56 @@ function AssistantChat({
       const frame = inputFrameRef.current?.getBoundingClientRect()
       const trigger = menuTriggerRef.current?.getBoundingClientRect()
       if (!frame || !trigger) return
-      setMenuMetrics({
+      const next = {
         alignOffset: Math.round(frame.left - trigger.left),
         sideOffset: Math.max(0, Math.round(trigger.top - frame.top)),
         width: Math.round(frame.width),
-      })
+      }
+      setMenuMetrics((current) =>
+        current.alignOffset === next.alignOffset &&
+        current.sideOffset === next.sideOffset &&
+        current.width === next.width
+          ? current
+          : next
+      )
     }
 
     measure()
     const observer = new ResizeObserver(measure)
     if (inputFrameRef.current) observer.observe(inputFrameRef.current)
-    window.addEventListener("resize", measure)
-    return () => {
-      observer.disconnect()
-      window.removeEventListener("resize", measure)
-    }
+    return () => observer.disconnect()
   }, [])
 
   const input = (
     <div className="mx-auto w-full max-w-3xl px-6 pb-4">
       <div ref={inputFrameRef} className="w-full">
-      <PromptInput
-        onSubmit={handleSubmit}
-        className="[&_[data-slot=input-group]]:rounded-2xl"
-        multiple
-      >
-        <AttachmentPreviewBar onCountChange={setAttachmentCount} />
-        <PromptInputBody>
-          <PromptInputTextarea
-            placeholder={labels.placeholder}
-            value={inputText}
-            onChange={(event) => {
-              inputHistoryIndexRef.current = null
-              setInputText(event.target.value)
-            }}
-            onKeyDown={handleInputKeyDown}
-            className="max-h-48 min-h-12 overflow-y-auto pl-3"
-          />
-        </PromptInputBody>
-        <PromptInputFooter className="justify-between">
-          <PromptInputTools>
-            <PromptInputActionMenu
-              open={actionMenuOpen}
-              onOpenChange={(open) => {
-                setActionMenuOpen(open)
-                if (!open) setWorkspaceHistoryOpen(false)
+        <PromptInput
+          onSubmit={handleSubmit}
+          className="[&_[data-slot=input-group]]:rounded-2xl"
+          multiple
+        >
+          <AttachmentPreviewBar onCountChange={setAttachmentCount} />
+          <PromptInputBody>
+            <PromptInputTextarea
+              placeholder={labels.placeholder}
+              value={inputText}
+              onChange={(event) => {
+                inputHistoryIndexRef.current = null
+                setInputText(event.target.value)
               }}
-            >
+              onKeyDown={handleInputKeyDown}
+              className="max-h-48 min-h-12 overflow-y-auto pl-3"
+            />
+          </PromptInputBody>
+          <PromptInputFooter className="justify-between">
+            <PromptInputTools>
+              <PromptInputActionMenu
+                open={actionMenuOpen}
+                onOpenChange={(open) => {
+                  setActionMenuOpen(open)
+                  if (!open) setWorkspaceHistoryOpen(false)
+                }}
+              >
               <div ref={menuTriggerRef}>
                 <PromptInputActionMenuTrigger
                   style={{ borderRadius: 9999 }}
@@ -679,7 +682,7 @@ function AssistantChat({
                           title={groupCwd}
                           onSelect={(event) => {
                             event.preventDefault()
-                            setCollapsedSessionCwds((current) => {
+                            setOpenSessionCwds((current) => {
                               const next = new Set(current)
                               if (next.has(groupCwd)) next.delete(groupCwd)
                               else next.add(groupCwd)
@@ -691,13 +694,13 @@ function AssistantChat({
                           <span className="min-w-0 flex-1 truncate">
                             {getPathFilename(groupCwd)}
                           </span>
-                          {collapsedSessionCwds.has(groupCwd) ? (
-                            <ChevronDownIcon className="size-4 shrink-0" />
-                          ) : (
+                          {openSessionCwds.has(groupCwd) ? (
                             <ChevronUpIcon className="size-4 shrink-0" />
+                          ) : (
+                            <ChevronDownIcon className="size-4 shrink-0" />
                           )}
                         </PromptInputActionMenuItem>
-                        {!collapsedSessionCwds.has(groupCwd)
+                        {openSessionCwds.has(groupCwd)
                           ? groupSessions
                               .slice(
                                 0,
@@ -723,7 +726,7 @@ function AssistantChat({
                           </PromptInputActionMenuItem>
                               ))
                           : null}
-                        {!collapsedSessionCwds.has(groupCwd) &&
+                        {openSessionCwds.has(groupCwd) &&
                         groupSessions.length > MAX_SESSIONS_PER_CWD ? (
                           <PromptInputActionMenuItem
                             className="pl-8 text-xs text-muted-foreground"
@@ -745,18 +748,18 @@ function AssistantChat({
                   )}
                 </div>
               </PromptInputActionMenuContent>
-            </PromptInputActionMenu>
-          </PromptInputTools>
-          <PromptInputSubmit
-            status={status}
-            onStop={handleStop}
-            disabled={!canSubmit}
-            className="rounded-full"
-          >
-            {isLive ? <SquareIcon className="size-4" /> : <ArrowUpIcon className="size-4" />}
-          </PromptInputSubmit>
-        </PromptInputFooter>
-      </PromptInput>
+              </PromptInputActionMenu>
+            </PromptInputTools>
+            <PromptInputSubmit
+              status={status}
+              onStop={handleStop}
+              disabled={!canSubmit}
+              className="rounded-full disabled:bg-primary disabled:text-primary-foreground"
+            >
+              {isLive ? <SquareIcon className="size-4" /> : <ArrowUpIcon className="size-4" />}
+            </PromptInputSubmit>
+          </PromptInputFooter>
+        </PromptInput>
       </div>
     </div>
   )

@@ -22,6 +22,8 @@ describe("asDiffMeta 从工具输出里认出 diff 元数据", () => {
   it("其它结构化输出不是 diff", () => {
     expect(asDiffMeta({ terminals: [] })).toBeNull()
     expect(asDiffMeta({ kind: "clickable" })).toBeNull()
+    expect(asDiffMeta({ kind: "diff" })).toBeNull()
+    expect(asDiffMeta({ kind: "diff", path: "/a.ts", patch: 1 })).toBeNull()
   })
 
   it("空值不是 diff", () => {

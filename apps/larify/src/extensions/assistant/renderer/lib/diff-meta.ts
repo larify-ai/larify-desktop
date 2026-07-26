@@ -5,8 +5,12 @@ export interface DiffMeta {
 }
 
 export function asDiffMeta(output: unknown): DiffMeta | null {
-  return output && typeof output === "object" && (output as DiffMeta).kind === "diff"
-    ? (output as DiffMeta)
+  if (!output || typeof output !== "object") return null
+  const value = output as Partial<DiffMeta>
+  return value.kind === "diff" &&
+    typeof value.path === "string" &&
+    typeof value.patch === "string"
+    ? (value as DiffMeta)
     : null
 }
 

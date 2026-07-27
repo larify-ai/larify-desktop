@@ -8,6 +8,7 @@ const REFRESH_DELAY = 400
 export function useGitDecorations(root: string | null): {
   available: boolean
   decorations: Map<string, string>
+  statuses: FileStatusResult[]
 } {
   const [snapshot, setSnapshot] = useState<{
     available: boolean
@@ -80,7 +81,8 @@ export function useGitDecorations(root: string | null): {
       available: !current || snapshot.available,
       decorations: current
         ? createGitStatusColors(root, snapshot.statuses)
-        : new Map<string, string>()
+        : new Map<string, string>(),
+      statuses: current ? snapshot.statuses : []
     }
   }, [root, snapshot])
 }

@@ -1,7 +1,10 @@
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { FileStatusResult } from 'simple-git'
-import { createGitStatusColors } from '../../../../src/extensions/workspace/renderer/git-status'
+import {
+  createGitStatusColors,
+  gitDecorationColorId
+} from '../../../../src/extensions/workspace/renderer/git-status'
 
 const status = (
   file: string,
@@ -83,9 +86,9 @@ describe('createGitStatusColors', () => {
     ['untracked file', '?', '?', 'untrackedResourceForeground'],
     ['ignored file', '!', '!', 'ignoredResourceForeground']
   ] as const)('maps %s to its VS Code theme color', (_, index, worktree, expected) => {
-    expect(createGitStatusColors(root, [status(file, index, worktree)]).get(file)).toContain(
-      expected
-    )
+    const fileStatus = status(file, index, worktree)
+    expect(createGitStatusColors(root, [fileStatus]).get(file)).toContain(expected)
+    expect(gitDecorationColorId(fileStatus)).toBe(`gitDecoration.${expected}`)
   })
 
   it('does not decorate paths outside the workspace', () => {

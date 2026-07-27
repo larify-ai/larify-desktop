@@ -127,6 +127,34 @@ describe('GitService', () => {
   )
 
   it(
+    'returns the committed version used by quick diff',
+    async () => {
+      const root = await createRepository()
+      const file = path.join(root, 'tracked.txt')
+      await writeFile(file, 'committed\n')
+      await simpleGit(root).add('.').commit('initial')
+      await writeFile(file, 'working tree\n')
+
+      const original = await new GitService().original(root, file)
+
+      expect(new TextDecoder().decode(original!)).toBe('committed\n')
+    },
+    gitTestTimeout
+  )
+
+  it(
+    'returns no quick diff baseline for an untracked file',
+    async () => {
+      const root = await createRepository()
+      const file = path.join(root, 'untracked.txt')
+      await writeFile(file, 'new\n')
+
+      await expect(new GitService().original(root, file)).resolves.toBeNull()
+    },
+    gitTestTimeout
+  )
+
+  it(
     'reports an error outside a Git repository',
     async () => {
       const root = await mkdtemp(path.join(os.tmpdir(), 'larify-no-git-'))

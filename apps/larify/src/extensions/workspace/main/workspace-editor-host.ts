@@ -4,19 +4,22 @@ import { join } from 'node:path'
 
 export type WorkspaceEditorCommand =
   | { type: 'open'; root: string; file: string }
+  | { type: 'open-diff'; root: string; file: string }
+  | { type: 'open-highlighted-diff'; root: string; file: string; patch: string }
   | { type: 'prepare'; root: string }
   | { type: 'theme'; theme: 'dark' | 'light' }
 
 export class WorkspaceEditorHost {
   readonly view: WebContentsView
   private ready = false
+  private visible = false
   private pending: WorkspaceEditorCommand[] = []
-  private workspaceCommand: Extract<WorkspaceEditorCommand, { type: 'open' | 'prepare' }> | null =
-    null
+  private workspaceCommand: Exclude<WorkspaceEditorCommand, { type: 'theme' }> | null = null
   private themeCommand: Extract<WorkspaceEditorCommand, { type: 'theme' }> | null = null
   private readonly resetReady = (): void => {
     if (!this.ready) return
     this.ready = false
+    this.view.setVisible(false)
     this.pending = this.currentCommands()
   }
 
@@ -29,6 +32,7 @@ export class WorkspaceEditorHost {
       }
     })
     this.window.contentView.addChildView(this.view)
+    this.view.setBackgroundColor(this.window.getBackgroundColor?.() ?? '#1e1e1f')
     this.view.setBounds({ x: 0, y: 0, width: 1, height: 1 })
     this.view.setVisible(false)
     this.view.webContents.on('did-start-loading', this.resetReady)
@@ -55,12 +59,15 @@ export class WorkspaceEditorHost {
   }
 
   setVisible(visible: boolean): void {
-    this.view.setVisible(visible)
+    this.visible = visible
+    this.view.setVisible(this.ready && visible)
   }
 
   send(command: WorkspaceEditorCommand): void {
-    if (command.type === 'theme') this.themeCommand = command
-    else this.workspaceCommand = command
+    if (command.type === 'theme') {
+      this.themeCommand = command
+      this.view.setBackgroundColor(command.theme === 'dark' ? '#1e1e1f' : '#fafafa')
+    } else this.workspaceCommand = command
     if (!this.ready) this.pending = this.currentCommands()
     else this.view.webContents.send('workspace-editor:command', command)
   }
@@ -68,6 +75,10 @@ export class WorkspaceEditorHost {
   markReady(): WorkspaceEditorCommand[] {
     this.ready = true
     return this.pending.splice(0)
+  }
+
+  present(): void {
+    this.view.setVisible(this.ready && this.visible)
   }
 
   private currentCommands(): WorkspaceEditorCommand[] {

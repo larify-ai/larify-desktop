@@ -26,4 +26,9 @@ describe('workspace icon theme', () => {
       getWorkspaceIcon('.gitattributes', 'file', false, false)
     )
   })
+
+  it('falls back when a named icon has no renderable glyph or asset', () => {
+    const icon = getWorkspaceIcon('vite.config.ts', 'file', false, false)
+    expect(icon.character ?? icon.url).toBeTruthy()
+  })
 })

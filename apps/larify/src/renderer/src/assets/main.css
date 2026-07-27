@@ -298,15 +298,21 @@ html {
 }
 
 .larify-file-diff .diff-style-root {
-  --diff-add-content--: color-mix(in srgb, var(--git-added) 18%, transparent);
-  --diff-del-content--: color-mix(in srgb, var(--git-deleted) 18%, transparent);
-  --diff-add-lineNumber--: color-mix(in srgb, var(--git-added) 18%, transparent);
-  --diff-del-lineNumber--: color-mix(in srgb, var(--git-deleted) 18%, transparent);
-  --diff-add-content-highlight--: color-mix(in srgb, var(--git-added) 28%, transparent);
-  --diff-del-content-highlight--: color-mix(in srgb, var(--git-deleted) 28%, transparent);
+  --diff-add-content--: #40b08b1f;
+  --diff-del-content--: #e8463a1f;
+  --diff-add-lineNumber--: #40b08b1f;
+  --diff-del-lineNumber--: #e8463a1f;
+  --diff-add-content-highlight--: #40b08b2e;
+  --diff-del-content-highlight--: #e8463a29;
 }
 
 .larify-file-diff .diff-tailwindcss-wrapper[data-theme="dark"] .diff-style-root {
+  --diff-add-content--: #00a56e47;
+  --diff-del-content--: #d02a2347;
+  --diff-add-lineNumber--: #00a56e47;
+  --diff-del-lineNumber--: #d02a2347;
+  --diff-add-content-highlight--: #00a56e47;
+  --diff-del-content-highlight--: #d02a2347;
   --diff-border--: #e0e2f217;
   --diff-plain-content--: #1a1b1d;
   --diff-expand-content--: #222427;

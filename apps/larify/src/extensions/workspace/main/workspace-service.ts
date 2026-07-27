@@ -12,6 +12,7 @@ export class WorkspaceService {
   private readonly openFiles = new Map<number, FileHandle>()
   private nextFileHandle = 1
   private openQueue = Promise.resolve()
+  private gitStatus: Promise<WorkspaceGitStatus> | null = null
 
   constructor(private readonly git = new GitService()) {}
 
@@ -42,12 +43,16 @@ export class WorkspaceService {
     this.root = resolved
     this.watchedDirectories.clear()
     this.allowedFiles.clear()
+    this.gitStatus = null
     this.watcher = watch([], {
       atomic: true,
       depth: 0,
       ignoreInitial: true
     })
-    this.watcher.on('all', onChange)
+    this.watcher.on('all', (event, changedPath) => {
+      this.gitStatus = null
+      onChange(event, changedPath)
+    })
     this.watchDirectory(resolved)
     return resolved
   }
@@ -71,14 +76,18 @@ export class WorkspaceService {
 
   async getGitStatuses(): Promise<WorkspaceGitStatus> {
     if (!this.root) return { available: false, message: 'No workspace is open' }
-    try {
-      return { available: true, statuses: await this.git.status(this.root) }
-    } catch (error) {
-      return {
-        available: false,
-        message: error instanceof Error ? error.message : String(error)
-      }
+    this.gitStatus ??= this.loadGitStatuses(this.root)
+    return this.gitStatus
+  }
+
+  async getGitOriginal(file: string): Promise<Uint8Array | null> {
+    const root = this.requireRoot()
+    const target = path.resolve(file)
+    const relative = path.relative(root, target)
+    if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+      throw new Error('Path is outside the workspace')
     }
+    return this.git.original(root, target)
   }
 
   async stat(candidate: string): Promise<{
@@ -135,6 +144,7 @@ export class WorkspaceService {
     const target = await this.resolveExisting(file)
     if (!(await stat(target)).isFile()) throw new Error('Workspace entry is not a file')
     await writeFile(target, content)
+    this.gitStatus = null
   }
 
   async dispose(): Promise<void> {
@@ -145,11 +155,23 @@ export class WorkspaceService {
     this.watchedDirectories.clear()
     this.allowedFiles.clear()
     this.root = null
+    this.gitStatus = null
   }
 
   private requireRoot(): string {
     if (!this.root) throw new Error('No workspace is open')
     return this.root
+  }
+
+  private async loadGitStatuses(root: string): Promise<WorkspaceGitStatus> {
+    try {
+      return { available: true, statuses: await this.git.status(root) }
+    } catch (error) {
+      return {
+        available: false,
+        message: error instanceof Error ? error.message : String(error)
+      }
+    }
   }
 
   private async closeOpenFiles(): Promise<void> {

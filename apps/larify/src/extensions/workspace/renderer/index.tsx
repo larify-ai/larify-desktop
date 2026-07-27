@@ -4,6 +4,7 @@ import type { View } from '@renderer/types/view'
 import { preloadAfterPageLoad } from '@renderer/lib/preload'
 import './workspace.css'
 import { WorkspaceEmptyState } from './workspace-empty-state'
+import { workspaceEditorClient } from './workspace-editor-client'
 import { WorkspaceIcon } from './workspace-icon'
 
 let workspaceViewPromise: Promise<{
@@ -30,13 +31,16 @@ const loadWorkspaceView = (): NonNullable<typeof workspaceViewPromise> => {
 
 const WorkspaceView = lazy(loadWorkspaceView)
 
+const currentTheme = (): 'dark' | 'light' =>
+  document.documentElement.classList.contains('dark') ? 'dark' : 'light'
+
 const extension: Extension = {
   activate(app, context) {
     app.register('view', 'workspace', {
       sidebar: {
         icon: WorkspaceIcon,
         id: 'workspace',
-        label: '评审',
+        label: '审查',
         order: 6,
         placement: 'content'
       },
@@ -47,9 +51,23 @@ const extension: Extension = {
       )
     } satisfies View)
     const cancelPreload = preloadAfterPageLoad(() => {
+      void workspaceEditorClient
+        .theme(currentTheme())
+        .catch((error) => console.error('[workspace:editor-theme]', error))
       void loadWorkspaceView().catch((error) => console.error('[workspace:preload]', error))
     })
-    context.subscriptions.push({ dispose: cancelPreload })
+    const observer = new MutationObserver(() => {
+      void workspaceEditorClient
+        .theme(currentTheme())
+        .catch((error) => console.error('[workspace:editor-theme]', error))
+    })
+    observer.observe(document.documentElement, { attributeFilter: ['class'] })
+    context.subscriptions.push({
+      dispose: () => {
+        cancelPreload()
+        observer.disconnect()
+      }
+    })
   }
 }
 

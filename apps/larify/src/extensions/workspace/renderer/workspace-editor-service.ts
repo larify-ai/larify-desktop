@@ -1,5 +1,7 @@
 import {
   observeActiveWorkspaceFile as observeMonacoActiveWorkspaceFile,
+  openWorkspaceDiff as openMonacoWorkspaceDiff,
+  openWorkspaceHighlightedDiff as openMonacoWorkspaceHighlightedDiff,
   openWorkspaceFile as openMonacoWorkspaceFile,
   setWorkspaceRoot,
   setWorkspaceTheme as setMonacoWorkspaceTheme
@@ -9,6 +11,17 @@ import { workspaceClient } from './workspace-client'
 let workspaceRoot: string | null = null
 let rootQueue = Promise.resolve()
 let openQueue = Promise.resolve()
+
+const measure = async <T>(name: string, operation: () => Promise<T>): Promise<T> => {
+  const start = `${name}:start:${crypto.randomUUID()}`
+  performance.mark(start)
+  try {
+    return await operation()
+  } finally {
+    performance.measure(name, start)
+    performance.clearMarks(start)
+  }
+}
 
 const normalizePath = (value: string): string =>
   value.replaceAll('\\', '/').replace(/\/+$/, '').toLowerCase()
@@ -24,8 +37,10 @@ export async function prepareWorkspaceRoot(root: string): Promise<void> {
     .catch(() => undefined)
     .then(async () => {
       if (workspaceRoot === root) return
-      await workspaceClient.open(root)
-      await setWorkspaceRoot(root)
+      await measure('larify:prepare-workspace-editor', async () => {
+        await workspaceClient.open(root)
+        await setWorkspaceRoot(root)
+      })
       workspaceRoot = root
     })
   rootQueue = request
@@ -41,17 +56,40 @@ export async function observeActiveWorkspaceFile(
 export function openWorkspaceFile(root: string, file: string): Promise<void> {
   const request = openQueue
     .catch(() => undefined)
-    .then(async () => {
-      const start = `larify:open-file:start:${crypto.randomUUID()}`
-      performance.mark(start)
-      try {
+    .then(() =>
+      measure('larify:open-file', async () => {
         await prepareWorkspaceRoot(root)
         const target = isInsideWorkspace(root, file) ? file : await workspaceClient.allowFile(file)
         await openMonacoWorkspaceFile(target)
-        performance.measure('larify:open-file', start)
-      } finally {
-        performance.clearMarks(start)
-      }
+      })
+    )
+  openQueue = request
+  return request
+}
+
+export function openWorkspaceDiff(root: string, file: string): Promise<void> {
+  const request = openQueue
+    .catch(() => undefined)
+    .then(() =>
+      measure('larify:open-diff', async () => {
+        await prepareWorkspaceRoot(root)
+        await openMonacoWorkspaceDiff(file)
+      })
+    )
+  openQueue = request
+  return request
+}
+
+export function openWorkspaceHighlightedDiff(
+  root: string,
+  file: string,
+  patch: string
+): Promise<void> {
+  const request = openQueue
+    .catch(() => undefined)
+    .then(async () => {
+      await prepareWorkspaceRoot(root)
+      await openMonacoWorkspaceHighlightedDiff(file, patch)
     })
   openQueue = request
   return request

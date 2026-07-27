@@ -27,7 +27,7 @@ const extension: Extension = {
         } catch (error) {
           console.error('[workspace:editor-preload]', error)
         }
-      }, 500)
+      }, 0)
     }
     const mainWindow = _app.get<MainWindowService>('service', 'main-window')?.get()
     const mainContents = mainWindow?.webContents

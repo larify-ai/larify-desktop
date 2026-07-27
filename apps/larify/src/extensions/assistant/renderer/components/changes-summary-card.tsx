@@ -1,8 +1,7 @@
 import { cn } from '@renderer/lib/utils'
 import { ChangesIcon } from '../../../workspace/renderer/changes-icon'
+import { setReviewRound } from '../../../workspace/renderer/review-changes'
 import type { ChangedFileSummary } from '../lib/change-summary'
-
-const MAX_VISIBLE_FILES = 3
 
 export function ChangesSummaryCard({
   additions,
@@ -15,7 +14,10 @@ export function ChangesSummaryCard({
   deletions: number
   files: ChangedFileSummary[]
 }): React.JSX.Element {
-  const hiddenCount = Math.max(0, files.length - MAX_VISIBLE_FILES)
+  const openChange = (selectedPath: string): void => {
+    setReviewRound({ files, selectedPath })
+    window.dispatchEvent(new CustomEvent('larify:workbench-open', { detail: 'workspace' }))
+  }
 
   return (
     <section
@@ -29,18 +31,21 @@ export function ChangesSummaryCard({
         <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
           <ChangesIcon className="size-5" />
         </span>
-        <div className="min-w-0 flex-1 text-sm font-medium">已编辑 {files.length} 个文件</div>
+        <div className="min-w-0 flex-1 text-sm font-medium">
+          已编辑 {files.length} 个文件
+        </div>
         <div className="flex shrink-0 items-center gap-2 font-mono text-xs">
           <span className="text-[var(--git-added)]">+{additions}</span>
           <span className="text-[var(--git-deleted)]">−{deletions}</span>
         </div>
       </div>
-
-      <div className="border-t border-border bg-muted/20 px-2 py-1.5">
-        {files.slice(0, MAX_VISIBLE_FILES).map((file) => (
-          <div
+      <div className="max-h-[10rem] overflow-y-auto border-t border-border bg-muted/20 px-2 py-1.5">
+        {files.map((file) => (
+          <button
+            type="button"
             key={file.path}
-            className="flex min-w-0 items-center gap-2 rounded-md py-1.5 pr-2 pl-3.5 text-xs"
+            className="flex w-full min-w-0 items-center gap-2 rounded-md py-1.5 pr-2 pl-3.5 text-left text-xs hover:bg-muted"
+            onClick={() => openChange(file.path)}
           >
             <span className="min-w-0 flex-1 truncate font-mono" title={file.path}>
               {file.path}
@@ -51,11 +56,8 @@ export function ChangesSummaryCard({
             <span className="shrink-0 font-mono text-[var(--git-deleted)]">
               −{file.deletions}
             </span>
-          </div>
+          </button>
         ))}
-        {hiddenCount > 0 ? (
-          <div className="px-2 py-1 text-xs text-muted-foreground">另外 {hiddenCount} 个文件</div>
-        ) : null}
       </div>
     </section>
   )

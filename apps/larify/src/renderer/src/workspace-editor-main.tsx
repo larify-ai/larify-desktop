@@ -1,3 +1,4 @@
+import '@codingame/monaco-vscode-language-pack-zh-hans'
 import './assets/main.css'
 import '../../extensions/workspace/renderer/workspace.css'
 import { createRoot } from 'react-dom/client'

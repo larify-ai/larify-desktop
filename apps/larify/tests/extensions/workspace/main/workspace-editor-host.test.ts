@@ -28,6 +28,7 @@ const electron = vi.hoisted(() => {
 
   class WebContentsView {
     readonly webContents = new WebContents()
+    setBackgroundColor = vi.fn()
     setBounds = vi.fn()
     setVisible = vi.fn()
   }

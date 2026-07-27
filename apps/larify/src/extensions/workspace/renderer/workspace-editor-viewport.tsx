@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { workspaceEditorClient } from './workspace-editor-client'
+import { WorkspaceEmptyState } from './workspace-empty-state'
 
 export function WorkspaceEditorViewport({ visible }: { visible: boolean }): React.JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
@@ -36,5 +37,9 @@ export function WorkspaceEditorViewport({ visible }: { visible: boolean }): Reac
     void workspaceEditorClient.setVisible(visible)
   }, [visible])
 
-  return <div ref={ref} className="h-full min-h-0 w-full" />
+  return (
+    <div ref={ref} className="relative h-full min-h-0 w-full">
+      <WorkspaceEmptyState />
+    </div>
+  )
 }

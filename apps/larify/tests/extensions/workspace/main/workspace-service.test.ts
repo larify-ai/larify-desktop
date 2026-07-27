@@ -77,6 +77,24 @@ describe('WorkspaceService', () => {
     await service.dispose()
   })
 
+  it('shares concurrent Git status requests', async () => {
+    const root = await createRoot()
+    let calls = 0
+    const git = {
+      status: async () => {
+        calls += 1
+        return []
+      }
+    }
+    const service = new WorkspaceService(git as never)
+    await service.open(root, () => undefined)
+
+    await Promise.all([service.getGitStatuses(), service.getGitStatuses()])
+
+    expect(calls).toBe(1)
+    await service.dispose()
+  })
+
   it('rejects paths outside the open workspace', async () => {
     const root = await createRoot()
     const outside = await createRoot()

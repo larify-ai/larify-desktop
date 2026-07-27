@@ -34,6 +34,9 @@ export const workspaceClient = {
 
   gitStatuses: () => window.bridge.invoke('workspace:git-status') as Promise<WorkspaceGitStatus>,
 
+  gitOriginal: (path: string) =>
+    window.bridge.invoke('workspace:git-original', path) as Promise<Uint8Array | null>,
+
   stat: (path: string) =>
     window.bridge.invoke('workspace:stat', path) as Promise<{
       directory: boolean

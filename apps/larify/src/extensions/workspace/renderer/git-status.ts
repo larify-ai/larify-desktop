@@ -33,26 +33,34 @@ const colors = Object.fromEntries(
   ])
 ) as Record<keyof typeof gitDecorationColorIds, string>
 
-const decoration = (status: FileStatusResult): string | undefined => {
+const gitDecorationKind = (
+  status: FileStatusResult
+): keyof typeof gitDecorationColorIds | undefined => {
   const pair = `${status.index}${status.working_dir}`
-  if (pair === '!!') return colors.ignored
+  if (pair === '!!') return 'ignored'
   if (['AA', 'DD', 'AU', 'UA', 'DU', 'UD', 'UU'].includes(pair)) {
-    return colors.conflicting
+    return 'conflicting'
   }
-  if (status.working_dir === 'D') return colors.deleted
-  if (status.index === 'D') return colors.stageDeleted
-  if (status.working_dir === 'M' || status.working_dir === 'T') {
-    return colors.modified
-  }
-  if (status.index === 'M' || status.index === 'T') {
-    return colors.stageModified
-  }
-  if (pair.includes('R') || pair.includes('C')) {
-    return colors.renamed
-  }
-  if (pair === '??') return colors.untracked
-  if (status.index === 'A') return colors.added
+  if (status.working_dir === 'D') return 'deleted'
+  if (status.index === 'D') return 'stageDeleted'
+  if (status.working_dir === 'M' || status.working_dir === 'T') return 'modified'
+  if (status.index === 'M' || status.index === 'T') return 'stageModified'
+  if (pair.includes('R') || pair.includes('C')) return 'renamed'
+  if (pair === '??') return 'untracked'
+  if (status.index === 'A') return 'added'
   return undefined
+}
+
+export const gitDecorationColorId = (
+  status: FileStatusResult
+): (typeof gitDecorationColorIds)[keyof typeof gitDecorationColorIds] | undefined => {
+  const kind = gitDecorationKind(status)
+  return kind ? gitDecorationColorIds[kind] : undefined
+}
+
+const decoration = (status: FileStatusResult): string | undefined => {
+  const kind = gitDecorationKind(status)
+  return kind ? colors[kind] : undefined
 }
 
 interface DecorationNode {

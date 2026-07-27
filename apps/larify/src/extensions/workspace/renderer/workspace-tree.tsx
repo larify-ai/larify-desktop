@@ -1,10 +1,11 @@
 import { forwardRef, useEffect, useRef, useState, type HTMLProps } from 'react'
 import { Tree, type NodeRendererProps, type TreeApi } from 'react-arborist'
-import { ChevronRightIcon, CircleAlertIcon } from 'lucide-react'
+import { ChevronRightIcon, CircleAlertIcon, GitBranchIcon } from 'lucide-react'
 import { useTheme } from 'next-themes'
 import type { WorkspaceEntry } from '../shared/types'
 import { getWorkspaceIcon } from './workspace-icon-theme'
 import { findTreeEntryPath } from './workspace-tree-path'
+import { initialOpenState } from './workspace-tree-state'
 
 export interface TreeEntry extends WorkspaceEntry {
   children?: TreeEntry[]
@@ -13,20 +14,24 @@ export interface TreeEntry extends WorkspaceEntry {
 }
 
 interface WorkspaceTreeProps {
+  changesOnly: boolean
+  entries: TreeEntry[]
   gitAvailable: boolean
   gitDecorations: Map<string, string>
-  entries: TreeEntry[]
   onOpen(file: string): void
   onToggle(directory: TreeEntry): void
+  onToggleView(): void
   revealPath?: string | null
 }
 
 export function WorkspaceTree({
+  changesOnly,
   entries,
   gitAvailable,
   gitDecorations,
   onOpen,
   onToggle,
+  onToggleView,
   revealPath
 }: WorkspaceTreeProps): React.JSX.Element {
   const { resolvedTheme } = useTheme()
@@ -53,29 +58,45 @@ export function WorkspaceTree({
     tree.select(path, { align: 'smart', focus: false })
   }, [entries, revealPath])
 
+  const treeVisible = size.height > 0 && size.width > 0
   return (
     <div
-      ref={containerRef}
-      className={`workspace-tree min-h-0 flex-1 ${resolvedTheme === 'dark' ? 'vs-dark' : 'vs'}`}
+      className={`workspace-tree relative flex min-h-0 flex-1 flex-col ${
+        resolvedTheme === 'dark' ? 'vs-dark' : 'vs'
+      }`}
     >
-      <div className="show-file-icons h-full">
-        {size.height > 0 && size.width > 0 ? (
+      <button
+        aria-label={changesOnly ? '切换到全局视图' : '切换到变更视图'}
+        className={`absolute right-4 top-1 z-10 grid size-6 place-items-center rounded-sm hover:bg-accent ${
+          changesOnly ? 'bg-accent' : ''
+        }`}
+        title={changesOnly ? '变更视图' : '全局视图'}
+        type="button"
+        onClick={onToggleView}
+      >
+        <GitBranchIcon className="size-3.5" />
+      </button>
+      <div ref={containerRef} className="min-h-0 flex-1">
+        <div
+          className="show-file-icons h-full"
+          style={{ visibility: treeVisible ? 'visible' : 'hidden' }}
+        >
           <Tree<TreeEntry>
+            key={changesOnly ? 'changes' : 'all'}
             ref={treeRef}
             data={entries}
             disableDrag
             disableDrop
-            height={size.height}
+            height={Math.max(size.height, 1)}
             idAccessor="path"
             indent={14}
-            initialOpenState={entries[0]?.root ? { [entries[0].path]: true } : undefined}
+            initialOpenState={initialOpenState(entries, changesOnly)}
             openByDefault={false}
             rowHeight={24}
-            width={size.width}
+            width={Math.max(size.width, 1)}
             outerElementType={TreeScrollContainer}
             onActivate={(node) => {
-              const entry = node.data
-              if (entry?.kind === 'file') onOpen(entry.path)
+              if (node.data.kind === 'file') onOpen(node.data.path)
             }}
             onToggle={(id) => {
               const entry = treeRef.current?.get(id)?.data
@@ -91,7 +112,7 @@ export function WorkspaceTree({
               />
             )}
           </Tree>
-        ) : null}
+        </div>
       </div>
     </div>
   )
@@ -116,7 +137,6 @@ function TreeNode({
 }): React.JSX.Element {
   const directory = node.data.kind === 'directory'
   const icon = getWorkspaceIcon(node.data.name, directory ? 'folder' : 'file', node.isOpen, light)
-
   return (
     <div
       style={style}
@@ -146,10 +166,7 @@ function TreeNode({
             {icon.character}
           </span>
         )}
-        <span
-          className="min-w-0 flex-1 truncate"
-          style={{ color: gitDecorations.get(node.data.path) }}
-        >
+        <span className="min-w-0 flex-1 truncate" style={{ color: gitDecorations.get(node.data.path) }}>
           {node.data.name}
         </span>
         {node.data.root && !gitAvailable ? (

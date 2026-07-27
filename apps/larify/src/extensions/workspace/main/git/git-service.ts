@@ -51,6 +51,22 @@ export class GitService {
       .filter((file) => isInside(workspaceRoot, file.path))
   }
 
+  async original(workspaceRoot: string, file: string): Promise<Uint8Array | null> {
+    const git = await this.createClient(workspaceRoot)
+    const repositoryRoot = await this.resolveRepositoryRoot(git, workspaceRoot)
+    const target = path.resolve(file)
+    if (!isInside(workspaceRoot, target) || !isInside(repositoryRoot, target)) {
+      throw new Error('Path is outside the workspace repository')
+    }
+
+    const relative = path.relative(repositoryRoot, target).split(path.sep).join('/')
+    try {
+      return new TextEncoder().encode(await git.raw(['show', `HEAD:${relative}`]))
+    } catch {
+      return null
+    }
+  }
+
   private async resolveRepositoryRoot(git: SimpleGit, workspaceRoot: string): Promise<string> {
     const key = path.resolve(workspaceRoot)
     const cached = this.repositoryRoots.get(key)

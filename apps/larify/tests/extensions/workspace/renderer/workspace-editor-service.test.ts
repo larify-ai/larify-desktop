@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const monaco = vi.hoisted(() => ({
   monacoReady: Promise.resolve(),
   observeActiveWorkspaceFile: vi.fn(),
+  openWorkspaceDiff: vi.fn(),
   openWorkspaceFile: vi.fn(),
   setWorkspaceRoot: vi.fn(),
   setWorkspaceTheme: vi.fn()
@@ -36,6 +37,7 @@ describe('workspace editor service', () => {
     vi.clearAllMocks()
     monaco.setWorkspaceRoot.mockResolvedValue(undefined)
     monaco.openWorkspaceFile.mockResolvedValue(undefined)
+    monaco.openWorkspaceDiff.mockResolvedValue(undefined)
     workspaceClient.allowFile.mockImplementation(async (file: string) => file)
     workspaceClient.open.mockImplementation(async (root: string) => root)
   })
@@ -86,5 +88,15 @@ describe('workspace editor service', () => {
     expect(workspaceClient.open.mock.invocationCallOrder[0]).toBeLessThan(
       workspaceClient.allowFile.mock.invocationCallOrder[0]
     )
+  })
+
+  it('opens a changed file with the native diff editor', async () => {
+    const { openWorkspaceDiff } =
+      await import('../../../../src/extensions/workspace/renderer/workspace-editor-service')
+
+    await openWorkspaceDiff('D:\\workspace', 'D:\\workspace\\changed.ts')
+
+    expect(monaco.setWorkspaceRoot).toHaveBeenCalledWith('D:\\workspace')
+    expect(monaco.openWorkspaceDiff).toHaveBeenCalledWith('D:\\workspace\\changed.ts')
   })
 })

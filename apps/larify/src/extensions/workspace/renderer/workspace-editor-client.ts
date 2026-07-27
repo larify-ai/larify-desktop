@@ -5,6 +5,15 @@ export const workspaceEditorClient = {
     window.bridge.invoke('workspace-editor:command', { type: 'prepare', root }),
   open: (root: string, file: string) =>
     window.bridge.invoke('workspace-editor:command', { type: 'open', root, file }),
+  openDiff: (root: string, file: string) =>
+    window.bridge.invoke('workspace-editor:command', { type: 'open-diff', root, file }),
+  openHighlightedDiff: (root: string, file: string, patch: string) =>
+    window.bridge.invoke('workspace-editor:command', {
+      type: 'open-highlighted-diff',
+      root,
+      file,
+      patch
+    }),
   theme: (theme: Theme) =>
     window.bridge.invoke('workspace-editor:command', { type: 'theme', theme }),
   state: () =>

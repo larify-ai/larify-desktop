@@ -61,6 +61,33 @@
   margin-left: -2px;
 }
 
+.workspace-diff-layout-toggle {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  color: var(--vscode-icon-foreground);
+  cursor: pointer;
+  display: inline-flex;
+  height: 24px;
+  justify-content: center;
+  padding: 0;
+  position: absolute;
+  right: 0;
+  top: 34px;
+  width: var(--larify-scrollbar-size);
+  z-index: 10;
+}
+
+.workspace-diff-layout-toggle:hover {
+  background: var(--vscode-toolbar-hoverBackground);
+}
+
+.workspace-diff-layout-toggle svg {
+  height: 16px;
+  width: 16px;
+}
+
 .monaco-workbench .workspace-editor .breadcrumbs-control .monaco-breadcrumb-item .hint-more {
   display: none !important;
 }
@@ -143,38 +170,73 @@
 .workspace-tree-icon {
   align-items: center;
   display: inline-flex;
-  flex: 0 0 18px;
-  height: 18px;
+  flex: 0 0 16px;
+  height: 16px;
   justify-content: center;
   overflow: visible;
-  width: 18px;
+  width: 16px;
 }
 
 .workspace-tree-font-icon {
   font-family: 'Workspace Seti';
   font-size: 14px;
-  line-height: 18px;
+  line-height: 16px;
 }
 
 .show-file-icons .workspace-tree-icon::before {
   background-position: center !important;
   background-size: 16px 16px !important;
   font-size: 14px;
-  height: 18px !important;
-  line-height: 18px;
-  width: 18px !important;
+  height: 16px !important;
+  line-height: 16px;
+  width: 16px !important;
 }
 
 .workspace-editor .monaco-icon-label.file-icon::before {
   background-position: center !important;
   background-size: 16px 16px !important;
-  min-width: 18px;
-  width: 18px !important;
+  min-width: 16px;
+  width: 16px !important;
 }
 
 .workspace-editor .editor-group-watermark .watermark-container::after {
   color: var(--vscode-foreground);
-  content: '开始编辑';
+  content: '开始审查';
   font-size: 18px;
   font-weight: 500;
+}
+.workspace-dirty-diff-added,
+.workspace-dirty-diff-modified {
+  box-sizing: border-box;
+  margin-left: 4px;
+  width: 3px !important;
+}
+
+.workspace-dirty-diff-added,
+.workspace-dirty-diff-modified {
+  background: var(--vscode-editorGutter-addedBackground);
+}
+
+.workspace-dirty-diff-deleted {
+  border-bottom: 4px solid transparent;
+  border-left: 4px solid var(--vscode-editorGutter-deletedBackground);
+  border-top: 4px solid transparent;
+  box-sizing: border-box;
+  height: 0 !important;
+  margin-left: 4px;
+  margin-top: -4px;
+  width: 0 !important;
+}
+
+.workspace-round-change-line {
+  background: color-mix(
+    in srgb,
+    var(--vscode-diffEditor-insertedLineBackground) 70%,
+    transparent
+  );
+  box-shadow: inset 2px 0 var(--vscode-editorGutter-addedBackground);
+}
+
+.workspace-round-deletion-anchor {
+  box-shadow: inset 2px 0 var(--vscode-editorGutter-deletedBackground);
 }

@@ -29,27 +29,33 @@ const assetUrl = (iconPath: string): string | undefined => {
 
 const definition = (id: string): WorkspaceIconDefinition => {
   const value = (iconTheme.iconDefinitions as Record<string, IconDefinition>)[id]
+  const codePoint = value?.fontCharacter?.match(/^\\([0-9a-f]+)$/i)?.[1]
   return {
-    character: value?.fontCharacter,
+    character: codePoint ? String.fromCodePoint(Number.parseInt(codePoint, 16)) : value?.fontCharacter,
     color: value?.fontColor,
     url: value?.iconPath ? assetUrl(value.iconPath) : undefined
   }
 }
 
+const hasIcon = (id: string): boolean => {
+  const value = (iconTheme.iconDefinitions as Record<string, IconDefinition>)[id]
+  return value?.fontCharacter !== undefined || value?.iconPath !== undefined
+}
+
 const fileIconId = (name: string, theme: IconTheme): string => {
   const normalized = name.toLowerCase()
   const byName = theme.fileNames[normalized]
-  if (byName) return byName
+  if (byName && hasIcon(byName)) return byName
 
   const parts = normalized.split('.')
   for (let index = 1; index < parts.length; index += 1) {
     const extension = parts.slice(index).join('.')
     const byExtension = theme.fileExtensions[extension]
-    if (byExtension) return byExtension
+    if (byExtension && hasIcon(byExtension)) return byExtension
   }
   const language = languageIdForFile(normalized)
   const byLanguage = language ? theme.languageIds?.[language] : undefined
-  if (byLanguage) return byLanguage
+  if (byLanguage && hasIcon(byLanguage)) return byLanguage
   return theme.file
 }
 

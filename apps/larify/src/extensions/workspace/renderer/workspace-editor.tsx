@@ -1,10 +1,14 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import { renderEditorPart } from '@codingame/monaco-vscode-views-service-override'
-import { monacoReady, observeWorkspaceEditor } from './monaco'
+import {
+  layoutWorkspaceEditor,
+  monacoReady
+} from './monaco'
 import { WorkspaceEmptyState } from './workspace-empty-state'
 
 interface WorkspaceEditorProps {
   activeFile: string | null
+  onReady(): void
   onReveal(path: string): void
   root: string | null
 }
@@ -57,11 +61,11 @@ function prependWorkspaceRoot(container: Element, root: string): boolean {
 
 export function WorkspaceEditor({
   activeFile,
+  onReady,
   onReveal,
   root
 }: WorkspaceEditorProps): React.JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null)
-  const [hasEditor, setHasEditor] = useState(false)
 
   useEffect(() => {
     let disposed = false
@@ -78,7 +82,20 @@ export function WorkspaceEditor({
         }
         container.addEventListener('mouseover', suppressTabHover, true)
         const part = renderEditorPart(container)
+        let layoutFrame = 0
+        const layout = (): void => {
+          cancelAnimationFrame(layoutFrame)
+          layoutFrame = requestAnimationFrame(() => void layoutWorkspaceEditor())
+        }
+        const resizeObserver = new ResizeObserver(() => {
+          layout()
+        })
+        resizeObserver.observe(container)
+        layout()
+        onReady()
         disposePart = () => {
+          cancelAnimationFrame(layoutFrame)
+          resizeObserver.disconnect()
           container.removeEventListener('mouseover', suppressTabHover, true)
           part.dispose()
         }
@@ -88,7 +105,7 @@ export function WorkspaceEditor({
       disposed = true
       disposePart?.()
     }
-  }, [])
+  }, [onReady])
 
   useEffect(() => {
     const container = containerRef.current
@@ -131,28 +148,10 @@ export function WorkspaceEditor({
     }
   }, [activeFile, onReveal, root])
 
-  useEffect(() => {
-    let disposed = false
-    let dispose: (() => void) | undefined
-    void observeWorkspaceEditor(setHasEditor)
-      .then((listener) => {
-        if (disposed) {
-          listener()
-          return
-        }
-        dispose = listener
-      })
-      .catch((error) => console.error('[workspace:observe-editor]', error))
-    return () => {
-      disposed = true
-      dispose?.()
-    }
-  }, [])
-
   return (
     <div className="workspace-editor relative h-full min-h-0 w-full">
       <div ref={containerRef} className="h-full min-h-0 w-full" />
-      {!hasEditor ? (
+      {!activeFile ? (
         <div className="absolute inset-0">
           <WorkspaceEmptyState />
         </div>

@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useTheme } from 'next-themes'
 import type { ImperativePanelHandle } from 'react-resizable-panels'
 import {
   ResizableHandle,
@@ -12,33 +11,29 @@ import { WorkspaceEditorViewport } from './workspace-editor-viewport'
 import { WorkspaceTree } from './workspace-tree'
 import { useGitDecorations } from './use-git-decorations'
 import { useWorkspaceExplorer } from './use-workspace-explorer'
-
-const basename = (path: string): string =>
-  path
-    .replace(/[\\/]+$/, '')
-    .split(/[\\/]/)
-    .at(-1) ?? path
-
-const scheduleIdle = (callback: () => void): (() => void) => {
-  if (typeof window.requestIdleCallback === 'function') {
-    const handle = window.requestIdleCallback(callback, { timeout: 1_000 })
-    return () => window.cancelIdleCallback(handle)
-  }
-  const handle = globalThis.setTimeout(callback)
-  return () => globalThis.clearTimeout(handle)
-}
+import { createGitChangeTree, createPathChangeTree } from './git-change-tree'
+import {
+  REVIEW_ROUND_EVENT,
+  resolveReviewPath,
+  takeReviewRound,
+  type ReviewRoundRequest,
+} from './review-changes'
 
 export function WorkspaceView(): React.JSX.Element {
-  const { resolvedTheme } = useTheme()
   const explorerRef = useRef<ImperativePanelHandle>(null)
   const [explorerCollapsed, setExplorerCollapsed] = useState(false)
+  const [changesOnly, setChangesOnly] = useState(false)
   const [activeFile, setActiveFile] = useState<string | null>(null)
   const [editorRequested, setEditorRequested] = useState(false)
   const [workbenchVisible, setWorkbenchVisible] = useState(false)
   const [revealPath, setRevealPath] = useState<string | null>(null)
   const editorRootRef = useRef<string | null>(null)
   const { entries, loadDirectory, revealFile, root } = useWorkspaceExplorer()
-  const { available: gitAvailable, decorations: gitDecorations } = useGitDecorations(root)
+  const {
+    available: gitAvailable,
+    decorations: gitDecorations,
+    statuses: gitStatuses
+  } = useGitDecorations(root)
   const revealInTree = useCallback(
     (path: string): void => {
       setRevealPath(path)
@@ -55,20 +50,10 @@ export function WorkspaceView(): React.JSX.Element {
       setRevealPath(null)
     }
     if (!root) return
-    return scheduleIdle(() => {
-      void workspaceEditorClient
-        .prepare(root)
-        .catch((error) => console.error('[workspace-editor:prepare]', error))
-    })
+    void workspaceEditorClient
+      .prepare(root)
+      .catch((error) => console.error('[workspace-editor:prepare]', error))
   }, [root])
-
-  useEffect(() => {
-    return scheduleIdle(() => {
-      void workspaceEditorClient
-        .theme(resolvedTheme === 'dark' ? 'dark' : 'light')
-        .catch((error) => console.error('[workspace-editor:theme]', error))
-    })
-  }, [resolvedTheme])
 
   useEffect(() => {
     const disposeActive = workspaceEditorClient.onActive((file) => {
@@ -105,16 +90,45 @@ export function WorkspaceView(): React.JSX.Element {
     void revealFile(activeFile).catch((error) => console.error('[workspace:reveal-file]', error))
   }, [activeFile, revealFile])
 
+  useEffect(() => {
+    const openRound = (detail: ReviewRoundRequest): void => {
+      const selected = detail.files.find((file) => file.path === detail.selectedPath)
+      if (!root || !selected) return
+      const selectedPath = resolveReviewPath(root, selected.path)
+      setChangesOnly(true)
+      setRevealPath(selectedPath)
+      setEditorRequested(true)
+      void workspaceEditorClient
+        .openHighlightedDiff(root, selectedPath, selected.patch)
+        .catch((error) => console.error('[workspace-editor:open-highlighted-diff]', error))
+    }
+    const onRound = (event: Event): void => {
+      openRound(takeReviewRound() ?? (event as CustomEvent<ReviewRoundRequest>).detail)
+    }
+
+    window.addEventListener(REVIEW_ROUND_EVENT, onRound)
+    const currentRound = takeReviewRound()
+    if (currentRound) openRound(currentRound)
+    return () => window.removeEventListener(REVIEW_ROUND_EVENT, onRound)
+  }, [root])
+
   const openFile = useCallback(
     (file: string): void => {
       if (!root) return
       setEditorRequested(true)
-      void workspaceEditorClient
-        .open(root, file)
-        .catch((error) => console.error('[workspace-editor:open]', error))
+      const request = changesOnly
+        ? workspaceEditorClient.openDiff(root, file)
+        : workspaceEditorClient.open(root, file)
+      void request.catch((error) => console.error('[workspace-editor:open]', error))
     },
-    [root]
+    [changesOnly, root]
   )
+
+  const treeEntries = root
+    ? changesOnly
+      ? createGitChangeTree(root, gitStatuses)
+      : createPathChangeTree(root, []).map((entry) => ({ ...entry, children: entries }))
+    : []
 
   return (
     <ResizablePanelGroup direction="horizontal" className="workspace-view bg-(--workbench-content)">
@@ -134,17 +148,10 @@ export function WorkspaceView(): React.JSX.Element {
               key={root}
               gitAvailable={gitAvailable}
               gitDecorations={gitDecorations}
-              entries={[
-                {
-                  children: entries,
-                  kind: 'directory',
-                  loaded: true,
-                  name: basename(root),
-                  path: root,
-                  root: true
-                }
-              ]}
+              entries={treeEntries}
+              changesOnly={changesOnly}
               onOpen={openFile}
+              onToggleView={() => setChangesOnly((current) => !current)}
               onToggle={(entry) => {
                 void loadDirectory(entry).catch((error) =>
                   console.error('[workspace:load-directory]', error)

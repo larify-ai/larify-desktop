@@ -1,4 +1,5 @@
 import { ipcMain, type IpcMainInvokeEvent, type WebContents } from 'electron'
+import { isAbsolute, resolve } from 'node:path'
 import type { WorkspaceService } from './workspace-service'
 import type { WorkspaceEditorHost } from './workspace-editor-host'
 
@@ -43,7 +44,12 @@ export function registerWorkspaceIpc(
       return service.open(root, sendChange)
     },
     'workspace:list': (_event: IpcMainInvokeEvent, directory?: string) => service.list(directory),
-    'workspace:git-status': () => service.getGitStatuses(),
+    'workspace:git-status': (event: IpcMainInvokeEvent) => {
+      subscribe(event)
+      return service.getGitStatuses()
+    },
+    'workspace:git-original': (_event: IpcMainInvokeEvent, file: string) =>
+      service.getGitOriginal(file),
     'workspace:stat': (_event: IpcMainInvokeEvent, path: string) =>
       optionalFile(() => service.stat(path)),
     'workspace:file-open': (_event: IpcMainInvokeEvent, file: string) =>
@@ -60,6 +66,7 @@ export function registerWorkspaceIpc(
     'workspace:write': (_event: IpcMainInvokeEvent, file: string, content: Uint8Array) =>
       service.write(file, content),
     'workspace-editor:ready': () => getEditor?.().markReady() ?? [],
+    'workspace-editor:present': () => getEditor?.().present(),
     'workspace-editor:set-bounds': (_event: IpcMainInvokeEvent, bounds: Electron.Rectangle) =>
       getEditor?.().setBounds(bounds),
     'workspace-editor:set-visible': (_event: IpcMainInvokeEvent, visible: boolean) =>
@@ -67,7 +74,20 @@ export function registerWorkspaceIpc(
     'workspace-editor:command': (
       _event: IpcMainInvokeEvent,
       command: Parameters<WorkspaceEditorHost['send']>[0]
-    ) => getEditor?.().send(command),
+    ) => {
+      if (
+        command.type === 'open' ||
+        command.type === 'open-diff' ||
+        command.type === 'open-highlighted-diff'
+      ) {
+        getEditor?.().send({
+          ...command,
+          file: isAbsolute(command.file) ? command.file : resolve(command.root, command.file)
+        })
+      } else {
+        getEditor?.().send(command)
+      }
+    },
     'workspace-editor:state': (event: IpcMainInvokeEvent) => {
       subscribe(event)
       return { activeFile }

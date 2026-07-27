@@ -89,6 +89,35 @@ describe('workspace IPC', () => {
     expect(electron.handlers.size).toBe(0)
   })
 
+  it('preserves absolute editor paths and resolves relative paths from the workspace', async () => {
+    const service = { open: vi.fn(async () => 'D:\\workspace') }
+    const editor = { send: vi.fn() }
+    const unregister = registerWorkspaceIpc(service as never, () => editor as never)
+
+    await invoke(
+      'workspace-editor:command',
+      {},
+      { type: 'open', root: 'D:\\workspace', file: 'D:\\other\\file.ts' }
+    )
+    await invoke(
+      'workspace-editor:command',
+      {},
+      { type: 'open-diff', root: 'D:\\workspace', file: 'src\\file.ts' }
+    )
+
+    expect(editor.send).toHaveBeenNthCalledWith(1, {
+      type: 'open',
+      root: 'D:\\workspace',
+      file: 'D:\\other\\file.ts'
+    })
+    expect(editor.send).toHaveBeenNthCalledWith(2, {
+      type: 'open-diff',
+      root: 'D:\\workspace',
+      file: 'D:\\workspace\\src\\file.ts'
+    })
+    unregister()
+  })
+
   it('maps missing optional files to null without hiding other errors', async () => {
     const missing = Object.assign(new Error('missing'), { code: 'ENOENT' })
     const service = {

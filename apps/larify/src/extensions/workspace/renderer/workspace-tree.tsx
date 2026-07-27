@@ -1,8 +1,10 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Tree, type NodeRendererProps } from 'react-arborist'
-import { ChevronRightIcon } from 'lucide-react'
+import { forwardRef, useEffect, useRef, useState, type HTMLProps } from 'react'
+import { Tree, type NodeRendererProps, type TreeApi } from 'react-arborist'
+import { ChevronRightIcon, CircleAlertIcon } from 'lucide-react'
+import { useTheme } from 'next-themes'
 import type { WorkspaceEntry } from '../shared/types'
-import { createWorkspaceIconResolver } from './monaco'
+import { getWorkspaceIcon } from './workspace-icon-theme'
+import { findTreeEntryPath } from './workspace-tree-path'
 
 export interface TreeEntry extends WorkspaceEntry {
   children?: TreeEntry[]
@@ -11,33 +13,26 @@ export interface TreeEntry extends WorkspaceEntry {
 }
 
 interface WorkspaceTreeProps {
+  gitAvailable: boolean
+  gitDecorations: Map<string, string>
   entries: TreeEntry[]
   onOpen(file: string): void
   onToggle(directory: TreeEntry): void
-  rootAction?: ReactNode
+  revealPath?: string | null
 }
 
 export function WorkspaceTree({
   entries,
+  gitAvailable,
+  gitDecorations,
   onOpen,
   onToggle,
-  rootAction
+  revealPath
 }: WorkspaceTreeProps): React.JSX.Element {
+  const { resolvedTheme } = useTheme()
   const containerRef = useRef<HTMLDivElement>(null)
-  const [iconResolver, setIconResolver] = useState<
-    ((path: string, kind: 'file' | 'folder' | 'root') => string) | null
-  >(null)
+  const treeRef = useRef<TreeApi<TreeEntry> | undefined>(undefined)
   const [size, setSize] = useState({ height: 0, width: 0 })
-
-  useEffect(() => {
-    let disposed = false
-    void createWorkspaceIconResolver().then((resolver) => {
-      if (!disposed) setIconResolver(() => resolver)
-    })
-    return () => {
-      disposed = true
-    }
-  }, [])
 
   useEffect(() => {
     const container = containerRef.current
@@ -49,94 +44,121 @@ export function WorkspaceTree({
     return () => observer.disconnect()
   }, [])
 
+  useEffect(() => {
+    const tree = treeRef.current
+    if (!revealPath || !tree) return
+    const path = findTreeEntryPath(entries, revealPath)
+    if (!path || !tree.get(path)) return
+    tree.openParents(path)
+    tree.select(path, { align: 'smart', focus: false })
+  }, [entries, revealPath])
+
   return (
-    <div ref={containerRef} className="show-file-icons min-h-0 flex-1">
-      {size.height > 0 && size.width > 0 ? (
-        <Tree<TreeEntry>
-          data={entries}
-          height={size.height}
-          idAccessor="path"
-          indent={16}
-          initialOpenState={
-            entries[0]?.root ? { [entries[0].path]: true } : undefined
-          }
-          openByDefault={false}
-          rowHeight={26}
-          width={size.width}
-          onActivate={(node) => {
-            const entry = node.data
-            if (entry?.kind === 'file') onOpen(entry.path)
-          }}
-          onToggle={(id) => {
-            const find = (items: TreeEntry[]): TreeEntry | undefined => {
-              for (const item of items) {
-                if (item.path === id) return item
-                const nested = item.children && find(item.children)
-                if (nested) return nested
-              }
-              return undefined
-            }
-            const entry = find(entries)
-            if (entry?.kind === 'directory' && !entry.loaded) onToggle(entry)
-          }}
-        >
-          {(props) => (
-            <TreeNode {...props} iconResolver={iconResolver} rootAction={rootAction} />
-          )}
-        </Tree>
-      ) : null}
+    <div
+      ref={containerRef}
+      className={`workspace-tree min-h-0 flex-1 ${resolvedTheme === 'dark' ? 'vs-dark' : 'vs'}`}
+    >
+      <div className="show-file-icons h-full">
+        {size.height > 0 && size.width > 0 ? (
+          <Tree<TreeEntry>
+            ref={treeRef}
+            data={entries}
+            disableDrag
+            disableDrop
+            height={size.height}
+            idAccessor="path"
+            indent={14}
+            initialOpenState={entries[0]?.root ? { [entries[0].path]: true } : undefined}
+            openByDefault={false}
+            rowHeight={24}
+            width={size.width}
+            outerElementType={TreeScrollContainer}
+            onActivate={(node) => {
+              const entry = node.data
+              if (entry?.kind === 'file') onOpen(entry.path)
+            }}
+            onToggle={(id) => {
+              const entry = treeRef.current?.get(id)?.data
+              if (entry?.kind === 'directory' && !entry.loaded) onToggle(entry)
+            }}
+          >
+            {(props) => (
+              <TreeNode
+                {...props}
+                gitAvailable={gitAvailable}
+                gitDecorations={gitDecorations}
+                light={resolvedTheme !== 'dark'}
+              />
+            )}
+          </Tree>
+        ) : null}
+      </div>
     </div>
   )
 }
 
+const TreeScrollContainer = forwardRef<HTMLDivElement, HTMLProps<HTMLDivElement>>(
+  function TreeScrollContainer({ className, ...props }, ref) {
+    return <div {...props} ref={ref} className={`${className ?? ''} workspace-tree-scroll`} />
+  }
+)
+
 function TreeNode({
   node,
   style,
-  dragHandle,
-  iconResolver,
-  rootAction
+  gitAvailable,
+  gitDecorations,
+  light
 }: NodeRendererProps<TreeEntry> & {
-  iconResolver: ((path: string, kind: 'file' | 'folder' | 'root') => string) | null
-  rootAction?: ReactNode
+  gitDecorations: Map<string, string>
+  gitAvailable: boolean
+  light: boolean
 }): React.JSX.Element {
   const directory = node.data.kind === 'directory'
-  const iconKind = node.data.root ? 'root' : directory ? 'folder' : 'file'
-  const iconClass = directory
-    ? `codicon codicon-${
-        node.data.root
-          ? node.isOpen
-            ? 'root-folder-opened'
-            : 'root-folder'
-          : node.isOpen
-            ? 'folder-opened'
-            : 'folder'
-      }`
-    : iconResolver?.(node.data.path, iconKind) ?? 'file-icon'
+  const icon = getWorkspaceIcon(node.data.name, directory ? 'folder' : 'file', node.isOpen, light)
 
   return (
     <div
-      ref={dragHandle}
       style={style}
-      className="flex cursor-default items-center gap-1.5 overflow-hidden px-1 text-sm hover:bg-accent"
+      className={`workspace-tree-row flex cursor-default items-center gap-1 overflow-hidden px-1 text-sm ${
+        node.isSelected ? 'bg-accent' : ''
+      }`}
       onClick={() => (directory ? node.toggle() : node.activate())}
     >
       {directory ? (
         <ChevronRightIcon
-          className={`size-3.5 shrink-0 transition-transform ${node.isOpen ? 'rotate-90' : ''}`}
+          className={`monaco-tl-twistie collapsible size-3.5 shrink-0 transition-transform ${
+            node.isOpen ? 'rotate-90' : 'collapsed'
+          }`}
         />
       ) : (
         <span className="w-3.5 shrink-0" />
       )}
-      <span
-        aria-hidden
-        className={`${iconClass} workspace-tree-icon`}
-      />
-      <span className="min-w-0 flex-1 truncate">{node.data.name}</span>
-      {node.data.root && rootAction ? (
-        <span className="ml-auto shrink-0" onClick={(event) => event.stopPropagation()}>
-          {rootAction}
+      <span className="monaco-tl-contents flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
+        {icon.url ? (
+          <img aria-hidden className="workspace-tree-icon" src={icon.url} />
+        ) : (
+          <span
+            aria-hidden
+            className="workspace-tree-icon workspace-tree-font-icon"
+            style={{ color: icon.color }}
+          >
+            {icon.character}
+          </span>
+        )}
+        <span
+          className="min-w-0 flex-1 truncate"
+          style={{ color: gitDecorations.get(node.data.path) }}
+        >
+          {node.data.name}
         </span>
-      ) : null}
+        {node.data.root && !gitAvailable ? (
+          <CircleAlertIcon
+            aria-label="Git 状态不可用"
+            className="mr-1 size-3.5 shrink-0 text-muted-foreground"
+          />
+        ) : null}
+      </span>
     </div>
   )
 }

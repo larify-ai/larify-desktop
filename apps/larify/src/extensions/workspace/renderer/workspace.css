@@ -1,3 +1,128 @@
+.workspace-editor-page,
+.workspace-editor-page body,
+.workspace-editor-page #root {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  width: 100%;
+}
+
+.workspace-tree {
+  background: transparent;
+  color: var(--foreground);
+}
+
+@font-face {
+  font-family: 'Workspace Seti';
+  src: url('./assets/ide-icons/seti.woff') format('woff');
+}
+
+.workspace-tree-scroll::-webkit-scrollbar-button,
+.workspace-tree-scroll::-webkit-scrollbar-button:single-button,
+.workspace-tree-scroll::-webkit-scrollbar-button:single-button:vertical:decrement,
+.workspace-tree-scroll::-webkit-scrollbar-button:single-button:vertical:increment,
+.workspace-tree-scroll::-webkit-scrollbar-button:vertical:start:decrement,
+.workspace-tree-scroll::-webkit-scrollbar-button:vertical:end:increment,
+.workspace-tree-scroll::-webkit-scrollbar-button:single-button:horizontal:decrement,
+.workspace-tree-scroll::-webkit-scrollbar-button:single-button:horizontal:increment,
+.workspace-tree-scroll::-webkit-scrollbar-button:horizontal:start:decrement,
+.workspace-tree-scroll::-webkit-scrollbar-button:horizontal:end:increment {
+  -webkit-appearance: none !important;
+  appearance: none !important;
+  background: transparent !important;
+  border: 0 !important;
+  display: none !important;
+  height: 0 !important;
+  max-height: 0 !important;
+  max-width: 0 !important;
+  min-height: 0 !important;
+  min-width: 0 !important;
+  width: 0 !important;
+}
+
+.workspace-tree-row:hover {
+  background: var(--accent);
+}
+
+.monaco-workbench {
+  --vscode-scrollbarSlider-background: var(--larify-scrollbar-thumb) !important;
+  --vscode-scrollbarSlider-hoverBackground: var(--larify-scrollbar-thumb-hover) !important;
+  --vscode-scrollbarSlider-activeBackground: var(--larify-scrollbar-thumb-active) !important;
+}
+
+.monaco-workbench .workspace-editor {
+  --vscode-editorGroupHeader-tabsBackground: var(--vscode-editor-background) !important;
+  --vscode-tab-activeBackground: var(--vscode-editor-background) !important;
+  --vscode-tab-inactiveBackground: var(--vscode-editor-background) !important;
+  --vscode-tab-selectedBackground: var(--vscode-editor-background) !important;
+}
+
+.monaco-workbench .workspace-editor .breadcrumbs-below-tabs .breadcrumbs-control {
+  margin-left: -2px;
+}
+
+.monaco-workbench .workspace-editor .breadcrumbs-control .monaco-breadcrumb-item .hint-more {
+  display: none !important;
+}
+
+.monaco-workbench .workspace-editor .part.editor > .content .editor-group-container > .title,
+.monaco-workbench
+  .workspace-editor
+  .part.editor
+  > .content
+  .editor-group-container
+  > .title
+  > .tabs-and-actions-container,
+.monaco-workbench
+  .workspace-editor
+  .part.editor
+  > .content
+  .editor-group-container
+  > .title
+  .tabs-container,
+.monaco-workbench
+  .workspace-editor
+  .part.editor
+  > .content
+  .editor-group-container
+  > .title
+  .tabs-container
+  > .tab {
+  background-color: var(--vscode-editor-background) !important;
+}
+
+.monaco-workbench .monaco-scrollable-element > .scrollbar.vertical {
+  width: var(--larify-scrollbar-size) !important;
+}
+
+.monaco-workbench .monaco-scrollable-element > .scrollbar.horizontal {
+  height: var(--larify-scrollbar-size) !important;
+}
+
+.monaco-workbench .monaco-scrollable-element > .scrollbar.vertical > .slider {
+  width: 100% !important;
+}
+
+.monaco-workbench .monaco-scrollable-element > .scrollbar.horizontal > .slider {
+  height: 100% !important;
+}
+
+.monaco-workbench .monaco-scrollable-element > .scrollbar > .slider {
+  background-color: var(--larify-scrollbar-thumb) !important;
+  background-clip: content-box !important;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  box-sizing: border-box;
+}
+
+.monaco-workbench .monaco-scrollable-element > .scrollbar > .slider:hover {
+  background-color: var(--larify-scrollbar-thumb-hover) !important;
+}
+
+.monaco-workbench .monaco-scrollable-element > .scrollbar > .slider.active {
+  background-color: var(--larify-scrollbar-thumb-active) !important;
+}
+
 .workspace-editor .part.editor::after {
   box-shadow: none !important;
 }
@@ -23,6 +148,12 @@
   justify-content: center;
   overflow: visible;
   width: 18px;
+}
+
+.workspace-tree-font-icon {
+  font-family: 'Workspace Seti';
+  font-size: 14px;
+  line-height: 18px;
 }
 
 .show-file-icons .workspace-tree-icon::before {

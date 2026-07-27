@@ -7,10 +7,11 @@ import {
   IModelService,
   IWorkbenchThemeService
 } from '@codingame/monaco-vscode-api/services'
-import { getIconClasses } from '@codingame/monaco-vscode-api/vscode/vs/editor/common/services/getIconClasses'
 import { URI } from '@codingame/monaco-vscode-api/vscode/vs/base/common/uri'
-import { FileKind } from '@codingame/monaco-vscode-api/vscode/vs/platform/files/common/files'
-import getConfigurationServiceOverride from '@codingame/monaco-vscode-configuration-service-override'
+import { getSingleFolderWorkspaceIdentifier } from '@codingame/monaco-vscode-api/vscode/vs/platform/workspaces/common/workspaceIdentifier'
+import getConfigurationServiceOverride, {
+  reinitializeWorkspace
+} from '@codingame/monaco-vscode-configuration-service-override'
 import getFileServiceOverride, {
   registerFileSystemOverlay
 } from '@codingame/monaco-vscode-files-service-override'
@@ -19,13 +20,14 @@ import getModelServiceOverride from '@codingame/monaco-vscode-model-service-over
 import getTextMateServiceOverride from '@codingame/monaco-vscode-textmate-service-override'
 import getThemeServiceOverride from '@codingame/monaco-vscode-theme-service-override'
 import getViewsServiceOverride from '@codingame/monaco-vscode-views-service-override'
-import '@codingame/monaco-vscode-css-default-extension'
-import '@codingame/monaco-vscode-html-default-extension'
-import '@codingame/monaco-vscode-json-default-extension'
-import '@codingame/monaco-vscode-markdown-basics-default-extension'
-import '@codingame/monaco-vscode-typescript-basics-default-extension'
+import { whenReady as whenCssReady } from '@codingame/monaco-vscode-css-default-extension'
+import { whenReady as whenHtmlReady } from '@codingame/monaco-vscode-html-default-extension'
+import { whenReady as whenJsonReady } from '@codingame/monaco-vscode-json-default-extension'
+import { whenReady as whenMarkdownReady } from '@codingame/monaco-vscode-markdown-basics-default-extension'
+import { whenReady as whenTypeScriptReady } from '@codingame/monaco-vscode-typescript-basics-default-extension'
 import * as monaco from 'monaco-editor'
 import { WorkspaceFileSystemProvider } from './file-system-provider'
+import { languageIdForFile } from './language-associations'
 import { whenWorkspaceThemesReady } from './theme-extension'
 import { configureEditorWorkers } from './workers'
 
@@ -34,6 +36,13 @@ const workspaceGlobal = globalThis as typeof globalThis & {
 }
 
 configureEditorWorkers()
+
+async function applyFileIconTheme(themeService: IWorkbenchThemeService): Promise<void> {
+  const theme = (await themeService.getFileIconThemes()).find(
+    (candidate) => candidate.settingsId === 'ide-icons'
+  )
+  if (theme) await themeService.setFileIconTheme(theme, 'preview')
+}
 
 workspaceGlobal.workspaceEditorReady ??= (() => {
   const provider = new WorkspaceFileSystemProvider()
@@ -51,10 +60,16 @@ workspaceGlobal.workspaceEditorReady ??= (() => {
     undefined,
     {
       configurationDefaults: {
-        'breadcrumbs.enabled': false,
+        'breadcrumbs.enabled': true,
+        'breadcrumbs.icons': false,
+        'breadcrumbs.symbolPath': 'off',
         'editor.minimap.enabled': false,
+        'editor.scrollbar.horizontalScrollbarSize': 12,
+        'editor.scrollbar.verticalScrollbarSize': 12,
         'window.menuBarVisibility': 'hidden',
-        'workbench.iconTheme': 'ayu',
+        'workbench.editor.enablePreview': false,
+        'workbench.editor.showIcons': true,
+        'workbench.iconTheme': 'ide-icons',
         'workbench.startupEditor': 'none'
       }
     }
@@ -65,12 +80,14 @@ export const monacoReady = workspaceGlobal.workspaceEditorReady.then(async () =>
   const [editorGroupsService, themeService] = await Promise.all([
     getService(IEditorGroupsService),
     getService(IWorkbenchThemeService),
-    whenWorkspaceThemesReady()
+    whenWorkspaceThemesReady(),
+    whenCssReady(),
+    whenHtmlReady(),
+    whenJsonReady(),
+    whenMarkdownReady(),
+    whenTypeScriptReady()
   ])
-  await Promise.all([
-    editorGroupsService.whenReady,
-    themeService.setFileIconTheme('ayu', undefined)
-  ])
+  await Promise.all([editorGroupsService.whenReady, applyFileIconTheme(themeService)])
   await Promise.all(
     editorGroupsService.groups.flatMap((group) =>
       group.editors
@@ -82,8 +99,32 @@ export const monacoReady = workspaceGlobal.workspaceEditorReady.then(async () =>
 
 export async function openWorkspaceFile(file: string): Promise<void> {
   await monacoReady
-  const editorService = await getService(IEditorService)
-  await editorService.openEditor({ resource: URI.file(file) })
+  const resource = URI.file(file)
+  const [editorService, languageService, modelService] = await Promise.all([
+    getService(IEditorService),
+    getService(ILanguageService),
+    getService(IModelService)
+  ])
+  await editorService.openEditor({ resource, options: { pinned: true } })
+  const language =
+    languageIdForFile(file) ?? languageService.guessLanguageIdByFilepathOrFirstLine(resource)
+  const model = modelService.getModel(resource)
+  if (model && language && model.getLanguageId() !== language) {
+    monaco.editor.setModelLanguage(model, language)
+  }
+}
+
+export async function setWorkspaceRoot(root: string): Promise<void> {
+  await monacoReady
+  const editorGroupsService = await getService(IEditorGroupsService)
+  for (const group of editorGroupsService.groups) {
+    if (!(await group.closeAllEditors())) {
+      throw new Error('Workspace switch was cancelled because an editor could not be closed')
+    }
+  }
+  await reinitializeWorkspace(getSingleFolderWorkspaceIdentifier(URI.file(root)))
+  const themeService = await getService(IWorkbenchThemeService)
+  await applyFileIconTheme(themeService)
 }
 
 export async function observeWorkspaceEditor(
@@ -97,24 +138,31 @@ export async function observeWorkspaceEditor(
   return () => listener.dispose()
 }
 
-export async function createWorkspaceIconResolver(): Promise<
-  (path: string, kind: 'file' | 'folder' | 'root') => string
-> {
+export async function observeActiveWorkspaceFile(
+  onChange: (file: string | null) => void
+): Promise<() => void> {
   await monacoReady
-  const [modelService, languageService] = await Promise.all([
-    getService(IModelService),
-    getService(ILanguageService)
-  ])
-  return (path, kind) =>
-    getIconClasses(
-      modelService,
-      languageService,
-      URI.file(path),
-      kind === 'file' ? FileKind.FILE : kind === 'root' ? FileKind.ROOT_FOLDER : FileKind.FOLDER
-    ).join(' ')
+  const editorService = await getService(IEditorService)
+  const emit = (): void => onChange(editorService.activeEditor?.resource?.fsPath ?? null)
+  const listener = editorService.onDidActiveEditorChange(emit)
+  emit()
+  return () => listener.dispose()
 }
 
 export async function setWorkspaceTheme(theme: 'dark' | 'light'): Promise<void> {
-  await Promise.all([monacoReady, whenWorkspaceThemesReady()])
-  monaco.editor.setTheme(theme === 'dark' ? 'Dark Modern' : 'Light Modern')
+  await monacoReady
+  const themeService = await getService(IWorkbenchThemeService)
+  const settingsId = theme === 'dark' ? 'IDE Dark' : 'IDE Light'
+  let colorTheme
+  for (let attempt = 0; attempt < 20 && !colorTheme; attempt += 1) {
+    colorTheme = (await themeService.getColorThemes()).find(
+      (candidate) => candidate.settingsId === settingsId
+    )
+    if (!colorTheme) await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+  if (!colorTheme) return
+  await Promise.all([
+    themeService.setColorTheme(colorTheme, 'preview'),
+    applyFileIconTheme(themeService)
+  ])
 }

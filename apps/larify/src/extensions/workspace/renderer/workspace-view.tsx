@@ -1,73 +1,139 @@
-import { useRef, useState } from 'react'
-import { FileDiffIcon } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTheme } from 'next-themes'
 import type { ImperativePanelHandle } from 'react-resizable-panels'
-import { basename } from '@codingame/monaco-vscode-api/vscode/vs/base/common/path'
-import { Button } from '@renderer/components/ui/button'
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger
-} from '@renderer/components/ui/tooltip'
 import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup
 } from '@renderer/components/ui/resizable'
-import { openWorkspaceFile } from './monaco'
-import { WorkspaceEditor } from './workspace-editor'
+import { WorkspaceEmptyState } from './workspace-empty-state'
+import { workspaceEditorClient } from './workspace-editor-client'
+import { WorkspaceEditorViewport } from './workspace-editor-viewport'
 import { WorkspaceTree } from './workspace-tree'
+import { useGitDecorations } from './use-git-decorations'
 import { useWorkspaceExplorer } from './use-workspace-explorer'
 
-function ViewToggle({
-  changesOnly,
-  onClick
-}: {
-  changesOnly: boolean
-  onClick(): void
-}): React.JSX.Element {
-  const label = changesOnly ? '全局视图' : '变更视图'
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          aria-label={label}
-          aria-pressed={changesOnly}
-          className="[&_svg]:size-4!"
-          size="icon-xs"
-          variant={changesOnly ? 'secondary' : 'ghost'}
-          onClick={onClick}
-        >
-          <FileDiffIcon />
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent side="right">{label}</TooltipContent>
-    </Tooltip>
-  )
+const basename = (path: string): string =>
+  path
+    .replace(/[\\/]+$/, '')
+    .split(/[\\/]/)
+    .at(-1) ?? path
+
+const scheduleIdle = (callback: () => void): (() => void) => {
+  if (typeof window.requestIdleCallback === 'function') {
+    const handle = window.requestIdleCallback(callback, { timeout: 1_000 })
+    return () => window.cancelIdleCallback(handle)
+  }
+  const handle = globalThis.setTimeout(callback)
+  return () => globalThis.clearTimeout(handle)
 }
 
 export function WorkspaceView(): React.JSX.Element {
   const { resolvedTheme } = useTheme()
   const explorerRef = useRef<ImperativePanelHandle>(null)
   const [explorerCollapsed, setExplorerCollapsed] = useState(false)
-  const [changesOnly, setChangesOnly] = useState(false)
-  const { entries, loadDirectory, root } = useWorkspaceExplorer()
+  const [activeFile, setActiveFile] = useState<string | null>(null)
+  const [editorRequested, setEditorRequested] = useState(false)
+  const [workbenchVisible, setWorkbenchVisible] = useState(false)
+  const [revealPath, setRevealPath] = useState<string | null>(null)
+  const editorRootRef = useRef<string | null>(null)
+  const { entries, loadDirectory, revealFile, root } = useWorkspaceExplorer()
+  const { available: gitAvailable, decorations: gitDecorations } = useGitDecorations(root)
+  const revealInTree = useCallback(
+    (path: string): void => {
+      setRevealPath(path)
+      void revealFile(path).catch((error) => console.error('[workspace:reveal-file]', error))
+    },
+    [revealFile]
+  )
+
+  useEffect(() => {
+    const rootChanged = editorRootRef.current !== root
+    editorRootRef.current = root
+    if (rootChanged) {
+      setActiveFile(null)
+      setRevealPath(null)
+    }
+    if (!root) return
+    return scheduleIdle(() => {
+      void workspaceEditorClient
+        .prepare(root)
+        .catch((error) => console.error('[workspace-editor:prepare]', error))
+    })
+  }, [root])
+
+  useEffect(() => {
+    return scheduleIdle(() => {
+      void workspaceEditorClient
+        .theme(resolvedTheme === 'dark' ? 'dark' : 'light')
+        .catch((error) => console.error('[workspace-editor:theme]', error))
+    })
+  }, [resolvedTheme])
+
+  useEffect(() => {
+    const disposeActive = workspaceEditorClient.onActive((file) => {
+      setEditorRequested(file !== null)
+      setActiveFile(file)
+      setRevealPath(file)
+    })
+    const disposeReveal = workspaceEditorClient.onReveal(revealInTree)
+    void workspaceEditorClient
+      .state()
+      .then(({ activeFile: file }) => {
+        if (!file) return
+        setEditorRequested(true)
+        setActiveFile(file)
+        setRevealPath(file)
+      })
+      .catch((error) => console.error('[workspace-editor:state]', error))
+    return () => {
+      disposeActive()
+      disposeReveal()
+    }
+  }, [revealInTree])
+
+  useEffect(() => {
+    const onActive = (event: Event): void =>
+      setWorkbenchVisible((event as CustomEvent<string | null>).detail === 'workspace')
+    window.addEventListener('larify:workbench-active', onActive)
+    window.dispatchEvent(new Event('larify:workbench-active-request'))
+    return () => window.removeEventListener('larify:workbench-active', onActive)
+  }, [])
+
+  useEffect(() => {
+    if (!activeFile) return
+    void revealFile(activeFile).catch((error) => console.error('[workspace:reveal-file]', error))
+  }, [activeFile, revealFile])
+
+  const openFile = useCallback(
+    (file: string): void => {
+      if (!root) return
+      setEditorRequested(true)
+      void workspaceEditorClient
+        .open(root, file)
+        .catch((error) => console.error('[workspace-editor:open]', error))
+    },
+    [root]
+  )
 
   return (
-    <ResizablePanelGroup direction="horizontal" className="bg-background">
+    <ResizablePanelGroup direction="horizontal" className="workspace-view bg-(--workbench-content)">
       <ResizablePanel
         ref={explorerRef}
         collapsible
         collapsedSize={0}
-        defaultSize={26}
-        minSize={16}
-        maxSize={40}
+        defaultSize={22}
+        minSize={14}
+        maxSize={36}
         onCollapse={() => setExplorerCollapsed(true)}
         onExpand={() => setExplorerCollapsed(false)}
       >
-        <div className="flex h-full min-h-0 flex-col">
-          {root && !changesOnly ? (
+        <div className="flex h-full min-h-0 flex-col bg-secondary p-1.5">
+          {root ? (
             <WorkspaceTree
+              key={root}
+              gitAvailable={gitAvailable}
+              gitDecorations={gitDecorations}
               entries={[
                 {
                   children: entries,
@@ -78,35 +144,14 @@ export function WorkspaceView(): React.JSX.Element {
                   root: true
                 }
               ]}
-              onOpen={(file) => void openWorkspaceFile(file)}
-              onToggle={(entry) => void loadDirectory(entry)}
-              rootAction={
-                <ViewToggle changesOnly={false} onClick={() => setChangesOnly(true)} />
-              }
+              onOpen={openFile}
+              onToggle={(entry) => {
+                void loadDirectory(entry).catch((error) =>
+                  console.error('[workspace:load-directory]', error)
+                )
+              }}
+              revealPath={revealPath}
             />
-          ) : root ? (
-            <div className="relative flex min-h-0 flex-1">
-              <WorkspaceTree
-                entries={[
-                  {
-                    children: [],
-                    kind: 'directory',
-                    loaded: true,
-                    name: basename(root),
-                    path: root,
-                    root: true
-                  }
-                ]}
-                onOpen={(file) => void openWorkspaceFile(file)}
-                onToggle={(entry) => void loadDirectory(entry)}
-                rootAction={
-                  <ViewToggle changesOnly onClick={() => setChangesOnly(false)} />
-                }
-              />
-              <div className="pointer-events-none absolute inset-0 grid place-items-center p-6 pt-12 text-center text-sm text-muted-foreground">
-                变更视图将在接入 Git 后显示
-              </div>
-            </div>
           ) : (
             <div className="flex-1" />
           )}
@@ -120,7 +165,13 @@ export function WorkspaceView(): React.JSX.Element {
         }
       />
       <ResizablePanel minSize={40}>
-        <WorkspaceEditor theme={resolvedTheme === 'dark' ? 'dark' : 'light'} />
+        <div className="h-full bg-(--workbench-content)">
+          {editorRequested ? (
+            <WorkspaceEditorViewport visible={workbenchVisible} />
+          ) : (
+            <WorkspaceEmptyState />
+          )}
+        </div>
       </ResizablePanel>
     </ResizablePanelGroup>
   )

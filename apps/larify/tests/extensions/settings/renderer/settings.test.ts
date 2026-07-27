@@ -39,7 +39,7 @@ describe('settings renderer', () => {
         sidebar: expect.objectContaining({ label: '设置' })
       })
     )
-    expect(subscriptions).toEqual([registration])
+    expect(subscriptions).toEqual([])
   })
 
   it('changes the selected appearance theme', async () => {

@@ -1,4 +1,4 @@
-import { app, screen, shell, ipcMain, nativeTheme, BrowserWindow, dialog } from 'electron'
+import { app, screen, ipcMain, nativeTheme, BrowserWindow, dialog } from 'electron'
 import { join } from 'path'
 import { is } from '@electron-toolkit/utils'
 import type { Extension } from 'kernel'
@@ -25,9 +25,19 @@ function isExternalUrl(value: string): boolean {
   }
 }
 
-function openExternalUrl(value: string): void {
-  if (isExternalUrl(value)) {
-    void shell.openExternal(value).catch(() => {})
+function openInBrowser(window: BrowserWindow, value: string): void {
+  if (isExternalUrl(value) && !window.webContents.isDestroyed()) {
+    window.webContents.send('browser:open-url', value)
+  }
+}
+
+function isRendererUrl(value: string): boolean {
+  const rendererUrl = process.env['ELECTRON_RENDERER_URL']
+  if (!is.dev || !rendererUrl) return false
+  try {
+    return new URL(value).origin === new URL(rendererUrl).origin
+  } catch {
+    return false
   }
 }
 
@@ -66,12 +76,13 @@ function createWindow(): BrowserWindow {
   win.on('ready-to-show', () => win.show())
 
   win.webContents.setWindowOpenHandler((details) => {
-    openExternalUrl(details.url)
+    openInBrowser(win, details.url)
     return { action: 'deny' }
   })
   win.webContents.on('will-navigate', (event, url) => {
+    if (isRendererUrl(url)) return
     event.preventDefault()
-    openExternalUrl(url)
+    openInBrowser(win, url)
   })
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {

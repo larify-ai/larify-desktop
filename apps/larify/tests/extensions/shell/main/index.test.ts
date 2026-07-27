@@ -6,11 +6,14 @@ const h = vi.hoisted(() => {
   const ipcHandlers = new Map<string, (...args: unknown[]) => unknown>()
   const windows: FakeWindow[] = []
   const openExternal = vi.fn().mockResolvedValue(undefined)
+  let isDev = false
 
   class FakeWindow {
     destroyed = false
     webContents = {
+      isDestroyed: () => false,
       on: vi.fn(),
+      send: vi.fn(),
       setWindowOpenHandler: vi.fn(),
       loadURL: vi.fn()
     }
@@ -33,7 +36,20 @@ const h = vi.hoisted(() => {
     static fromWebContents = (): null => null
   }
 
-  return { appHandlers, ipcHandlers, nativeThemeHandlers, openExternal, windows, FakeWindow }
+  return {
+    appHandlers,
+    ipcHandlers,
+    nativeThemeHandlers,
+    openExternal,
+    windows,
+    FakeWindow,
+    get isDev() {
+      return isDev
+    },
+    set isDev(value: boolean) {
+      isDev = value
+    }
+  }
 })
 
 vi.mock('electron', () => ({
@@ -64,7 +80,13 @@ vi.mock('electron', () => ({
   dialog: { showOpenDialog: vi.fn() }
 }))
 
-vi.mock('@electron-toolkit/utils', () => ({ is: { dev: false } }))
+vi.mock('@electron-toolkit/utils', () => ({
+  is: {
+    get dev() {
+      return h.isDev
+    }
+  }
+}))
 
 import extension from '../../../../src/extensions/shell/main'
 
@@ -76,6 +98,8 @@ describe('shell main window lifecycle', () => {
     h.openExternal.mockClear()
     h.openExternal.mockResolvedValue(undefined)
     h.windows.length = 0
+    h.isDev = false
+    delete process.env['ELECTRON_RENDERER_URL']
   })
 
   it('updates the main-window service when the app is activated after closing its window', () => {
@@ -108,7 +132,7 @@ describe('shell main window lifecycle', () => {
     expect(h.FakeWindow.getAllWindows()).toEqual([second])
   })
 
-  it('opens only HTTP and HTTPS links outside the app', async () => {
+  it('routes only HTTP and HTTPS links to the built-in browser', () => {
     const subscriptions: Array<{ dispose(): void }> = []
     extension.activate(
       { register: vi.fn(() => ({ dispose: vi.fn() })) } as never,
@@ -119,13 +143,14 @@ describe('shell main window lifecycle', () => {
     expect(handler({ url: 'https://example.com' })).toEqual({ action: 'deny' })
     expect(handler({ url: 'file:///C:/Windows/System32' })).toEqual({ action: 'deny' })
     expect(handler({ url: 'not a URL' })).toEqual({ action: 'deny' })
-    await Promise.resolve()
-
-    expect(h.openExternal).toHaveBeenCalledTimes(1)
-    expect(h.openExternal).toHaveBeenCalledWith('https://example.com')
+    expect(h.windows[0].webContents.send).toHaveBeenCalledTimes(1)
+    expect(h.windows[0].webContents.send).toHaveBeenCalledWith(
+      'browser:open-url',
+      'https://example.com'
+    )
   })
 
-  it('prevents the main window from navigating away', async () => {
+  it('prevents the main window from navigating away', () => {
     const subscriptions: Array<{ dispose(): void }> = []
     extension.activate(
       { register: vi.fn(() => ({ dispose: vi.fn() })) } as never,
@@ -137,23 +162,30 @@ describe('shell main window lifecycle', () => {
     const event = { preventDefault: vi.fn() }
 
     handler(event, 'https://example.com')
-    await Promise.resolve()
-
     expect(event.preventDefault).toHaveBeenCalledWith()
-    expect(h.openExternal).toHaveBeenCalledWith('https://example.com')
+    expect(h.windows[0].webContents.send).toHaveBeenCalledWith(
+      'browser:open-url',
+      'https://example.com'
+    )
   })
 
-  it('ignores failures while opening an external link', async () => {
-    h.openExternal.mockRejectedValueOnce(new Error('Unavailable'))
+  it('allows development renderer reloads to stay in Electron', () => {
+    h.isDev = true
+    process.env['ELECTRON_RENDERER_URL'] = 'http://localhost:5173'
     const subscriptions: Array<{ dispose(): void }> = []
     extension.activate(
       { register: vi.fn(() => ({ dispose: vi.fn() })) } as never,
       { subscriptions, manifest: {} } as never
     )
-    const handler = h.windows[0].webContents.setWindowOpenHandler.mock.calls[0][0]
+    const handler = h.windows[0].webContents.on.mock.calls.find(
+      ([event]) => event === 'will-navigate'
+    )?.[1]
+    const event = { preventDefault: vi.fn() }
 
-    expect(handler({ url: 'https://example.com' })).toEqual({ action: 'deny' })
-    await expect(Promise.resolve()).resolves.toBeUndefined()
+    handler(event, 'http://localhost:5173/')
+
+    expect(event.preventDefault).not.toHaveBeenCalled()
+    expect(h.windows[0].webContents.send).not.toHaveBeenCalled()
   })
 
   it('updates title-bar symbols when the system theme changes', () => {

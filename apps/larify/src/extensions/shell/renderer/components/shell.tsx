@@ -148,8 +148,18 @@ function ShellBody({ app }: { app: App }): React.JSX.Element {
       const id = (event as CustomEvent<string | null | undefined>).detail
       setWorkbench((current) => (id && current !== id ? current : null))
     }
+    const openWorkbench = (event: Event): void => {
+      const id = (event as CustomEvent<string | undefined>).detail
+      if (!id) return
+      setMountedWorkbenches((current) => (current.includes(id) ? current : [...current, id]))
+      setWorkbench(id)
+    }
     window.addEventListener('larify:workbench-close', closeWorkbench)
-    return () => window.removeEventListener('larify:workbench-close', closeWorkbench)
+    window.addEventListener('larify:workbench-open', openWorkbench)
+    return () => {
+      window.removeEventListener('larify:workbench-close', closeWorkbench)
+      window.removeEventListener('larify:workbench-open', openWorkbench)
+    }
   }, [])
 
   return (

@@ -21,7 +21,9 @@ import {
   ToolOutput,
 } from "@renderer/components/ai-elements/tool"
 import { FileDiff } from "./file-diff"
+import { ChangesSummaryCard } from "./changes-summary-card"
 import { asDiffMeta, toolCall, toolIcon } from "../lib/diff-meta"
+import { summarizeMessageChanges } from "../lib/change-summary"
 
 const debugToolErrors = import.meta.env.VITE_LARIFY_DEBUG_TOOL_ERRORS === "1"
 
@@ -99,6 +101,8 @@ export function MessageView({
 }): React.JSX.Element {
   const hasText = message.parts.some((p) => p.type === "text")
   const files = message.parts.filter(isFileUIPart)
+  const changeSummary =
+    message.role === "assistant" && !streaming ? summarizeMessageChanges(message) : null
   const content = message.parts.map((part, i) => {
     if (isFileUIPart(part)) return null
     if (part.type === "text") return <MessageResponse key={i}>{part.text}</MessageResponse>
@@ -145,7 +149,12 @@ export function MessageView({
       {message.role === "user" ? (
         <UserMessageContent>{content}</UserMessageContent>
       ) : (
-        <MessageContent className="select-text">{content}</MessageContent>
+        <MessageContent className="select-text">
+          {content}
+          {changeSummary ? (
+            <ChangesSummaryCard {...changeSummary} className="mt-3" />
+          ) : null}
+        </MessageContent>
       )}
     </Message>
   )

@@ -1,6 +1,7 @@
 import { Liquid } from "liquidjs"
 import template from "./prompt.md?raw"
 import type { ToolRegistry } from "./registry"
+import type { SkillFactory } from "./skill-factory"
 
 const liquid = new Liquid()
 
@@ -11,10 +12,18 @@ function platformName(): string {
   return process.platform
 }
 
-export function buildSystemPrompt(registry: ToolRegistry, cwd: string): string {
+export function buildSystemPrompt(
+  registry: ToolRegistry,
+  cwd: string,
+  skillFactory?: SkillFactory,
+): string {
   const toolkits = registry.listToolkits()
+  const skills = skillFactory
+    ?.eager()
+    .map(({ name, description, path }) => ({ name, description, path }))
   return liquid.parseAndRenderSync(template, {
     toolkits,
+    skills,
     platform: platformName(),
     cwd,
   }).trim()

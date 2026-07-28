@@ -2,13 +2,14 @@ import { ipcMain } from "electron"
 import { convertToModelMessages, type UIMessage } from "ai"
 import type { Extension } from "kernel"
 import type { Toolkit } from "../../../shared/tool"
-import { runAgent, toolsContextFor } from "./agent"
+import { runAgentUIStream, toolsContextFor } from "./agent"
 import { createToolRegistry } from "./registry"
 import { createAgentToolkit } from "./agent-toolkit"
 import { buildSystemPrompt } from "./system-prompt"
 import { createSessionStore } from "./session-store"
 import { sanitizeAndValidateMessages } from "./message-sanitizer"
 import { larifyWorkspacePath } from "../../../main/utils/app-paths"
+import { createSkillFactory, skillRoots } from "./skill-factory"
 
 interface RunRequest {
   runId: string
@@ -65,19 +66,20 @@ const extension: Extension = {
       const controller = new AbortController()
       controllers.set(runId, controller)
       try {
+        const skills = createSkillFactory(skillRoots())
         const registry = createToolRegistry(app.getAll<Toolkit>("tool"))
-        registry.addToolkit(createAgentToolkit(registry))
+        registry.addToolkit(createAgentToolkit(registry, skills))
         const validMessages = await sanitizeAndValidateMessages(messages)
         const modelMessages = await convertToModelMessages(prepareMessagesForModel(validMessages))
         const cwd = requestCwd || larifyWorkspacePath()
         const tools = registry.toolSet()
-        const reader = runAgent({
+        const reader = runAgentUIStream({
           messages: modelMessages,
           tools,
           activeTools: registry.activeToolNames(),
           toolsContext: toolsContextFor(tools, { sessionId, cwd }),
           abortSignal: controller.signal,
-          system: buildSystemPrompt(registry, cwd),
+          system: buildSystemPrompt(registry, cwd, skills),
         }).getReader()
         for (;;) {
           const { done, value } = await reader.read()

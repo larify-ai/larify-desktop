@@ -14,6 +14,8 @@ import type { LanguageModelV4 } from "@ai-sdk/provider"
 import type { ToolContext } from "../../../shared/tool"
 import { createModel, deepseekProviderOptions } from "./model"
 
+type AgentOutput = NonNullable<Parameters<typeof streamText>[0]["output"]>
+
 export function toolsContextFor(
   tools: ToolSet,
   context: ToolContext,
@@ -31,38 +33,46 @@ function promptWithTools(names: string[]): LanguageModelMiddleware {
   }
 }
 
-export function runAgent(opts: {
+export function runAgent<OUTPUT extends AgentOutput = AgentOutput>(opts: {
   messages: ModelMessage[]
   tools: ToolSet
   activeTools: string[]
   toolsContext: Record<string, ToolContext>
+  output?: OUTPUT
   model?: LanguageModelV4
   abortSignal?: AbortSignal
   system?: string
-}): ReadableStream<UIMessageChunk> {
-  const { messages, tools, activeTools, toolsContext, abortSignal, system } = opts
+}) {
+  const { messages, tools, activeTools, toolsContext, abortSignal, system, output } = opts
   const model = wrapLanguageModel({
     model: opts.model ?? createModel(),
     middleware: promptWithTools(activeTools),
   })
+  return streamText({
+    model,
+    system,
+    messages,
+    tools,
+    toolsContext: toolsContext as never,
+    output,
+    providerOptions: {
+      deepseek: deepseekProviderOptions,
+    },
+    experimental_transform: smoothStream({
+      delayInMs: 20,
+      chunking: new Intl.Segmenter("zh", { granularity: "word" }),
+    }),
+    stopWhen: isLoopFinished(),
+    abortSignal,
+  })
+}
+
+export function runAgentUIStream(
+  opts: Parameters<typeof runAgent>[0],
+): ReadableStream<UIMessageChunk> {
   return createUIMessageStream({
     execute: ({ writer }) => {
-      const result = streamText({
-        model,
-        system,
-        messages,
-        tools,
-        toolsContext: toolsContext as never,
-        providerOptions: {
-          deepseek: deepseekProviderOptions,
-        },
-        experimental_transform: smoothStream({
-          delayInMs: 20,
-          chunking: new Intl.Segmenter("zh", { granularity: "word" }),
-        }),
-        stopWhen: isLoopFinished(),
-        abortSignal,
-      })
+      const result = runAgent(opts)
       writer.merge(
         toUIMessageStream({
           stream: result.stream,

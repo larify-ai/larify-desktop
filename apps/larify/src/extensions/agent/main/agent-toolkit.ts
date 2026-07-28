@@ -2,8 +2,9 @@ import { asSchema, tool } from "ai"
 import { z } from "zod"
 import type { Toolkit } from "../../../shared/tool"
 import type { ToolRegistry } from "./registry"
+import type { SkillFactory } from "./skill-factory"
 
-export function createAgentToolkit(registry: ToolRegistry): Toolkit {
+export function createAgentToolkit(registry: ToolRegistry, skills?: SkillFactory): Toolkit {
   return {
     name: "agent",
     description: "List tools, read schemas, etc.",
@@ -54,6 +55,13 @@ export function createAgentToolkit(registry: ToolRegistry): Toolkit {
           )
           return JSON.stringify(definitions)
         },
+      }),
+      list_skills: tool({
+        description: "First list skills with agent_list_skills, then read content with fs_read.",
+        inputSchema: z.object({}).strict(),
+        metadata: { eager: true, icon: "search" },
+        execute: async () =>
+          skills?.list().map(({ name, description, path }) => ({ name, description, path })) ?? [],
       }),
     },
   }

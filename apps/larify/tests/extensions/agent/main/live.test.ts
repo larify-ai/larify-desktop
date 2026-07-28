@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { readUIMessageStream, type UIMessage } from "ai"
-import { runAgent } from "../../../../src/extensions/agent/main/agent"
+import { runAgentUIStream } from "../../../../src/extensions/agent/main/agent"
 
 function textOf(message: UIMessage): string {
   return message.parts
@@ -11,7 +11,7 @@ function textOf(message: UIMessage): string {
 
 describe.skipIf(!process.env.LIVE)("runAgent (live DeepSeek)", () => {
   it("streams a real reply from DeepSeek", async () => {
-    const stream = runAgent({
+    const stream = runAgentUIStream({
       messages: [{ role: "user", content: "只回复四个字：你好世界" }],
       tools: {},
       activeTools: [],

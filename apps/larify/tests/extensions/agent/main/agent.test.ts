@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest"
 import { z } from "zod"
 import { MockLanguageModelV4, convertArrayToReadableStream } from "ai/test"
 import { readUIMessageStream, type UIMessage } from "ai"
-import { runAgent } from "../../../../src/extensions/agent/main/agent"
+import { runAgentUIStream } from "../../../../src/extensions/agent/main/agent"
 
 const USAGE = {
   inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
@@ -38,7 +38,7 @@ function textOf(message: UIMessage): string {
 }
 
 async function assemble(model: MockLanguageModelV4): Promise<UIMessage> {
-  const stream = runAgent({
+  const stream = runAgentUIStream({
     messages: [{ role: "user", content: "hi" }],
     tools: {},
     activeTools: [],
@@ -112,7 +112,7 @@ describe("prompt-cache middleware", () => {
       },
     })
 
-    const stream = runAgent({
+    const stream = runAgentUIStream({
       messages: [{ role: "user", content: "go" }],
       tools: tools as never,
       activeTools: ["eager_tool"],

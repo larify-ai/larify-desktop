@@ -5,7 +5,7 @@ import { join } from "node:path"
 import { MockLanguageModelV4, convertArrayToReadableStream } from "ai/test"
 import { readUIMessageStream, type UIMessage } from "ai"
 import { afterAll, describe, expect, it } from "vitest"
-import { runAgent, toolsContextFor } from "../../../../src/extensions/agent/main/agent"
+import { runAgentUIStream, toolsContextFor } from "../../../../src/extensions/agent/main/agent"
 import { asDiffMeta, toolIcon } from "../../../../src/extensions/assistant/renderer/lib/diff-meta"
 import { editFileTool } from "../../../../src/extensions/file/main/edit"
 import { readFileTool } from "../../../../src/extensions/file/main/read"
@@ -82,7 +82,7 @@ describe("经过 agent 的工具调用拿得到会话上下文", () => {
     writeFileSync(file, "const a = 1\nconst b = 2\nconst c = 3\n")
     await callTool(readFileTool, { file_path: file }, { sessionId: session, cwd: root })
 
-    const stream = runAgent({
+    const stream = runAgentUIStream({
       messages: [{ role: "user", content: "edit it" }],
       tools: { edit: editFileTool } as never,
       activeTools: [],
@@ -108,7 +108,7 @@ describe("经过 agent 的工具调用拿得到会话上下文", () => {
     writeFileSync(file, "line one\nline two\nline three\n")
     await callTool(readFileTool, { file_path: file }, { sessionId: session, cwd: root })
 
-    const stream = runAgent({
+    const stream = runAgentUIStream({
       messages: [{ role: "user", content: "edit it" }],
       tools: { edit: editFileTool } as never,
       activeTools: [],

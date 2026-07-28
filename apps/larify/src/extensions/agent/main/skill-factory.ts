@@ -91,7 +91,7 @@ export function createSkillFactory(roots: string[]): SkillFactory {
 
   const eager = (): Skill[] => [...skills.values()].filter((skill) => skill.eager)
 
-  const list = (): Skill[] => [...skills.values()].filter((skill) => !skill.eager)
+  const list = (): Skill[] => [...skills.values()]
 
   return { eager, list }
 }

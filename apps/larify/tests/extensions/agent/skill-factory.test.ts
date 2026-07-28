@@ -33,7 +33,7 @@ afterEach(async () => {
 })
 
 describe("createSkillFactory", () => {
-  it("separates eager skills from discoverable skills", () => {
+  it("lists all skills and selects eager skills for the system prompt", () => {
     const root = createRoot()
     writeSkill(root, "grounding", "name: grounding\ndescription: Ground information.\neager: true")
     writeSkill(root, "review", "name: review\ndescription: Review changes.")
@@ -44,9 +44,10 @@ describe("createSkillFactory", () => {
       { name: "grounding", description: "Ground information.", eager: true },
     ])
     expect(factory.list()).toMatchObject([
+      { name: "grounding", description: "Ground information.", eager: true },
       { name: "review", description: "Review changes.", eager: false },
     ])
-    expect(factory.list()[0].path).toBe(join(root, "review", "SKILL.md"))
+    expect(factory.list()[1].path).toBe(join(root, "review", "SKILL.md"))
   })
 
   it("discovers SKILL.md files recursively and ignores other Markdown files", () => {
@@ -116,7 +117,7 @@ describe("createSkillFactory", () => {
     expect(() => createSkillFactory([root])).toThrow(message)
   })
 
-  it("exposes only name, description, and path through agent_list_skills", async () => {
+  it("exposes all skills and their eager state through agent_list_skills", async () => {
     const root = createRoot()
     writeSkill(root, "review", "name: review\ndescription: Review changes.")
     writeSkill(root, "grounding", "name: grounding\ndescription: Ground information.\neager: true")
@@ -141,8 +142,15 @@ describe("createSkillFactory", () => {
 
     expect(output).toEqual([
       {
+        name: "grounding",
+        description: "Ground information.",
+        eager: true,
+        path: join(root, "grounding", "SKILL.md"),
+      },
+      {
         name: "review",
         description: "Review changes.",
+        eager: false,
         path: join(root, "review", "SKILL.md"),
       },
     ])

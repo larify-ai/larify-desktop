@@ -11,7 +11,7 @@ export function wrapWithTitle(tool: Tool): Tool {
     inputSchema: z
       .object({
         title: z.string().min(1).describe("Short user-facing phrase describing the step, as brief as possible"),
-        args: tool.inputSchema as z.ZodTypeAny,
+        args: z.preprocess((value) => value ?? {}, tool.inputSchema as z.ZodTypeAny),
       })
       .strict(),
     execute: execute && ((input: { args: unknown }, options: any) => execute(input.args, options)),

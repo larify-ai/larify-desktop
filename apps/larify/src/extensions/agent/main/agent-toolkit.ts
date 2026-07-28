@@ -61,7 +61,12 @@ export function createAgentToolkit(registry: ToolRegistry, skills?: SkillFactory
         inputSchema: z.object({}).strict(),
         metadata: { eager: true, icon: "search" },
         execute: async () =>
-          skills?.list().map(({ name, description, path }) => ({ name, description, path })) ?? [],
+          skills?.list().map(({ name, description, eager, path }) => ({
+            name,
+            description,
+            eager,
+            path,
+          })) ?? [],
       }),
     },
   }

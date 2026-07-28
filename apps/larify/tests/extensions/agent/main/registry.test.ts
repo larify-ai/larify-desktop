@@ -28,6 +28,16 @@ describe("wrapWithTitle", () => {
   it("validates args against the original schema", () => {
     expect(parse(wrapped.inputSchema, { title: "t", args: { path: 123 } }).success).toBe(false)
     expect(parse(wrapped.inputSchema, { title: "t", args: {} }).success).toBe(false)
+    expect(parse(wrapped.inputSchema, { title: "t" }).success).toBe(false)
+  })
+
+  it("defaults omitted args only when the original schema accepts an empty object", () => {
+    const noArgs = wrapWithTitle(tool({ inputSchema: z.object({}).strict() }))
+
+    expect(parse(noArgs.inputSchema, { title: "list" })).toMatchObject({
+      success: true,
+      data: { title: "list", args: {} },
+    })
   })
 
   it("rejects extra top-level keys (strict)", () => {

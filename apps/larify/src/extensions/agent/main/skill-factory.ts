@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { join, resolve } from "node:path"
+import matter from "gray-matter"
 import { larifyPath, resourcePath } from "../../../main/utils/app-paths"
 
 export interface Skill {
@@ -37,29 +38,8 @@ function findSkillFiles(root: string): string[] {
 
 function readSkill(path: string): Skill {
   const source = readFileSync(path, "utf8")
-  const match = source.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/)
-  if (!match) throw new Error(`Skill at "${path}" must have YAML frontmatter.`)
-
-  const data: Record<string, unknown> = {}
-  for (const line of match[1].split(/\r?\n/)) {
-    const separator = line.indexOf(":")
-    if (separator < 0) continue
-    const key = line.slice(0, separator).trim()
-    let value: unknown = line.slice(separator + 1).trim()
-    if (
-      typeof value === "string" &&
-      value.length >= 2 &&
-      ((value.startsWith('"') && value.endsWith('"')) ||
-        (value.startsWith("'") && value.endsWith("'")))
-    ) {
-      value = value.slice(1, -1)
-    } else if (value === "true") {
-      value = true
-    } else if (value === "false") {
-      value = false
-    }
-    data[key] = value
-  }
+  if (!matter.test(source)) throw new Error(`Skill at "${path}" must have YAML frontmatter.`)
+  const { data } = matter(source)
 
   if (typeof data.name !== "string" || !data.name.trim()) {
     throw new Error(`Skill at "${path}" must have a non-empty name.`)
@@ -84,8 +64,14 @@ export function createSkillFactory(roots: string[]): SkillFactory {
 
   for (const root of roots) {
     for (const path of findSkillFiles(root)) {
-      const skill = readSkill(path)
-      skills.set(skill.name, skill)
+      try {
+        const skill = readSkill(path)
+        skills.set(skill.name, skill)
+      } catch (error) {
+        console.warn(
+          `[agent skills] Skipped invalid skill "${path}": ${error instanceof Error ? error.message : String(error)}`,
+        )
+      }
     }
   }
 

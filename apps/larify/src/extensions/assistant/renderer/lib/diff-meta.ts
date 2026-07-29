@@ -20,9 +20,9 @@ export function toolIcon(toolMetadata: unknown): string | undefined {
 }
 
 export function toolCall(input: unknown): { title?: string; args: unknown } {
-  if (input && typeof input === "object" && "args" in input) {
-    const { title, args } = input as { title?: unknown; args?: unknown }
-    return { ...(typeof title === "string" && { title }), args }
+  if (input && typeof input === "object") {
+    const { _title, ...args } = input as Record<string, unknown>
+    return { ...(typeof _title === "string" && { title: _title }), args }
   }
   return { args: input }
 }

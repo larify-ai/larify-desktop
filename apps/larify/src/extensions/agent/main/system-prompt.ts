@@ -2,6 +2,7 @@ import { Liquid } from "liquidjs"
 import template from "./prompt.md?raw"
 import type { ToolRegistry } from "./registry"
 import type { SkillFactory } from "./skill-factory"
+import { larifyPath } from "../../../main/utils/app-paths"
 
 const liquid = new Liquid()
 
@@ -26,5 +27,7 @@ export function buildSystemPrompt(
     skills,
     platform: platformName(),
     cwd,
+    contextDirectory: larifyPath("context"),
+    taskDirectory: larifyPath("tasks"),
   }).trim()
 }

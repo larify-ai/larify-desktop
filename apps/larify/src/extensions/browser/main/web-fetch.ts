@@ -8,9 +8,12 @@ import type { BrowserTab } from './tab'
 import { normalizeUrl } from './url'
 import { waitForOperationOrAbort } from './waits'
 
+const TRANSIENT_NAVIGATION_ERROR =
+  /ERR_(?:SOCKET_NOT_CONNECTED|NETWORK_CHANGED|CONNECTION_RESET|CONNECTION_CLOSED|TIMED_OUT)/
+
 export const webFetchInputSchema = z
   .object({
-    url: z.string().trim().min(1).describe('URL or local file path to read')
+    url: z.string().trim().min(1).describe('URL to read')
   })
   .strict()
 
@@ -40,8 +43,36 @@ export async function executeWebFetch(
   if (!url) throw new Error(`Invalid URL or file path: ${input.url}`)
 
   return service.withTemporaryTab(ctx.sessionId, url, async (tab) => {
-    await waitForOperationOrAbort(tab.waitForNavigation(), ctx.signal, 'Web fetch was cancelled.')
+    let navigationError: unknown
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        await waitForOperationOrAbort(
+          tab.waitForNavigation(),
+          ctx.signal,
+          'Web fetch was cancelled.'
+        )
+        navigationError = undefined
+        break
+      } catch (error) {
+        if (error instanceof Error && error.message.startsWith('navigation load event timed out after')) {
+          navigationError = error
+          break
+        }
+        if (
+          attempt === 0 &&
+          error instanceof Error &&
+          TRANSIENT_NAVIGATION_ERROR.test(error.message) &&
+          tab.navigate(url)
+        ) {
+          continue
+        }
+        throw error
+      }
+    }
     const page = await waitForOperationOrAbort(tab.read(), ctx.signal, 'Web fetch was cancelled.')
+    if (navigationError && (!page.url || page.url === 'about:blank' || !page.content.trim())) {
+      throw navigationError
+    }
     return pageContentOutput(page)
   })
 }
@@ -50,7 +81,7 @@ export function webFetchTools(getService: () => BrowserService): Toolkit['tools'
   return {
     web_fetch: defineTool({
       description:
-        'Read a URL or local file in a temporary browser tab and return its title and clean Markdown content.',
+        'Read a URL returned by web_search in a temporary browser tab and return its title and clean Markdown content.',
       metadata: { icon: 'browser', eager: true },
       inputSchema: webFetchInputSchema,
       execute: (args, ctx) => executeWebFetch(getService(), args, ctx)

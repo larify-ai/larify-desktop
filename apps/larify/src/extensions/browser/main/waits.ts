@@ -183,10 +183,11 @@ export async function waitForText(
 export async function waitForFunction(
   send: CdpSend,
   expression: string,
-  timeoutMs: number = DEFAULT_TIMEOUT
+  timeoutMs: number = DEFAULT_TIMEOUT,
+  signal?: AbortSignal
 ): Promise<void> {
   const expr = `!!(${expression})`
-  await poll(() => evalBool(send, expr), timeoutMs, 'wait_for_function')
+  await poll(() => evalBool(send, expr), timeoutMs, 'wait_for_function', signal)
 }
 
 export async function waitForUrl(

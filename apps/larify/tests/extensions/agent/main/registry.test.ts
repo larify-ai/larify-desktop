@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, vi } from "vitest"
 import { tool, type Tool } from "ai"
 import { z } from "zod"
 import { createToolRegistry, wrapWithTitle } from "../../../../src/extensions/agent/main/registry"
@@ -16,37 +16,36 @@ describe("wrapWithTitle", () => {
   })
   const wrapped = wrapWithTitle(raw)
 
-  it("wraps the schema as strict { title, args }", () => {
-    expect(parse(wrapped.inputSchema, { title: "open", args: { path: "a.txt" } }).success).toBe(true)
+  it("adds _title to the original flat schema", () => {
+    expect(parse(wrapped.inputSchema, { _title: "open", path: "a.txt" }).success).toBe(true)
   })
 
-  it("requires a non-empty title", () => {
-    expect(parse(wrapped.inputSchema, { args: { path: "a.txt" } }).success).toBe(false)
-    expect(parse(wrapped.inputSchema, { title: "", args: { path: "a.txt" } }).success).toBe(false)
+  it("requires a non-empty _title", () => {
+    expect(parse(wrapped.inputSchema, { path: "a.txt" }).success).toBe(false)
+    expect(parse(wrapped.inputSchema, { _title: "", path: "a.txt" }).success).toBe(false)
   })
 
   it("validates args against the original schema", () => {
-    expect(parse(wrapped.inputSchema, { title: "t", args: { path: 123 } }).success).toBe(false)
-    expect(parse(wrapped.inputSchema, { title: "t", args: {} }).success).toBe(false)
-    expect(parse(wrapped.inputSchema, { title: "t" }).success).toBe(false)
+    expect(parse(wrapped.inputSchema, { _title: "t", path: 123 }).success).toBe(false)
+    expect(parse(wrapped.inputSchema, { _title: "t" }).success).toBe(false)
   })
 
-  it("defaults omitted args only when the original schema accepts an empty object", () => {
+  it("accepts only _title when the original schema accepts an empty object", () => {
     const noArgs = wrapWithTitle(tool({ inputSchema: z.object({}).strict() }))
 
-    expect(parse(noArgs.inputSchema, { title: "list" })).toMatchObject({
+    expect(parse(noArgs.inputSchema, { _title: "list" })).toMatchObject({
       success: true,
-      data: { title: "list", args: {} },
+      data: { _title: "list" },
     })
   })
 
   it("rejects extra top-level keys (strict)", () => {
-    expect(parse(wrapped.inputSchema, { title: "t", args: { path: "a" }, name: "x" }).success).toBe(false)
+    expect(parse(wrapped.inputSchema, { _title: "t", path: "a", name: "x" }).success).toBe(false)
   })
 
-  it("execute strips title and forwards args + options to the original", async () => {
+  it("execute strips _title and forwards args + options to the original", async () => {
     const out = await (wrapped.execute as any)(
-      { title: "open", args: { path: "a.txt" } },
+      { _title: "open", path: "a.txt" },
       { context: { sessionId: "s1" } },
     )
     expect(out).toEqual({ got: { path: "a.txt" }, ctx: { sessionId: "s1" } })
@@ -61,6 +60,11 @@ describe("wrapWithTitle", () => {
   it("leaves execute undefined when the tool has none", () => {
     const noExec = { description: "d", inputSchema: z.object({}) } as unknown as Tool
     expect(wrapWithTitle(noExec).execute).toBeUndefined()
+  })
+
+  it("rejects an original schema that uses the reserved _title field", () => {
+    const conflicting = tool({ inputSchema: z.object({ _title: z.string() }) })
+    expect(() => wrapWithTitle(conflicting)).toThrow('reserved "_title" field')
   })
 })
 
@@ -88,7 +92,7 @@ describe("ToolRegistry", () => {
   it("toolSet returns all tools keyed by qualified name, each wrapped", () => {
     const set = registry.toolSet()
     expect(Object.keys(set).sort()).toEqual(["browser_navigate", "file_read", "file_write"])
-    expect(parse(set.file_read.inputSchema, { title: "t", args: { path: "a" } }).success).toBe(true)
+    expect(parse(set.file_read.inputSchema, { _title: "t", path: "a" }).success).toBe(true)
     expect(set.file_read.contextSchema).toBe(toolContextSchema)
   })
 
@@ -126,9 +130,30 @@ describe("ToolRegistry", () => {
   it("toolSet tools execute through the wrapper (unwrap args, pass context)", async () => {
     const set = registry.toolSet()
     const out = await (set.file_read.execute as any)(
-      { title: "read it", args: { path: "x.txt" } },
+      { _title: "read it", path: "x.txt" },
       { context: { sessionId: "sess" } },
     )
     expect(out).toEqual({ path: "x.txt" })
+  })
+
+  it("skips an invalid tool without affecting other tools", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const isolated = createToolRegistry([
+      {
+        name: "mixed",
+        description: "Mixed tools",
+        tools: {
+          invalid: tool({ inputSchema: z.object({ _title: z.string() }) }),
+          valid: tool({ inputSchema: z.object({ path: z.string() }) }),
+        },
+      },
+    ])
+
+    expect(Object.keys(isolated.toolSet())).toEqual(["mixed_valid"])
+    expect(isolated.listTools("mixed")?.tools).toEqual([
+      { tool_name: "mixed_valid" },
+    ])
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('Skipped invalid tool "mixed_invalid"'))
+    warn.mockRestore()
   })
 })

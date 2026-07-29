@@ -71,7 +71,7 @@ describe("list_toolkit_tools", () => {
 })
 
 describe("get_tool_schemas", () => {
-  it("returns the tool's native { title, args } schema", async () => {
+  it("returns the tool's flat schema with _title", async () => {
     const { run } = agentTools()
     const out = JSON.parse(await run("get_tool_schemas", { tool_names: ["file_read"] }))
     expect(out).toHaveLength(1)
@@ -79,8 +79,8 @@ describe("get_tool_schemas", () => {
     expect(out[0].name).toBe("file_read")
     expect(out[0].description).toBe("Read a file")
     expect(out[0].inputSchema.type).toBe("object")
-    expect(out[0].inputSchema.properties).toHaveProperty("title")
-    expect(out[0].inputSchema.properties.args.properties).toHaveProperty("path")
+    expect(out[0].inputSchema.properties).toHaveProperty("_title")
+    expect(out[0].inputSchema.properties).toHaveProperty("path")
   })
 
   it("returns multiple schemas at once", async () => {

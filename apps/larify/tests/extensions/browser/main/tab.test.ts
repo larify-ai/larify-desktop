@@ -808,8 +808,8 @@ describe("BrowserTab", () => {
     webContents(tab).deferLoad = true
 
     const pending = tab.navigateAndWait("https://example.com")
-    const assertion = expect(pending).rejects.toThrow("navigation load event timed out after 30s")
-    await vi.advanceTimersByTimeAsync(30_000)
+    const assertion = expect(pending).rejects.toThrow("navigation load event timed out after 60s")
+    await vi.advanceTimersByTimeAsync(60_000)
 
     await assertion
     vi.useRealTimers()
@@ -1065,7 +1065,7 @@ describe("BrowserTab", () => {
     webContents(tab).deferLoad = true
 
     expect(tab.navigate("https://example.com")).toBe(true)
-    await vi.advanceTimersByTimeAsync(30_000)
+    await vi.advanceTimersByTimeAsync(60_000)
 
     expect(tab.state().loading).toBe(false)
     expect(tab.state().error?.description).toContain("navigation load event timed out")
@@ -1099,6 +1099,51 @@ describe("BrowserTab", () => {
     const tab = new BrowserTab(1, "p")
 
     await expect(tab.read()).rejects.toThrow("execution context was destroyed")
+  })
+
+  it("waits for the document element before reading the page", async () => {
+    const html = `<html><head><title>Ready</title></head><body><main><h1>Ready</h1><p>${"content ".repeat(80)}</p></main></body></html>`
+    let documentReads = 0
+    h.sendCommandMock.mockImplementation(
+      async (method: string, params: { expression?: string }) => {
+        if (method !== "Runtime.evaluate") return {}
+        if (params.expression === "document.documentElement?.outerHTML ?? null") {
+          documentReads += 1
+          return { result: { value: documentReads === 1 ? null : html } }
+        }
+        if (params.expression === "!!(document.documentElement)") {
+          return { result: { value: true } }
+        }
+        return {}
+      },
+    )
+    const tab = new BrowserTab(1, "p")
+
+    await expect(tab.read()).resolves.toMatchObject({ title: "Ready" })
+    expect(documentReads).toBe(2)
+  })
+
+  it("stops waiting when the document element remains unavailable", async () => {
+    vi.useFakeTimers()
+    h.sendCommandMock.mockImplementation(
+      async (method: string, params: { expression?: string }) => {
+        if (method !== "Runtime.evaluate") return {}
+        if (params.expression === "document.documentElement?.outerHTML ?? null") {
+          return { result: { value: null } }
+        }
+        if (params.expression === "!!(document.documentElement)") {
+          return { result: { value: false } }
+        }
+        return {}
+      },
+    )
+    const tab = new BrowserTab(1, "p")
+    const pending = tab.read()
+    const rejection = expect(pending).rejects.toThrow("wait_for_function timed out after 5s")
+
+    await vi.advanceTimersByTimeAsync(5000)
+    await rejection
+    vi.useRealTimers()
   })
 
   it("cancels a pending raw CDP call when the operation is aborted", async () => {

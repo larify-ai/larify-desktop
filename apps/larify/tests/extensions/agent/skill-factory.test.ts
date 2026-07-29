@@ -1,10 +1,11 @@
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { createAgentToolkit } from "../../../src/extensions/agent/main/agent-toolkit"
 import { createToolRegistry } from "../../../src/extensions/agent/main/registry"
 import { createSkillFactory } from "../../../src/extensions/agent/main/skill-factory"
 import { buildSystemPrompt } from "../../../src/extensions/agent/main/system-prompt"
+import { larifyPath } from "../../../src/main/utils/app-paths"
 
 const roots: string[] = []
 
@@ -86,7 +87,7 @@ describe("createSkillFactory", () => {
     const builtIn = createRoot()
     const project = createRoot()
     writeSkill(builtIn, "review", "name: review\ndescription: Built-in review.\neager: true")
-    writeSkill(project, "review", "name: review\ndescription: Project review.")
+    writeSkill(project, "review", "name: review\ndescription: Project review.\neager: false")
 
     const factory = createSkillFactory([builtIn, project])
 
@@ -110,16 +111,22 @@ describe("createSkillFactory", () => {
       "name: invalid\ndescription: Invalid eager.\neager: yes",
       "eager as a boolean",
     ],
-  ])("rejects %s", (_case, frontmatter, message) => {
+  ])("skips %s without affecting valid skills", (_case, frontmatter, message) => {
     const root = createRoot()
     writeSkill(root, "invalid", frontmatter)
+    writeSkill(root, "valid", "name: valid\ndescription: Valid skill.")
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
 
-    expect(() => createSkillFactory([root])).toThrow(message)
+    expect(createSkillFactory([root]).list()).toMatchObject([
+      { name: "valid", description: "Valid skill." },
+    ])
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining(message))
+    warn.mockRestore()
   })
 
   it("exposes all skills and their eager state through agent_list_skills", async () => {
     const root = createRoot()
-    writeSkill(root, "review", "name: review\ndescription: Review changes.")
+    writeSkill(root, "review", "name: review\ndescription: Review changes.\neager: false")
     writeSkill(root, "grounding", "name: grounding\ndescription: Ground information.\neager: true")
     const skills = createSkillFactory([root])
     const registry = createToolRegistry([])
@@ -131,7 +138,7 @@ describe("createSkillFactory", () => {
     expect(registry.activeToolNames()).toContain("agent_list_skills")
 
     const output = await listSkills!.execute!(
-      { title: "List skills", args: {} },
+      { _title: "List skills" },
       {
         toolCallId: "test",
         messages: [],
@@ -162,7 +169,7 @@ describe("createSkillFactory", () => {
     const listSkills = registry.tool("agent_list_skills")!
 
     const output = await listSkills.execute!(
-      { title: "List skills", args: {} },
+      { _title: "List skills" },
       {
         toolCallId: "test",
         messages: [],
@@ -177,7 +184,7 @@ describe("createSkillFactory", () => {
   it("writes only eager skills into the system prompt", () => {
     const root = createRoot()
     writeSkill(root, "context", "name: context\ndescription: Represent context.\neager: true")
-    writeSkill(root, "review", "name: review\ndescription: Review changes.")
+    writeSkill(root, "review", "name: review\ndescription: Review changes.\neager: false")
     const skills = createSkillFactory([root])
 
     const prompt = buildSystemPrompt(createToolRegistry([]), root, skills)
@@ -186,8 +193,10 @@ describe("createSkillFactory", () => {
       `- \`context\`: Represent context. (\`${join(root, "context", "SKILL.md")}\`)`,
     )
     expect(prompt).not.toContain("Review changes.")
+    expect(prompt).toContain(`The context directory is \`${larifyPath("context")}\`.`)
+    expect(prompt).toContain(`The task directory is \`${larifyPath("tasks")}\`.`)
     expect(prompt).toContain(
-      "Some available skills are listed below. To see more, use `agent_list_skills`, then read the relevant content with `fs_read`.",
+      "Some available skills are listed below. To see more, first list skills with `agent_list_skills`, then read content with `fs_read`.",
     )
   })
 

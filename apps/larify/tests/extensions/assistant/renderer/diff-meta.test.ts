@@ -50,18 +50,25 @@ describe("toolIcon 从工具 metadata 里取图标名", () => {
 
 describe("toolCall 从 {title, args} 包装里拆出标题和真实参数", () => {
   it("拆出模型给的 title 和内层 args", () => {
-    const input = { title: "读取 hello.txt 内容", args: { file_path: "/a.txt", limit: 50000 } }
+    const input = { _title: "读取 hello.txt 内容", file_path: "/a.txt", limit: 50000 }
 
     expect(toolCall(input)).toEqual({ title: "读取 hello.txt 内容", args: { file_path: "/a.txt", limit: 50000 } })
   })
 
   it("title 缺失或非字符串时只给 args, 不带 title 字段", () => {
-    expect(toolCall({ args: { x: 1 } })).toEqual({ args: { x: 1 } })
-    expect(toolCall({ title: 123, args: { x: 1 } })).toEqual({ args: { x: 1 } })
+    expect(toolCall({ x: 1 })).toEqual({ args: { x: 1 } })
+    expect(toolCall({ _title: 123, x: 1 })).toEqual({ args: { x: 1 } })
   })
 
   it("没有 args 包装时把整个输入当参数", () => {
     expect(toolCall({ file_path: "/a.txt" })).toEqual({ args: { file_path: "/a.txt" } })
+  })
+
+  it("从扁平输入中拆出 title 和参数", () => {
+    expect(toolCall({ _title: "读取文件", file_path: "/a.txt" })).toEqual({
+      title: "读取文件",
+      args: { file_path: "/a.txt" },
+    })
   })
 
   it("流式途中输入还没到时不抛错", () => {

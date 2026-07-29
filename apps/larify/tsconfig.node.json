@@ -6,7 +6,9 @@
     "src/preload/**/*",
     "src/shared/**/*",
     "src/extensions/*/shared/**/*",
-    "src/extensions/*/main/**/*"
+    "src/extensions/*/main/**/*",
+    "src/extensions/*/loop/**/*",
+    "src/extensions/*/utils/**/*"
   ],
   "compilerOptions": {
     "composite": true,

@@ -59,6 +59,107 @@ describe('web fetch', () => {
     )
   })
 
+  it('reads available content when the full page load times out', async () => {
+    const tab = {
+      waitForNavigation: vi.fn(async () => {
+        throw new Error('navigation load event timed out after 60s')
+      }),
+      read: vi.fn(async () => ({
+        url: 'https://example.com/docs',
+        title: 'Docs',
+        content: '# Loaded content'
+      }))
+    }
+    const service = {
+      withTemporaryTab: vi.fn(
+        async (
+          _sessionId: string,
+          _url: string,
+          callback: (temporaryTab: BrowserTab) => Promise<unknown>
+        ) => callback(tab as unknown as BrowserTab)
+      )
+    } as unknown as BrowserService
+
+    await expect(
+      executeWebFetch(
+        service,
+        { url: 'https://example.com/docs' },
+        { sessionId: 'session-1', cwd: 'D:\\Workspace' }
+      )
+    ).resolves.toEqual({
+      url: 'https://example.com/docs',
+      title: 'Docs',
+      content: '# Loaded content'
+    })
+  })
+
+  it('retries a transient navigation failure once', async () => {
+    const tab = {
+      waitForNavigation: vi
+        .fn()
+        .mockRejectedValueOnce(
+          new Error(
+            'navigation failed (-15): ERR_SOCKET_NOT_CONNECTED: https://example.com/docs'
+          )
+        )
+        .mockResolvedValueOnce(undefined),
+      navigate: vi.fn(() => true),
+      read: vi.fn(async () => ({
+        url: 'https://example.com/docs',
+        title: 'Docs',
+        content: '# Loaded content'
+      }))
+    }
+    const service = {
+      withTemporaryTab: vi.fn(
+        async (
+          _sessionId: string,
+          _url: string,
+          callback: (temporaryTab: BrowserTab) => Promise<unknown>
+        ) => callback(tab as unknown as BrowserTab)
+      )
+    } as unknown as BrowserService
+
+    await expect(
+      executeWebFetch(
+        service,
+        { url: 'https://example.com/docs' },
+        { sessionId: 'session-1', cwd: 'D:\\Workspace' }
+      )
+    ).resolves.toMatchObject({ content: '# Loaded content' })
+    expect(tab.navigate).toHaveBeenCalledOnce()
+    expect(tab.waitForNavigation).toHaveBeenCalledTimes(2)
+  })
+
+  it('preserves a navigation timeout when no page content is available', async () => {
+    const tab = {
+      waitForNavigation: vi.fn(async () => {
+        throw new Error('navigation load event timed out after 60s')
+      }),
+      read: vi.fn(async () => ({
+        url: 'about:blank',
+        content: ''
+      }))
+    }
+    const service = {
+      withTemporaryTab: vi.fn(
+        async (
+          _sessionId: string,
+          _url: string,
+          callback: (temporaryTab: BrowserTab) => Promise<unknown>
+        ) => callback(tab as unknown as BrowserTab)
+      )
+    } as unknown as BrowserService
+
+    await expect(
+      executeWebFetch(
+        service,
+        { url: 'https://example.com/docs' },
+        { sessionId: 'session-1', cwd: 'D:\\Workspace' }
+      )
+    ).rejects.toThrow('navigation load event timed out after 60s')
+  })
+
   it('rejects invalid URLs and missing file paths before creating a temporary tab', async () => {
     const service = {
       withTemporaryTab: vi.fn()
@@ -106,11 +207,7 @@ describe('web fetch', () => {
 
     try {
       await expect(
-        executeWebFetch(
-          service,
-          { url: relativePath },
-          { sessionId: 'session-1', cwd }
-        )
+        executeWebFetch(service, { url: relativePath }, { sessionId: 'session-1', cwd })
       ).resolves.toMatchObject({
         url: pathToFileURL(absolutePath).href,
         title: 'Local',

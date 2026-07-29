@@ -30,6 +30,7 @@ import { modifierBitForKey, parseKeyChord } from "./keymap"
 const DIALOG_OVERRIDE =
   "window.alert=function(){};window.confirm=function(){return true;};window.prompt=function(){return null;};"
 const DOWNLOAD_CANCEL_CONFIRM_TIMEOUT = 5000
+const NAVIGATION_TIMEOUT = 60000
 
 function sameOrigin(a: string, b: string): boolean {
   try {
@@ -67,7 +68,7 @@ function withTimeout<T>(
 
 function waitForWebContentsLoadEvent(
   wc: WebContents,
-  timeoutMs = 30000,
+  timeoutMs = NAVIGATION_TIMEOUT,
   acceptsFailedUrl?: (url: string) => boolean,
   signal?: AbortSignal,
 ): Promise<void> {
@@ -117,7 +118,7 @@ function waitForWebContentsLoadEvent(
 
 function waitForWebContentsNotLoading(
   wc: WebContents,
-  timeoutMs = 30000,
+  timeoutMs = NAVIGATION_TIMEOUT,
   stableMs = 100,
   signal?: AbortSignal,
 ): Promise<void> {
@@ -168,7 +169,7 @@ function waitForWebContentsNotLoading(
 
 async function waitForWebContentsLoad(
   wc: WebContents,
-  timeoutMs = 30000,
+  timeoutMs = NAVIGATION_TIMEOUT,
   acceptsFailedUrl?: (url: string) => boolean,
   signal?: AbortSignal,
 ): Promise<void> {
@@ -279,7 +280,7 @@ export class BrowserTab {
     const task = this.cdpReady.then(async () => {
       const loaded = waitForWebContentsLoad(
         this.view.webContents,
-        30000,
+        NAVIGATION_TIMEOUT,
         (url) => this.activeNavigationUrls.has(url),
       )
       await Promise.all([
@@ -305,7 +306,7 @@ export class BrowserTab {
     const wc = this.view.webContents
     if (!wc.navigationHistory.canGoBack()) return
     const waitController = new AbortController()
-    const loaded = waitForWebContentsLoad(wc, 30000, undefined, waitController.signal)
+    const loaded = waitForWebContentsLoad(wc, NAVIGATION_TIMEOUT, undefined, waitController.signal)
     let generation: number
     try {
       generation = this.runNavigationAction(() => wc.navigationHistory.goBack())
@@ -322,7 +323,7 @@ export class BrowserTab {
     const wc = this.view.webContents
     if (!wc.navigationHistory.canGoForward()) return
     const waitController = new AbortController()
-    const loaded = waitForWebContentsLoad(wc, 30000, undefined, waitController.signal)
+    const loaded = waitForWebContentsLoad(wc, NAVIGATION_TIMEOUT, undefined, waitController.signal)
     let generation: number
     try {
       generation = this.runNavigationAction(() => wc.navigationHistory.goForward())
@@ -338,7 +339,7 @@ export class BrowserTab {
   async reloadAndWait(): Promise<void> {
     const wc = this.view.webContents
     const waitController = new AbortController()
-    const loaded = waitForWebContentsLoad(wc, 30000, undefined, waitController.signal)
+    const loaded = waitForWebContentsLoad(wc, NAVIGATION_TIMEOUT, undefined, waitController.signal)
     let generation: number
     try {
       generation = this.runNavigationAction(() => wc.reload())
@@ -787,21 +788,31 @@ export class BrowserTab {
   }
 
   async read(): Promise<{ url: string; title?: string; content: string }> {
-    const res = (await this.sendCdp("Runtime.evaluate", {
-      expression: "document.documentElement.outerHTML",
-      returnByValue: true,
-    })) as {
-      result?: { value?: unknown }
-      exceptionDetails?: { exception?: { description?: string }; text?: string }
+    const readDocumentHtml = async (): Promise<string | undefined> => {
+      const res = (await this.sendCdp("Runtime.evaluate", {
+        expression: "document.documentElement?.outerHTML ?? null",
+        returnByValue: true,
+      })) as {
+        result?: { value?: unknown }
+        exceptionDetails?: { exception?: { description?: string }; text?: string }
+      }
+      if (res.exceptionDetails) {
+        throw new Error(
+          res.exceptionDetails.exception?.description ??
+            res.exceptionDetails.text ??
+            "page read evaluation failed",
+        )
+      }
+      return typeof res.result?.value === "string" ? res.result.value : undefined
     }
-    if (res.exceptionDetails) {
-      throw new Error(
-        res.exceptionDetails.exception?.description ??
-          res.exceptionDetails.text ??
-          "page read evaluation failed",
-      )
+
+    let html = await readDocumentHtml()
+    if (html === undefined) {
+      await waits.waitForFunction(this.cdpSend, "document.documentElement", 5000)
+      html = await readDocumentHtml()
     }
-    const html = typeof res.result?.value === "string" ? res.result.value : ""
+    if (html === undefined) throw new Error("page DOM is unavailable after waiting for it to load")
+
     const sourceUrl = this.view.webContents.getURL()
     const { title, markdown } = await htmlToMarkdown(html, sourceUrl)
     return { url: sourceUrl, title, content: markdown }

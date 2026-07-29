@@ -1,0 +1,32 @@
+diff --git a/node_modules/defuddle/dist/defuddle.js b/node_modules/defuddle/dist/defuddle.js
+index 8d6cd18..f35a68f 100644
+--- a/node_modules/defuddle/dist/defuddle.js
++++ b/node_modules/defuddle/dist/defuddle.js
+@@ -19,6 +19,11 @@ const dom_1 = require("./utils/dom");
+ const STANDARD_VARIABLE_KEYS = new Set(['title', 'author', 'published', 'site', 'description', 'image', 'language']);
+ // CSS-special characters that make class names invalid in selectors (Tailwind utilities like sm:pt-[131px])
+ const UNSAFE_CSS_CLASS_RE = /[:\[\]()#>~+,]/;
++function escapeCssIdentifier(value) {
++    return value
++        .replace(/^[0-9]/, (character) => `\\3${character} `)
++        .replace(/[^a-zA-Z0-9_-]/g, (character) => `\\${character}`);
++}
+ class Defuddle {
+     /**
+      * Create a new Defuddle instance
+@@ -1183,13 +1188,13 @@ class Defuddle {
+         while (current && current !== this.doc.documentElement) {
+             let selector = current.tagName.toLowerCase();
+             if (current.id) {
+-                selector += '#' + current.id;
++                selector += '#' + escapeCssIdentifier(current.id);
+             }
+             else if ((0, dom_1.getClassName)(current)) {
+                 const safe = (0, dom_1.getClassName)(current).trim().split(/\s+/)
+                     .filter(cls => !UNSAFE_CSS_CLASS_RE.test(cls));
+                 if (safe.length) {
+-                    selector += '.' + safe.join('.');
++                    selector += '.' + safe.map(escapeCssIdentifier).join('.');
+                 }
+             }
+             parts.unshift(selector);

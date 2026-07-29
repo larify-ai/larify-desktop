@@ -1,6 +1,7 @@
 ---
 name: context-representation
 description: How context is represented.
+eager: true
 ---
 
 # Directory Structure

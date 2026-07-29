@@ -1,6 +1,7 @@
 ---
 name: exploration-dimensions
 description: How subjects are explored.
+eager: true
 ---
 
 The following questions define how any subject can be explored recursively at any level of granularity, both epistemically and practically, in both directions, including competing alternatives.
@@ -22,9 +23,9 @@ The following questions define how any subject can be explored recursively at an
 
 # Practical Exploration
 
-- **Value**
-  - gain: Explore the question about "what value does it gain, and why this gain rather than another?"
-  - lose: Explore the question about "what value does it lose, and why this loss rather than another?"
+- **Expected Value**
+  - increase: Explore the question about "what expected value does it increase, and why this increase rather than another?"
+  - decrease: Explore the question about "what expected value does it decrease, and why this decrease rather than another?"
 - **Uncertainty**
   - reduce: Explore the question about "what uncertainty does it reduce, and why this reduction rather than another?"
   - increase: Explore the question about "what uncertainty does it increase, and why this increase rather than another?"

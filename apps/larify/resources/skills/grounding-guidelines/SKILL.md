@@ -1,6 +1,7 @@
 ---
 name: grounding-guidelines
 description: How information is grounded.
+eager: true
 ---
 
 # Principles

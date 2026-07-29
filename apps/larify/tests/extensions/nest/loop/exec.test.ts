@@ -38,6 +38,10 @@ import { exec } from "../../../../src/extensions/nest/loop/exec"
 const app = {
   getAll: vi.fn(() => []),
 }
+const modelConfig = {
+  modelId: "deepseek-v4-flash",
+  thinking: "enabled",
+} as const
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -61,6 +65,7 @@ describe("nest loop exec", () => {
           cwd: "D:\\workspace",
           prompt: "loop prompt",
           sessionId: "parent-session",
+          modelConfig,
         }),
       ).resolves.toBe(verdict)
     },
@@ -76,6 +81,7 @@ describe("nest loop exec", () => {
       cwd: "D:\\workspace",
       prompt: "loop prompt",
       sessionId: "parent-session",
+      modelConfig,
     })
 
     expect(mocks.toolsContextFor).toHaveBeenCalledWith(
@@ -89,6 +95,7 @@ describe("nest loop exec", () => {
       expect.objectContaining({
         messages: [{ role: "user", content: "loop prompt" }],
         output: expect.anything(),
+        deepseekOptions: { thinking: { type: "enabled" } },
       }),
     )
   })
@@ -105,6 +112,7 @@ describe("nest loop exec", () => {
         cwd: "D:\\workspace",
         prompt: "loop prompt",
         sessionId: "parent-session",
+        modelConfig,
       }),
     ).rejects.toBe(error)
   })

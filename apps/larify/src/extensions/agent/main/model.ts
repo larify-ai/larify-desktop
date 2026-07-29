@@ -1,17 +1,11 @@
-import { createDeepSeek } from "@ai-sdk/deepseek"
-import type { DeepSeekLanguageModelOptions } from "@ai-sdk/deepseek"
-
-export type ModelId = "deepseek-v4-flash" | "deepseek-v4-pro"
+import { createDeepSeek } from '@ai-sdk/deepseek'
+import type { ModelId } from '../shared/model'
 
 const deepseek = createDeepSeek({
-  baseURL: "https://api.deepseek.com",
-  apiKey: "sk-51d1b62d722148e6973c420d5d900faf",
+  baseURL: 'https://api.deepseek.com',
+  apiKey: 'sk-51d1b62d722148e6973c420d5d900faf'
 })
 
-export const deepseekProviderOptions = {
-  thinking: { type: "disabled" },
-} satisfies DeepSeekLanguageModelOptions
-
-export function createModel(id: ModelId = "deepseek-v4-flash") {
+export function createModel(id: ModelId = 'deepseek-v4-pro') {
   return deepseek(id)
 }

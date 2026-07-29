@@ -1,6 +1,10 @@
 import type { ChatTransport, UIMessage, UIMessageChunk } from "ai"
+import type { AgentModelConfig } from "../../../agent/shared/model"
 
-export const createIpcTransport = (getCwd: () => string): ChatTransport<UIMessage> => ({
+export const createIpcTransport = (
+  getCwd: () => string,
+  getModelConfig: () => AgentModelConfig,
+): ChatTransport<UIMessage> => ({
   async sendMessages({ chatId, messages, abortSignal }) {
     const runId = crypto.randomUUID()
     const cwd = getCwd()
@@ -74,6 +78,7 @@ export const createIpcTransport = (getCwd: () => string): ChatTransport<UIMessag
               sessionId: chatId,
               messages,
               cwd,
+              modelConfig: getModelConfig(),
             })
           })
           .catch(fail)

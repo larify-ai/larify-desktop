@@ -1,6 +1,7 @@
 import { readUIMessageStream, type UIMessage, type UIMessageChunk } from "ai"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { createIpcTransport } from "../../../../src/extensions/assistant/renderer/lib/transport"
+import { defaultModelConfig } from "../../../../src/extensions/agent/shared/model"
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -201,7 +202,7 @@ describe("assistant IPC transport review lifecycle", () => {
       },
     })
 
-    const transport = createIpcTransport(() => "C:/workspace")
+    const transport = createIpcTransport(() => "C:/workspace", () => defaultModelConfig)
     const stream = await transport.sendMessages({
       abortSignal: abort.signal,
       chatId: "session-1",
@@ -263,10 +264,40 @@ describe("assistant IPC transport review lifecycle", () => {
     await readAll(await send())
     expect(invoke.mock.calls.filter(([channel]) => channel === "review:finish")).toHaveLength(1)
   })
+
+  it("forwards the selected model and thinking mode to the agent run", async () => {
+    const listeners = new Map<string, (value?: unknown) => void>()
+    const modelConfig = { modelId: "deepseek-v4-flash", thinking: "enabled" } as const
+    let request: Record<string, unknown> | undefined
+    const invoke = vi.fn(async (channel: string, ...args: unknown[]) => {
+      if (channel === "agent:run") {
+        request = args[0] as Record<string, unknown>
+        listeners.get(`agent:end:${request.runId as string}`)?.()
+      }
+      return null
+    })
+    vi.stubGlobal("window", {
+      bridge: {
+        invoke,
+        on: (channel: string, callback: (value?: unknown) => void) => {
+          listeners.set(channel, callback)
+          return () => listeners.delete(channel)
+        },
+      },
+    })
+
+    const stream = await createIpcTransport(
+      () => "C:/workspace",
+      () => modelConfig,
+    ).sendMessages({ chatId: "session-1", messages: [], trigger: "submit-message" })
+    await readAll(stream)
+
+    expect(request?.modelConfig).toEqual(modelConfig)
+  })
 })
 
 async function send(abortSignal?: AbortSignal): Promise<ReadableStream<unknown>> {
-  return createIpcTransport(() => "C:/workspace").sendMessages({
+  return createIpcTransport(() => "C:/workspace", () => defaultModelConfig).sendMessages({
     abortSignal,
     chatId: "session-1",
     messages: [],

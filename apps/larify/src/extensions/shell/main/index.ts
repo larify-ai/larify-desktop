@@ -164,7 +164,7 @@ const extension: Extension = {
       if (!win || win.isDestroyed()) getWindow()
     }
     const onNativeThemeUpdated = (): void => {
-      for (const window of BrowserWindow.getAllWindows()) syncTitleBar(window)
+      if (win) syncTitleBar(win)
     }
     app.on('activate', onActivate)
     nativeTheme.on('updated', onNativeThemeUpdated)

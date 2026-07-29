@@ -52,7 +52,6 @@ export type ReasoningProps = ComponentProps<typeof Collapsible> & {
   duration?: number;
 };
 
-const AUTO_CLOSE_DELAY = 1000;
 const MS_IN_S = 1000;
 
 export const Reasoning = memo(
@@ -112,12 +111,8 @@ export const Reasoning = memo(
         isOpen &&
         !hasAutoClosed
       ) {
-        const timer = setTimeout(() => {
-          setIsOpen(false);
-          setHasAutoClosed(true);
-        }, AUTO_CLOSE_DELAY);
-
-        return () => clearTimeout(timer);
+        setIsOpen(false);
+        setHasAutoClosed(true);
       }
       return undefined;
     }, [isStreaming, isOpen, setIsOpen, hasAutoClosed]);

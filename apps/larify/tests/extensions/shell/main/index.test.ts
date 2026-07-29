@@ -194,6 +194,7 @@ describe('shell main window lifecycle', () => {
       { register: vi.fn(() => ({ dispose: vi.fn() })) } as never,
       { subscriptions, manifest: {} } as never
     )
+    const auxiliaryWindow = new h.FakeWindow()
 
     h.nativeThemeHandlers.get('updated')!()
 
@@ -202,6 +203,7 @@ describe('shell main window lifecycle', () => {
       height: 32,
       symbolColor: '#000000'
     })
+    expect(auxiliaryWindow.setTitleBarOverlay).not.toHaveBeenCalled()
 
     for (const subscription of subscriptions) subscription.dispose()
     expect(h.nativeThemeHandlers.has('updated')).toBe(false)

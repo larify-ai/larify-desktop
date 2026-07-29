@@ -46,6 +46,40 @@ describe("message rendering performance guards", () => {
     container.remove()
   })
 
+  it("collapses reasoning after the reasoning part finishes", async () => {
+    const reasoningMessage = (state: "streaming" | "done"): UIMessage => ({
+      id: "reasoning",
+      role: "assistant",
+      parts: [{ type: "reasoning", text: "thinking", state }],
+    })
+
+    await act(async () => {
+      root.render(createElement(MessageView, { message: reasoningMessage("streaming"), streaming: true }))
+    })
+
+    expect(container.querySelector("button")?.getAttribute("aria-expanded")).toBe("true")
+
+    await act(async () => {
+      root.render(createElement(MessageView, { message: reasoningMessage("done"), streaming: true }))
+    })
+
+    expect(container.querySelector("button")?.getAttribute("aria-expanded")).toBe("false")
+  })
+
+  it("treats a trailing reasoning part without state as streaming", async () => {
+    const message: UIMessage = {
+      id: "reasoning-without-state",
+      role: "assistant",
+      parts: [{ type: "reasoning", text: "thinking" }],
+    }
+
+    await act(async () => {
+      root.render(createElement(MessageView, { message, streaming: true }))
+    })
+
+    expect(container.querySelector("button")?.getAttribute("aria-expanded")).toBe("true")
+  })
+
   it("skips committing unchanged old messages when wrapped with React.memo", async () => {
     const oldRender = vi.fn(MessageView)
     const liveRender = vi.fn(MessageView)

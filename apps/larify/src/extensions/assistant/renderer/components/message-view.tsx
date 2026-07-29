@@ -98,21 +98,26 @@ export function MessageView({
 }: {
   message: UIMessage
   streaming?: boolean
-}): React.JSX.Element {
-  const hasText = message.parts.some((p) => p.type === "text")
+}): React.JSX.Element | null {
   const files = message.parts.filter(isFileUIPart)
   const changeSummary =
     message.role === "assistant" && !streaming ? summarizeMessageChanges(message) : null
   const content = message.parts.map((part, i) => {
     if (isFileUIPart(part)) return null
-    if (part.type === "text") return <MessageResponse key={i}>{part.text}</MessageResponse>
-    if (part.type === "reasoning")
+    if (part.type === "text")
+      return part.text ? <MessageResponse key={i}>{part.text}</MessageResponse> : null
+    if (part.type === "reasoning") {
+      if (!part.text) return null
+      const isReasoningStreaming =
+        part.state === "streaming" ||
+        (part.state === undefined && streaming && i === message.parts.length - 1)
       return (
-        <Reasoning key={i} isStreaming={streaming && !hasText}>
+        <Reasoning key={i} isStreaming={isReasoningStreaming}>
           <ReasoningTrigger />
           <ReasoningContent>{part.text}</ReasoningContent>
         </Reasoning>
       )
+    }
     if (isToolUIPart(part))
       {
         const toolMeta = asDiffMeta(part.output)
@@ -142,6 +147,8 @@ export function MessageView({
       }
     return null
   })
+
+  if (files.length === 0 && content.every((part) => part === null)) return null
 
   return (
     <Message from={message.role}>

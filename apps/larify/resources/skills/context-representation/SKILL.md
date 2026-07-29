@@ -10,7 +10,6 @@ Organize context as a recursive hierarchy of domains:
 ```
 ~/.larify/context/<domain>/
   README.md
-  <subject>.md
   <subdomain>/
     README.md
     <subject>.md

@@ -3,6 +3,7 @@ import { convertToModelMessages, type UIMessage } from "ai"
 import type { Extension } from "kernel"
 import type { Toolkit } from "../../../shared/tool"
 import { runAgentUIStream, toolsContextFor } from "./agent"
+import { createModel } from "./model"
 import { createToolRegistry } from "./registry"
 import { createAgentToolkit } from "./agent-toolkit"
 import { buildSystemPrompt } from "./system-prompt"
@@ -10,12 +11,14 @@ import { createSessionStore } from "./session-store"
 import { sanitizeAndValidateMessages } from "./message-sanitizer"
 import { larifyWorkspacePath } from "../../../main/utils/app-paths"
 import { createSkillFactory, skillRoots } from "./skill-factory"
+import { defaultModelConfig, isAgentModelConfig, type AgentModelConfig } from "../shared/model"
 
 interface RunRequest {
   runId: string
   sessionId: string
   messages: UIMessage[]
   cwd?: string
+  modelConfig?: AgentModelConfig
 }
 
 function prepareMessagesForModel(messages: UIMessage[]): UIMessage[] {
@@ -54,45 +57,59 @@ const extension: Extension = {
       }
     })
 
-    ipcMain.handle("agent:session-save", async (_event, sessionId: string, messages: UIMessage[], cwd: string) => {
-      return sessions.saveSession(sessionId, await sanitizeAndValidateMessages(messages), cwd)
-    })
+    ipcMain.handle(
+      "agent:session-save",
+      async (_event, sessionId: string, messages: UIMessage[], cwd: string) => {
+        return sessions.saveSession(sessionId, await sanitizeAndValidateMessages(messages), cwd)
+      },
+    )
 
     ipcMain.handle("agent:session-list", () => {
       return sessions.listSessions()
     })
 
-    ipcMain.handle("agent:run", async (event, { runId, sessionId, messages, cwd: requestCwd }: RunRequest) => {
-      const controller = new AbortController()
-      controllers.set(runId, controller)
-      try {
-        const skills = createSkillFactory(skillRoots())
-        const registry = createToolRegistry(app.getAll<Toolkit>("tool"))
-        registry.addToolkit(createAgentToolkit(registry, skills))
-        const validMessages = await sanitizeAndValidateMessages(messages)
-        const modelMessages = await convertToModelMessages(prepareMessagesForModel(validMessages))
-        const cwd = requestCwd || larifyWorkspacePath()
-        const tools = registry.toolSet()
-        const reader = runAgentUIStream({
-          messages: modelMessages,
-          tools,
-          activeTools: registry.activeToolNames(),
-          toolsContext: toolsContextFor(tools, { sessionId, cwd }),
-          abortSignal: controller.signal,
-          system: buildSystemPrompt(registry, cwd, skills),
-        }).getReader()
-        for (;;) {
-          const { done, value } = await reader.read()
-          if (done) break
-          event.sender.send(`agent:chunk:${runId}`, value)
+    ipcMain.handle(
+      "agent:run",
+      async (event, { runId, sessionId, messages, cwd: requestCwd, modelConfig }: RunRequest) => {
+        const controller = new AbortController()
+        controllers.set(runId, controller)
+        try {
+          const skills = createSkillFactory(skillRoots())
+          const registry = createToolRegistry(app.getAll<Toolkit>("tool"))
+          registry.addToolkit(createAgentToolkit(registry, skills))
+          const validMessages = await sanitizeAndValidateMessages(messages)
+          const modelMessages = await convertToModelMessages(prepareMessagesForModel(validMessages))
+          const cwd = requestCwd || larifyWorkspacePath()
+          const config = isAgentModelConfig(modelConfig) ? modelConfig : defaultModelConfig
+          console.info("[agent:run:model]", {
+            runId,
+            modelId: config.modelId,
+            thinking: config.thinking,
+          })
+          const tools = registry.toolSet()
+          const reader = runAgentUIStream({
+            messages: modelMessages,
+            tools,
+            activeTools: registry.activeToolNames(),
+            toolsContext: toolsContextFor(tools, { sessionId, cwd }),
+            abortSignal: controller.signal,
+            system: buildSystemPrompt(registry, cwd, skills),
+            model: createModel(config.modelId),
+            deepseekOptions: { thinking: { type: config.thinking } },
+          }).getReader()
+          for (;;) {
+            const { done, value } = await reader.read()
+            if (done) break
+            event.sender.send(`agent:chunk:${runId}`, value)
+          }
+        } catch (e) {
+          console.error("[agent:run]", e)
+        } finally {
+          controllers.delete(runId)
+          event.sender.send(`agent:end:${runId}`)
         }
-      } catch (e) {
-        console.error("[agent:run]", e)
-      } finally {
-        controllers.delete(runId)
-        event.sender.send(`agent:end:${runId}`)
-      }
-    })
+      },
+    )
 
     ipcMain.handle("agent:cancel", (_e, runId: string) => {
       controllers.get(runId)?.abort()

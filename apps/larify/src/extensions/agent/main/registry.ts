@@ -19,7 +19,7 @@ export function wrapWithTitle(tool: Tool): Tool {
         _title: z
           .string()
           .min(1)
-          .describe("Short user-facing phrase describing the step, as brief as possible"),
+          .describe("Short user-facing phrase describing the step, required"),
       })
       .strict(),
     execute:

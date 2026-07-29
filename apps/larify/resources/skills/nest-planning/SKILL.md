@@ -15,15 +15,15 @@ Organize what was learned into the context representation following the `context
 
 ## Propose Exploratory Tasks Recursively
 
-Propose exploratory tasks recursively along the dimensions defined in the `exploration-dimensions` skill.
+Propose exploratory tasks recursively along the dimensions defined in the `exploration-dimensions` skill to make better decisions.
 
 ## Write the Prior
 
-Write the proposed exploratory tasks into the `## Prior` of the latest `# Round N` in the current task's `task.md`, with their dependencies drawn in the graph, following the Prior Template below.
+Write the proposed exploratory tasks into the `## Prior` of the latest `# Round N` in the current task's `task.md`, following the Prior Template below.
 
 ## Schedule the Next Task
 
-Among the proposed tasks whose predecessors are all met, schedule the highest-priority one — priority being how much it maximizes the expected rates of value gain, information gain, uncertainty reduction, complexity reduction, and cost / risk reduction: only for the scheduled task, create a sub-directory, create a `task.md` inside the sub-directory, write the task's `# Brief` into the `task.md` following the Brief Template below, then link the task to the `task.md`. Set the scheduled task's status to `in_progress`. Leave every other task's link empty — a later round schedules the next task once its predecessors are met.
+Among the proposed tasks, schedule the highest-priority ones — priority being how much they maximize the expected rates of value gain, information gain, uncertainty reduction, complexity reduction, and cost / risk reduction. Schedule multiple tasks only when they can be explored independently in parallel. Only for scheduled tasks, create their sub-directories and `task.md` files, write their `# Brief` following the Brief Template below, then link them from the prior. Set their status to `in_progress`. Leave every other task's link empty.
 
 # Prior Template
 

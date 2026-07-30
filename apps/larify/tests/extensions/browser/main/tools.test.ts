@@ -96,10 +96,28 @@ describe("browser toolkit", () => {
     )
   })
 
-  it("marks web search and fetch as eager browser tools", () => {
+  it("exposes only the core browser tools eagerly", () => {
     const tools = createBrowserToolkit(createService()).tools
-    expect(tools.web_search?.metadata).toMatchObject({ icon: "browser", eager: true })
-    expect(tools.web_fetch?.metadata).toMatchObject({ icon: "browser", eager: true })
+    expect(
+      Object.entries(tools)
+        .filter(([, tool]) => tool.metadata?.eager)
+        .map(([name]) => name)
+        .sort(),
+    ).toEqual(
+      [
+        "click",
+        "close_tab",
+        "create_tab",
+        "fill",
+        "list_tabs",
+        "navigate",
+        "press",
+        "read_page",
+        "snapshot",
+        "web_fetch",
+        "web_search",
+      ].sort(),
+    )
   })
 
   it("rejects unknown fields in public browser schemas", () => {
@@ -161,26 +179,24 @@ describe("browser toolkit", () => {
     })
   })
 
-  it("returns runtime tab lookup errors without throwing", async () => {
+  it("throws runtime tab lookup errors", async () => {
     const service = {
       ...createService(),
       tab: vi.fn(() => null),
     } as unknown as BrowserService
 
-    await expect(tool("navigate", service).execute({ id: 99, url: "https://example.com" }, ctx)).resolves.toEqual({
-      error: 'Browser tab "99" not found.',
-    })
-    await expect(tool("snapshot", service).execute({ id: 99 }, ctx)).resolves.toEqual({
-      error: 'Browser tab "99" not found.',
-    })
+    await expect(tool("navigate", service).execute({ id: 99, url: "https://example.com" }, ctx)).rejects.toThrow(
+      'Browser tab "99" not found.',
+    )
+    await expect(tool("snapshot", service).execute({ id: 99 }, ctx)).rejects.toThrow(
+      'Browser tab "99" not found.',
+    )
     await expect(
       tool("query_element", service).execute({ id: 99, selector: "body", query: "text" }, ctx),
-    ).resolves.toEqual({
-      error: 'Browser tab "99" not found.',
-    })
-    await expect(tool("click", service).execute({ id: 99, selector: "button" }, ctx)).resolves.toEqual({
-      error: 'Browser tab "99" not found.',
-    })
+    ).rejects.toThrow('Browser tab "99" not found.')
+    await expect(tool("click", service).execute({ id: 99, selector: "button" }, ctx)).rejects.toThrow(
+      'Browser tab "99" not found.',
+    )
   })
 
   it("navigates with goto, back, forward, and reload actions", async () => {
@@ -244,27 +260,20 @@ describe("browser toolkit", () => {
 
     controller.abort()
 
-    await expect(pending).resolves.toEqual({ error: "browser navigation was cancelled" })
+    await expect(pending).rejects.toThrow("browser navigation was cancelled")
     await Promise.resolve()
     expect(tab.navigateAndWait).not.toHaveBeenCalled()
   })
 
-  it("exposes runtime tool errors when debug tool errors are enabled", async () => {
-    const original = process.env.LARIFY_DEBUG_TOOL_ERRORS
-    process.env.LARIFY_DEBUG_TOOL_ERRORS = "1"
+  it("always exposes runtime tool errors", async () => {
     const service = {
       ...createService(),
       tab: vi.fn(() => null),
     } as unknown as BrowserService
 
-    try {
-      await expect(tool("navigate", service).execute({ id: 99, url: "https://example.com" }, ctx)).rejects.toThrow(
-        'Browser tab "99" not found.',
-      )
-    } finally {
-      if (original === undefined) delete process.env.LARIFY_DEBUG_TOOL_ERRORS
-      else process.env.LARIFY_DEBUG_TOOL_ERRORS = original
-    }
+    await expect(tool("navigate", service).execute({ id: 99, url: "https://example.com" }, ctx)).rejects.toThrow(
+      'Browser tab "99" not found.',
+    )
   })
 
   it("uses session scoped service calls and hides favicon data from agent list output", async () => {
@@ -324,7 +333,7 @@ describe("browser toolkit", () => {
     })
   })
 
-  it("returns wait errors without throwing", async () => {
+  it("throws wait errors", async () => {
     const service = {
       ...createService(),
       tab: vi.fn(() => ({
@@ -334,9 +343,7 @@ describe("browser toolkit", () => {
       })),
     } as unknown as BrowserService
 
-    await expect(tool("wait_for", service).execute({ id: 1, selector: "button" }, ctx)).resolves.toEqual({
-      error: "timed out",
-    })
+    await expect(tool("wait_for", service).execute({ id: 1, selector: "button" }, ctx)).rejects.toThrow("timed out")
   })
 
   it("returns small browser snapshots inline", async () => {
@@ -403,9 +410,9 @@ describe("browser toolkit", () => {
       tab: vi.fn(() => tab),
     } as unknown as BrowserService
 
-    await expect(tool("create_tab", service).execute({ url: "not a url" }, ctx)).resolves.toEqual({
-      error: "invalid url: not a url",
-    })
+    await expect(tool("create_tab", service).execute({ url: "not a url" }, ctx)).rejects.toThrow(
+      "invalid url: not a url",
+    )
     expect(service.createTab).toHaveBeenCalledWith(ctx.context.sessionId)
     expect(service.close).toHaveBeenCalledWith(ctx.context.sessionId, 1)
   })
@@ -426,7 +433,7 @@ describe("browser toolkit", () => {
 
     controller.abort()
 
-    await expect(pending).resolves.toEqual({ error: "browser navigation was cancelled" })
+    await expect(pending).rejects.toThrow("browser navigation was cancelled")
     expect(service.close).toHaveBeenCalledWith("session-1", 1)
   })
 
@@ -459,7 +466,7 @@ describe("browser toolkit", () => {
     expect(sendCdp).toHaveBeenCalledWith("Runtime.evaluate", undefined, undefined, undefined, controller.signal)
   })
 
-  it("returns cdp_call errors with tab state", async () => {
+  it("throws cdp_call errors", async () => {
     const service = {
       ...createService(),
       tab: vi.fn(() => ({
@@ -479,18 +486,9 @@ describe("browser toolkit", () => {
       })),
     } as unknown as BrowserService
 
-    await expect(tool("cdp_call", service).execute({ id: 1, method: "Runtime.evaluate" }, ctx)).resolves.toEqual({
-      error: "CDP failed",
-      tab: {
-        id: 1,
-        url: "https://example.com",
-        title: "Example",
-        loading: false,
-        canGoBack: false,
-        canGoForward: false,
-        error: null,
-      },
-    })
+    await expect(tool("cdp_call", service).execute({ id: 1, method: "Runtime.evaluate" }, ctx)).rejects.toThrow(
+      "CDP failed",
+    )
   })
 
   it("returns cdp_events through tool output handling", async () => {
@@ -749,7 +747,7 @@ describe("browser toolkit", () => {
     )
   })
 
-  it("returns interaction errors without throwing", async () => {
+  it("throws interaction errors", async () => {
     const service = {
       ...createService(),
       tab: vi.fn(() => ({
@@ -759,9 +757,9 @@ describe("browser toolkit", () => {
       })),
     } as unknown as BrowserService
 
-    await expect(tool("click", service).execute({ id: 1, selector: "missing" }, ctx)).resolves.toEqual({
-      error: "element not found",
-    })
+    await expect(tool("click", service).execute({ id: 1, selector: "missing" }, ctx)).rejects.toThrow(
+      "element not found",
+    )
   })
 
   it("returns capture tool results in the original browser tool shapes", async () => {
@@ -870,9 +868,9 @@ describe("browser toolkit", () => {
       tab: vi.fn((_sessionId: string, id: number) => (id === 1 ? source : target)),
     } as unknown as BrowserService
 
-    await expect(tool("click", service).execute({ id: 1, selector: "a", newTab: true }, ctx)).resolves.toEqual({
-      error: "ERR_NAME_NOT_RESOLVED",
-    })
+    await expect(tool("click", service).execute({ id: 1, selector: "a", newTab: true }, ctx)).rejects.toThrow(
+      "ERR_NAME_NOT_RESOLVED",
+    )
     expect(service.close).toHaveBeenCalledWith("session-1", 2)
   })
 
@@ -896,7 +894,7 @@ describe("browser toolkit", () => {
 
     controller.abort()
 
-    await expect(pending).resolves.toEqual({ error: "browser navigation was cancelled" })
+    await expect(pending).rejects.toThrow("browser navigation was cancelled")
     expect(service.close).toHaveBeenCalledWith("session-1", 2)
   })
 
@@ -915,7 +913,7 @@ describe("browser toolkit", () => {
 
     controller.abort()
 
-    await expect(pending).resolves.toEqual({ error: "browser link lookup was cancelled" })
+    await expect(pending).rejects.toThrow("browser link lookup was cancelled")
     expect(service.createTab).not.toHaveBeenCalled()
   })
 
@@ -950,11 +948,10 @@ describe("browser toolkit", () => {
     } as unknown as BrowserService
 
     const pending = tool("record_start", service).execute({ id: 1, path: recordPath, duration: 1 }, ctx)
+    const assertion = expect(pending).rejects.toThrow("recorder failed to write output: disk full")
     await vi.advanceTimersByTimeAsync(1000)
 
-    await expect(pending).resolves.toEqual({
-      error: "recorder failed to write output: disk full",
-    })
+    await assertion
     vi.useRealTimers()
   })
 
@@ -973,11 +970,11 @@ describe("browser toolkit", () => {
       { context: { sessionId: "session-1", cwd: "D:\\Workspace" }, abortSignal: controller.signal },
     )
     await vi.waitFor(() => expect(service.recordStart).toHaveBeenCalledOnce())
+    const assertion = expect(pending).rejects.toThrow("recording was cancelled")
     controller.abort()
-    const result = await pending
 
+    await assertion
     expect(service.recordStopIfCurrent).toHaveBeenCalledWith("session-1", 1)
-    expect(result).toEqual({ error: "recording was cancelled" })
   })
 
   it("does not start recording when the tool is already aborted", async () => {
@@ -995,7 +992,7 @@ describe("browser toolkit", () => {
         { id: 1, path: join(tmpdir(), "larify-record-pre-abort-test.webm"), duration: 600 },
         { context: { sessionId: "session-1", cwd: "D:\\Workspace" }, abortSignal: controller.signal },
       ),
-    ).resolves.toEqual({ error: "recording was cancelled" })
+    ).rejects.toThrow("recording was cancelled")
     expect(service.recordStart).not.toHaveBeenCalled()
     expect(service.recordStopIfCurrent).not.toHaveBeenCalled()
   })
@@ -1005,7 +1002,7 @@ describe("browser toolkit", () => {
     expect(parseToolInput("record_start", { id: 1, path: "x.webm", duration: 5 }).success).toBe(true)
   })
 
-  it("returns capture errors without throwing", async () => {
+  it("throws capture errors", async () => {
     const service = {
       ...createService(),
       tab: vi.fn(() => ({
@@ -1015,9 +1012,7 @@ describe("browser toolkit", () => {
       })),
     } as unknown as BrowserService
 
-    await expect(tool("screenshot", service).execute({ id: 1 }, ctx)).resolves.toEqual({
-      error: "capture failed",
-    })
+    await expect(tool("screenshot", service).execute({ id: 1 }, ctx)).rejects.toThrow("capture failed")
   })
 
   it("returns input tool results in the original browser tool shapes", async () => {
@@ -1070,7 +1065,7 @@ describe("browser toolkit", () => {
     })
   })
 
-  it("returns input errors without throwing", async () => {
+  it("throws input errors", async () => {
     const service = {
       ...createService(),
       tab: vi.fn(() => ({
@@ -1080,9 +1075,9 @@ describe("browser toolkit", () => {
       })),
     } as unknown as BrowserService
 
-    await expect(tool("keyboard_key", service).execute({ id: 1, action: "down", key: "Enter" }, ctx)).resolves.toEqual({
-      error: "key failed",
-    })
+    await expect(
+      tool("keyboard_key", service).execute({ id: 1, action: "down", key: "Enter" }, ctx),
+    ).rejects.toThrow("key failed")
   })
 
   it("spills large browser snapshots to a file", async () => {

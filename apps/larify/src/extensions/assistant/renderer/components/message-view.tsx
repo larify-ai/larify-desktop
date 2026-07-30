@@ -25,8 +25,6 @@ import { ChangesSummaryCard } from "./changes-summary-card"
 import { asDiffMeta, toolCall, toolIcon } from "../lib/diff-meta"
 import { summarizeMessageChanges } from "../lib/change-summary"
 
-const debugToolErrors = import.meta.env.VITE_LARIFY_DEBUG_TOOL_ERRORS === "1"
-
 function UserMessageContent({ children }: { children: ReactNode }): React.JSX.Element {
   const contentRef = useRef<HTMLDivElement>(null)
   const [expanded, setExpanded] = useState(false)
@@ -125,20 +123,16 @@ export function MessageView({
         const { title, args } = toolCall(part.input)
         if (!title) return null
         const toolName = getToolName(part)
-        const showErrorAsOutput = part.state === "output-error" && !debugToolErrors
-        const state = showErrorAsOutput ? "output-available" : part.state
-        const output = showErrorAsOutput ? part.errorText : part.output
-        const errorText = showErrorAsOutput ? undefined : part.errorText
         return (
           <Tool key={i}>
-            <ToolHeader type="dynamic-tool" toolName={toolName} title={title} icon={icon} state={state} />
+            <ToolHeader type="dynamic-tool" toolName={toolName} title={title} icon={icon} state={part.state} />
             <ToolContent>
               {toolMeta ? (
                 <FileDiff meta={toolMeta} />
               ) : (
                 <>
                   <ToolInput input={{ name: toolName, args }} />
-                  <ToolOutput output={output} errorText={errorText} />
+                  <ToolOutput output={part.output} errorText={part.errorText} />
                 </>
               )}
             </ToolContent>

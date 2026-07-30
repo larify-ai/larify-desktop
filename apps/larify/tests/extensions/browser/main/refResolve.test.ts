@@ -9,6 +9,7 @@ describe("parseRef", () => {
   it("accepts ref tokens and rejects selectors", () => {
     expect(parseRef("@e123")).toBe("e123")
     expect(parseRef("ref=e5")).toBe("e5")
+    expect(parseRef("[ref=e181]")).toBe("e181")
     expect(parseRef("e12")).toBe("e12")
     expect(parseRef("  @e7  ")).toBe("e7")
   })

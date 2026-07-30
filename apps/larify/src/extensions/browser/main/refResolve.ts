@@ -7,6 +7,8 @@ export type IframeSessions = Map<string, string>
 
 export function parseRef(input: string): string | undefined {
   const t = input.trim()
+  const bracketed = /^\[ref=(e[0-9]+)\]$/.exec(t)
+  if (bracketed) return bracketed[1]
   if (t.startsWith('@')) {
     const s = t.slice(1)
     return s.startsWith('e') && /^[0-9]*$/.test(s.slice(1)) ? s : undefined

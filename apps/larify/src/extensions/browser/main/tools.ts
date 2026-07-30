@@ -16,8 +16,8 @@ const idSchema = z.number().int().positive().describe("Browser tab id")
 const elementTargetSchema = z
   .string()
   .min(1)
-  .describe('Element selector. Use CSS selector, xpath=..., or snapshot ref like "e2".')
-const cssSelectorSchema = z.string().min(1).describe("CSS selector")
+  .describe('Element target. Prefer a snapshot ref exactly as shown, such as "[ref=e2]"; otherwise use CSS or xpath=...')
+const cssSelectorSchema = z.string().min(1).describe("CSS selector only")
 const timeoutSchema = z.number().min(1).max(600).optional().describe("Timeout in seconds, 1-600")
 
 type BrowserServiceProvider = BrowserService | (() => BrowserService)
@@ -78,7 +78,9 @@ const snapshotSchema = z
     includeUrls: z.boolean().default(false).describe("Include href URLs for links."),
     compact: z.boolean().default(false).describe("Remove empty structural elements."),
     depth: z.number().int().positive().optional().describe("Limit tree depth."),
-    selector: cssSelectorSchema.optional(),
+    selector: cssSelectorSchema
+      .describe("CSS selector only; snapshot refs are not supported.")
+      .optional(),
   })
   .strict()
 
@@ -146,24 +148,13 @@ const getTab = (provider: BrowserServiceProvider, sessionId: string, id: number)
   return tab
 }
 
-const shouldExposeToolErrors = (): boolean => process.env.LARIFY_DEBUG_TOOL_ERRORS === "1"
-
-const errorResult = (error: unknown): { error: string } => {
-  if (shouldExposeToolErrors()) throw error
-  return { error: error instanceof Error ? error.message : String(error) }
-}
-
 async function withTab<T>(
   service: BrowserServiceProvider,
   sessionId: string,
   id: number,
   action: (tab: BrowserTab) => Promise<T> | T,
-): Promise<T | { error: string }> {
-  try {
-    return await action(getTab(service, sessionId, id))
-  } catch (error) {
-    return errorResult(error)
-  }
+): Promise<T> {
+  return action(getTab(service, sessionId, id))
 }
 
 const tempPath = (extension: string): string =>
@@ -193,40 +184,37 @@ async function writeDataUrl(
 export function createBrowserToolkit(service: BrowserServiceProvider): Toolkit {
   return {
     name: "browser",
-    description: "Create browser tabs, navigate pages, inspect content, and interact with web pages",
+    description:
+      "Search and fetch web content in temporary tabs; create, list, close, and navigate persistent tabs; inspect pages and elements; run JavaScript and debug with CDP, console messages, and page errors; interact with pages and forms; upload and download files; control keyboard and mouse input; capture screenshots, save pages as PDFs, and record tab videos.",
     tools: {
       create_tab: defineTool({
         description:
           "Open a new browser tab, optionally navigating to a URL or local file path.",
-        metadata: { icon: "browser" },
+        metadata: { icon: "browser", eager: true },
         inputSchema: z.object({ url: z.string().optional().describe("URL or local file path") }).strict(),
         execute: async (args, ctx) => {
           const { url } = args
+          const resolved = resolveService(service)
+          const id = resolved.createTab(ctx.sessionId)
+          const tab = getTab(service, ctx.sessionId, id)
           try {
-            const resolved = resolveService(service)
-            const id = resolved.createTab(ctx.sessionId)
-            const tab = getTab(service, ctx.sessionId, id)
-            try {
-              if (url) {
-                await runUntilAbort(
-                  () => tab.navigateAndWait(resolveNavigationInput(ctx.cwd, url)),
-                  ctx.signal,
-                  "browser navigation",
-                )
-              }
-            } catch (error) {
-              await resolved.close(ctx.sessionId, id)
-              throw error
+            if (url) {
+              await runUntilAbort(
+                () => tab.navigateAndWait(resolveNavigationInput(ctx.cwd, url)),
+                ctx.signal,
+                "browser navigation",
+              )
             }
-            return tabState(tab)
           } catch (error) {
-            return errorResult(error)
+            await resolved.close(ctx.sessionId, id)
+            throw error
           }
+          return tabState(tab)
         },
       }),
       close_tab: defineTool({
         description: "Close a browser tab by id.",
-        metadata: { icon: "browser" },
+        metadata: { icon: "browser", eager: true },
         inputSchema: z.object({ id: idSchema }).strict(),
         execute: async (args, ctx) => {
           const { id } = args
@@ -238,14 +226,14 @@ export function createBrowserToolkit(service: BrowserServiceProvider): Toolkit {
       }),
       list_tabs: defineTool({
         description: "List all open browser tabs with their navigation state.",
-        metadata: { icon: "browser" },
+        metadata: { icon: "browser", eager: true },
         inputSchema: z.object({}).strict(),
         execute: async (_args, ctx) =>
           resolveService(service).state(ctx.sessionId).tabs.map(stripFavIcon),
       }),
       navigate: defineTool({
         description: "Navigate a browser tab: goto a URL, go back/forward, or reload.",
-        metadata: { icon: "browser" },
+        metadata: { icon: "browser", eager: true },
         inputSchema: navigateSchema,
         execute: async (args, ctx) => {
           const { id, action, url } = args
@@ -263,7 +251,7 @@ export function createBrowserToolkit(service: BrowserServiceProvider): Toolkit {
       }),
       snapshot: defineTool({
         description: "Return an accessibility tree with refs for interaction.",
-        metadata: { icon: "browser" },
+        metadata: { icon: "browser", eager: true },
         inputSchema: snapshotSchema,
         execute: async (args, ctx) => {
           const { id, includeUrls, ...options } = args
@@ -274,7 +262,7 @@ export function createBrowserToolkit(service: BrowserServiceProvider): Toolkit {
       }),
       read_page: defineTool({
         description: "Read the current page as clean markdown.",
-        metadata: { icon: "browser" },
+        metadata: { icon: "browser", eager: true },
         inputSchema: tabIdInputSchema,
         execute: async (args, ctx) => {
           const { id } = args
@@ -303,23 +291,14 @@ export function createBrowserToolkit(service: BrowserServiceProvider): Toolkit {
         inputSchema: cdpCallSchema,
         execute: async (args, ctx) => {
           const { id, method, params, sessionId, timeout } = args
-          try {
-            const tab = getTab(service, ctx.sessionId, id)
-            return spill(
-              JSON.stringify(
-                await tab.sendCdp(method, params, sessionId, secondsToMs(timeout), ctx.signal),
-                null,
-                2,
-              ),
-            )
-          } catch (error) {
-            if (shouldExposeToolErrors()) throw error
-            const tab = resolveService(service).tab(ctx.sessionId, id)
-            return {
-              error: error instanceof Error ? error.message : String(error),
-              ...(tab && { tab: tabState(tab) }),
-            }
-          }
+          const tab = getTab(service, ctx.sessionId, id)
+          return spill(
+            JSON.stringify(
+              await tab.sendCdp(method, params, sessionId, secondsToMs(timeout), ctx.signal),
+              null,
+              2,
+            ),
+          )
         },
       }),
       cdp_events: defineTool({
@@ -488,7 +467,12 @@ const typeSchema = z
   })
   .strict()
 
-const pressSchema = z.object({ id: idSchema, key: z.string().min(1).describe("Key name or chord.") }).strict()
+const pressSchema = z
+  .object({
+    id: idSchema,
+    key: z.string().min(1).describe("KeyboardEvent.key name or modifier chord."),
+  })
+  .strict()
 
 const selectSchema = z
   .object({
@@ -511,7 +495,7 @@ function interactionTools(service: BrowserServiceProvider): Toolkit["tools"] {
   return {
     click: defineTool({
       description: "Click one element.",
-      metadata: { icon: "browser" },
+      metadata: { icon: "browser", eager: true },
       inputSchema: clickSchema,
       execute: async (args, ctx) => {
         const { id, selector, newTab } = args
@@ -608,7 +592,7 @@ function interactionTools(service: BrowserServiceProvider): Toolkit["tools"] {
     }),
     fill: defineTool({
       description: "Clear and fill an input element.",
-      metadata: { icon: "browser" },
+      metadata: { icon: "browser", eager: true },
       inputSchema: fillSchema,
       execute: async (args, ctx) => {
         const { id, selector, text } = args
@@ -632,7 +616,7 @@ function interactionTools(service: BrowserServiceProvider): Toolkit["tools"] {
     }),
     press: defineTool({
       description: "Press a key at the current focus.",
-      metadata: { icon: "browser" },
+      metadata: { icon: "browser", eager: true },
       inputSchema: pressSchema,
       execute: async (args, ctx) => {
         const { id, key } = args
@@ -705,7 +689,9 @@ function waitTools(service: BrowserServiceProvider): Toolkit["tools"] {
 const screenshotSchema = z
   .object({
     id: idSchema,
-    selector: elementTargetSchema.optional().describe("Element to capture; omit for the viewport."),
+    selector: elementTargetSchema
+      .optional()
+      .describe('Element target to capture, preferably a snapshot ref such as "[ref=e2]"; omit for the viewport.'),
     fullPage: z.boolean().default(false).describe("Capture the full scrollable page."),
     format: z.enum(["png", "jpeg"]).default("png"),
     quality: z.number().int().min(0).max(100).optional().describe("JPEG quality."),
@@ -799,13 +785,7 @@ function captureTools(service: BrowserServiceProvider): Toolkit["tools"] {
       description: "Stop the current recording and save the video.",
       metadata: { icon: "browser" },
       inputSchema: z.object({}).strict(),
-      execute: async (_args, ctx) => {
-        try {
-          return await resolveService(service).recordStop(ctx.sessionId)
-        } catch (error) {
-          return errorResult(error)
-        }
-      },
+      execute: async (_args, ctx) => resolveService(service).recordStop(ctx.sessionId),
     }),
     record_restart: defineTool({
       description: "Stop any current recording and start a fresh one for the tab.",

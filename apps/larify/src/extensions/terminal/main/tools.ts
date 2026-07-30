@@ -230,7 +230,8 @@ const terminalResult = (
 export function createTerminalToolkit(service: TerminalService): Toolkit {
   return {
     name: 'terminal',
-    description: 'Create terminals, run commands, operate interactive TUIs, and read terminal snapshots',
+    description:
+      'Create terminals, run commands, operate interactive TUIs, and read terminal snapshots. The terminal includes Electron\'s Node as builtin-node, e.g. builtin-node script.js.',
     tools: {
       list: defineTool({
         description: 'List all terminals',

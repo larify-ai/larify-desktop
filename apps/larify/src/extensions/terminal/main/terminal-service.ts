@@ -150,7 +150,11 @@ export class TerminalService {
       cwd: resolveCwd(opts?.cwd),
       title: opts?.title,
       shellArgs: [...(opts?.shellArgs ?? []), ...(integration.shellArgs ?? [])],
-      shellEnv: { ...opts?.shellEnv, ...integration.shellEnv }
+      shellEnv: {
+        ...opts?.shellEnv,
+        ...integration.shellEnv,
+        LARIFY_ELECTRON_PATH: process.execPath
+      }
     })
   }
 

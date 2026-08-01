@@ -50,6 +50,249 @@ describe('ContextWorker', () => {
     expect(WorkerMock.instances).toHaveLength(1)
   })
 
+  it('searches immediately while stale documents update in the background', async () => {
+    const embeddings = {
+      embedMarkdown: vi.fn(async () => [
+        [3, 0],
+        [1, 0]
+      ]),
+      embedQuery: vi.fn(async () => [0, 1])
+    }
+    const context = new ContextWorker(() => embeddings as never)
+    const searched = context.search('workspace', 'audio', 5)
+    const worker = WorkerMock.instances[0]
+
+    expect(worker.postMessage).toHaveBeenCalledWith({
+      id: 0,
+      type: 'pending-embedding',
+      cwd: 'workspace'
+    })
+
+    await vi.waitFor(() =>
+      expect(worker.postMessage).toHaveBeenCalledWith({
+        id: 1,
+        type: 'search',
+        cwd: 'workspace',
+        query: 'audio',
+        vector: [0, 1],
+        limit: 5
+      })
+    )
+    worker.emit('message', {
+      id: 1,
+      result: [{ name: 'Audio', description: 'Audio input', uri: 'file:///audio.md' }]
+    })
+    await expect(searched).resolves.toHaveLength(1)
+
+    worker.emit('message', {
+      id: 0,
+      result: {
+        node: {
+          name: 'Audio',
+          description: 'Audio input',
+          uri: 'file:///audio.md'
+        },
+        hash: 'hash',
+        content: 'Microphone'
+      }
+    })
+
+    await vi.waitFor(() =>
+      expect(worker.postMessage).toHaveBeenCalledWith({
+        id: 2,
+        type: 'set-embeddings',
+        cwd: 'workspace',
+        uri: 'file:///audio.md',
+        hash: 'hash',
+        vectors: [
+          [3, 0],
+          [1, 0]
+        ]
+      })
+    )
+    worker.emit('message', { id: 2 })
+    expect(embeddings.embedMarkdown).toHaveBeenCalledWith({
+      name: 'Audio',
+      description: 'Audio input',
+      content: 'Microphone'
+    })
+  })
+
+  it('updates embeddings after a context file changes', async () => {
+    const embeddings = { embedMarkdown: vi.fn(), embedQuery: vi.fn() }
+    const context = new ContextWorker(() => embeddings as never)
+    const opened = context.open('workspace')
+    const worker = WorkerMock.instances[0]
+
+    worker.emit('message', { id: 0 })
+    await opened
+    expect(worker.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 1, type: 'pending-embedding' })
+    )
+    worker.emit('message', { id: 1 })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    worker.emit('message', { type: 'changed', cwd: 'workspace' })
+    await vi.waitFor(() =>
+      expect(worker.postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 2, type: 'pending-embedding' })
+      )
+    )
+    worker.emit('message', { id: 2 })
+  })
+
+  it('does not write embeddings after a workspace closes', async () => {
+    let finishEmbedding!: (vectors: number[][]) => void
+    const embeddings = {
+      embedMarkdown: vi.fn(() => new Promise<number[][]>((resolve) => (finishEmbedding = resolve))),
+      embedQuery: vi.fn(async () => [1, 0])
+    }
+    const context = new ContextWorker(() => embeddings as never)
+    const searched = context.search('workspace', 'audio')
+    const worker = WorkerMock.instances[0]
+
+    worker.emit('message', {
+      id: 0,
+      result: {
+        node: {
+          name: 'Audio',
+          description: 'Audio input',
+          uri: 'file:///audio.md'
+        },
+        hash: 'hash',
+        content: 'Microphone'
+      }
+    })
+    await vi.waitFor(() =>
+      expect(worker.postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 1, type: 'search' })
+      )
+    )
+    worker.emit('message', { id: 1, result: [] })
+    await searched
+    await vi.waitFor(() => expect(embeddings.embedMarkdown).toHaveBeenCalledOnce())
+
+    const closed = context.close('workspace')
+    worker.emit('message', { id: 2 })
+    await closed
+    finishEmbedding([[1, 0]])
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(worker.postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'set-embeddings' })
+    )
+  })
+
+  it('does not restart after disposal while an embedding is running', async () => {
+    let finishEmbedding!: (vectors: number[][]) => void
+    const embeddings = {
+      embedMarkdown: vi.fn(() => new Promise<number[][]>((resolve) => (finishEmbedding = resolve))),
+      embedQuery: vi.fn(async () => [1, 0])
+    }
+    const context = new ContextWorker(() => embeddings as never)
+    const searched = context.search('workspace', 'audio')
+    const worker = WorkerMock.instances[0]
+
+    worker.emit('message', {
+      id: 0,
+      result: {
+        node: { name: 'Audio', description: '', uri: 'file:///audio.md' },
+        hash: 'hash',
+        content: 'Microphone'
+      }
+    })
+    await vi.waitFor(() =>
+      expect(worker.postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 1, type: 'search' })
+      )
+    )
+    worker.emit('message', { id: 1, result: [] })
+    await searched
+    await vi.waitFor(() => expect(embeddings.embedMarkdown).toHaveBeenCalledOnce())
+
+    const disposal = context.dispose()
+    worker.emit('message', { id: 2 })
+    await disposal
+    finishEmbedding([[1, 0]])
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(WorkerMock.instances).toHaveLength(1)
+  })
+
+  it('falls back to lexical search when query embedding fails', async () => {
+    const embeddings = {
+      embedMarkdown: vi.fn(),
+      embedQuery: vi.fn(async () => {
+        throw new Error('model unavailable')
+      })
+    }
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const context = new ContextWorker(() => embeddings as never)
+    const searched = context.search('workspace', 'audio')
+    const worker = WorkerMock.instances[0]
+
+    worker.emit('message', {
+      id: 0,
+      result: undefined
+    })
+    await vi.waitFor(() =>
+      expect(worker.postMessage).toHaveBeenCalledWith({
+        id: 1,
+        type: 'search',
+        cwd: 'workspace',
+        query: 'audio',
+        limit: undefined
+      })
+    )
+    worker.emit('message', { id: 1 })
+
+    await expect(searched).resolves.toEqual([])
+    expect(log).toHaveBeenCalledWith('[context:embedding]', expect.any(Error))
+    log.mockRestore()
+  })
+
+  it('shares background synchronization across concurrent searches', async () => {
+    const embeddings = {
+      embedMarkdown: vi.fn(async () => [[1, 0]]),
+      embedQuery: vi.fn(async () => [1, 0])
+    }
+    const context = new ContextWorker(() => embeddings as never)
+    const first = context.search('workspace', 'first')
+    const second = context.search('workspace', 'second')
+    const worker = WorkerMock.instances[0]
+    const document = {
+      node: {
+        name: 'Audio',
+        description: 'Audio input',
+        uri: 'file:///audio.md'
+      },
+      hash: 'hash',
+      content: 'Microphone'
+    }
+
+    await vi.waitFor(() => expect(worker.postMessage).toHaveBeenCalledTimes(3))
+    worker.emit('message', { id: 1, result: [] })
+    worker.emit('message', { id: 2, result: [] })
+    await Promise.all([first, second])
+
+    worker.emit('message', { id: 0, result: document })
+    await vi.waitFor(() =>
+      expect(worker.postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 3, type: 'set-embeddings' })
+      )
+    )
+    worker.emit('message', { id: 3 })
+    await vi.waitFor(() =>
+      expect(worker.postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 4, type: 'pending-embedding' })
+      )
+    )
+    worker.emit('message', { id: 4 })
+
+    expect(embeddings.embedMarkdown).toHaveBeenCalledOnce()
+    expect(worker.postMessage).toHaveBeenCalledTimes(5)
+  })
+
   it('checks duplicate names through the worker', async () => {
     const context = new ContextWorker()
     const duplicate = context.duplicateName('workspace', 'subject.md', 'Subject')
@@ -83,6 +326,16 @@ describe('ContextWorker', () => {
     const duplicate = context.duplicateName('workspace', 'subject.md', 'Subject')
     worker.emit('message', { id: 1 })
     await expect(duplicate).resolves.toBe(false)
+  })
+
+  it('returns empty results without starting workers for empty queries', async () => {
+    const embeddings = { embedMarkdown: vi.fn(), embedQuery: vi.fn() }
+    const context = new ContextWorker(() => embeddings as never)
+
+    await expect(context.search('workspace', '   ')).resolves.toEqual([])
+    await expect(context.search('workspace', 'audio', 0)).resolves.toEqual([])
+    expect(WorkerMock.instances).toHaveLength(0)
+    expect(embeddings.embedQuery).not.toHaveBeenCalled()
   })
 
   it('matches concurrent requests to out-of-order responses', async () => {
@@ -239,6 +492,12 @@ describe('ContextWorker', () => {
 
     await firstRejection
     await secondRejection
+
+    const reopened = context.open('third')
+    const replacement = WorkerMock.instances[1]
+    worker.emit('error', new Error('late worker error'))
+    replacement.emit('message', { id: 2 })
+    await expect(reopened).resolves.toBeUndefined()
   })
 
   it('rejects pending requests when the worker exits', async () => {

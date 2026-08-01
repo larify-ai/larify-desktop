@@ -65,6 +65,7 @@ describe('context graph', () => {
     expect(graph.node(node('A').uri)).toEqual(node('A'))
     expect(graph.search('original').map(({ name }) => name)).toEqual(['A'])
     expect(graph.search('replacement')).toEqual([])
+    expect(graph.pendingEmbedding()?.hash).toBe('same')
     graph.close()
   })
 
@@ -262,6 +263,105 @@ describe('context graph', () => {
     graph.deleteMissing([node('A').uri, node('B').uri])
 
     expect(graph.nodes()).toEqual([node('A'), node('B')])
+    graph.close()
+  })
+
+  it('tracks stale embeddings and performs semantic search', () => {
+    const graph = new GraphIndex(':memory:')
+    graph.upsert(node('Audio'), 'microphone', '1')
+    graph.upsert(node('Bluetooth'), 'wireless', '2')
+
+    expect(graph.pendingEmbedding()?.name).toBe('Audio')
+    graph.setEmbeddings(node('Audio').uri, '1', [[1, 0]])
+    expect(graph.pendingEmbedding()?.name).toBe('Bluetooth')
+    graph.setEmbeddings(node('Bluetooth').uri, '2', [[0, 1]])
+
+    expect(graph.pendingEmbedding()).toBeUndefined()
+    expect(graph.hybridSearch('not-in-text', [0, 1]).map(({ name }) => name)).toEqual([
+      'Bluetooth',
+      'Audio'
+    ])
+
+    graph.upsert(node('Bluetooth'), 'updated', '3')
+    expect(graph.pendingEmbedding()?.name).toBe('Bluetooth')
+    graph.close()
+  })
+
+  it('ignores embeddings with incompatible dimensions', () => {
+    const graph = new GraphIndex(':memory:')
+    graph.upsert(node('Audio'), 'audio', '1')
+    graph.setEmbeddings(node('Audio').uri, '1', [[1, 0]])
+
+    expect(graph.hybridSearch('missing', [1])).toEqual([])
+    graph.close()
+  })
+
+  it('retains only the highest-scoring semantic results', () => {
+    const graph = new GraphIndex(':memory:')
+    for (let score = 1; score <= 10; score++) {
+      graph.upsert(node(`Node ${score}`), '', String(score))
+      graph.setEmbeddings(node(`Node ${score}`).uri, String(score), [[score, 0]])
+    }
+
+    expect(graph.hybridSearch('missing', [1, 0], 3).map(({ name }) => name)).toEqual([
+      'Node 10',
+      'Node 9',
+      'Node 8'
+    ])
+    graph.close()
+  })
+
+  it('ranks documents by their best chunk without returning duplicates', () => {
+    const graph = new GraphIndex(':memory:')
+    graph.upsert(node('Multi chunk'), '', 'multi')
+    graph.upsert(node('Single chunk'), '', 'single')
+    graph.setEmbeddings(node('Multi chunk').uri, 'multi', [
+      [1, 0],
+      [0, 1]
+    ])
+    graph.setEmbeddings(node('Single chunk').uri, 'single', [[0.8, 0]])
+
+    expect(graph.hybridSearch('missing', [1, 0], 2).map(({ name }) => name)).toEqual([
+      'Multi chunk',
+      'Single chunk'
+    ])
+    graph.close()
+  })
+
+  it('fuses BM25 and semantic rankings when expanding related nodes', () => {
+    const graph = new GraphIndex(':memory:')
+    graph.upsert(node('Root'), 'query query query', 'root')
+    graph.upsert(node('Lexical'), 'query query', 'lexical')
+    graph.upsert(node('Hybrid'), 'query', 'hybrid')
+    graph.upsert(node('Semantic'), '', 'semantic')
+    graph.replaceEdges(node('Root').uri, [
+      node('Lexical').uri,
+      node('Hybrid').uri,
+      node('Semantic').uri
+    ])
+    graph.setEmbeddings(node('Root').uri, 'root', [[2, 0]])
+    graph.setEmbeddings(node('Lexical').uri, 'lexical', [[0, 1]])
+    graph.setEmbeddings(node('Hybrid').uri, 'hybrid', [[1, 0]])
+    graph.setEmbeddings(node('Semantic').uri, 'semantic', [[0.5, 0.5]])
+
+    expect(graph.hybridSearch('query', [1, 0], 4).map(({ name }) => name)).toEqual([
+      'Root',
+      'Hybrid',
+      'Lexical',
+      'Semantic'
+    ])
+    graph.close()
+  })
+
+  it('rejects embeddings generated for an outdated file hash', () => {
+    const graph = new GraphIndex(':memory:')
+    graph.upsert(node('Audio'), 'first', '1')
+    graph.upsert(node('Audio'), 'second', '2')
+    graph.setEmbeddings(node('Audio').uri, '1', [[1, 0]])
+    expect(graph.pendingEmbedding()?.name).toBe('Audio')
+
+    graph.setEmbeddings(node('Audio').uri, '2', [[1, 0]])
+    expect(graph.pendingEmbedding()).toBeUndefined()
     graph.close()
   })
 })

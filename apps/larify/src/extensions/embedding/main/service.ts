@@ -1,5 +1,4 @@
-import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { ensureLarifyPath } from '../../../main/utils/app-paths'
 
 export const EMBEDDING_MODEL = 'onnx-community/Qwen3-Embedding-0.6B-ONNX'
 export const EMBEDDING_DIMENSIONS = 1024
@@ -123,9 +122,9 @@ async function loadQwenExtractor(cacheDir: string): Promise<EmbeddingExtractor> 
 }
 
 function defaultCacheDir(): string {
-  return join(homedir(), '.larify', 'models')
+  return ensureLarifyPath('models')
 }
 
 function isVector(value: unknown): value is number[] {
-  return Array.isArray(value) && value.every((entry) => typeof entry === 'number')
+  return Array.isArray(value) && value.every(Number.isFinite)
 }

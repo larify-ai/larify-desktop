@@ -8,6 +8,9 @@ const mocks = vi.hoisted(() => ({
   postMessage: vi.fn(),
   graphs: [] as Array<{
     search: ReturnType<typeof vi.fn>
+    pendingEmbedding: ReturnType<typeof vi.fn>
+    setEmbeddings: ReturnType<typeof vi.fn>
+    hybridSearch: ReturnType<typeof vi.fn>
     hasName: ReturnType<typeof vi.fn>
     close: ReturnType<typeof vi.fn>
   }>,
@@ -17,6 +20,7 @@ const mocks = vi.hoisted(() => ({
     }
   >,
   build: vi.fn(),
+  read: vi.fn(),
   update: vi.fn(),
   watch: vi.fn()
 }))
@@ -39,6 +43,10 @@ vi.mock('../../../../src/extensions/context/main/indexer', () => ({
   updateContext: mocks.update
 }))
 
+vi.mock('../../../../src/extensions/context/main/document', () => ({
+  readContextDocument: mocks.read
+}))
+
 import '../../../../src/extensions/context/main/worker'
 
 interface Request {
@@ -50,6 +58,9 @@ interface Request {
 function graph(): (typeof mocks.graphs)[number] {
   const value = {
     search: vi.fn(() => []),
+    pendingEmbedding: vi.fn(),
+    setEmbeddings: vi.fn(),
+    hybridSearch: vi.fn(() => []),
     hasName: vi.fn(() => false),
     close: vi.fn()
   }
@@ -75,6 +86,11 @@ beforeEach(async () => {
   mocks.graphs.length = 0
   mocks.watchers.length = 0
   mocks.build.mockImplementation(graph)
+  mocks.read.mockImplementation((file: string) => ({
+    node: { name: 'Audio', description: 'Audio', uri: pathToFileURL(file).href },
+    content: 'Microphone',
+    hash: 'hash'
+  }))
   mocks.watch.mockImplementation(watcher)
 })
 
@@ -108,6 +124,49 @@ describe('context worker', () => {
     })
     expect(mocks.build).toHaveBeenCalledTimes(2)
     expect(mocks.graphs[1].search).toHaveBeenCalledWith('audio', undefined)
+  })
+
+  it('reads and writes embeddings and performs hybrid search', async () => {
+    await send({ id: 1, type: 'open', cwd: 'workspace' })
+    const uri = pathToFileURL(resolve('audio.md')).href
+    const documents = [
+      {
+        node: { name: 'Audio', description: 'Audio', uri },
+        hash: 'hash',
+        content: 'Microphone'
+      }
+    ]
+    const result = [documents[0].node]
+    mocks.graphs[0].pendingEmbedding.mockReturnValue({ ...documents[0].node, hash: 'hash' })
+    mocks.graphs[0].hybridSearch.mockReturnValue(result)
+
+    expect(await send({ id: 2, type: 'pending-embedding', cwd: 'workspace' })).toEqual({
+      id: 2,
+      result: documents[0]
+    })
+    expect(
+      await send({
+        id: 3,
+        type: 'set-embeddings',
+        cwd: 'workspace',
+        uri,
+        hash: 'hash',
+        vectors: [[1, 0]]
+      })
+    ).toEqual({ id: 3, result: undefined })
+    expect(mocks.graphs[0].setEmbeddings).toHaveBeenCalledWith(uri, 'hash', [[1, 0]])
+
+    expect(
+      await send({
+        id: 4,
+        type: 'search',
+        cwd: 'workspace',
+        query: 'audio',
+        vector: [1, 0],
+        limit: 5
+      })
+    ).toEqual({ id: 4, result })
+    expect(mocks.graphs[0].hybridSearch).toHaveBeenCalledWith('audio', [1, 0], 5)
   })
 
   it('updates valid context files before checking duplicate names', async () => {
@@ -167,6 +226,10 @@ describe('context worker', () => {
 
     expect(mocks.update).toHaveBeenCalledOnce()
     expect(mocks.update).toHaveBeenCalledWith(root, [markdown], mocks.graphs[0])
+    expect(mocks.postMessage).toHaveBeenCalledWith({
+      type: 'changed',
+      cwd: resolve('workspace')
+    })
   })
 
   it('isolates update and watcher errors', async () => {

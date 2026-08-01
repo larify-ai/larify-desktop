@@ -55,12 +55,17 @@ export class EmbeddingWorker {
       if ('error' in response) pending.reject(new Error(response.error))
       else pending.resolve(response.result)
     })
-    worker.on('error', (error) => this.fail(error))
+    worker.on('error', (error) => {
+      if (this.worker !== worker) return
+      this.worker = undefined
+      this.fail(error)
+    })
     worker.on('exit', (code) => {
+      if (this.worker !== worker) return
+      this.worker = undefined
       if (this.pending.size) {
         this.fail(new Error(`Embedding worker exited with code ${code}.`))
       }
-      if (this.worker === worker) this.worker = undefined
     })
     this.worker = worker
     return worker

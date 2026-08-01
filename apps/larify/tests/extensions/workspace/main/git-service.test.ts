@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, rm, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -155,12 +155,13 @@ describe('GitService', () => {
   )
 
   it(
-    'reports an error outside a Git repository',
+    'initializes Git outside a repository',
     async () => {
       const root = await mkdtemp(path.join(os.tmpdir(), 'larify-no-git-'))
       temporaryDirectories.push(root)
 
-      await expect(new GitService().status(root)).rejects.toThrow()
+      await expect(new GitService().status(root)).resolves.toEqual([])
+      await expect(stat(path.join(root, '.git'))).resolves.toMatchObject({})
     },
     gitTestTimeout
   )

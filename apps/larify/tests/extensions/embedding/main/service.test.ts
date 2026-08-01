@@ -72,6 +72,54 @@ describe('EmbeddingService', () => {
     ])
   })
 
+  it('returns an empty batch without loading the model', async () => {
+    const loadExtractor = vi.fn<() => Promise<EmbeddingExtractor>>()
+    const service = new EmbeddingService({ loadExtractor })
+
+    await expect(service.embedDocuments([])).resolves.toEqual([])
+    expect(loadExtractor).not.toHaveBeenCalled()
+  })
+
+  it('counts tokens with the model tokenizer', async () => {
+    const encode = vi.fn(() => [1, 2, 3])
+    const extractor = Object.assign(async () => ({ tolist: () => [vector(1)] }), {
+      tokenizer: { encode }
+    }) as EmbeddingExtractor
+    const service = new EmbeddingService({ loadExtractor: async () => extractor })
+
+    const countTokens = await service.tokenCounter()
+
+    expect(countTokens('内容')).toBe(3)
+    expect(encode).toHaveBeenCalledWith('内容')
+  })
+
+  it('reports a missing model tokenizer', async () => {
+    const service = new EmbeddingService({
+      loadExtractor: async () => async () => ({ tolist: () => [vector(1)] })
+    })
+
+    await expect(service.tokenCounter()).rejects.toThrow('tokenizer is unavailable')
+  })
+
+  it('rejects malformed and non-finite vectors', async () => {
+    for (const output of [[], [vector(Number.NaN)], [vector(Number.POSITIVE_INFINITY)]]) {
+      const service = new EmbeddingService({
+        loadExtractor: async () => async () => ({ tolist: () => output })
+      })
+      await expect(service.embedQuery('query')).rejects.toThrow('invalid vectors')
+    }
+  })
+
+  it('rejects vectors with unexpected dimensions', async () => {
+    const service = new EmbeddingService({
+      loadExtractor: async () => async () => ({ tolist: () => [[1, 2, 3]] })
+    })
+
+    await expect(service.embedQuery('query')).rejects.toThrow(
+      `must return ${EMBEDDING_DIMENSIONS} dimensions`
+    )
+  })
+
   it('continues the queue after a failed request', async () => {
     let calls = 0
     const service = new EmbeddingService({

@@ -1,11 +1,12 @@
 import { join, resolve } from 'node:path'
 import { parentPort } from 'node:worker_threads'
-import { pathToFileURL } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { watch, type FSWatcher } from 'chokidar'
+import { readContextDocument, type ContextDocument } from './document'
 import { isMarkdown, isWithin } from './files'
 import { type GraphIndex, type Node } from './graph'
 import { buildContextGraph, updateContext } from './indexer'
-import type { WorkerRequest, WorkerResponse } from './worker-protocol'
+import type { WorkerNotification, WorkerRequest, WorkerResponse } from './worker-protocol'
 
 interface Context {
   graph: GraphIndex
@@ -28,7 +29,9 @@ port.on('message', async (request: WorkerRequest) => {
   }
 })
 
-async function handle(request: WorkerRequest): Promise<Node[] | boolean | undefined> {
+async function handle(
+  request: WorkerRequest
+): Promise<Node[] | ContextDocument | boolean | undefined> {
   switch (request.type) {
     case 'open':
       open(request.cwd)
@@ -37,7 +40,22 @@ async function handle(request: WorkerRequest): Promise<Node[] | boolean | undefi
       const workspace = resolve(request.cwd)
       open(workspace)
       const context = contexts.get(workspace)!
-      return context.graph.search(request.query, request.limit)
+      return request.vector !== undefined
+        ? context.graph.hybridSearch(request.query, request.vector, request.limit)
+        : context.graph.search(request.query, request.limit)
+    }
+    case 'pending-embedding': {
+      const context = openContext(request.cwd)
+      const pending = context.graph.pendingEmbedding()
+      if (!pending) return
+      const document = readContextDocument(fileURLToPath(pending.uri))
+      if (document?.hash !== pending.hash) return
+      return document
+    }
+    case 'set-embeddings': {
+      const context = openContext(request.cwd)
+      context.graph.setEmbeddings(request.uri, request.hash, request.vectors)
+      return
     }
     case 'duplicateName': {
       const workspace = resolve(request.cwd)
@@ -62,6 +80,12 @@ async function handle(request: WorkerRequest): Promise<Node[] | boolean | undefi
   }
 }
 
+function openContext(cwd: string): Context {
+  const workspace = resolve(cwd)
+  open(workspace)
+  return contexts.get(workspace)!
+}
+
 function open(cwd: string): void {
   const workspace = resolve(cwd)
   if (contexts.has(workspace)) return
@@ -73,6 +97,7 @@ function open(cwd: string): void {
       if (!isMarkdown(file)) return
       try {
         updateContext(root, [file], graph)
+        port.postMessage({ type: 'changed', cwd: workspace } satisfies WorkerNotification)
       } catch (error) {
         console.error('[context:update]', error)
       }

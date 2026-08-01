@@ -3,7 +3,7 @@ import { toString } from 'mdast-util-to-string'
 
 interface MarkdownSection {
   headingPath: string[]
-  content: string
+  blocks: string[]
 }
 
 export function readMarkdownSections(markdown: string): MarkdownSection[] {
@@ -23,17 +23,17 @@ export function readMarkdownSections(markdown: string): MarkdownSection[] {
     const end = node.position?.end.offset
     if (start === undefined || end === undefined) continue
 
-    const content = markdown.slice(start, end).trim()
-    if (!content) continue
+    const block = markdown.slice(start, end)
+    if (!block.trim()) continue
 
     if (currentSection) {
-      currentSection.content += `\n\n${content}`
+      currentSection.blocks.push(block)
       continue
     }
 
     currentSection = {
       headingPath: headings.filter(Boolean),
-      content
+      blocks: [block]
     }
     sections.push(currentSection)
   }

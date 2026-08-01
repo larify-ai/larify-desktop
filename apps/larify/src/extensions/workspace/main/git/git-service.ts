@@ -72,6 +72,7 @@ export class GitService {
     const cached = this.repositoryRoots.get(key)
     if (cached) return cached
 
+    if (!(await git.checkIsRepo())) await git.init()
     const repositoryRoot = path.resolve(await git.revparse(['--show-toplevel']))
     this.repositoryRoots.set(key, repositoryRoot)
     return repositoryRoot

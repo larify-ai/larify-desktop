@@ -8,7 +8,8 @@ export function getEmbeddingWorker(): EmbeddingWorker {
 }
 
 const extension: Extension = {
-  activate(_app, context) {
+  activate(app, context) {
+    context.subscriptions.push(app.register('service', 'embedding', getEmbeddingWorker()))
     context.subscriptions.push({
       dispose() {
         const current = worker

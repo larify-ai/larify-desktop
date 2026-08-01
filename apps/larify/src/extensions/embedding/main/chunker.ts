@@ -16,12 +16,22 @@ export function chunkMarkdown(
 ): string[] {
   const name = document.name.trim()
   const description = document.description.trim()
-  if (!name || !description) throw new Error('Markdown document requires a name and description.')
 
   return [
-    `# ${name}\n\n${description}`,
+    ...splitMetadata(name, description, countTokens),
     ...splitByHeading(readMarkdownSections(document.content), countTokens)
   ]
+}
+
+function splitMetadata(name: string, description: string, countTokens: TokenCounter): string[] {
+  const prefix = name ? `# ${name}` : ''
+  const metadata = withPrefix(prefix, description)
+  if (!metadata) return []
+  if (fits(metadata, countTokens)) return [metadata]
+  if (prefix && description && fits(prefix, countTokens)) {
+    return hardSplit(prefix, description, countTokens)
+  }
+  return hardSplit('', metadata, countTokens)
 }
 
 type Section = ReturnType<typeof readMarkdownSections>[number]
@@ -29,12 +39,12 @@ type Section = ReturnType<typeof readMarkdownSections>[number]
 function splitByHeading(sections: Section[], countTokens: TokenCounter, depth = 0): string[] {
   return groupByHeading(sections, depth).flatMap((group) => {
     const text = render(group)
-    if (countTokens(text) <= MAX_CHUNK_TOKENS) return [text]
+    if (fits(text, countTokens)) return [text]
 
     const hasDeeperHeading = group.some((section) => section.headingPath.length > depth + 1)
     return hasDeeperHeading
       ? splitByHeading(group, countTokens, depth + 1)
-      : splitLongSections(group, countTokens)
+      : group.flatMap((section) => splitSection(section, countTokens))
   })
 }
 
@@ -42,7 +52,7 @@ function groupByHeading(sections: Section[], depth: number): Section[][] {
   const groups: Section[][] = []
   for (const section of sections) {
     const previous = groups.at(-1)
-    if (previous?.at(-1)?.headingPath[depth] === section.headingPath[depth]) {
+    if (previous && previous.at(-1)?.headingPath[depth] === section.headingPath[depth]) {
       previous.push(section)
     } else {
       groups.push([section])
@@ -64,15 +74,11 @@ function render(sections: Section[]): string {
     ) {
       shared++
     }
-    blocks.push(...section.headingPath.slice(shared), section.content)
+    blocks.push(...section.headingPath.slice(shared), ...section.blocks)
     previousPath = section.headingPath
   }
 
   return blocks.join('\n\n')
-}
-
-function splitLongSections(sections: Section[], countTokens: TokenCounter): string[] {
-  return sections.flatMap((section) => splitSection(section, countTokens))
 }
 
 function splitSection(section: Section, countTokens: TokenCounter): string[] {
@@ -80,19 +86,19 @@ function splitSection(section: Section, countTokens: TokenCounter): string[] {
   const chunks: string[] = []
   let content = ''
 
-  for (const paragraph of section.content.split(/\n{2,}/)) {
-    const combined = content ? `${content}\n\n${paragraph}` : paragraph
-    if (countTokens(withPrefix(prefix, combined)) <= MAX_CHUNK_TOKENS) {
+  for (const block of section.blocks) {
+    const combined = withPrefix(content, block)
+    if (fits(withPrefix(prefix, combined), countTokens)) {
       content = combined
       continue
     }
 
     if (content) chunks.push(withPrefix(prefix, content))
-    if (countTokens(withPrefix(prefix, paragraph)) > MAX_CHUNK_TOKENS) {
-      chunks.push(...hardSplit(prefix, paragraph, countTokens))
+    if (!fits(withPrefix(prefix, block), countTokens)) {
+      chunks.push(...hardSplit(prefix, block, countTokens))
       content = ''
     } else {
-      content = paragraph
+      content = block
     }
   }
 
@@ -101,6 +107,9 @@ function splitSection(section: Section, countTokens: TokenCounter): string[] {
 }
 
 function hardSplit(prefix: string, text: string, countTokens: TokenCounter): string[] {
+  if (prefix && !fits(withPrefix(prefix, Array.from(text)[0] ?? ''), countTokens)) {
+    return hardSplit('', withPrefix(prefix, text), countTokens)
+  }
   const characters = Array.from(text)
   const chunks: string[] = []
 
@@ -110,14 +119,11 @@ function hardSplit(prefix: string, text: string, countTokens: TokenCounter): str
     while (low < high) {
       const middle = Math.ceil((low + high) / 2)
       const candidate = withPrefix(prefix, characters.slice(start, middle).join(''))
-      if (countTokens(candidate) <= MAX_CHUNK_TOKENS) low = middle
+      if (fits(candidate, countTokens)) low = middle
       else high = middle - 1
     }
 
     const chunk = withPrefix(prefix, characters.slice(start, low).join(''))
-    if (countTokens(chunk) > MAX_CHUNK_TOKENS) {
-      throw new Error('Markdown heading exceeds the embedding token limit.')
-    }
     chunks.push(chunk)
     start = low
   }
@@ -125,6 +131,11 @@ function hardSplit(prefix: string, text: string, countTokens: TokenCounter): str
   return chunks
 }
 
+function fits(text: string, countTokens: TokenCounter): boolean {
+  return countTokens(text) <= MAX_CHUNK_TOKENS
+}
+
 function withPrefix(prefix: string, content: string): string {
-  return prefix ? `${prefix}\n\n${content}` : content
+  if (!prefix) return content
+  return content ? `${prefix}\n\n${content}` : prefix
 }

@@ -27,7 +27,10 @@ export class GraphIndex {
     return this.transaction(() => {
       if (this.hasName(node.name, node.uri)) return false
       const id = this.saveNode(node, hash)
-      if (id !== undefined) this.indexNode(id, node, content)
+      if (id !== undefined) {
+        this.indexNode(id, node, content)
+        this.database.prepare('DELETE FROM embeddings WHERE uri = ?').run(node.uri)
+      }
       return true
     })
   }
@@ -97,6 +100,42 @@ export class GraphIndex {
     return this.expand(this.matchingNodes(match, limit), match, limit)
   }
 
+  pendingEmbedding(): (Node & { hash: string }) | undefined {
+    return this.database
+      .prepare(
+        `
+        SELECT nodes.name, nodes.description, nodes.uri, nodes.hash
+        FROM nodes
+        WHERE NOT EXISTS (SELECT 1 FROM embeddings WHERE embeddings.uri = nodes.uri)
+        ORDER BY nodes.name
+        LIMIT 1
+      `
+      )
+      .get() as (Node & { hash: string }) | undefined
+  }
+
+  setEmbeddings(uri: string, hash: string, vectors: number[][]): void {
+    if (!this.database.prepare('SELECT 1 FROM nodes WHERE uri = ? AND hash = ?').get(uri, hash)) {
+      return
+    }
+    this.transaction(() => {
+      this.database.prepare('DELETE FROM embeddings WHERE uri = ?').run(uri)
+      const insert = this.database.prepare('INSERT INTO embeddings(uri, vector) VALUES (?, ?)')
+      for (const vector of vectors) {
+        insert.run(uri, Buffer.from(new Float32Array(vector).buffer))
+      }
+    })
+  }
+
+  hybridSearch(query: string, vector: number[], limit = 20): Node[] {
+    if (!query.trim() || limit <= 0) return []
+    const match = searchQuery(query)
+    const lexical = match ? this.matchingNodes(match, limit) : []
+    const semantic = this.semanticNodes(vector, limit)
+    const ranked = reciprocalRankFusion(lexical, semantic).slice(0, limit)
+    return match ? this.expand(ranked, match, limit, vector) : ranked
+  }
+
   close(): void {
     this.database.close()
   }
@@ -116,13 +155,13 @@ export class GraphIndex {
       .all(match, limit) as unknown as Node[]
   }
 
-  private expand(matches: Node[], match: string, limit: number): Node[] {
+  private expand(matches: Node[], match: string, limit: number, vector?: number[]): Node[] {
     const results: Node[] = []
     const seen = new Set<string>()
     for (const node of matches) {
       this.append(results, seen, node)
       if (results.length === limit) return results
-      for (const related of this.related(node.uri, match, limit - results.length, seen)) {
+      for (const related of this.related(node.uri, match, limit - results.length, seen, vector)) {
         this.append(results, seen, related)
       }
       if (results.length === limit) return results
@@ -150,6 +189,13 @@ export class GraphIndex {
 
       CREATE INDEX IF NOT EXISTS edges_target ON edges(target);
 
+      CREATE TABLE IF NOT EXISTS embeddings (
+        uri TEXT NOT NULL REFERENCES nodes(uri) ON DELETE CASCADE,
+        vector BLOB NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS embeddings_uri ON embeddings(uri);
+
       CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
         name,
         description,
@@ -159,10 +205,23 @@ export class GraphIndex {
     `)
   }
 
-  private related(source: string, match: string, limit: number, excluded: Set<string>): Node[] {
+  private related(
+    source: string,
+    match: string,
+    limit: number,
+    excluded: Set<string>,
+    vector?: number[]
+  ): Node[] {
     const matched = this.matchingRelated(source, match, limit, excluded)
-    if (matched.length === limit) return matched
-    return [...matched, ...this.unmatchedRelated(source, match, limit - matched.length, excluded)]
+    const ranked = vector
+      ? reciprocalRankFusion(matched, this.semanticRelated(source, vector, limit, excluded)).slice(
+          0,
+          limit
+        )
+      : matched
+    if (ranked.length === limit) return ranked
+    const seen = new Set([...excluded, ...ranked.map(({ uri }) => uri)])
+    return [...ranked, ...this.unmatchedRelated(source, match, limit - ranked.length, seen)]
   }
 
   private matchingRelated(
@@ -219,6 +278,33 @@ export class GraphIndex {
       .all(source, source, match, ...parameters, limit) as unknown as Node[]
   }
 
+  private semanticRelated(
+    source: string,
+    query: number[],
+    limit: number,
+    excluded: Set<string>
+  ): Node[] {
+    const { clause, parameters } = this.exclusion(excluded)
+    const rows = this.database
+      .prepare(
+        `
+        WITH related(uri) AS (
+          SELECT target FROM edges WHERE source = ?
+          UNION
+          SELECT source FROM edges WHERE target = ?
+        )
+        SELECT nodes.name, nodes.description, nodes.uri, embeddings.vector
+        FROM related
+        JOIN nodes ON nodes.uri = related.uri
+        JOIN embeddings ON embeddings.uri = nodes.uri
+        WHERE 1 ${clause}
+        ORDER BY nodes.uri
+      `
+      )
+      .iterate(source, source, ...parameters) as Iterable<Node & { vector: Uint8Array }>
+    return this.rankBySimilarity(rows, query, limit)
+  }
+
   private exclusion(excluded: Set<string>): { clause: string; parameters: string[] } {
     const parameters = [...excluded]
     const placeholders = parameters.map(() => '?').join(', ')
@@ -232,6 +318,41 @@ export class GraphIndex {
     if (seen.has(node.uri)) return
     seen.add(node.uri)
     results.push(node)
+  }
+
+  private semanticNodes(query: number[], limit: number): Node[] {
+    const rows = this.database
+      .prepare(
+        `
+        SELECT nodes.name, nodes.description, nodes.uri, embeddings.vector
+          FROM embeddings
+          JOIN nodes ON nodes.uri = embeddings.uri
+          ORDER BY nodes.uri
+      `
+      )
+      .iterate() as Iterable<Node & { vector: Uint8Array }>
+    return this.rankBySimilarity(rows, query, limit)
+  }
+
+  private rankBySimilarity(
+    rows: Iterable<Node & { vector: Uint8Array }>,
+    query: number[],
+    limit: number
+  ): Node[] {
+    const ranked: { node: Node; score: number }[] = []
+    let current: { node: Node; score: number } | undefined
+    for (const { vector, ...node } of rows) {
+      const score = similarity(query, vector)
+      if (!Number.isFinite(score)) continue
+      if (current?.node.uri !== node.uri) {
+        if (current) retain(ranked, current, limit)
+        current = { node, score }
+      } else {
+        current.score = Math.max(current.score, score)
+      }
+    }
+    if (current) retain(ranked, current, limit)
+    return ranked.map(({ node }) => node)
   }
 
   private saveNode(node: Node, hash: string): number | undefined {
@@ -276,4 +397,34 @@ export class GraphIndex {
       throw error
     }
   }
+}
+
+function reciprocalRankFusion(...rankings: Node[][]): Node[] {
+  const nodes = new Map<string, { node: Node; score: number }>()
+  for (const ranking of rankings) {
+    ranking.forEach((node, rank) => {
+      const result = nodes.get(node.uri) ?? { node, score: 0 }
+      result.score += 1 / (60 + rank + 1)
+      nodes.set(node.uri, result)
+    })
+  }
+  return [...nodes.values()].sort((a, b) => b.score - a.score).map(({ node }) => node)
+}
+
+function retain<T extends { score: number }>(ranked: T[], result: T, limit: number): void {
+  const index = ranked.findIndex(({ score }) => score < result.score)
+  if (index < 0) {
+    if (ranked.length < limit) ranked.push(result)
+    return
+  }
+  ranked.splice(index, 0, result)
+  if (ranked.length > limit) ranked.pop()
+}
+
+function similarity(query: number[], bytes: Uint8Array): number {
+  const vector = new Float32Array(
+    bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
+  )
+  if (query.length !== vector.length) return Number.NEGATIVE_INFINITY
+  return query.reduce((score, value, index) => score + value * vector[index], 0)
 }

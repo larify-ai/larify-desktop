@@ -3,11 +3,12 @@ import type { Disposable, Extension } from 'kernel'
 import { createContextDiagnosticsProvider } from './diagnostics'
 import { cleanContextRegistry, registerContext } from './workspace'
 import { ContextWorker } from './worker-client'
+import type { EmbeddingWorker } from '../../embedding/main/worker-client'
 import { registerFileDiagnosticsProvider } from '../../file/main/diagnostics'
 
 const extension: Extension = {
   activate(app, context) {
-    const worker = new ContextWorker()
+    const worker = new ContextWorker(() => app.get<EmbeddingWorker>('service', 'embedding'))
     const workspaces = new Map<string, Disposable>()
     cleanContextRegistry()
     app.register('service', 'context', worker)

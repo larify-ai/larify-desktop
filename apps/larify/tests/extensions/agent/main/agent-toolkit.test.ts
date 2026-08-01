@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, vi } from "vitest"
 import { tool } from "ai"
 import { z } from "zod"
 import { createToolRegistry } from "../../../../src/extensions/agent/main/registry"
@@ -99,5 +99,43 @@ describe("get_tool_schemas", () => {
   it("is eager", () => {
     const { toolkit } = agentTools()
     expect(toolkit.tools.get_tool_schemas.metadata?.eager).toBe(true)
+  })
+})
+
+describe("search_context", () => {
+  it("searches context in the current working directory", async () => {
+    const registry = createToolRegistry([fileToolkit])
+    const search = vi.fn(async () => [{ name: "Audio" }])
+    const toolkit = createAgentToolkit(registry, undefined, { search })
+
+    const result = await (toolkit.tools.search_context.execute as any)(
+      { query: "audio", limit: 20 },
+      {
+        context: { sessionId: "session", cwd: "D:\\workspace" },
+        abortSignal: undefined,
+      },
+    )
+
+    expect(search).toHaveBeenCalledWith("D:\\workspace", "audio", 20)
+    expect(result).toEqual([{ name: "Audio" }])
+  })
+
+  it("searches context in a specified working directory", async () => {
+    const registry = createToolRegistry([fileToolkit])
+    const search = vi.fn(async () => [])
+    const toolkit = createAgentToolkit(registry, undefined, { search })
+
+    await (toolkit.tools.search_context.execute as any)(
+      { query: "audio", cwd: "D:\\other", limit: 20 },
+      { context: { sessionId: "session", cwd: "D:\\workspace" } },
+    )
+
+    expect(search).toHaveBeenCalledWith("D:\\other", "audio", 20)
+  })
+
+  it("is eager", () => {
+    const registry = createToolRegistry([fileToolkit])
+    const toolkit = createAgentToolkit(registry)
+    expect(toolkit.tools.search_context.metadata?.eager).toBe(true)
   })
 })

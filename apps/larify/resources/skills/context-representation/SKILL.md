@@ -9,14 +9,17 @@ eager: true
 Organize context as a recursive hierarchy of domains:
 
 ```
-~/.larify/context/<domain>/
-  README.md
-  <subdomain>/
-    README.md
+<cwd>/.larify/
+  index.md
+  <domain>/
+    index.md
     <subject>.md
-    <subsubdomain>/
-      README.md
+    <subdomain>/
+      index.md
       <subject>.md
+      <subsubdomain>/
+        index.md
+        <subject>.md
 ```
 
 # Document Template
@@ -34,14 +37,32 @@ description: <what it covers and when to use it>
 
 # Relation Specification
 
-- Index each domain's subjects with links in its `README.md`.
+- Index each domain's direct subdomains with links in its `index.md`.
+- Index each domain's direct subjects with links in its `index.md`.
 - Express a relation as an inline Markdown link to a relative path.
 - Cite an external source with an inline Markdown link to its URL.
 - State the relation's meaning in the surrounding natural language.
-- Represent a relation bidirectional through its link and backlink.
+
+# Navigable Small World
+
+- Navigate vertically from upper to lower through indexes.
+- Navigate horizontally through related links and backlinks.
+- Keep relevant subjects reachable through few meaningful hops.
+- Link `<cwd>` contents outside `.larify/` from related subjects.
+
+# Quality Criteria
+
+- **Accuracy**: whether subjects are recursively grounded in evidence, conflicting claims are made explicit, and temporal validity is maintained.
+- **Completeness**: whether subjects are recursively explored, verified, and critiqued across granularities until no meaningful expansion remains.
+- **Effectiveness**: whether context retrieval achieves sufficient precision and recall.
+- **Efficiency**: whether sufficient context is reached with low latency and token cost.
 
 # Version Control
 
-- Initialize and maintain context as a Git repository.
-- All context changes must be committed.
-- Store large assets with Git LFS.
+- Track context in the current Git repository.
+- Commit context with its related repository changes.
+- Track large context assets through Git LFS.
+
+# Tips
+
+- Use Chinese throughout, including directory names, file names, metadata, and content.

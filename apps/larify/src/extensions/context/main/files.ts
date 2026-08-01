@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, statSync } from 'node:fs'
-import { extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import type { Link } from 'mdast'
 import { fromMarkdown } from 'mdast-util-from-markdown'
@@ -35,8 +35,10 @@ export function resolveContextLink(root: string, source: string, url: string): s
   if (URL.canParse(url) || url.startsWith('#')) return
   try {
     let target = fileURLToPath(new URL(url, pathToFileURL(source)))
-    if (!isWithin(root, target)) return
-    if (existsSync(target) && statSync(target).isDirectory()) target = join(target, 'README.md')
+    if (!isWithin(dirname(root), target)) return
+    if (isWithin(root, target) && existsSync(target) && statSync(target).isDirectory()) {
+      target = join(target, 'index.md')
+    }
     return resolve(target)
   } catch {
     return

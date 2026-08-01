@@ -1,13 +1,21 @@
 import { asSchema, tool } from "ai"
 import { z } from "zod"
-import type { Toolkit } from "../../../shared/tool"
+import { defineTool, type Toolkit } from "../../../shared/tool"
 import type { ToolRegistry } from "./registry"
 import type { SkillFactory } from "./skill-factory"
 
-export function createAgentToolkit(registry: ToolRegistry, skills?: SkillFactory): Toolkit {
+export interface ContextSearch {
+  search(cwd: string, query: string, limit?: number): Promise<unknown>
+}
+
+export function createAgentToolkit(
+  registry: ToolRegistry,
+  skills?: SkillFactory,
+  context?: ContextSearch,
+): Toolkit {
   return {
     name: "agent",
-    description: "List tools, read schemas, etc.",
+    description: "List tools, read schemas, list skills, and search context.",
     tools: {
       list_toolkit_tools: tool({
         description: "First list tools with agent_list_toolkit_tools, then read schemas with agent_get_tool_schemas.",
@@ -67,6 +75,22 @@ export function createAgentToolkit(registry: ToolRegistry, skills?: SkillFactory
             eager,
             path,
           })) ?? [],
+      }),
+      search_context: defineTool({
+        description: "Search relevant context using hybrid retrieval (bm25 and vector).",
+        inputSchema: z.object({
+          query: z.string().min(1).describe("Search query"),
+          cwd: z
+            .string()
+            .optional()
+            .describe("Workspace directory; defaults to cwd. Find others in `~/.larify/indexes/registry.json`"),
+          limit: z.number().int().positive().max(200).default(100).describe("Maximum results"),
+        }),
+        metadata: { eager: true, icon: "search" },
+        execute: ({ query, cwd: target, limit }, { cwd }) => {
+          if (!context) throw new Error("Context search tool is unavailable.")
+          return context.search(target ?? cwd, query, limit)
+        },
       }),
     },
   }

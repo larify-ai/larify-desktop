@@ -20,4 +20,4 @@ Reorganize and commit the context representation following the `context-represen
 
 ## Write the Execution
 
-Write the execution result into the `## Execute` of the latest `# Round N` in the task's `task.md`, following the `task-representation` skill.
+Append the execution result as a new `Execute` event in the task's `task.md`, following the `task-representation` skill.

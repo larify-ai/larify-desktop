@@ -5,7 +5,7 @@ import type { Toolkit } from "../../../shared/tool"
 import { runAgentUIStream, toolsContextFor } from "./agent"
 import { createModel } from "./model"
 import { createToolRegistry } from "./registry"
-import { createAgentToolkit } from "./agent-toolkit"
+import { createAgentToolkit, type ContextSearch } from "./agent-toolkit"
 import { buildSystemPrompt } from "./system-prompt"
 import { createSessionStore } from "./session-store"
 import { sanitizeAndValidateMessages } from "./message-sanitizer"
@@ -76,10 +76,13 @@ const extension: Extension = {
         try {
           const skills = createSkillFactory(skillRoots())
           const registry = createToolRegistry(app.getAll<Toolkit>("tool"))
-          registry.addToolkit(createAgentToolkit(registry, skills))
+          registry.addToolkit(
+            createAgentToolkit(registry, skills, app.get<ContextSearch>("service", "context")),
+          )
           const validMessages = await sanitizeAndValidateMessages(messages)
           const modelMessages = await convertToModelMessages(prepareMessagesForModel(validMessages))
           const cwd = requestCwd || larifyWorkspacePath()
+          app.emit("workspace:open", cwd)
           const config = isAgentModelConfig(modelConfig) ? modelConfig : defaultModelConfig
           console.info("[agent:run:model]", {
             runId,

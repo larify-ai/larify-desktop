@@ -1,36 +1,49 @@
-import type { Extension } from 'kernel'
-import { watch } from 'chokidar'
-import { larifyPath } from '../../../main/utils/app-paths'
+import { join, resolve } from 'node:path'
+import type { Disposable, Extension } from 'kernel'
 import { createContextDiagnosticsProvider } from './diagnostics'
-import { isMarkdown } from './files'
-import { buildContextGraph, updateContext } from './indexer'
+import { cleanContextRegistry, registerContext } from './workspace'
+import { ContextWorker } from './worker-client'
 import { registerFileDiagnosticsProvider } from '../../file/main/diagnostics'
 
 const extension: Extension = {
-  activate(_app, context) {
-    const dispose = registerFileDiagnosticsProvider(createContextDiagnosticsProvider())
-    const root = larifyPath('context')
-    const graph = buildContextGraph(root)
-    const watcher = watch(root, { ignoreInitial: true })
-    let timer: ReturnType<typeof setTimeout> | undefined
-    const pending = new Set<string>()
-    watcher.on('all', (_event, file) => {
-      if (!isMarkdown(file)) return
-      pending.add(file)
-      clearTimeout(timer)
-      timer = setTimeout(() => {
-        const files = [...pending]
-        pending.clear()
-        updateContext(root, files, graph)
-      }, 100)
+  activate(app, context) {
+    const worker = new ContextWorker()
+    const workspaces = new Map<string, Disposable>()
+    cleanContextRegistry()
+    app.register('service', 'context', worker)
+
+    app.on('workspace:open', (cwd) => {
+      if (typeof cwd !== 'string') return
+      const workspace = resolve(cwd)
+      if (workspaces.has(workspace)) return
+
+      registerContext(workspace)
+      const root = join(workspace, '.larify')
+      const disposeDiagnostics = registerFileDiagnosticsProvider(
+        createContextDiagnosticsProvider(root, (file, name) =>
+          worker.duplicateName(workspace, file, name)
+        )
+      )
+      const disposable: Disposable = {
+        async dispose() {
+          disposeDiagnostics()
+          await worker.close(workspace)
+        }
+      }
+      workspaces.set(workspace, disposable)
+      void worker.open(workspace).catch((error) => {
+        console.error('[context:open]', error)
+        if (workspaces.get(workspace) !== disposable) return
+        disposeDiagnostics()
+        workspaces.delete(workspace)
+      })
     })
 
     context.subscriptions.push({
-      dispose() {
-        dispose()
-        clearTimeout(timer)
-        void watcher.close()
-        graph.close()
+      async dispose() {
+        await Promise.all([...workspaces.values()].map((workspace) => workspace.dispose()))
+        workspaces.clear()
+        await worker.dispose()
       }
     })
   }

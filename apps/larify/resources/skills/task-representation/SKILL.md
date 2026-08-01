@@ -28,37 +28,23 @@ status: <in_progress | completed>
 
 # Brief
 
-# Round 1
-
-## Explore
-
-<exploratory task graph>
-
-### References
-
-<references to related context>
-
-## Execute
-
-<execution result>
-
-### References
-
-<references to related context>
-
-## Critique
-
-<critical task graph>
-
-### References
-
-<references to related context>
-
-...
-
-# Round N
+# Events
 
 # Debrief
+```
+
+# Event Format
+
+Append each event chronologically under `# Events`:
+
+```markdown
+## <Explore | Execute | Critique>
+
+<event content>
+
+### References
+
+<references to related context>
 ```
 
 # Brief Template
@@ -67,7 +53,6 @@ status: <in_progress | completed>
 ---
 name: <human-readable task title>
 description: <brief description of the task>
-status: in_progress
 ---
 
 # Brief

@@ -5,6 +5,7 @@ import { z } from "zod"
 import { defineTool } from "../../../shared/tool"
 import { applyLineBreaks, dominantLineBreak, normalizeLineBreaks } from "../../../main/utils/text"
 import { decodeText } from "./encoding"
+import { formatFileDiagnostics, provideFileDiagnostics } from "./diagnostics"
 import { markRead, readAtFor, withFileLock } from "./state"
 
 const inputSchema = z.object({
@@ -54,6 +55,7 @@ export const editFileTool = defineTool({
       const updated = content.split(old_string).join(new_string)
       await writeFile(target, applyLineBreaks(updated, lineBreak))
       markRead(ctx.sessionId, target, (await stat(target)).mtimeMs)
+      const diagnostics = await provideFileDiagnostics(target)
 
       const patch = createTwoFilesPatch(target, target, content, updated, "", "", { context: 3 })
       return {
@@ -61,8 +63,12 @@ export const editFileTool = defineTool({
         path: target,
         patch,
         summary: replace_all ? `Edited ${target} (${count} replacements).` : `Edited ${target}.`,
+        ...(diagnostics.length ? { diagnostics } : {}),
       }
     })
   },
-  toModelOutput: (output) => ({ type: "text", value: output.summary }),
+  toModelOutput: (output) => ({
+    type: "text",
+    value: output.summary + formatFileDiagnostics(output.diagnostics),
+  }),
 })

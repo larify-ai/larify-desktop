@@ -126,6 +126,7 @@ describe('nest loop exec', () => {
         messages: [{ role: 'user', content: 'loop prompt' }],
         system: 'system prompt',
         output: expect.anything(),
+        prepareStep: expect.any(Function),
         deepseekOptions: { thinking: { type: 'enabled' } }
       })
     )
@@ -236,6 +237,92 @@ describe('nest loop exec', () => {
       expect.arrayContaining([
         expect.objectContaining({
           content: expect.stringContaining('must have a description')
+        })
+      ])
+    )
+  })
+
+  it('rejects task files created for unscheduled tasks', async () => {
+    const rootTask = task(join(root, 'unscheduled', 'task.md'), 'in_progress')
+    const scheduledTask = task(join(root, 'unscheduled', 'scheduled', 'task.md'), 'completed')
+    const unscheduledTask = join(root, 'unscheduled', 'unscheduled', 'task.md')
+    mkdirSync(dirname(unscheduledTask), { recursive: true })
+    writeFileSync(
+      unscheduledTask,
+      '---\nname: Unscheduled task\ndescription: Unscheduled description\n---\n'
+    )
+
+    mocks.runAgent
+      .mockReturnValueOnce({
+        output: Promise.resolve({
+          verdict: 'schedule',
+          taskFiles: ['scheduled/task.md']
+        }),
+        responseMessages: Promise.resolve([{ role: 'assistant', content: 'first verdict' }])
+      })
+      .mockImplementationOnce(() => {
+        task(unscheduledTask, 'completed')
+        return {
+          output: Promise.resolve({
+            verdict: 'schedule',
+            taskFiles: ['scheduled/task.md']
+          })
+        }
+      })
+
+    await expect(
+      exec({
+        app: app as never,
+        cwd: 'D:\\workspace',
+        taskFile: rootTask,
+        prompt: 'loop prompt',
+        sessionId: 'parent-session',
+        modelConfig
+      })
+    ).resolves.toBe('schedule')
+
+    expect(get(scheduledTask, 'status')).toBe('in_progress')
+    expect(mocks.runAgent.mock.calls[1]?.[0].messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          content: expect.stringContaining('Do not create task.md for an unscheduled task')
+        })
+      ])
+    )
+  })
+
+  it('does not terminate with an unscheduled in-progress task', async () => {
+    const rootTask = task(join(root, 'terminate-unscheduled', 'task.md'), 'in_progress')
+    const childTask = task(
+      join(root, 'terminate-unscheduled', 'child', 'task.md'),
+      'in_progress'
+    )
+
+    mocks.runAgent
+      .mockReturnValueOnce({
+        output: Promise.resolve({ verdict: 'terminate' }),
+        responseMessages: Promise.resolve([{ role: 'assistant', content: 'first verdict' }])
+      })
+      .mockImplementationOnce(() => {
+        task(childTask, 'completed')
+        return { output: Promise.resolve({ verdict: 'terminate' }) }
+      })
+
+    await expect(
+      exec({
+        app: app as never,
+        cwd: 'D:\\workspace',
+        taskFile: rootTask,
+        prompt: 'loop prompt',
+        sessionId: 'parent-session',
+        modelConfig
+      })
+    ).resolves.toBe('terminate')
+
+    expect(mocks.runAgent.mock.calls[1]?.[0].messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          content: expect.stringContaining('Do not create task.md for an unscheduled task')
         })
       ])
     )

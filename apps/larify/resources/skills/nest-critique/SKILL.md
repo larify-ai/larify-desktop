@@ -24,7 +24,7 @@ Append the proposed critical tasks as a new `Critique` event using the Task Grap
 
 ## Schedule the Next Task
 
-Among the proposed critical tasks, schedule the highest-priority ones — priority being how much they maximize the rates of expected value increase, information gain, uncertainty reduction, complexity reduction, and cost / risk reduction. Schedule multiple tasks only when they can be completed independently in parallel. Only for scheduled tasks, create their sub-directories and `task.md` files, write their `# Brief` following the `task-representation` skill, then add their links to the table. Leave every other task's link empty.
+Among the proposed critical tasks, schedule the highest-priority ones — priority being how much they maximize the rates of expected value increase, information gain, uncertainty reduction, complexity reduction, and cost / risk reduction. Schedule multiple tasks only when they can be completed independently in parallel. Only for scheduled tasks, create their sub-directories and `task.md` files, write their `# Brief` following the `task-representation` skill, then add their links to the table.
 
 ## Review the Verdict
 

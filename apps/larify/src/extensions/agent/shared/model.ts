@@ -8,6 +8,11 @@ export const modelLabels: Record<ModelId, string> = {
   'deepseek-v4-pro': 'DeepSeek-V4-Pro'
 }
 
+export const modelContextWindows: Record<ModelId, { limit: number; rollover: number }> = {
+  'deepseek-v4-flash': { limit: 1_000_000, rollover: 800_000 },
+  'deepseek-v4-pro': { limit: 1_000_000, rollover: 800_000 }
+}
+
 export interface AgentModelConfig {
   modelId: ModelId
   thinking: ThinkingMode

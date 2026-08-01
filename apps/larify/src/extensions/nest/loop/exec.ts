@@ -12,10 +12,11 @@ import { createToolRegistry } from '../../agent/main/registry'
 import { buildSystemPrompt } from '../../agent/main/system-prompt'
 import { createSkillFactory, skillRoots } from '../../agent/main/skill-factory'
 import { createModel } from '../../agent/main/model'
-import type { AgentModelConfig } from '../../agent/shared/model'
+import { modelContextWindows, type AgentModelConfig } from '../../agent/shared/model'
 import { read, set } from '../utils/frontmatter'
 import { childTaskFiles } from '../utils/task'
 import workflowPrompt from './prompt.md?raw'
+import { contextRollover } from './context-rollover'
 
 const MAX_VERDICT_ATTEMPTS = 3
 const taskPath = z.string().describe('Path relative to the current task directory.')
@@ -33,14 +34,25 @@ const verdictOutput = Output.object({ schema: verdictSchema })
 type Verdict = z.infer<typeof verdictSchema>
 
 function validateVerdict(taskFile: string, verdict: Verdict): string | undefined {
-  if (verdict.verdict === 'terminate') return
-
   const baseDirectory = dirname(taskFile)
-  if (verdict.taskFiles.some(isAbsolute)) {
+  const taskFiles = verdict.verdict === 'schedule' ? verdict.taskFiles : []
+  if (taskFiles.some(isAbsolute)) {
     return 'Scheduled task paths must be relative to the current task directory.'
   }
-  const scheduled = verdict.taskFiles.map((path) => resolve(baseDirectory, path))
+  const scheduled = taskFiles.map((path) => resolve(baseDirectory, path))
   const children = childTaskFiles(taskFile).map((path) => resolve(path))
+
+  for (const path of children) {
+    try {
+      if (!scheduled.includes(path) && read(path).metadata.status !== 'completed') {
+        return `Do not create task.md for an unscheduled task: ${path}`
+      }
+    } catch (error) {
+      return `Failed to read child task: ${error instanceof Error ? error.message : String(error)}`
+    }
+  }
+
+  if (verdict.verdict === 'terminate') return
 
   for (const path of scheduled) {
     if (!children.includes(path)) return `Scheduled task.md does not exist: ${path}`
@@ -92,7 +104,8 @@ export async function exec(input: ExecInput): Promise<'schedule' | 'terminate'> 
       system: buildSystemPrompt(registry, input.cwd, skills, workflowPrompt),
       output: verdictOutput,
       model: createModel(input.modelConfig.modelId),
-      deepseekOptions: { thinking: { type: input.modelConfig.thinking } }
+      deepseekOptions: { thinking: { type: input.modelConfig.thinking } },
+      prepareStep: contextRollover(modelContextWindows[input.modelConfig.modelId].rollover)
     })
     const verdict = await result.output
     const error = validateVerdict(input.taskFile, verdict)

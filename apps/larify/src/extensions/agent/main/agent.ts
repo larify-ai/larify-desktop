@@ -16,7 +16,7 @@ import type { DeepSeekLanguageModelOptions } from '@ai-sdk/deepseek'
 import type { ToolContext } from '../../../shared/tool'
 import { createModel } from './model'
 
-type AgentOutput = NonNullable<Parameters<typeof streamText>[0]['output']>
+export type AgentOutput = NonNullable<Parameters<typeof streamText>[0]['output']>
 
 export function toolsContextFor(tools: ToolSet, context: ToolContext): Record<string, ToolContext> {
   return Object.fromEntries(Object.keys(tools).map((name) => [name, context]))

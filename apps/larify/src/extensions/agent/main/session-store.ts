@@ -3,25 +3,23 @@ import { dirname, join } from "node:path"
 import type { UIMessage } from "ai"
 import { larifyPath } from "../../../main/utils/app-paths"
 
-export interface StoredSession {
-  id: string
-  createdAt: number
-  updatedAt: number
-  messages: UIMessage[]
-  cwd?: string
-}
-
 export interface SessionMeta {
   id: string
   title?: string
   cwd?: string
+  taskFiles?: string[]
   createdAt: number
   updatedAt: number
 }
 
 export interface SessionStore {
   loadSession: (id: string) => Promise<{ messages: UIMessage[]; cwd: string } | null>
-  saveSession: (id: string, messages: UIMessage[], cwd: string) => Promise<StoredSession>
+  saveSession: (
+    id: string,
+    messages: UIMessage[],
+    cwd: string,
+    taskFiles?: string[]
+  ) => Promise<SessionMeta>
   listSessions: () => Promise<SessionMeta[]>
 }
 
@@ -43,6 +41,14 @@ const writeJson = async (path: string, value: unknown): Promise<void> => {
   await rename(tmp, path)
 }
 
+const readMessages = async (
+  path: string
+): Promise<{ messages: UIMessage[]; cwd?: string } | null> => {
+  const value = await readJson<UIMessage[] | { messages: UIMessage[]; cwd?: string }>(path)
+  if (!value) return null
+  return Array.isArray(value) ? { messages: value } : value
+}
+
 const getText = (message: UIMessage): string => {
   return message.parts
     .filter((part) => part.type === "text")
@@ -60,52 +66,50 @@ const createTitle = (messages: UIMessage[]): string | undefined => {
 
 export function createSessionStore(
   root = larifyPath("sessions"),
-  defaultCwd = larifyPath("workspace"),
+  defaultCwd = larifyPath("workspace")
 ): SessionStore {
   const sessionDir = (id: string): string => join(root, safeSessionId(id))
   const messagesPath = (id: string): string => join(sessionDir(id), "messages.json")
   const metaPath = (id: string): string => join(sessionDir(id), "meta.json")
   const saves = new Map<string, Promise<void>>()
 
-  const runSave = async (id: string, messages: UIMessage[], cwd: string): Promise<StoredSession> => {
+  const runSave = async (
+    id: string,
+    messages: UIMessage[],
+    cwd: string,
+    taskFiles?: string[]
+  ): Promise<SessionMeta> => {
     const now = Date.now()
-    const previous = await readJson<StoredSession>(messagesPath(id))
-    const stored: StoredSession = {
-      id,
-      createdAt: previous?.createdAt ?? now,
-      updatedAt: now,
-      messages,
-      cwd: cwd || defaultCwd,
-    }
     const previousMeta = await readJson<SessionMeta>(metaPath(id))
+    const relatedTasks = [...new Set([...(previousMeta?.taskFiles ?? []), ...(taskFiles ?? [])])]
     const meta: SessionMeta = {
       id,
-      createdAt: stored.createdAt,
-      updatedAt: stored.updatedAt,
+      createdAt: previousMeta?.createdAt ?? now,
+      updatedAt: now,
       title: previousMeta?.title ?? createTitle(messages),
-      cwd: stored.cwd,
+      cwd: cwd || defaultCwd,
+      taskFiles: relatedTasks.length ? relatedTasks : undefined
     }
 
-    await writeJson(messagesPath(id), stored)
+    await writeJson(messagesPath(id), messages)
     await writeJson(metaPath(id), meta)
-    return stored
+    return meta
   }
 
   return {
     async loadSession(id) {
-      const stored = await readJson<StoredSession>(messagesPath(id))
+      const stored = await readMessages(messagesPath(id))
       if (!stored) return null
-      return { messages: stored.messages, cwd: stored.cwd || defaultCwd }
+      const meta = await readJson<SessionMeta>(metaPath(id))
+      return { messages: stored.messages, cwd: meta?.cwd || stored.cwd || defaultCwd }
     },
 
-    async saveSession(id, messages, cwd) {
+    async saveSession(id, messages, cwd, taskFiles) {
       const previous = saves.get(id) ?? Promise.resolve()
-      const next = previous
-        .catch(() => undefined)
-        .then(() => runSave(id, messages, cwd))
+      const next = previous.catch(() => undefined).then(() => runSave(id, messages, cwd, taskFiles))
       const tracked = next.then(
         () => undefined,
-        () => undefined,
+        () => undefined
       )
       saves.set(id, tracked)
       void tracked.finally(() => {
@@ -134,11 +138,11 @@ export function createSessionStore(
               throw error
             }
             return readJson<SessionMeta>(join(root, entry.name, "meta.json"))
-          }),
+          })
       )
       return metas
         .filter((meta): meta is SessionMeta => meta !== null)
         .sort((a, b) => b.updatedAt - a.updatedAt)
-    },
+    }
   }
 }

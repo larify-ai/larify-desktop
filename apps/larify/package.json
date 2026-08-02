@@ -10,6 +10,7 @@
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "test": "vitest run",
+    "nest:run": "electron-vite build --logLevel error && electron . --nest-run",
     "test:browser-live": "node tests/extensions/browser/live/run-oopif-screenshot.mjs",
     "start": "electron-vite preview",
     "dev": "electron-vite dev",

@@ -14,20 +14,22 @@ describe("session store", () => {
         {
           id: "user-1",
           role: "user",
-          parts: [{ type: "text", text: "hello" }],
+          parts: [{ type: "text", text: "hello" }]
         },
         {
           id: "assistant-1",
           role: "assistant",
-          parts: [{ type: "text", text: "hidden searchable answer" }],
-        },
+          parts: [{ type: "text", text: "hidden searchable answer" }]
+        }
       ]
 
       const saved = await store.saveSession("chat/one", messages, "/workspace/proj")
       const loaded = await store.loadSession("chat/one")
-      const meta = JSON.parse(
-        await readFile(join(root, "chat%2Fone", "meta.json"), "utf8"),
-      ) as { id: string; title?: string; updatedAt: number }
+      const meta = JSON.parse(await readFile(join(root, "chat%2Fone", "meta.json"), "utf8")) as {
+        id: string
+        title?: string
+        updatedAt: number
+      }
       const sessions = await store.listSessions()
 
       expect(saved.id).toBe("chat/one")
@@ -45,7 +47,7 @@ describe("session store", () => {
     try {
       const store = createSessionStore(root, "/default/workspace")
       const messages: UIMessage[] = [
-        { id: "u1", role: "user", parts: [{ type: "text", text: "hi" }] },
+        { id: "u1", role: "user", parts: [{ type: "text", text: "hi" }] }
       ]
 
       // simulate an old meta.json without cwd
@@ -53,15 +55,32 @@ describe("session store", () => {
       await mkdir(sessionDir, { recursive: true })
       await writeFile(
         join(sessionDir, "messages.json"),
-        JSON.stringify({ id: "s1", createdAt: 100, updatedAt: 200, messages }),
+        JSON.stringify({ id: "s1", createdAt: 100, updatedAt: 200, messages, cwd: "/legacy" })
       )
       await writeFile(
         join(sessionDir, "meta.json"),
-        JSON.stringify({ id: "s1", createdAt: 100, updatedAt: 200, title: "hi" }),
+        JSON.stringify({ id: "s1", createdAt: 100, updatedAt: 200, title: "hi" })
       )
 
       const loaded = await store.loadSession("s1")
-      expect(loaded).toEqual({ messages, cwd: "/default/workspace" })
+      expect(loaded).toEqual({ messages, cwd: "/legacy" })
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it("links a background session to its task", async () => {
+    const root = await mkdtemp(join(tmpdir(), "larify-sessions-"))
+    try {
+      const store = createSessionStore(root)
+      const messages: UIMessage[] = [
+        { id: "u1", role: "user", parts: [{ type: "text", text: "work" }] }
+      ]
+
+      await store.saveSession("background", messages, "/workspace", ["/tasks/a.md"])
+      await store.saveSession("background", messages, "/workspace")
+      const meta = JSON.parse(await readFile(join(root, "background", "meta.json"), "utf8"))
+      expect(meta.taskFiles).toEqual(["/tasks/a.md"])
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -75,7 +94,7 @@ describe("session store", () => {
       await mkdir(sessionDir, { recursive: true })
       await writeFile(
         join(sessionDir, "meta.json"),
-        JSON.stringify({ id: "empty", createdAt: 100, updatedAt: 200 }),
+        JSON.stringify({ id: "empty", createdAt: 100, updatedAt: 200 })
       )
       expect(await store.listSessions()).toEqual([])
     } finally {
@@ -88,20 +107,24 @@ describe("session store", () => {
     try {
       const store = createSessionStore(root)
       const first: UIMessage[] = [
-        { id: "user-1", role: "user", parts: [{ type: "text", text: "first" }] },
+        { id: "user-1", role: "user", parts: [{ type: "text", text: "first" }] }
       ]
       const second: UIMessage[] = [
-        { id: "user-2", role: "user", parts: [{ type: "text", text: "second" }] },
+        { id: "user-2", role: "user", parts: [{ type: "text", text: "second" }] }
       ]
 
       await Promise.all([
-        store.saveSession("chat/one", first, "/cwd1"),
-        store.saveSession("chat/one", second, "/cwd2"),
+        store.saveSession("chat/one", first, "/cwd1", ["/tasks/a.md"]),
+        store.saveSession("chat/one", second, "/cwd2", ["/tasks/b.md"])
       ])
 
       const loaded = await store.loadSession("chat/one")
+      const meta = JSON.parse(
+        await readFile(join(root, "chat%2Fone", "meta.json"), "utf8")
+      ) as { taskFiles: string[] }
       expect(loaded?.messages).toEqual(second)
       expect(loaded?.cwd).toBe("/cwd2")
+      expect(meta.taskFiles).toEqual(["/tasks/a.md", "/tasks/b.md"])
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -114,14 +137,16 @@ describe("session store", () => {
       await writeFile(root, "blocks directory creation")
       const store = createSessionStore(root)
       const messages: UIMessage[] = [
-        { id: "user-1", role: "user", parts: [{ type: "text", text: "recovered" }] },
+        { id: "user-1", role: "user", parts: [{ type: "text", text: "recovered" }] }
       ]
 
       await expect(store.saveSession("chat", messages, "/cwd")).rejects.toThrow()
       await rm(root)
       await mkdir(root)
 
-      await expect(store.saveSession("chat", messages, "/cwd")).resolves.toMatchObject({ id: "chat" })
+      await expect(store.saveSession("chat", messages, "/cwd")).resolves.toMatchObject({
+        id: "chat"
+      })
       const loaded = await store.loadSession("chat")
       expect(loaded).toEqual({ messages, cwd: "/cwd" })
     } finally {

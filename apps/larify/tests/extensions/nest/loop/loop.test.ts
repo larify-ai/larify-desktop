@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -27,12 +27,13 @@ const input = (rootTaskFile: string): LoopInput => ({
   app: { getAll: vi.fn(() => []) } as never,
   cwd: root,
   rootTaskFile,
-  sessionId: 'session',
   modelConfig: {
     modelId: 'deepseek-v4-flash',
     thinking: 'enabled'
   } as const
 })
+
+beforeEach(() => vi.clearAllMocks())
 
 describe('nest loop', () => {
   it('completes children before their parent', async () => {
@@ -50,9 +51,24 @@ describe('nest loop', () => {
     expect(order).toEqual([childTask, rootTask])
     expect(mocks.exec).toHaveBeenCalledWith(
       expect.objectContaining({
-        prompt: `Follow the workflow for the task: ${childTask}`
+        prompt: `Follow the workflow for the current task: ${childTask}`
       })
     )
+  })
+
+  it('runs children sequentially', async () => {
+    const rootTask = task(join(root, 'sequential', 'task.md'))
+    const first = task(join(root, 'sequential', 'first', 'task.md'))
+    const second = task(join(root, 'sequential', 'second', 'task.md'))
+    const order: string[] = []
+    mocks.exec.mockImplementation(async ({ taskFile }: { taskFile: string }) => {
+      order.push(taskFile)
+      set(taskFile, 'status', 'completed')
+    })
+
+    await runLoop(input(rootTask))
+
+    expect(order).toEqual([first, second, rootTask])
   })
 
   it('propagates child failures', async () => {
@@ -62,5 +78,34 @@ describe('nest loop', () => {
     mocks.exec.mockRejectedValue(error)
 
     await expect(runLoop(input(rootTask))).rejects.toBe(error)
+    expect(mocks.exec).toHaveBeenCalledTimes(3)
+  })
+
+  it('retries the current task after a failure', async () => {
+    const rootTask = task(join(root, 'retry', 'task.md'))
+    mocks.exec
+      .mockRejectedValueOnce(new Error('temporary failure'))
+      .mockImplementationOnce(async () => {
+        set(rootTask, 'status', 'completed')
+        return 'terminate'
+      })
+
+    await expect(runLoop(input(rootTask))).resolves.toBeUndefined()
+
+    expect(mocks.exec).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not retry after cancellation', async () => {
+    const rootTask = task(join(root, 'cancelled', 'task.md'))
+    const controller = new AbortController()
+    const error = new Error('cancelled')
+    mocks.exec.mockImplementationOnce(async () => {
+      controller.abort()
+      throw error
+    })
+
+    await expect(runLoop({ ...input(rootTask), signal: controller.signal })).rejects.toBe(error)
+
+    expect(mocks.exec).toHaveBeenCalledOnce()
   })
 })

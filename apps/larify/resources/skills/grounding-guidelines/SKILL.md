@@ -22,7 +22,6 @@ eager: true
 
 ## gathering content
 
-- `~/.larify/context/`
 - document
 - codebase
 - forums

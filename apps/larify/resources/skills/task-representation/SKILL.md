@@ -26,11 +26,9 @@ description: <brief description of the task>
 status: <in_progress | completed>
 ---
 
-# Brief
-
 # Events
 
-# Debrief
+<chronological events>
 ```
 
 # Event Format
@@ -38,50 +36,11 @@ status: <in_progress | completed>
 Append each event chronologically under `# Events`:
 
 ```markdown
-## <Explore | Execute | Critique>
+## <event title>
 
 <event content>
 
 ### References
 
-<references to related context>
+<links to related context documents, progress documents, workspace artifacts, and external sources, etc.>
 ```
-
-# Brief Template
-
-```markdown
----
-name: <human-readable task title>
-description: <brief description of the task>
----
-
-# Brief
-
-## What
-
-<what to explore>
-
-## Why
-
-<why it matters>
-
-## References
-
-<references to related context>
-```
-
-# Task Graph Format
-
-````markdown
-```mermaid
-flowchart TD
-  nameA --> nameC
-  nameB --> nameC
-```
-
-| name  | description | link                   |
-|-------|-------------|------------------------|
-| nameA | descA       | [nameA](nameA/task.md) |
-| nameB | descB       | -                      |
-| nameC | descC       | -                      |
-````

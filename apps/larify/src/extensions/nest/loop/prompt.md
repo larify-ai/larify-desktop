@@ -3,7 +3,7 @@
 ```
 skills = {
     Explore: `nest-explore`,
-    Execute: `nest-execute`,
+    Verify: `nest-verify`,
     Critique: `nest-critique`,
     Reflect: `nest-reflect`
 }
@@ -11,10 +11,10 @@ skills = {
 phase = Explore
 
 while True:
-    read and follow skills[phase] without reading later phase skills in advance
+    do the steps following skills[phase]
 
-    if a verdict is returned:
-        return the verdict
+    if the verdict stops the loop:
+        break
 
-    continue with the phase specified by `Review the Verdict`
+    phase = the phase specified by `Review the Verdict`
 ```

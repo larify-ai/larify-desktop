@@ -37,7 +37,7 @@ export class BrowserTabManager {
       height: 800,
       skipTaskbar: true,
       focusable: false,
-      webPreferences: { backgroundThrottling: false },
+      webPreferences: { backgroundThrottling: false }
     })
     this.host.setPosition(HOST_POSITION.x, HOST_POSITION.y)
     this.window.once("closed", this.handleWindowClosed)
@@ -72,10 +72,7 @@ export class BrowserTabManager {
     return tab.id
   }
 
-  async withTemporaryTab<T>(
-    url: string,
-    callback: (tab: BrowserTab) => Promise<T>
-  ): Promise<T> {
+  async withTemporaryTab<T>(url: string, callback: (tab: BrowserTab) => Promise<T>): Promise<T> {
     if (this.destroying) throw new Error("browser tab manager is destroyed")
     const tab = new BrowserTab(this.nextTemporaryId--, PARTITION)
     tab.view.webContents.setWindowOpenHandler(() => ({ action: "deny" }))
@@ -184,9 +181,7 @@ export class BrowserTabManager {
     return this.recorder.stop()
   }
 
-  recordStopIfCurrent(
-    generation: number
-  ): Promise<{ path: string; bytes: number } | null> {
+  recordStopIfCurrent(generation: number): Promise<{ path: string; bytes: number } | null> {
     return this.recorder.stopIfCurrent(generation)
   }
 
@@ -207,7 +202,7 @@ export class BrowserTabManager {
   state(): BrowserState {
     return {
       tabs: [...this.tabs.values()].map((tab) => tab.state()),
-      activeId: this.activeId,
+      activeId: this.activeId
     }
   }
 
@@ -227,15 +222,18 @@ export class BrowserTabManager {
     }
     await Promise.allSettled([...this.temporaryOperations])
     await Promise.allSettled([...this.closing.values()])
-    await this.recorder.destroy()
-    for (const tab of this.tabs.values()) {
-      this.viewParent.get(tab.id)?.contentView.removeChildView(tab.view)
-      tab.destroy()
+    try {
+      await this.recorder.destroy()
+    } finally {
+      for (const tab of this.tabs.values()) {
+        this.viewParent.get(tab.id)?.contentView.removeChildView(tab.view)
+        tab.destroy()
+      }
+      this.tabs.clear()
+      this.viewParent.clear()
+      this.activeId = null
+      if (!this.host.isDestroyed()) this.host.destroy()
     }
-    this.tabs.clear()
-    this.viewParent.clear()
-    this.activeId = null
-    if (!this.host.isDestroyed()) this.host.destroy()
   }
 
   private emit(): void {

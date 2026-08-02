@@ -19,7 +19,7 @@ export interface AgentModelConfig {
 }
 
 export const defaultModelConfig: AgentModelConfig = {
-  modelId: 'deepseek-v4-pro',
+  modelId: 'deepseek-v4-flash',
   thinking: 'disabled'
 }
 

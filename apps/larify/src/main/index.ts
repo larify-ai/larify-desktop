@@ -28,6 +28,25 @@ app.whenReady().then(async () => {
   await loader.loadAll(immediate)
 
   const deferred = extensions.filter(({ id }) => deferredIds.has(id))
+  const nestIndex = process.argv.indexOf('--nest-run')
+  if (nestIndex >= 0) {
+    const taskFile = process.argv[nestIndex + 1]
+    let exitCode = 0
+    try {
+      if (!taskFile) throw new Error('Expected a task.md path after --nest-run')
+      await loader.loadAll(deferred)
+      const { runPlayground } = await import('../extensions/nest/loop/run-playground')
+      await runPlayground(host, taskFile)
+    } catch (error) {
+      exitCode = 1
+      console.error('[nest]', error)
+    } finally {
+      await loader.unloadAll()
+      app.exit(exitCode)
+    }
+    return
+  }
+
   const mainWindow = host.get<{ get(): BrowserWindow }>('service', 'main-window')?.get()
   const loadDeferred = (): void => {
     void loader.loadAll(deferred).catch((error) => {

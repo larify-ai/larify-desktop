@@ -1,67 +1,25 @@
-import { Output, type ModelMessage } from 'ai'
-import { z } from 'zod'
-import { dirname, isAbsolute, resolve } from 'node:path'
+import type { UIMessage, UIMessageChunk } from 'ai'
+import { randomUUID } from 'node:crypto'
 import type { App } from 'kernel'
-import { runAgent } from '../../agent/main/agent'
+import { runAgentSession } from '../../agent/main/run-session'
 import { createAgentRuntime } from '../../agent/main/runtime'
+import { createSessionStore } from '../../agent/main/session-store'
 import { modelContextWindows, type AgentModelConfig } from '../../agent/shared/model'
-import { read, set } from '../utils/frontmatter'
-import { childTaskFiles } from '../utils/task'
-import workflowPrompt from './prompt.md?raw'
+import { larifyPath } from '../../../main/utils/app-paths'
+import type { SessionResource } from '../../../main/utils/session-resource'
+import { appendToList } from '../utils/frontmatter'
 import { contextRollover } from './context-rollover'
+import workflowPrompt from './prompt.md?raw'
 
-const MAX_VERDICT_ATTEMPTS = 3
-const taskPath = z.string().describe('Path relative to the current task directory.')
-const verdictSchema = z.discriminatedUnion('verdict', [
-  z.object({
-    verdict: z.literal('schedule'),
-    taskFiles: z.array(taskPath).min(1)
-  }),
-  z.object({
-    verdict: z.literal('terminate')
-  })
-])
-const verdictOutput = Output.object({ schema: verdictSchema })
-
-type Verdict = z.infer<typeof verdictSchema>
-
-function validateVerdict(taskFile: string, verdict: Verdict): string | undefined {
-  const baseDirectory = dirname(taskFile)
-  const taskFiles = verdict.verdict === 'schedule' ? verdict.taskFiles : []
-  if (taskFiles.some(isAbsolute)) {
-    return 'Scheduled task paths must be relative to the current task directory.'
+async function destroySessionResources(app: App, sessionId: string): Promise<void> {
+  const results = await Promise.allSettled(
+    app
+      .getAll<SessionResource>('session-resource')
+      .map((resource) => resource.destroySession(sessionId))
+  )
+  for (const result of results) {
+    if (result.status === 'rejected') console.error('[nest cleanup]', result.reason)
   }
-  const scheduled = taskFiles.map((path) => resolve(baseDirectory, path))
-  const children = childTaskFiles(taskFile).map((path) => resolve(path))
-
-  for (const path of children) {
-    try {
-      if (!scheduled.includes(path) && read(path).metadata.status !== 'completed') {
-        return `Do not create task.md for an unscheduled task: ${path}`
-      }
-    } catch (error) {
-      return `Failed to read child task: ${error instanceof Error ? error.message : String(error)}`
-    }
-  }
-
-  if (verdict.verdict === 'terminate') return
-
-  for (const path of scheduled) {
-    if (!children.includes(path)) return `Scheduled task.md does not exist: ${path}`
-    try {
-      const { metadata } = read(path)
-      if (typeof metadata.name !== 'string' || !metadata.name.trim()) {
-        return `Scheduled task must have a name: ${path}`
-      }
-      if (typeof metadata.description !== 'string' || !metadata.description.trim()) {
-        return `Scheduled task must have a description: ${path}`
-      }
-    } catch (error) {
-      return `Failed to read scheduled task: ${error instanceof Error ? error.message : String(error)}`
-    }
-  }
-
-  return undefined
 }
 
 export interface ExecInput {
@@ -69,50 +27,44 @@ export interface ExecInput {
   cwd: string
   taskFile: string
   prompt: string
-  sessionId: string
   modelConfig: AgentModelConfig
   signal?: AbortSignal
+  onChunk?: (chunk: UIMessageChunk) => void
 }
 
-export async function exec(input: ExecInput): Promise<'schedule' | 'terminate'> {
-  const messages: ModelMessage[] = [{ role: 'user', content: input.prompt }]
+export async function exec(input: ExecInput): Promise<void> {
+  const sessionId = randomUUID()
+  const sessions = createSessionStore(larifyPath('sessions', 'background'))
+  const messages: UIMessage[] = [
+    {
+      id: randomUUID(),
+      role: 'user',
+      parts: [{ type: 'text', text: input.prompt }]
+    }
+  ]
+  await sessions.saveSession(sessionId, messages, input.cwd, [input.taskFile])
+  appendToList(input.taskFile, 'sessions', sessionId)
+
   const runtime = createAgentRuntime({
     app: input.app,
     cwd: input.cwd,
-    sessionId: input.sessionId,
+    sessionId,
     modelConfig: input.modelConfig,
     prompt: workflowPrompt
   })
 
-  for (let attempt = 1; ; attempt++) {
-    const result = runAgent({
+  try {
+    const run = await runAgentSession(
       messages,
-      ...runtime,
-      abortSignal: input.signal,
-      output: verdictOutput,
-      prepareStep: contextRollover(modelContextWindows[input.modelConfig.modelId].rollover)
-    })
-    const verdict = await result.output
-    const error = validateVerdict(input.taskFile, verdict)
-    if (!error) {
-      if (verdict.verdict === 'schedule') {
-        for (const path of verdict.taskFiles) {
-          set(resolve(dirname(input.taskFile), path), 'status', 'in_progress')
-        }
-      } else {
-        set(input.taskFile, 'status', 'completed')
-      }
-      return verdict.verdict
-    }
-    if (attempt === MAX_VERDICT_ATTEMPTS) {
-      throw new Error(
-        `Failed to produce a valid verdict: ${error} Received: ${JSON.stringify(verdict)}`
-      )
-    }
-
-    messages.push(...(await result.responseMessages), {
-      role: 'user',
-      content: `The verdict is invalid: ${error} Try again.`
-    })
+      {
+        ...runtime,
+        abortSignal: input.signal,
+        prepareStep: contextRollover(modelContextWindows[input.modelConfig.modelId].rollover)
+      },
+      input.onChunk
+    )
+    await sessions.saveSession(sessionId, await run.messages, input.cwd)
+  } finally {
+    await destroySessionResources(input.app, sessionId)
   }
 }

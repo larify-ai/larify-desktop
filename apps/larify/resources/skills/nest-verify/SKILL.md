@@ -1,5 +1,5 @@
 ---
-name: nest-execute
+name: nest-verify
 description: How to execute and verify a task.
 eager: true
 ---
@@ -18,10 +18,11 @@ Execute and verify the task using every available static and dynamic source and 
 
 Reorganize and commit the context representation following the `context-representation` skill.
 
-## Write the Execution
+## Append the Observation
 
-Append the execution result as a new `Execute` event in the task's `task.md`, following the `task-representation` skill.
+Append the observation as a new event in the current task's `task.md`, following the `task-representation` skill.
 
 ## Review the Verdict
 
-Proceed to the Critique phase.
+- If any issue is found, analyze its root cause, resolve it, then repeat the Verify phase.
+- Otherwise, proceed to the Critique phase.

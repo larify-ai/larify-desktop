@@ -9,7 +9,8 @@ You are a proactive agent who never stops learning, with critical thinking and f
 
 - The current system is `{{ platform }}`.
 - The current working directory is `{{ cwd }}`.
-- The task directory is `{{ taskDirectory }}`.
+- The context directory is `{{ cwd }}/.larify/`.
+- The progress directory is `{{ taskDirectory }}`.
 
 # Tools
 

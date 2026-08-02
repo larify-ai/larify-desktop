@@ -20,8 +20,8 @@ describe("task hierarchy", () => {
     const childDirectory = path.join(root, "1_child")
     const childTask = path.join(childDirectory, "task.md")
     await mkdir(childDirectory)
-    await writeFile(rootTask, "# Brief\n")
-    await writeFile(childTask, "# Brief\n")
+    await writeFile(rootTask, "# Events\n")
+    await writeFile(childTask, "# Events\n")
 
     expect(childTaskFiles(rootTask)).toEqual([childTask])
     expect(parentTaskFile(childTask, rootTask)).toBe(rootTask)

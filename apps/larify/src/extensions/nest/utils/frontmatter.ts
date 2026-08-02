@@ -17,3 +17,8 @@ export function set(path: string, key: string, value: unknown): void {
   const { data, content } = matter(readFileSync(path, "utf8"))
   writeFileSync(path, matter.stringify(content, { ...data, [key]: value }))
 }
+
+export function appendToList(path: string, key: string, value: unknown): void {
+  const current = get(path, key)
+  set(path, key, [...new Set([...(Array.isArray(current) ? current : []), value])])
+}

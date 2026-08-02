@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 const h = vi.hoisted(() => ({
   hostWin: null as unknown,
   mainWin: null as unknown,
-  views: [] as Array<{ visibleCalls: boolean[]; boundsCalls: unknown[]; parent: unknown }>,
+  views: [] as Array<{ visibleCalls: boolean[]; boundsCalls: unknown[]; parent: unknown }>
 }))
 
 vi.mock("electron", () => {
@@ -39,7 +39,7 @@ vi.mock("electron", () => {
       canGoBack: () => false,
       canGoForward: () => false,
       goBack(): void {},
-      goForward(): void {},
+      goForward(): void {}
     }
   }
 
@@ -66,7 +66,7 @@ vi.mock("electron", () => {
       },
       removeChildView: (view: WebContentsView) => {
         if (view.parent === this) view.parent = null
-      },
+      }
     }
     constructor() {
       h.hostWin = this
@@ -102,8 +102,8 @@ function fakeWindow(): import("electron").BrowserWindow {
       },
       removeChildView: (view: { parent: unknown }) => {
         if (view.parent === win) view.parent = null
-      },
-    },
+      }
+    }
   }
   h.mainWin = win
   return win as unknown as import("electron").BrowserWindow
@@ -132,7 +132,7 @@ describe("BrowserTabManager", () => {
     expect(manager.state().tabs[0]).toMatchObject({
       id: 1,
       url: "https://example.com",
-      loading: true,
+      loading: true
     })
   })
 
@@ -145,7 +145,7 @@ describe("BrowserTabManager", () => {
 
     expect(changes.at(-1)).toMatchObject({
       activeId: 1,
-      tabs: [{ id: 1, url: "https://example.com" }],
+      tabs: [{ id: 1, url: "https://example.com" }]
     })
   })
 
@@ -229,13 +229,13 @@ describe("BrowserTabManager", () => {
     const callback = vi.fn(async () => undefined)
 
     await expect(manager.withTemporaryTab("not a valid url", callback)).rejects.toThrow(
-      "invalid url",
+      "invalid url"
     )
 
     expect(callback).not.toHaveBeenCalled()
-    expect((h.views.at(-1) as unknown as { webContents: { closed: boolean } }).webContents.closed).toBe(
-      true,
-    )
+    expect(
+      (h.views.at(-1) as unknown as { webContents: { closed: boolean } }).webContents.closed
+    ).toBe(true)
     expect(manager.state()).toEqual({ tabs: [], activeId: null })
   })
 
@@ -302,9 +302,10 @@ describe("BrowserTabManager", () => {
     const destroy = vi.spyOn(tab, "destroy")
     let finishStop!: () => void
     const stopIfRecordingTab = vi.fn(
-      () => new Promise<void>((resolve) => {
-        finishStop = resolve
-      }),
+      () =>
+        new Promise<void>((resolve) => {
+          finishStop = resolve
+        })
     )
     ;(
       manager as unknown as {
@@ -356,7 +357,7 @@ describe("BrowserTabManager", () => {
       () =>
         new Promise<void>((resolve) => {
           finishRecorderDestroy = resolve
-        }),
+        })
     )
     ;(manager as unknown as { recorder: { destroy: () => Promise<void> } }).recorder.destroy =
       destroyRecorder
@@ -383,12 +384,26 @@ describe("BrowserTabManager", () => {
   })
 
   it("removes its main-window closed listener when destroyed", async () => {
-    const win = fakeWindow() as unknown as import("electron").BrowserWindow & { listenerCount(): number }
+    const win = fakeWindow() as unknown as import("electron").BrowserWindow & {
+      listenerCount(): number
+    }
     const manager = new BrowserTabManager(win)
     expect(win.listenerCount()).toBe(1)
 
     await manager.destroy()
 
     expect(win.listenerCount()).toBe(0)
+  })
+
+  it("destroys tabs when recorder cleanup fails", async () => {
+    const manager = new BrowserTabManager(fakeWindow())
+    const tab = manager.get(manager.createTab())!
+    const destroyTab = vi.spyOn(tab, "destroy")
+    ;(manager as unknown as { recorder: { destroy: () => Promise<void> } }).recorder.destroy = () =>
+      Promise.reject(new Error("recorder cleanup failed"))
+
+    await expect(manager.destroy()).rejects.toThrow("recorder cleanup failed")
+    expect(destroyTab).toHaveBeenCalledOnce()
+    expect(manager.state().tabs).toEqual([])
   })
 })

@@ -23,9 +23,6 @@ The following questions define how to inquire into any subject recursively at an
 
 # Practical Inquiry
 
-- **Expected Value**
-  - increase: Inquire into the question "what expected value does it increase, and why this increase rather than another?"
-  - decrease: Inquire into the question "what expected value does it decrease, and why this decrease rather than another?"
 - **Uncertainty**
   - reduce: Inquire into the question "what uncertainty does it reduce, and why this reduction rather than another?"
   - increase: Inquire into the question "what uncertainty does it increase, and why this increase rather than another?"

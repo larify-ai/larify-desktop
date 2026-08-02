@@ -193,7 +193,7 @@ describe("createSkillFactory", () => {
       `- \`context\`: Represent context. (\`${join(root, "context", "SKILL.md")}\`)`,
     )
     expect(prompt).not.toContain("Review changes.")
-    expect(prompt).toContain(`The task directory is \`${larifyPath("tasks")}\`.`)
+    expect(prompt).toContain(`The progress directory is \`${larifyPath("tasks")}\`.`)
     expect(prompt).toContain(
       "Some available skills are listed below. To see more, first list skills with `agent_list_skills`, then read content with `fs_read`.",
     )

@@ -18,16 +18,15 @@ Reorganize and commit the context representation following the `context-represen
 
 Propose critical tasks recursively along the dimensions defined in the `inquiry-dimensions` skill to make better decisions.
 
-## Write the Critique
-
-Append the proposed critical tasks as a new `Critique` event using the Task Graph Format defined in the `task-representation` skill.
-
 ## Schedule the Next Task
 
-Among the proposed critical tasks, schedule the highest-priority ones — priority being how much they maximize the rates of expected value increase, information gain, uncertainty reduction, complexity reduction, and cost / risk reduction. Schedule multiple tasks only when they can be completed independently in parallel. Only for scheduled tasks, create their sub-directories and `task.md` files, write their `# Brief` following the `task-representation` skill, then add their links to the table.
+Among the proposed tasks, schedule the highest-priority one — priority being how much it maximizes the rate of reducing uncertainty, complexity, and cost / risk. Only for the scheduled task, create its sub-directory and `task.md`, set its status to `in_progress`, and append its initial event, following the `task-representation` skill.
+
+## Append the Observation
+
+Append the observation as a new event in the current task's `task.md`, following the `task-representation` skill.
 
 ## Review the Verdict
 
-- If new critical tasks can be proposed recursively or any existing critical task remains incomplete, confirm that every scheduled task has a `task.md` with a name and description; then stop and return `{ "verdict": "schedule", "taskFiles": ["<relative task.md path>"] }`.
-- If neither new critical tasks can be proposed recursively nor any existing critical task remains incomplete, and any hypothesis has not been cross-validated, proceed to the Execute phase.
-- If neither new critical tasks can be proposed recursively nor any existing critical task remains incomplete, and every hypothesis has been cross-validated, then proceed to the Reflect phase.
+- If further critical tasks can be proposed recursively, confirm that the scheduled task has a `task.md`, then stop the loop.
+- Otherwise, proceed to the Reflect phase.

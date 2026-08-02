@@ -1,17 +1,12 @@
 import { ipcMain } from "electron"
 import { convertToModelMessages, type UIMessage } from "ai"
 import type { Extension } from "kernel"
-import type { Toolkit } from "../../../shared/tool"
-import { runAgentUIStream, toolsContextFor } from "./agent"
-import { createModel } from "./model"
-import { createToolRegistry } from "./registry"
-import { createAgentToolkit, type ContextSearch } from "./agent-toolkit"
-import { buildSystemPrompt } from "./system-prompt"
+import { runAgentUIStream } from "./agent"
 import { createSessionStore } from "./session-store"
 import { sanitizeAndValidateMessages } from "./message-sanitizer"
 import { larifyWorkspacePath } from "../../../main/utils/app-paths"
-import { createSkillFactory, skillRoots } from "./skill-factory"
 import { defaultModelConfig, isAgentModelConfig, type AgentModelConfig } from "../shared/model"
+import { createAgentRuntime } from "./runtime"
 
 interface RunRequest {
   runId: string
@@ -74,11 +69,6 @@ const extension: Extension = {
         const controller = new AbortController()
         controllers.set(runId, controller)
         try {
-          const skills = createSkillFactory(skillRoots())
-          const registry = createToolRegistry(app.getAll<Toolkit>("tool"))
-          registry.addToolkit(
-            createAgentToolkit(registry, skills, app.get<ContextSearch>("service", "context")),
-          )
           const validMessages = await sanitizeAndValidateMessages(messages)
           const modelMessages = await convertToModelMessages(prepareMessagesForModel(validMessages))
           const cwd = requestCwd || larifyWorkspacePath()
@@ -89,16 +79,10 @@ const extension: Extension = {
             modelId: config.modelId,
             thinking: config.thinking,
           })
-          const tools = registry.toolSet()
           const reader = runAgentUIStream({
             messages: modelMessages,
-            tools,
-            activeTools: registry.activeToolNames(),
-            toolsContext: toolsContextFor(tools, { sessionId, cwd }),
             abortSignal: controller.signal,
-            system: buildSystemPrompt(registry, cwd, skills),
-            model: createModel(config.modelId),
-            deepseekOptions: { thinking: { type: config.thinking } },
+            ...createAgentRuntime({ app, cwd, sessionId, modelConfig: config }),
           }).getReader()
           for (;;) {
             const { done, value } = await reader.read()

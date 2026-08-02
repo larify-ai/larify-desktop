@@ -16,7 +16,7 @@ Reorganize and commit the context representation following the `context-represen
 
 ## Propose Exploratory Tasks Recursively
 
-Propose exploratory tasks recursively along the dimensions defined in the `exploration-dimensions` skill to make better decisions.
+Propose exploratory tasks recursively along the dimensions defined in the `inquiry-dimensions` skill to make better decisions.
 
 ## Write the Exploration
 

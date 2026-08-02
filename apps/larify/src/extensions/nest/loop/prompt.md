@@ -1,21 +1,20 @@
 # Workflow
 
-```text
+```
+skills = {
+    Explore: `nest-explore`,
+    Execute: `nest-execute`,
+    Critique: `nest-critique`,
+    Reflect: `nest-reflect`
+}
+
 phase = Explore
 
 while True:
-    if phase == Explore:
-        follow the `nest-explore` skill
-    elif phase == Execute:
-        follow the `nest-execute` skill
-        phase = Critique
-    elif phase == Critique:
-        follow the `nest-critique` skill
-    elif phase == Reflect:
-        follow the `nest-reflect` skill
+    read and follow skills[phase] without reading later phase skills in advance
 
-    if verdict is `schedule` or `terminate`:
-        return verdict
+    if a verdict is returned:
+        return the verdict
 
-    otherwise, continue with the phase selected by the skill
+    continue with the phase specified by `Review the Verdict`
 ```

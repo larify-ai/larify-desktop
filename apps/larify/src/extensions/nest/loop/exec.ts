@@ -2,16 +2,8 @@ import { Output, type ModelMessage } from 'ai'
 import { z } from 'zod'
 import { dirname, isAbsolute, resolve } from 'node:path'
 import type { App } from 'kernel'
-import type { Toolkit } from '../../../shared/tool'
-import {
-  createAgentToolkit,
-  type ContextSearch
-} from '../../agent/main/agent-toolkit'
-import { runAgent, toolsContextFor } from '../../agent/main/agent'
-import { createToolRegistry } from '../../agent/main/registry'
-import { buildSystemPrompt } from '../../agent/main/system-prompt'
-import { createSkillFactory, skillRoots } from '../../agent/main/skill-factory'
-import { createModel } from '../../agent/main/model'
+import { runAgent } from '../../agent/main/agent'
+import { createAgentRuntime } from '../../agent/main/runtime'
 import { modelContextWindows, type AgentModelConfig } from '../../agent/shared/model'
 import { read, set } from '../utils/frontmatter'
 import { childTaskFiles } from '../utils/task'
@@ -83,28 +75,21 @@ export interface ExecInput {
 }
 
 export async function exec(input: ExecInput): Promise<'schedule' | 'terminate'> {
-  const skills = createSkillFactory(skillRoots())
-  const registry = createToolRegistry(input.app.getAll<Toolkit>('tool'))
-  registry.addToolkit(
-    createAgentToolkit(registry, skills, input.app.get<ContextSearch>('service', 'context'))
-  )
-  const tools = registry.toolSet()
   const messages: ModelMessage[] = [{ role: 'user', content: input.prompt }]
+  const runtime = createAgentRuntime({
+    app: input.app,
+    cwd: input.cwd,
+    sessionId: input.sessionId,
+    modelConfig: input.modelConfig,
+    prompt: workflowPrompt
+  })
 
   for (let attempt = 1; ; attempt++) {
     const result = runAgent({
       messages,
-      tools,
-      activeTools: registry.activeToolNames(),
-      toolsContext: toolsContextFor(tools, {
-        sessionId: input.sessionId,
-        cwd: input.cwd
-      }),
+      ...runtime,
       abortSignal: input.signal,
-      system: buildSystemPrompt(registry, input.cwd, skills, workflowPrompt),
       output: verdictOutput,
-      model: createModel(input.modelConfig.modelId),
-      deepseekOptions: { thinking: { type: input.modelConfig.thinking } },
       prepareStep: contextRollover(modelContextWindows[input.modelConfig.modelId].rollover)
     })
     const verdict = await result.output

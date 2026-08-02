@@ -21,3 +21,7 @@ Reorganize and commit the context representation following the `context-represen
 ## Write the Execution
 
 Append the execution result as a new `Execute` event in the task's `task.md`, following the `task-representation` skill.
+
+## Review the Verdict
+
+Proceed to the Critique phase.

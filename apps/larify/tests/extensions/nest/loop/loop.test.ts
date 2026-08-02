@@ -64,11 +64,27 @@ describe('nest loop', () => {
     mocks.exec.mockImplementation(async ({ taskFile }: { taskFile: string }) => {
       order.push(taskFile)
       set(taskFile, 'status', 'completed')
+      return 'terminate'
     })
 
     await runLoop(input(rootTask))
 
     expect(order).toEqual([first, second, rootTask])
+  })
+
+  it('does not terminate a task with an unfinished child', async () => {
+    const rootTask = task(join(root, 'scheduled', 'task.md'))
+    const childTask = join(root, 'scheduled', 'child', 'task.md')
+    const order: string[] = []
+    mocks.exec.mockImplementation(async ({ taskFile }: { taskFile: string }) => {
+      order.push(taskFile)
+      if (taskFile === rootTask && order.length === 1) task(childTask)
+      return 'terminate'
+    })
+
+    await runLoop(input(rootTask))
+
+    expect(order).toEqual([rootTask, childTask, rootTask])
   })
 
   it('propagates child failures', async () => {

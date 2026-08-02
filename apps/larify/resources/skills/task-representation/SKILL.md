@@ -38,9 +38,9 @@ Append each event chronologically under `# Events`:
 ```markdown
 ## <event title>
 
-<event content>
+<event summary>
 
 ### References
 
-<links to related context documents, progress documents, workspace artifacts, and external sources, etc.>
+<links to related context documents, because everything learned must be represented following the `context-representation` skill>
 ```

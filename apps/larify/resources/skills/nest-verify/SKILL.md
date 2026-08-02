@@ -16,11 +16,11 @@ Execute and verify the task using every available static and dynamic source and 
 
 ## Update Context Representation
 
-Reorganize and commit the context representation following the `context-representation` skill.
+Preserve everything learned by reorganizing and committing the context representation following the `context-representation` skill.
 
-## Append the Observation
+## Append the Event
 
-Append the observation as a new event in the current task's `task.md`, following the `task-representation` skill.
+Append the progress with references as a new event in the current task's `task.md`, following the `task-representation` skill.
 
 ## Review the Verdict
 

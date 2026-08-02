@@ -1,6 +1,6 @@
 import type { App } from 'kernel'
 import type { UIMessageChunk } from 'ai'
-import { get } from '../utils/frontmatter'
+import { get, set } from '../utils/frontmatter'
 import { childTaskFiles } from '../utils/task'
 import { exec } from './exec'
 import type { AgentModelConfig } from '../../agent/shared/model'
@@ -20,10 +20,10 @@ export interface LoopInput {
 export async function runLoop(input: LoopInput): Promise<void> {
   const log = input.log ?? (() => undefined)
 
-  async function execute(taskFile: string): Promise<void> {
+  async function execute(taskFile: string) {
     for (let attempt = 1; ; attempt++) {
       try {
-        await exec({
+        return await exec({
           app: input.app,
           cwd: input.cwd,
           taskFile,
@@ -32,7 +32,6 @@ export async function runLoop(input: LoopInput): Promise<void> {
           onChunk: input.onChunk,
           prompt: `Follow the workflow for the current task: ${taskFile}`
         })
-        return
       } catch (error) {
         if (input.signal?.aborted || attempt === MAX_ATTEMPTS) throw error
       }
@@ -51,7 +50,11 @@ export async function runLoop(input: LoopInput): Promise<void> {
       }
 
       log(`execute ${taskFile}`)
-      await execute(taskFile)
+      const verdict = await execute(taskFile)
+      const unfinished = childTaskFiles(taskFile).some(
+        (file) => get(file, 'status') !== 'completed'
+      )
+      if (verdict === 'terminate' && !unfinished) set(taskFile, 'status', 'completed')
       const sessions = get(taskFile, 'sessions')
       const session = Array.isArray(sessions) ? sessions.at(-1) : undefined
       log(`executed ${taskFile}${session ? ` session ${session}` : ''}`)

@@ -1,5 +1,6 @@
-import type { UIMessage, UIMessageChunk } from 'ai'
+import { Output, type UIMessage, type UIMessageChunk } from 'ai'
 import { randomUUID } from 'node:crypto'
+import { z } from 'zod'
 import type { App } from 'kernel'
 import { runAgentSession } from '../../agent/main/run-session'
 import { createAgentRuntime } from '../../agent/main/runtime'
@@ -10,6 +11,10 @@ import type { SessionResource } from '../../../main/utils/session-resource'
 import { appendToList } from '../utils/frontmatter'
 import { contextRollover } from './context-rollover'
 import workflowPrompt from './prompt.md?raw'
+
+const verdictSchema = z.object({ verdict: z.enum(['schedule', 'terminate']) })
+const verdictOutput = Output.json()
+export type Verdict = z.infer<typeof verdictSchema>['verdict']
 
 async function destroySessionResources(app: App, sessionId: string): Promise<void> {
   const results = await Promise.allSettled(
@@ -32,7 +37,7 @@ export interface ExecInput {
   onChunk?: (chunk: UIMessageChunk) => void
 }
 
-export async function exec(input: ExecInput): Promise<void> {
+export async function exec(input: ExecInput): Promise<Verdict> {
   const sessionId = randomUUID()
   const sessions = createSessionStore(larifyPath('sessions', 'background'))
   const messages: UIMessage[] = [
@@ -58,12 +63,15 @@ export async function exec(input: ExecInput): Promise<void> {
       messages,
       {
         ...runtime,
+        output: verdictOutput,
         abortSignal: input.signal,
         prepareStep: contextRollover(modelContextWindows[input.modelConfig.modelId].rollover)
       },
       input.onChunk
     )
-    await sessions.saveSession(sessionId, await run.messages, input.cwd)
+    const completedMessages = await run.messages
+    await sessions.saveSession(sessionId, completedMessages, input.cwd)
+    return verdictSchema.parse(await run.result.output).verdict
   } finally {
     await destroySessionResources(input.app, sessionId)
   }

@@ -83,7 +83,7 @@ function input(taskFile: string): ExecInput {
 beforeEach(() => {
   vi.clearAllMocks()
   app.getAll.mockReturnValue([])
-  mocks.runAgent.mockReturnValue({})
+  mocks.runAgent.mockReturnValue({ output: Promise.resolve({ verdict: 'schedule' }) })
   mocks.registry.activeToolNames.mockReturnValue(['agent_list_toolkit_tools'])
   mocks.registry.toolSet.mockReturnValue({ test_tool: {} })
   mocks.createToolRegistry.mockReturnValue(mocks.registry)
@@ -100,13 +100,13 @@ describe('nest loop exec', () => {
     expect(get(taskFile, 'sessions')).toBeUndefined()
   })
 
-  it.each(['in_progress', 'completed'])('does not infer a %s task outcome', async (status) => {
+  it.each(['in_progress', 'completed'])('returns the verdict for a %s task', async (status) => {
     const taskFile = task(join(root, status, 'task.md'), status)
 
-    await expect(exec(input(taskFile))).resolves.toBeUndefined()
+    await expect(exec(input(taskFile))).resolves.toBe('schedule')
   })
 
-  it('uses an independent background session and no structured output', async () => {
+  it('uses an independent background session and structured JSON output', async () => {
     const taskFile = task(join(root, 'runtime', 'task.md'), 'completed')
 
     await exec(input(taskFile))
@@ -119,10 +119,10 @@ describe('nest loop exec', () => {
     expect(options).toEqual(
       expect.objectContaining({
         system: 'system prompt',
-        prepareStep: expect.any(Function)
+        prepareStep: expect.any(Function),
+        output: expect.anything()
       })
     )
-    expect(options).not.toHaveProperty('output')
     expect(mocks.buildSystemPrompt).toHaveBeenCalledWith(
       mocks.registry,
       'D:\\workspace',
@@ -130,6 +130,13 @@ describe('nest loop exec', () => {
       expect.stringContaining('phase = Explore')
     )
     expect(get(taskFile, 'sessions')).toEqual([expect.any(String)])
+  })
+
+  it('rejects an invalid verdict', async () => {
+    const taskFile = task(join(root, 'invalid', 'task.md'), 'in_progress')
+    mocks.runAgent.mockReturnValue({ output: Promise.resolve({ verdict: 'continue' }) })
+
+    await expect(exec(input(taskFile))).rejects.toThrow()
   })
 
   it('destroys resources owned by the background session', async () => {

@@ -4,7 +4,7 @@ import type { BrowserState } from "../shared/types"
 import { BrowserTab } from "./tab"
 import { Recorder } from "./recorder"
 
-const PARTITION = "persist:larify-browser"
+export const BROWSER_PARTITION = "persist:larify-browser"
 const HOST_POSITION = { x: -3000, y: -3000 }
 
 export class BrowserTabManager {
@@ -58,7 +58,7 @@ export class BrowserTabManager {
 
   createTab(url?: string): number {
     if (this.destroying) throw new Error("browser tab manager is destroyed")
-    const tab = new BrowserTab(this.nextId++, PARTITION)
+    const tab = new BrowserTab(this.nextId++, BROWSER_PARTITION)
     tab.bindChange(() => this.emit())
     tab.view.webContents.setWindowOpenHandler((details) => {
       if (!this.destroying) this.createTab(details.url || undefined)
@@ -74,7 +74,7 @@ export class BrowserTabManager {
 
   async withTemporaryTab<T>(url: string, callback: (tab: BrowserTab) => Promise<T>): Promise<T> {
     if (this.destroying) throw new Error("browser tab manager is destroyed")
-    const tab = new BrowserTab(this.nextTemporaryId--, PARTITION)
+    const tab = new BrowserTab(this.nextTemporaryId--, BROWSER_PARTITION)
     tab.view.webContents.setWindowOpenHandler(() => ({ action: "deny" }))
     const operation = this.runTemporaryTab(tab, url, callback)
     this.temporaryOperations.add(operation)

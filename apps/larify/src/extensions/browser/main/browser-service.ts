@@ -1,9 +1,11 @@
-import type { BrowserWindow, Rectangle } from "electron"
+import { session, type BrowserWindow, type Rectangle } from "electron"
 import { addListener, type Listener } from "../../../main/utils/listener"
+import { prepareResponseOutput, type ToolPayload } from "../../../main/utils/tool-output"
 import { SessionScopedManagers } from "../../../main/utils/session-scoped-managers"
 import type { BrowserState } from "../shared/types"
-import { BrowserTabManager } from "./tab-manager"
+import { BROWSER_PARTITION, BrowserTabManager } from "./tab-manager"
 import type { BrowserTab } from "./tab"
+import { isText } from "./content-type"
 
 export class BrowserService {
   private readonly managers = new SessionScopedManagers(
@@ -40,6 +42,12 @@ export class BrowserService {
     callback: (tab: BrowserTab) => Promise<T>
   ): Promise<T> {
     return this.manager(sessionId).withTemporaryTab(url, callback)
+  }
+
+  async readText(url: string, signal?: AbortSignal): Promise<ToolPayload | undefined> {
+    const response = await session.fromPartition(BROWSER_PARTITION).fetch(url, { signal })
+    if (!response.ok || !isText(response.headers.get("content-type"))) return
+    return prepareResponseOutput(response)
   }
 
   ensureTab(sessionId: string): void {

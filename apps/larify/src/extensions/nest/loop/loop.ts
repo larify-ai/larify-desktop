@@ -1,9 +1,10 @@
 import type { App } from 'kernel'
 import type { UIMessageChunk } from 'ai'
-import { get, set } from '../utils/frontmatter'
+import { get } from '../utils/frontmatter'
 import { childTaskFiles } from '../utils/task'
 import { exec } from './exec'
 import type { AgentModelConfig } from '../../agent/shared/model'
+import { VerdictNotAcceptedError } from './verdict'
 
 const MAX_ATTEMPTS = 3
 
@@ -13,14 +14,11 @@ export interface LoopInput {
   rootTaskFile: string
   modelConfig: AgentModelConfig
   signal?: AbortSignal
-  log?: (message: string) => void
-  onChunk?: (chunk: UIMessageChunk) => void
+  onChunk?: (taskFile: string, chunk: UIMessageChunk) => void
 }
 
 export async function runLoop(input: LoopInput): Promise<void> {
-  const log = input.log ?? (() => undefined)
-
-  async function execute(taskFile: string) {
+  async function execute(taskFile: string): Promise<void> {
     for (let attempt = 1; ; attempt++) {
       try {
         return await exec({
@@ -29,11 +27,17 @@ export async function runLoop(input: LoopInput): Promise<void> {
           taskFile,
           modelConfig: input.modelConfig,
           signal: input.signal,
-          onChunk: input.onChunk,
+          onChunk: input.onChunk && ((chunk) => input.onChunk?.(taskFile, chunk)),
           prompt: `Follow the workflow for the current task: ${taskFile}`
         })
       } catch (error) {
-        if (input.signal?.aborted || attempt === MAX_ATTEMPTS) throw error
+        if (
+          input.signal?.aborted ||
+          error instanceof VerdictNotAcceptedError ||
+          attempt === MAX_ATTEMPTS
+        ) {
+          throw error
+        }
       }
     }
   }
@@ -45,22 +49,13 @@ export async function runLoop(input: LoopInput): Promise<void> {
       )
 
       if (children.length > 0) {
-        for (const child of children) await runTask(child)
+        await Promise.all(children.map(runTask))
         continue
       }
 
-      log(`execute ${taskFile}`)
-      const verdict = await execute(taskFile)
-      const unfinished = childTaskFiles(taskFile).some(
-        (file) => get(file, 'status') !== 'completed'
-      )
-      if (verdict === 'terminate' && !unfinished) set(taskFile, 'status', 'completed')
-      const sessions = get(taskFile, 'sessions')
-      const session = Array.isArray(sessions) ? sessions.at(-1) : undefined
-      log(`executed ${taskFile}${session ? ` session ${session}` : ''}`)
+      await execute(taskFile)
     }
   }
 
   await runTask(input.rootTaskFile)
-  log('done')
 }

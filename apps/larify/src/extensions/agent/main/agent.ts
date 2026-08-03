@@ -8,6 +8,7 @@ import {
   type LanguageModelMiddleware,
   type ModelMessage,
   type PrepareStepFunction,
+  type StopCondition,
   type ToolSet,
   type UIMessageChunk
 } from 'ai'
@@ -43,6 +44,7 @@ export function runAgent<OUTPUT extends AgentOutput = AgentOutput>(opts: {
   system?: string
   deepseekOptions?: DeepSeekLanguageModelOptions
   prepareStep?: PrepareStepFunction<ToolSet, Record<string, never>>
+  stopWhen?: StopCondition<ToolSet, Record<string, never>>
 }): ReturnType<typeof streamText<ToolSet, Record<string, never>, OUTPUT>> {
   const {
     messages,
@@ -53,7 +55,8 @@ export function runAgent<OUTPUT extends AgentOutput = AgentOutput>(opts: {
     system,
     output,
     deepseekOptions,
-    prepareStep
+    prepareStep,
+    stopWhen
   } = opts
   const model = wrapLanguageModel({
     model: opts.model ?? createModel(),
@@ -71,7 +74,7 @@ export function runAgent<OUTPUT extends AgentOutput = AgentOutput>(opts: {
       delayInMs: 20,
       chunking: new Intl.Segmenter('zh', { granularity: 'word' })
     }),
-    stopWhen: isLoopFinished(),
+    stopWhen: stopWhen ?? isLoopFinished(),
     prepareStep,
     abortSignal
   })

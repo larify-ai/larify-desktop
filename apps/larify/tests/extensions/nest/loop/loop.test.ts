@@ -3,6 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { set } from '../../../../src/extensions/nest/utils/frontmatter'
+import { VerdictNotAcceptedError } from '../../../../src/extensions/nest/loop/verdict'
 
 const mocks = vi.hoisted(() => ({
   exec: vi.fn()
@@ -56,20 +57,33 @@ describe('nest loop', () => {
     )
   })
 
-  it('runs children sequentially', async () => {
-    const rootTask = task(join(root, 'sequential', 'task.md'))
-    const first = task(join(root, 'sequential', 'first', 'task.md'))
-    const second = task(join(root, 'sequential', 'second', 'task.md'))
+  it('runs children in parallel', async () => {
+    const rootTask = task(join(root, 'parallel', 'task.md'))
+    const first = task(join(root, 'parallel', 'first', 'task.md'))
+    const second = task(join(root, 'parallel', 'second', 'task.md'))
     const order: string[] = []
-    mocks.exec.mockImplementation(async ({ taskFile }: { taskFile: string }) => {
-      order.push(taskFile)
-      set(taskFile, 'status', 'completed')
-      return 'terminate'
-    })
+    const chunks: string[] = []
+    let started = 0
+    let release!: () => void
+    const ready = new Promise<void>((resolve) => (release = resolve))
+    mocks.exec.mockImplementation(
+      async ({ taskFile, onChunk }: { taskFile: string; onChunk?: (chunk: never) => void }) => {
+        order.push(taskFile)
+        onChunk?.({} as never)
+        if (taskFile !== rootTask) {
+          started++
+          if (started === 2) release()
+          await ready
+        }
+        set(taskFile, 'status', 'completed')
+      }
+    )
 
-    await runLoop(input(rootTask))
+    await runLoop({ ...input(rootTask), onChunk: (taskFile) => chunks.push(taskFile) })
 
+    expect(started).toBe(2)
     expect(order).toEqual([first, second, rootTask])
+    expect(chunks).toEqual([first, second, rootTask])
   })
 
   it('does not terminate a task with an unfinished child', async () => {
@@ -78,8 +92,11 @@ describe('nest loop', () => {
     const order: string[] = []
     mocks.exec.mockImplementation(async ({ taskFile }: { taskFile: string }) => {
       order.push(taskFile)
-      if (taskFile === rootTask && order.length === 1) task(childTask)
-      return 'terminate'
+      if (taskFile === rootTask && order.length === 1) {
+        task(childTask)
+      } else {
+        set(taskFile, 'status', 'completed')
+      }
     })
 
     await runLoop(input(rootTask))
@@ -97,18 +114,23 @@ describe('nest loop', () => {
     expect(mocks.exec).toHaveBeenCalledTimes(3)
   })
 
-  it('retries the current task after a failure', async () => {
+  it('retries the current task after a temporary failure', async () => {
     const rootTask = task(join(root, 'retry', 'task.md'))
     mocks.exec
       .mockRejectedValueOnce(new Error('temporary failure'))
-      .mockImplementationOnce(async () => {
-        set(rootTask, 'status', 'completed')
-        return 'terminate'
-      })
+      .mockImplementationOnce(async () => set(rootTask, 'status', 'completed'))
 
     await expect(runLoop(input(rootTask))).resolves.toBeUndefined()
-
     expect(mocks.exec).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not restart after verdict retries are exhausted', async () => {
+    const rootTask = task(join(root, 'verdict-failure', 'task.md'))
+    const error = new VerdictNotAcceptedError('missing verdict')
+    mocks.exec.mockRejectedValue(error)
+
+    await expect(runLoop(input(rootTask))).rejects.toBe(error)
+    expect(mocks.exec).toHaveBeenCalledOnce()
   })
 
   it('does not retry after cancellation', async () => {

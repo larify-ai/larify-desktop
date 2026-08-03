@@ -24,9 +24,9 @@ Append the proposed critical tasks with references as a new event in the current
 
 ## Schedule the Next Task
 
-Among the proposed tasks, schedule the highest-priority one — priority being how much it maximizes the rate of reducing uncertainty, complexity, and cost / risk. Only for the scheduled task, create its sub-directory and `task.md`, set its status to `in_progress`, and append its `Brief` with references as the first event, following the `task-representation` skill.
+Among the proposed tasks, schedule the highest-priority one — priority being how much it maximizes the rate of reducing uncertainty, complexity, and cost / risk. Schedule multiple tasks only when they can run independently in parallel. Only for scheduled tasks, create their sub-directories and `task.md` files, set their status to `in_progress`, and append their `Brief` with references as the first event, following the `task-representation` skill.
 
 ## Review the Verdict
 
-- If any critical task is proposed, confirm that the scheduled task has a `task.md`, then stop the loop and return `{ "verdict": "schedule" }`.
-- Otherwise, proceed to the Reflect phase.
+- If critical tasks can be proposed recursively or any existing critical task remains incomplete, confirm that each scheduled task has a `task.md`, then immediately call `nest_submit_verdict` with `{ "verdict": "schedule" }`.
+- If no critical task can be proposed recursively and no existing critical task remains incomplete, proceed to the Reflect phase.

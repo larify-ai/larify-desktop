@@ -10,14 +10,6 @@ eager: true
 
 Gather and cross-validate sufficient information following the `grounding-guidelines` skill.
 
-## Evaluate Context Quality
-
-Evaluate the context representation against the quality criteria defined in the `context-representation` skill.
-
-## Analyze Quality Issues
-
-Analyze the root causes of identified issues and determine whether to explore, verify, or critique further.
-
 ## Debrief the Experience
 
 Debrief what works and why it works, what fails and why it fails, and the resulting reusable best practices and lessons learned.
@@ -26,11 +18,19 @@ Debrief what works and why it works, what fails and why it fails, and the result
 
 Preserve everything learned by reorganizing and committing the context representation following the `context-representation` skill.
 
+## Evaluate Context Quality
+
+Evaluate the context representation against the quality criteria defined in the `context-representation` skill.
+
+## Analyze Quality Issues
+
+Analyze the root causes of identified issues and determine whether to explore or critique further.
+
 ## Append the Event
 
 Append the debrief with references as a new event in the current task's `task.md`, following the `task-representation` skill.
 
 ## Review the Verdict
 
-- If the context quality evaluation identifies any issues, proceed to Explore, Verify, or Critique according to the root causes.
-- Otherwise, append the progress with references as a new event to the parent task's `task.md` if exists, then stop the loop and return `{ "verdict": "terminate" }`.
+- If the context quality evaluation identifies any issues, proceed to Explore or Critique according to the root causes.
+- If the context quality evaluation identifies no issues, append the progress with references as a new event to the parent task's `task.md` if one exists, set the current task's status to `completed`, then call `nest_submit_verdict` with `{ "verdict": "terminate" }`.

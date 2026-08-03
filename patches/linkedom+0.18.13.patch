@@ -1,0 +1,38 @@
+diff --git a/node_modules/linkedom/cjs/cached.js b/node_modules/linkedom/cjs/cached.js
+index a425a39..680e805 100644
+--- a/node_modules/linkedom/cjs/cached.js
++++ b/node_modules/linkedom/cjs/cached.js
+@@ -124,14 +124,6 @@ defineProperties(ParentNode.prototype, {
+ });
+ 
+ 
+-// NonElementParentNode
+-defineProperties(NonElementParentNode.prototype, {
+-  getElementById: {value(id) {
+-    return this.querySelector('#' + id);
+-  }}
+-});
+-
+-
+ // HTMLDocument
+ const {title: {
+   get: getTitle,
+diff --git a/node_modules/linkedom/esm/cached.js b/node_modules/linkedom/esm/cached.js
+index ae33a8a..846979a 100644
+--- a/node_modules/linkedom/esm/cached.js
++++ b/node_modules/linkedom/esm/cached.js
+@@ -123,14 +123,6 @@ defineProperties(ParentNode.prototype, {
+ });
+ 
+ 
+-// NonElementParentNode
+-defineProperties(NonElementParentNode.prototype, {
+-  getElementById: {value(id) {
+-    return this.querySelector('#' + id);
+-  }}
+-});
+-
+-
+ // HTMLDocument
+ const {title: {
+   get: getTitle,

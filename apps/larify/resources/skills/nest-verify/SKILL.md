@@ -24,5 +24,5 @@ Append the progress with references as a new event in the current task's `task.m
 
 ## Review the Verdict
 
-- If any issue is found, analyze its root cause, resolve it, then repeat the Verify phase.
-- Otherwise, proceed to the Critique phase.
+- If any issue is identified, analyze its root cause, resolve it, then repeat the Verify phase.
+- If no issue is identified, proceed to the Critique phase.

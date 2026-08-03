@@ -23,5 +23,8 @@ describe('context rollover', () => {
       ]
     })
     expect(await prepareStep(options(900))).toBeUndefined()
+    expect(CONTEXT_ROLLOVER_PROMPT).toContain(
+      'call `nest_submit_verdict` with `{ "verdict": "schedule" }`'
+    )
   })
 })

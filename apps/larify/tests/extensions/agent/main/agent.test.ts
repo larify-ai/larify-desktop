@@ -150,6 +150,82 @@ describe("runAgentSession", () => {
       expect.arrayContaining(["tool-input-available", "tool-output-available", "text-delta"])
     )
   })
+
+  it("preserves tool error messages", async () => {
+    const model = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: convertArrayToReadableStream([
+          { type: "stream-start", warnings: [] },
+          {
+            type: "tool-call",
+            toolCallId: "call-1",
+            toolName: "fail",
+            input: "{}"
+          },
+          { type: "finish", finishReason: "tool-calls", usage: USAGE }
+        ])
+      })
+    })
+    const errors: string[] = []
+    const session = await runAgentSession(
+      [{ id: "user-1", role: "user", parts: [{ type: "text", text: "go" }] }],
+      {
+        tools: {
+          fail: {
+            description: "fail",
+            inputSchema: z.object({}),
+            execute: async () => {
+              throw new Error("navigation failed: ERR_CONNECTION_RESET")
+            }
+          }
+        },
+        activeTools: ["fail"],
+        toolsContext: {},
+        model,
+        stopWhen: () => true
+      },
+      (chunk) => {
+        if (chunk.type === "tool-output-error") errors.push(chunk.errorText)
+      }
+    )
+
+    await session.messages
+    expect(errors).toEqual(["navigation failed: ERR_CONNECTION_RESET"])
+  })
+
+  it("keeps the latest partial message when streaming is interrupted", async () => {
+    const parts = [
+      { type: "stream-start" as const, warnings: [] },
+      { type: "text-start" as const, id: "0" },
+      { type: "text-delta" as const, id: "0", delta: "partial response" }
+    ]
+    const model = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: new ReadableStream({
+          pull(controller) {
+            const part = parts.shift()
+            if (part) controller.enqueue(part)
+            else controller.error(new Error("interrupted"))
+          }
+        })
+      })
+    })
+    const original: UIMessage[] = [
+      { id: "user-1", role: "user", parts: [{ type: "text", text: "go" }] }
+    ]
+    const session = await runAgentSession(
+      original,
+      {
+        tools: {},
+        activeTools: [],
+        toolsContext: {},
+        model
+      }
+    )
+
+    await expect(session.messages).rejects.toThrow("interrupted")
+    expect(textOf(session.latest().at(-1)!)).toBe("partial response")
+  })
 })
 
 describe("prompt-cache middleware", () => {

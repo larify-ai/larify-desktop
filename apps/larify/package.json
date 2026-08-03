@@ -70,7 +70,7 @@
     "d3-selection": "^3.0.0",
     "d3-zoom": "^3.0.0",
     "date-fns": "^4.4.0",
-    "defuddle": "^0.19.1",
+    "defuddle": "0.19.2",
     "diff": "^9.0.0",
     "dugite": "^3.2.2",
     "gray-matter": "^4.0.3",

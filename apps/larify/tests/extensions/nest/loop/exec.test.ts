@@ -2,6 +2,7 @@ import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
+import type { Tool } from 'ai'
 
 const mocks = vi.hoisted(() => {
   const registry = {
@@ -25,10 +26,20 @@ vi.mock('../../../../src/extensions/agent/main/agent', () => ({
 }))
 
 vi.mock('../../../../src/extensions/agent/main/run-session', () => ({
-  runAgentSession: async (messages: unknown, options: unknown) => ({
-    result: mocks.runAgent({ ...(options as object), messages }),
-    messages: Promise.resolve(messages)
-  })
+  runAgentSession: async (
+    messages: unknown,
+    options: { tools: Record<string, Tool>; [key: string]: unknown }
+  ) => {
+    const result = mocks.runAgent({ ...options, messages })
+    const output = await result.output
+    if (output) await options.tools.nest_submit_verdict.execute?.(output, {} as never)
+    const latest = result.latestMessages ?? messages
+    return {
+      result,
+      messages: result.error ? Promise.reject(result.error) : Promise.resolve(latest),
+      latest: () => latest
+    }
+  }
 }))
 
 vi.mock('../../../../src/extensions/agent/main/session-store', () => ({
@@ -83,7 +94,7 @@ function input(taskFile: string): ExecInput {
 beforeEach(() => {
   vi.clearAllMocks()
   app.getAll.mockReturnValue([])
-  mocks.runAgent.mockReturnValue({ output: Promise.resolve({ verdict: 'schedule' }) })
+  mocks.runAgent.mockReturnValue({ output: Promise.resolve({ verdict: 'terminate' }) })
   mocks.registry.activeToolNames.mockReturnValue(['agent_list_toolkit_tools'])
   mocks.registry.toolSet.mockReturnValue({ test_tool: {} })
   mocks.createToolRegistry.mockReturnValue(mocks.registry)
@@ -100,13 +111,30 @@ describe('nest loop exec', () => {
     expect(get(taskFile, 'sessions')).toBeUndefined()
   })
 
-  it.each(['in_progress', 'completed'])('returns the verdict for a %s task', async (status) => {
-    const taskFile = task(join(root, status, 'task.md'), status)
+  it('accepts terminate for a completed task', async () => {
+    const taskFile = task(join(root, 'completed', 'task.md'), 'completed')
 
-    await expect(exec(input(taskFile))).resolves.toBe('schedule')
+    await expect(exec(input(taskFile))).resolves.toBeUndefined()
+    expect(get(taskFile, 'status')).toBe('completed')
   })
 
-  it('uses an independent background session and structured JSON output', async () => {
+  it('saves partial messages when the user interrupts the run', async () => {
+    const taskFile = task(join(root, 'interrupted', 'task.md'), 'in_progress')
+    const partial = [
+      { id: 'assistant', role: 'assistant', parts: [{ type: 'text', text: 'partial' }] }
+    ]
+    mocks.runAgent.mockReturnValue({
+      output: Promise.resolve(undefined),
+      latestMessages: partial,
+      error: new Error('aborted')
+    })
+
+    await expect(exec(input(taskFile))).rejects.toThrow('aborted')
+
+    expect(mocks.saveSession).toHaveBeenLastCalledWith(expect.any(String), partial, 'D:\\workspace')
+  })
+
+  it('uses an independent background session and a structured output tool', async () => {
     const taskFile = task(join(root, 'runtime', 'task.md'), 'completed')
 
     await exec(input(taskFile))
@@ -120,7 +148,9 @@ describe('nest loop exec', () => {
       expect.objectContaining({
         system: 'system prompt',
         prepareStep: expect.any(Function),
-        output: expect.anything()
+        stopWhen: expect.any(Function),
+        tools: expect.objectContaining({ nest_submit_verdict: expect.anything() }),
+        activeTools: expect.arrayContaining(['nest_submit_verdict'])
       })
     )
     expect(mocks.buildSystemPrompt).toHaveBeenCalledWith(
@@ -132,11 +162,20 @@ describe('nest loop exec', () => {
     expect(get(taskFile, 'sessions')).toEqual([expect.any(String)])
   })
 
-  it('rejects an invalid verdict', async () => {
-    const taskFile = task(join(root, 'invalid', 'task.md'), 'in_progress')
-    mocks.runAgent.mockReturnValue({ output: Promise.resolve({ verdict: 'continue' }) })
+  it('retries when no verdict is accepted', async () => {
+    const taskFile = task(join(root, 'missing-output', 'task.md'), 'in_progress')
+    mocks.runAgent.mockReturnValue({ output: Promise.resolve(undefined) })
 
-    await expect(exec(input(taskFile))).rejects.toThrow()
+    await expect(exec(input(taskFile))).rejects.toThrow(
+      'Failed to receive an accepted nest_submit_verdict call.'
+    )
+    expect(mocks.runAgent).toHaveBeenCalledTimes(3)
+    expect(mocks.saveSession).toHaveBeenCalledTimes(6)
+    const messages = mocks.runAgent.mock.calls[1][0].messages
+    expect(messages.at(-1).parts[0].text).toContain('You MUST call nest_submit_verdict')
+    expect(mocks.runAgent.mock.calls[0][0].prepareStep).toEqual(expect.any(Function))
+    expect(mocks.runAgent.mock.calls[1][0].prepareStep).toBeUndefined()
+    expect(mocks.runAgent.mock.calls[2][0].prepareStep).toBeUndefined()
   })
 
   it('destroys resources owned by the background session', async () => {

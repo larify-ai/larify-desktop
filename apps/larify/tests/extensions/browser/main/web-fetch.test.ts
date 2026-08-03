@@ -59,6 +59,63 @@ describe('web fetch', () => {
     )
   })
 
+  it('falls back to a textual response when browser reading fails', async () => {
+    const tab = {
+      waitForNavigation: vi.fn(async () => undefined),
+      read: vi.fn(async () => {
+        throw new Error('CDP command timed out after 30s: Runtime.evaluate')
+      })
+    }
+    const service = {
+      withTemporaryTab: vi.fn(
+        async (
+          _sessionId: string,
+          _url: string,
+          callback: (temporaryTab: BrowserTab) => Promise<unknown>
+        ) => callback(tab as unknown as BrowserTab)
+      ),
+      readText: vi.fn(async () => ({ inline: 'const answer = 42' }))
+    } as unknown as BrowserService
+
+    await expect(
+      executeWebFetch(
+        service,
+        { url: 'https://raw.githubusercontent.com/example/source.ts' },
+        { sessionId: 'session-1', cwd: 'D:\\Workspace' }
+      )
+    ).resolves.toEqual({
+      url: 'https://raw.githubusercontent.com/example/source.ts',
+      content: 'const answer = 42'
+    })
+  })
+
+  it('preserves the browser error when the response is not textual', async () => {
+    const service = {
+      withTemporaryTab: vi.fn(
+        async (
+          _sessionId: string,
+          _url: string,
+          callback: (temporaryTab: BrowserTab) => Promise<unknown>
+        ) =>
+          callback({
+            waitForNavigation: vi.fn(async () => undefined),
+            read: vi.fn(async () => {
+              throw new Error('browser read failed')
+            })
+          } as unknown as BrowserTab)
+      ),
+      readText: vi.fn(async () => undefined)
+    } as unknown as BrowserService
+
+    await expect(
+      executeWebFetch(
+        service,
+        { url: 'https://example.com/file.pdf' },
+        { sessionId: 'session-1', cwd: 'D:\\Workspace' }
+      )
+    ).rejects.toThrow('browser read failed')
+  })
+
   it('reads available content when the full page load times out', async () => {
     const tab = {
       waitForNavigation: vi.fn(async () => {
@@ -98,9 +155,7 @@ describe('web fetch', () => {
       waitForNavigation: vi
         .fn()
         .mockRejectedValueOnce(
-          new Error(
-            'navigation failed (-15): ERR_SOCKET_NOT_CONNECTED: https://example.com/docs'
-          )
+          new Error('navigation failed (-15): ERR_SOCKET_NOT_CONNECTED: https://example.com/docs')
         )
         .mockResolvedValueOnce(undefined),
       navigate: vi.fn(() => true),

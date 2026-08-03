@@ -40,6 +40,7 @@ description: <what it covers and when to use it>
 - Index each domain's direct subdomains with links in its `index.md`.
 - Index each domain's direct subjects with links in its `index.md`.
 - Express a relation as an inline Markdown link to a relative path.
+- Cite existing `<cwd>` contents outside `.larify/` from related subjects.
 - Cite an external source with an inline Markdown link to its URL.
 - State the relation's meaning in the surrounding natural language.
 
@@ -48,7 +49,6 @@ description: <what it covers and when to use it>
 - Navigate vertically from upper to lower through indexes.
 - Navigate horizontally through related links and backlinks.
 - Keep relevant subjects reachable through few meaningful hops.
-- Link `<cwd>` contents outside `.larify/` from related subjects.
 
 # Quality Criteria
 

@@ -1,6 +1,5 @@
-import { Output, type UIMessage, type UIMessageChunk } from 'ai'
+import { type UIMessage, type UIMessageChunk } from 'ai'
 import { randomUUID } from 'node:crypto'
-import { z } from 'zod'
 import type { App } from 'kernel'
 import { runAgentSession } from '../../agent/main/run-session'
 import { createAgentRuntime } from '../../agent/main/runtime'
@@ -10,11 +9,18 @@ import { larifyPath } from '../../../main/utils/app-paths'
 import type { SessionResource } from '../../../main/utils/session-resource'
 import { appendToList } from '../utils/frontmatter'
 import { contextRollover } from './context-rollover'
+import { createVerdictTool, VERDICT_TOOL, VerdictNotAcceptedError } from './verdict'
 import workflowPrompt from './prompt.md?raw'
 
-const verdictSchema = z.object({ verdict: z.enum(['schedule', 'terminate']) })
-const verdictOutput = Output.json()
-export type Verdict = z.infer<typeof verdictSchema>['verdict']
+const MAX_VERDICT_ATTEMPTS = 3
+
+function userMessage(text: string): UIMessage {
+  return {
+    id: randomUUID(),
+    role: 'user',
+    parts: [{ type: 'text', text }]
+  }
+}
 
 async function destroySessionResources(app: App, sessionId: string): Promise<void> {
   const results = await Promise.allSettled(
@@ -37,16 +43,10 @@ export interface ExecInput {
   onChunk?: (chunk: UIMessageChunk) => void
 }
 
-export async function exec(input: ExecInput): Promise<Verdict> {
+export async function exec(input: ExecInput): Promise<void> {
   const sessionId = randomUUID()
   const sessions = createSessionStore(larifyPath('sessions', 'background'))
-  const messages: UIMessage[] = [
-    {
-      id: randomUUID(),
-      role: 'user',
-      parts: [{ type: 'text', text: input.prompt }]
-    }
-  ]
+  const messages = [userMessage(input.prompt)]
   await sessions.saveSession(sessionId, messages, input.cwd, [input.taskFile])
   appendToList(input.taskFile, 'sessions', sessionId)
 
@@ -59,19 +59,40 @@ export async function exec(input: ExecInput): Promise<Verdict> {
   })
 
   try {
-    const run = await runAgentSession(
-      messages,
-      {
-        ...runtime,
-        output: verdictOutput,
-        abortSignal: input.signal,
-        prepareStep: contextRollover(modelContextWindows[input.modelConfig.modelId].rollover)
-      },
-      input.onChunk
-    )
-    const completedMessages = await run.messages
-    await sessions.saveSession(sessionId, completedMessages, input.cwd)
-    return verdictSchema.parse(await run.result.output).verdict
+    const verdict = createVerdictTool(input.taskFile)
+    const options = {
+      ...runtime,
+      tools: { ...runtime.tools, [VERDICT_TOOL]: verdict.tool },
+      activeTools: [...runtime.activeTools, VERDICT_TOOL],
+      stopWhen: () => verdict.result() !== undefined,
+      abortSignal: input.signal
+    }
+    const prepareStep = contextRollover(modelContextWindows[input.modelConfig.modelId].rollover)
+    let currentMessages = messages
+
+    for (let attempt = 1; attempt <= MAX_VERDICT_ATTEMPTS; attempt++) {
+      const run = await runAgentSession(
+        currentMessages,
+        attempt === 1 ? { ...options, prepareStep } : options,
+        input.onChunk
+      )
+      try {
+        await run.messages
+      } finally {
+        currentMessages = run.latest()
+        await sessions.saveSession(sessionId, currentMessages, input.cwd)
+      }
+      if (verdict.result() !== undefined) return
+      if (attempt === MAX_VERDICT_ATTEMPTS) {
+        throw new VerdictNotAcceptedError(`Failed to receive an accepted ${VERDICT_TOOL} call.`)
+      }
+
+      currentMessages = [
+        ...currentMessages,
+        userMessage(`You MUST call ${VERDICT_TOOL} to complete the request. Call it now.`)
+      ]
+      await sessions.saveSession(sessionId, currentMessages, input.cwd)
+    }
   } finally {
     await destroySessionResources(input.app, sessionId)
   }

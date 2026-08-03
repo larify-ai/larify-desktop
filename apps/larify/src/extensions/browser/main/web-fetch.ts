@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { z } from 'zod'
-import { prepareToolOutput } from '../../../main/utils/tool-output'
+import { prepareToolOutput, type ToolPayload } from '../../../main/utils/tool-output'
 import { defineTool, type Toolkit, type ToolRunContext } from '../../../shared/tool'
 import type { BrowserService } from './browser-service'
 import type { BrowserTab } from './tab'
@@ -32,6 +32,10 @@ export function pageContentOutput(
   }
 }
 
+function textContentOutput(url: string, output: ToolPayload): Record<string, unknown> {
+  return 'inline' in output ? { url, content: output.inline } : { url, ...output }
+}
+
 export async function executeWebFetch(
   service: BrowserService,
   input: z.infer<typeof webFetchInputSchema>,
@@ -54,7 +58,10 @@ export async function executeWebFetch(
         navigationError = undefined
         break
       } catch (error) {
-        if (error instanceof Error && error.message.startsWith('navigation load event timed out after')) {
+        if (
+          error instanceof Error &&
+          error.message.startsWith('navigation load event timed out after')
+        ) {
           navigationError = error
           break
         }
@@ -69,7 +76,14 @@ export async function executeWebFetch(
         throw error
       }
     }
-    const page = await waitForOperationOrAbort(tab.read(), ctx.signal, 'Web fetch was cancelled.')
+    let page: Awaited<ReturnType<BrowserTab['read']>>
+    try {
+      page = await waitForOperationOrAbort(tab.read(), ctx.signal, 'Web fetch was cancelled.')
+    } catch (error) {
+      const output = await service.readText(url, ctx.signal).catch(() => undefined)
+      if (!output) throw error
+      return textContentOutput(url, output)
+    }
     if (navigationError && (!page.url || page.url === 'about:blank' || !page.content.trim())) {
       throw navigationError
     }

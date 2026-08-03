@@ -9,6 +9,7 @@ import { larifyPath } from '../../../main/utils/app-paths'
 import { runLoop } from './loop'
 
 const MAX_LOG_LENGTH = 100
+const MAX_ERROR_LENGTH = 500
 const consoleEncoding = (() => {
   if (process.platform !== 'win32') return 'utf8'
   const codePage = /\d+/.exec(execFileSync('chcp.com').toString())?.[0]
@@ -24,11 +25,11 @@ function append(current: string, delta: string): string {
   return (current + delta).slice(0, MAX_LOG_LENGTH + 1)
 }
 
-function display(value: unknown): string {
+function display(value: unknown, limit = MAX_LOG_LENGTH): string {
   const text = (typeof value === 'string' ? value : (JSON.stringify(value) ?? String(value)))
     .replace(/\s+/g, ' ')
     .trim()
-  return text.length > MAX_LOG_LENGTH ? `${text.slice(0, MAX_LOG_LENGTH)}...` : text
+  return text.length > limit ? `${text.slice(0, limit)}...` : text
 }
 
 function createPrinter(): (chunk: UIMessageChunk) => void {
@@ -67,18 +68,18 @@ function createPrinter(): (chunk: UIMessageChunk) => void {
         )
         break
       case 'tool-input-error':
-        print(`[tool error] ${chunk.toolName} ${display(chunk.errorText)}`)
+        print(`[tool error] ${chunk.toolName} ${display(chunk.errorText, MAX_ERROR_LENGTH)}`)
         break
       case 'tool-output-error':
         print(
-          `[tool error] ${tools.get(chunk.toolCallId) ?? chunk.toolCallId} ${display(chunk.errorText)}`
+          `[tool error] ${tools.get(chunk.toolCallId) ?? chunk.toolCallId} ${display(chunk.errorText, MAX_ERROR_LENGTH)}`
         )
         break
       case 'tool-output-denied':
         print(`[tool denied] ${tools.get(chunk.toolCallId) ?? chunk.toolCallId}`)
         break
       case 'error':
-        print(`[error] ${display(chunk.errorText)}`)
+        print(`[error] ${display(chunk.errorText, MAX_ERROR_LENGTH)}`)
     }
   }
 }
@@ -93,6 +94,7 @@ export async function runPlayground(app: App, taskFile: string): Promise<void> {
 
   const controller = new AbortController()
   const abort = (): void => controller.abort()
+  const printers = new Map<string, ReturnType<typeof createPrinter>>()
   process.once('SIGINT', abort)
 
   print(`[nest] workspace ${cwd}`)
@@ -103,8 +105,14 @@ export async function runPlayground(app: App, taskFile: string): Promise<void> {
       rootTaskFile: taskFile,
       modelConfig: defaultModelConfig,
       signal: controller.signal,
-      log: (message) => print(`[nest] ${display(message)}`),
-      onChunk: createPrinter()
+      onChunk: (taskFile, chunk) => {
+        let printer = printers.get(taskFile)
+        if (!printer) {
+          printer = createPrinter()
+          printers.set(taskFile, printer)
+        }
+        printer(chunk)
+      }
     })
   } finally {
     process.off('SIGINT', abort)

@@ -39,15 +39,14 @@ description: <what it covers and when to use it>
 
 - Index each domain's direct subdomains with links in its `index.md`.
 - Index each domain's direct subjects with links in its `index.md`.
-- Express a relation as an inline Markdown link to a relative path.
-- Cite existing `<cwd>` contents outside `.larify/` from related subjects.
-- Cite an external source with an inline Markdown link to its URL.
+- Express each relation through an inline Markdown link.
 - State the relation's meaning in the surrounding natural language.
+- Cite local sources by relative path and external sources by URL.
 
 # Navigable Small World
 
 - Navigate vertically from upper to lower through indexes.
-- Navigate horizontally through related links and backlinks.
+- Navigate horizontally between subjects through related links.
 - Keep relevant subjects reachable through few meaningful hops.
 
 # Quality Criteria
@@ -63,6 +62,9 @@ description: <what it covers and when to use it>
 - Commit context with its related repository changes.
 - Track large context assets through Git LFS.
 
-# Tips
+# Constraints
 
+- Represent everything learned in `<subject>.md`; only track task progress in `task.md`.
 - Use Chinese throughout, including directory names, file names, metadata, and content.
+- Keep `<subject>.md` self-contained.
+- Never cite `task.md` in `<subject>.md`.

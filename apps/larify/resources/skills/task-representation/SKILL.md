@@ -42,5 +42,5 @@ Append each event chronologically under `# Events`:
 
 ### References
 
-<links only to related documents under `<cwd>/.larify/` without backlinks to the `task.md` file>
+<links to related `<subject>.md` files under `<cwd>/.larify/`>
 ```

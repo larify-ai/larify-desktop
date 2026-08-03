@@ -16,7 +16,7 @@ Execute and verify the task using every available static and dynamic source and 
 
 ## Update Context Representation
 
-Preserve everything learned by reorganizing and committing the context representation following the `context-representation` skill.
+Reorganize and commit the context representation following the `context-representation` skill.
 
 ## Append the Event
 

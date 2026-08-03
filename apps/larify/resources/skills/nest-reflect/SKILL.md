@@ -16,7 +16,7 @@ Debrief what works and why it works, what fails and why it fails, and the result
 
 ## Update Context Representation
 
-Preserve everything learned by reorganizing and committing the context representation following the `context-representation` skill.
+Reorganize and commit the context representation following the `context-representation` skill.
 
 ## Evaluate Context Quality
 

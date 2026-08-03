@@ -12,7 +12,7 @@ Gather and cross-validate sufficient information following the `grounding-guidel
 
 ## Update Context Representation
 
-Preserve everything learned by reorganizing and committing the context representation following the `context-representation` skill.
+Reorganize and commit the context representation following the `context-representation` skill.
 
 ## Propose Critical Tasks Recursively
 

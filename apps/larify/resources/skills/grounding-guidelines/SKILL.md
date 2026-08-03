@@ -52,11 +52,6 @@ eager: true
 - states / values
 - ...
 
-# Ask the user for help
-
-- information only from the user
-- operations only by the user
-
 # Example
 
 Take a hypothesis about how the code behaves. Cross-validate it by every method: search online, use a browser, read the docs and the code, and ask the user — each forms a hypothesis of what it *should* do (static). Then instrument that path — add a trace log, attach a debug probe — and run it to observe what it *actually* does (dynamic): the data flow, the control flow, the runtime behavior, the states and outputs; the two can differ, and only the run is the ground truth. Recurse along the relations — what each step depends on (constraint), what it decomposes into (composition), what it generalizes to (abstraction) — gathering more at each until the hypothesis is grounded.

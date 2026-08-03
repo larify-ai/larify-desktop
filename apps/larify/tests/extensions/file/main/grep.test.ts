@@ -292,11 +292,13 @@ describe("grep", () => {
     expect(result).toContain("Search stopped")
   })
 
-  it("rejects when the path does not exist (stat ENOENT)", async () => {
+  it("returns the ENOENT error when the path does not exist", async () => {
     const root = await makeFixture()
     const missing = path.join(root, "does-not-exist")
 
-    await expect(callTool<string>(grepFilesTool, { pattern: "foo", path: missing })).rejects.toThrow()
+    const result = await callTool<string>(grepFilesTool, { pattern: "foo", path: missing })
+
+    expect(result).toMatch(/ENOENT/)
   })
 
   it("has no toModelOutput transform (returns a plain string)", () => {

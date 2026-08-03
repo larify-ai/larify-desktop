@@ -175,14 +175,14 @@ describe("ls", () => {
     ).rejects.toThrow("Path is not a directory")
   })
 
-  // 8. ENOENT (nonexistent path) rejects with the stat error.
-  it("rejects with an ENOENT error for a nonexistent path", async () => {
+  // 8. ENOENT (nonexistent path) is returned for the model to handle.
+  it("returns the ENOENT error for a nonexistent path", async () => {
     const root = await makeFixture()
     const missing = path.join(root, "does-not-exist")
 
-    await expect(
-      callTool<string>(lsTool, { path: missing }, { sessionId: freshSession() }),
-    ).rejects.toThrow(/ENOENT/)
+    const result = await callTool<string>(lsTool, { path: missing }, { sessionId: freshSession() })
+
+    expect(result).toMatch(/ENOENT/)
   })
 
   // 9. Dotfiles/hidden entries ARE included.

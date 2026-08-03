@@ -74,11 +74,6 @@ const extension: Extension = {
           const cwd = requestCwd || larifyWorkspacePath()
           app.emit("workspace:open", cwd)
           const config = isAgentModelConfig(modelConfig) ? modelConfig : defaultModelConfig
-          console.info("[agent:run:model]", {
-            runId,
-            modelId: config.modelId,
-            thinking: config.thinking,
-          })
           const reader = runAgentUIStream({
             messages: modelMessages,
             abortSignal: controller.signal,

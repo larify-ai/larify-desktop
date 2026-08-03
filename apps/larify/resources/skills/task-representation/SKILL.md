@@ -6,7 +6,7 @@ eager: true
 
 # Directory Structure
 
-Organize progress as a recursive hierarchy of tasks:
+Organize progress recursively into single-concern tasks following separation of concerns:
 
 ```
 ~/.larify/tasks/<task>/

@@ -24,4 +24,9 @@ Append the proposed exploratory tasks with references as a new event in the curr
 
 ## Schedule the Next Task
 
-Among the proposed tasks, schedule the highest-priority one — priority being how much it maximizes the rate of reducing uncertainty, complexity, and cost / risk. Schedule multiple tasks only when they can run independently in parallel. Only for scheduled tasks, create their sub-directories and `task.md` files, set their status to `in_progress`, and append their `Brief` with references as the first event, following the `task-representation` skill.
+Among the proposed tasks, schedule the highest-priority one — priority being how much it maximizes the rate of reducing uncertainty, complexity, and cost / risk. Only for the scheduled task, create its sub-directory and `task.md` under the current task's directory, set its status to `in_progress`, and append its `Brief` with references as the first event, following the `task-representation` skill.
+
+## Review the Verdict
+
+- If a task is scheduled, confirm that it has a `task.md` under the current task's directory.
+- If no task is scheduled, confirm that no new `task.md` is created under the current task's directory.

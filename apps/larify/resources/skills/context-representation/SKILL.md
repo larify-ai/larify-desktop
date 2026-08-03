@@ -59,7 +59,7 @@ description: <what it covers and when to use it>
 # Version Control
 
 - Track context in the current Git repository.
-- Commit context with its related repository changes.
+- Commit every context update as a checkpoint.
 - Track large context assets through Git LFS.
 
 # Constraints

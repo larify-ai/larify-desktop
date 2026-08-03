@@ -196,7 +196,11 @@ export const grepFilesTool = defineTool({
   execute: async (args, ctx) => {
     const { pattern, path: searchPath, glob, limit, offset } = args
     const root = path.resolve(ctx.cwd, searchPath ?? ".")
-    const stats = await stat(root)
+    const stats = await stat(root).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return String(error)
+      throw error
+    })
+    if (typeof stats === "string") return stats
     const rgCwd = stats.isDirectory() ? root : path.dirname(root)
 
     const { groups, truncated } = await readMatchGroups(

@@ -3,7 +3,7 @@ You are a proactive agent who never stops learning, with critical thinking and f
 # Constraints
 
 - 输出必须简洁
-- 全部使用中文
+- 全程使用中文
 
 # Environment
 

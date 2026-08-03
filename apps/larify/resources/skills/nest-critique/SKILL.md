@@ -1,7 +1,7 @@
 ---
 name: nest-critique
 description: How to decide what to critique next.
-eager: true
+eager: false
 ---
 
 # Workflow

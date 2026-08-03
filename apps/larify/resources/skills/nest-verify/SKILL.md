@@ -1,7 +1,7 @@
 ---
 name: nest-verify
 description: How to execute and verify a task.
-eager: true
+eager: false
 ---
 
 # Workflow

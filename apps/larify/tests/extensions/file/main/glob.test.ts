@@ -71,6 +71,15 @@ describe("glob", () => {
     )
   })
 
+  it("returns the ENOENT error when the path does not exist", async () => {
+    const root = await makeFixture()
+    const missing = path.join(root, "does-not-exist")
+
+    const result = await callTool<string>(globFilesTool, { pattern: "**/*", path: missing })
+
+    expect(result).toMatch(/ENOENT/)
+  })
+
   // --- added cases ---
 
   it("uses ctx.cwd for the search root when path is omitted (pattern only)", async () => {

@@ -32,3 +32,7 @@ The following questions define how to inquire into any subject recursively at an
 - **Cost / Risk**
   - reduce: Inquire into the question "what cost or risk does it reduce, and why this reduction rather than another?"
   - increase: Inquire into the question "what cost or risk does it increase, and why this increase rather than another?"
+
+# Recursion Principle
+
+Apply every inquiry recursively — for example, causes of causes, prerequisites of prerequisites, decompositions of decompositions, and further reductions in uncertainty, complexity, and cost / risk — until reaching first principles or further improvement is impossible.

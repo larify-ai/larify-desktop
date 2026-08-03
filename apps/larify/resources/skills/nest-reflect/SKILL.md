@@ -1,7 +1,7 @@
 ---
 name: nest-reflect
 description: How to reflect to perfect the context representation.
-eager: true
+eager: false
 ---
 
 # Workflow

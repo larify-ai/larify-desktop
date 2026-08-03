@@ -31,8 +31,6 @@ vi.mock('../../../../src/extensions/agent/main/run-session', () => ({
     options: { tools: Record<string, Tool>; [key: string]: unknown }
   ) => {
     const result = mocks.runAgent({ ...options, messages })
-    const output = await result.output
-    if (output) await options.tools.nest_submit_verdict.execute?.(output, {} as never)
     const latest = result.latestMessages ?? messages
     return {
       result,
@@ -94,7 +92,7 @@ function input(taskFile: string): ExecInput {
 beforeEach(() => {
   vi.clearAllMocks()
   app.getAll.mockReturnValue([])
-  mocks.runAgent.mockReturnValue({ output: Promise.resolve({ verdict: 'terminate' }) })
+  mocks.runAgent.mockReturnValue({})
   mocks.registry.activeToolNames.mockReturnValue(['agent_list_toolkit_tools'])
   mocks.registry.toolSet.mockReturnValue({ test_tool: {} })
   mocks.createToolRegistry.mockReturnValue(mocks.registry)
@@ -111,7 +109,7 @@ describe('nest loop exec', () => {
     expect(get(taskFile, 'sessions')).toBeUndefined()
   })
 
-  it('accepts terminate for a completed task', async () => {
+  it('runs once without requiring a verdict', async () => {
     const taskFile = task(join(root, 'completed', 'task.md'), 'completed')
 
     await expect(exec(input(taskFile))).resolves.toBeUndefined()
@@ -134,7 +132,7 @@ describe('nest loop exec', () => {
     expect(mocks.saveSession).toHaveBeenLastCalledWith(expect.any(String), partial, 'D:\\workspace')
   })
 
-  it('uses an independent background session and a structured output tool', async () => {
+  it('uses an independent background session', async () => {
     const taskFile = task(join(root, 'runtime', 'task.md'), 'completed')
 
     await exec(input(taskFile))
@@ -147,35 +145,25 @@ describe('nest loop exec', () => {
     expect(options).toEqual(
       expect.objectContaining({
         system: 'system prompt',
-        prepareStep: expect.any(Function),
-        stopWhen: expect.any(Function),
-        tools: expect.objectContaining({ nest_submit_verdict: expect.anything() }),
-        activeTools: expect.arrayContaining(['nest_submit_verdict'])
+        tools: { test_tool: {} },
+        activeTools: ['agent_list_toolkit_tools']
       })
     )
     expect(mocks.buildSystemPrompt).toHaveBeenCalledWith(
       mocks.registry,
       'D:\\workspace',
       expect.anything(),
-      expect.stringContaining('phase = Explore')
+      undefined
     )
     expect(get(taskFile, 'sessions')).toEqual([expect.any(String)])
   })
 
-  it('retries when no verdict is accepted', async () => {
+  it('ends after one agent run', async () => {
     const taskFile = task(join(root, 'missing-output', 'task.md'), 'in_progress')
-    mocks.runAgent.mockReturnValue({ output: Promise.resolve(undefined) })
 
-    await expect(exec(input(taskFile))).rejects.toThrow(
-      'Failed to receive an accepted nest_submit_verdict call.'
-    )
-    expect(mocks.runAgent).toHaveBeenCalledTimes(3)
-    expect(mocks.saveSession).toHaveBeenCalledTimes(6)
-    const messages = mocks.runAgent.mock.calls[1][0].messages
-    expect(messages.at(-1).parts[0].text).toContain('You MUST call nest_submit_verdict')
-    expect(mocks.runAgent.mock.calls[0][0].prepareStep).toEqual(expect.any(Function))
-    expect(mocks.runAgent.mock.calls[1][0].prepareStep).toBeUndefined()
-    expect(mocks.runAgent.mock.calls[2][0].prepareStep).toBeUndefined()
+    await expect(exec(input(taskFile))).resolves.toBeUndefined()
+    expect(mocks.runAgent).toHaveBeenCalledOnce()
+    expect(mocks.saveSession).toHaveBeenCalledTimes(2)
   })
 
   it('destroys resources owned by the background session', async () => {

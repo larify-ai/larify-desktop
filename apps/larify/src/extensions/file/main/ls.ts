@@ -23,7 +23,11 @@ export const lsTool = defineTool({
   execute: async (args, ctx) => {
     const { path: targetPath, limit, offset } = args
     const root = path.resolve(ctx.cwd, targetPath ?? ".")
-    const rootStats = await stat(root)
+    const rootStats = await stat(root).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return String(error)
+      throw error
+    })
+    if (typeof rootStats === "string") return rootStats
     if (!rootStats.isDirectory()) throw new Error(`Path is not a directory: ${root}`)
 
     const entries = (await readdir(root, { withFileTypes: true })).sort((a, b) =>

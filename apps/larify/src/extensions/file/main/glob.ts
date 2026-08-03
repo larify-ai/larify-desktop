@@ -34,7 +34,11 @@ export const globFilesTool = defineTool({
   execute: async (args, ctx) => {
     const { pattern, path: searchPath, limit, offset } = args
     const root = path.resolve(ctx.cwd, searchPath ?? ".")
-    const stats = await stat(root)
+    const stats = await stat(root).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return String(error)
+      throw error
+    })
+    if (typeof stats === "string") return stats
     if (!stats.isDirectory()) throw new Error(`Path is not a directory: ${root}`)
 
     const result = await runRipgrepLimited(rgArgs(pattern), root, {

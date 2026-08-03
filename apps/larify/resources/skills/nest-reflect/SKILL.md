@@ -32,5 +32,5 @@ Append the debrief with references as a new event in the current task's `task.md
 
 ## Review the Verdict
 
-- If reevaluation identifies any context quality issues, proceed to Explore, Verify, or Critique according to the root causes.
+- If the context quality evaluation identifies any issues, proceed to Explore, Verify, or Critique according to the root causes.
 - Otherwise, append the progress with references as a new event to the parent task's `task.md` if exists, then stop the loop and return `{ "verdict": "terminate" }`.

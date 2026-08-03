@@ -10,17 +10,17 @@ eager: true
 
 Gather and cross-validate sufficient information following the `grounding-guidelines` skill.
 
-## Propose Critical Tasks Recursively
-
-Propose critical tasks recursively along the dimensions defined in the `inquiry-dimensions` skill to make better decisions.
-
 ## Update Context Representation
 
 Preserve everything learned by reorganizing and committing the context representation following the `context-representation` skill.
 
+## Propose Critical Tasks Recursively
+
+Propose critical tasks recursively along the dimensions defined in the `inquiry-dimensions` skill to make better decisions.
+
 ## Append the Event
 
-Append the progress with references as a new event in the current task's `task.md`, following the `task-representation` skill.
+Append the proposed critical tasks with references as a new event in the current task's `task.md`, following the `task-representation` skill.
 
 ## Schedule the Next Task
 
@@ -28,5 +28,5 @@ Among the proposed tasks, schedule the highest-priority one — priority being h
 
 ## Review the Verdict
 
-- If further critical tasks can be proposed recursively, confirm that the scheduled task has a `task.md`, then stop the loop and return `{ "verdict": "schedule" }`.
+- If any critical task is proposed, confirm that the scheduled task has a `task.md`, then stop the loop and return `{ "verdict": "schedule" }`.
 - Otherwise, proceed to the Reflect phase.

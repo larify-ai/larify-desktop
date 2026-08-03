@@ -42,5 +42,5 @@ Append each event chronologically under `# Events`:
 
 ### References
 
-<links to related context documents, because everything learned must be represented following the `context-representation` skill>
+<links to related context documents without backlinks to the task.md>
 ```

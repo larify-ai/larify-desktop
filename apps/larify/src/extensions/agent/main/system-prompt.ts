@@ -19,7 +19,7 @@ export function buildSystemPrompt(
   skillFactory?: SkillFactory,
   additionalPrompt?: string
 ): string {
-  const toolkits = registry.listToolkits()
+  const toolkits = registry.listToolkits(true)
   const skills = skillFactory
     ?.eager()
     .map(({ name, description, path }) => ({ name, description, path }))

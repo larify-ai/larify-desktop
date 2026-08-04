@@ -1,6 +1,6 @@
 import { lazy, Suspense } from 'react'
 import { GlobeIcon } from 'lucide-react'
-import type { Extension } from 'kernel'
+import type { Extension } from '@shared/extension'
 import type { View } from '@renderer/types/view'
 import { getAgentSessionId } from '@renderer/lib/agent-session'
 import { preloadAfterPageLoad } from '@renderer/lib/preload'

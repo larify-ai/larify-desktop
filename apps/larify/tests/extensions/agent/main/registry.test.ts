@@ -12,7 +12,10 @@ describe("wrapWithTitle", () => {
     metadata: { icon: "read", eager: true },
     contextSchema: toolContextSchema,
     inputSchema: z.object({ path: z.string() }),
-    execute: async (args, options) => ({ got: args, ctx: (options as { context: unknown }).context }),
+    execute: async (args, options) => ({
+      got: args,
+      ctx: (options as { context: unknown }).context,
+    }),
   })
   const wrapped = wrapWithTitle(raw)
 
@@ -73,14 +76,25 @@ const fileToolkit: Toolkit = {
   description: "File operations",
   instruction: "Use these for files.",
   tools: {
-    read: tool({ description: "Read", metadata: { eager: true }, contextSchema: toolContextSchema, inputSchema: z.object({ path: z.string() }), execute: async (a) => a }),
-    write: tool({ description: "Write", inputSchema: z.object({ path: z.string() }), execute: async () => "ok" }),
+    read: tool({
+      description: "Read",
+      metadata: { eager: true },
+      contextSchema: toolContextSchema,
+      inputSchema: z.object({ path: z.string() }),
+      execute: async (a) => a,
+    }),
+    write: tool({
+      description: "Write",
+      inputSchema: z.object({ path: z.string() }),
+      execute: async () => "ok",
+    }),
   },
 }
 
 const browserToolkit: Toolkit = {
   name: "browser",
   description: "Browser control",
+  eager: false,
   tools: {
     navigate: tool({ inputSchema: z.object({ url: z.string() }), execute: async () => "ok" }),
   },
@@ -100,7 +114,7 @@ describe("ToolRegistry", () => {
     expect(registry.activeToolNames()).toEqual(["file_read"])
   })
 
-  it("listToolkits returns name + description", () => {
+  it("listToolkits returns every toolkit", () => {
     expect(registry.listToolkits()).toEqual([
       { toolkit_name: "file", description: "File operations" },
       { toolkit_name: "browser", description: "Browser control" },
@@ -136,6 +150,29 @@ describe("ToolRegistry", () => {
     expect(out).toEqual({ path: "x.txt" })
   })
 
+  it("listToolkits can return only eager toolkits", () => {
+    expect(registry.listToolkits(true)).toEqual([
+      { toolkit_name: "file", description: "File operations" },
+    ])
+  })
+
+  it("listToolkits can return only non-eager toolkits", () => {
+    expect(registry.listToolkits(false)).toEqual([
+      { toolkit_name: "browser", description: "Browser control" },
+    ])
+  })
+
+  it("listToolkits omits an absent description", () => {
+    const isolated = createToolRegistry([
+      {
+        name: "mcp",
+        eager: false,
+        tools: { run: tool({ inputSchema: z.object({}) }) },
+      },
+    ])
+    expect(isolated.listToolkits()).toEqual([{ toolkit_name: "mcp" }])
+  })
+
   it("skips an invalid tool without affecting other tools", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
     const isolated = createToolRegistry([
@@ -150,10 +187,10 @@ describe("ToolRegistry", () => {
     ])
 
     expect(Object.keys(isolated.toolSet())).toEqual(["mixed_valid"])
-    expect(isolated.listTools("mixed")?.tools).toEqual([
-      { tool_name: "mixed_valid" },
-    ])
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('Skipped invalid tool "mixed_invalid"'))
+    expect(isolated.listTools("mixed")?.tools).toEqual([{ tool_name: "mixed_valid" }])
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('Skipped invalid tool "mixed_invalid"'),
+    )
     warn.mockRestore()
   })
 })

@@ -1,6 +1,6 @@
 import { ipcMain } from "electron"
 import { convertToModelMessages, type UIMessage } from "ai"
-import type { Extension } from "kernel"
+import type { Extension } from "@shared/extension"
 import { runAgentUIStream } from "./agent"
 import { createSessionStore } from "./session-store"
 import { sanitizeAndValidateMessages } from "./message-sanitizer"

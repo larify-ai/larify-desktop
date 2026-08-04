@@ -1,6 +1,6 @@
 import type { DeepSeekLanguageModelOptions } from '@ai-sdk/deepseek'
 import type { ToolSet } from 'ai'
-import type { App } from 'kernel'
+import type { App } from '@shared/extension'
 import type { Toolkit, ToolContext } from '../../../shared/tool'
 import type { AgentModelConfig } from '../shared/model'
 import { createAgentToolkit, type ContextSearch } from './agent-toolkit'

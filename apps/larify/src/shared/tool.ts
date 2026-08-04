@@ -10,7 +10,8 @@ export type ToolContext = z.infer<typeof toolContextSchema>
 
 export interface Toolkit {
   name: string
-  description: string
+  description?: string
+  eager?: boolean
   instruction?: string
   tools: Record<string, Tool>
 }

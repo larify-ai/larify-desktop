@@ -1,4 +1,4 @@
-import type { Manifest } from "kernel"
+import type { Manifest } from "@shared/extension"
 
 export function discoverExtensions<T>(modules: Record<string, T>): {
   extensions: Manifest[]

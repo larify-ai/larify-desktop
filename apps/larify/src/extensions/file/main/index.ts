@@ -1,4 +1,4 @@
-import type { Extension } from "kernel"
+import type { Extension } from "@shared/extension"
 import type { Toolkit } from "../../../shared/tool"
 import { readFileTool } from "./read"
 import { editFileTool } from "./edit"

@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react'
-import type { Extension } from 'kernel'
+import type { Extension } from '@shared/extension'
 import { SquareTerminalIcon } from 'lucide-react'
 import type { View } from '@renderer/types/view'
 import { preloadAfterPageLoad } from '@renderer/lib/preload'

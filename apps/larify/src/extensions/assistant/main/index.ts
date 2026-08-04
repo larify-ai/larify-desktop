@@ -1,5 +1,5 @@
 import { ipcMain } from 'electron'
-import type { Extension } from 'kernel'
+import type { Extension } from '@shared/extension'
 import { GitSnapshotService } from './git-snapshot'
 
 const extension: Extension = {

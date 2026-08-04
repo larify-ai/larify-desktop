@@ -1,4 +1,4 @@
-import type { Extension } from 'kernel'
+import type { Extension } from '@shared/extension'
 import { registerWorkspaceIpc } from './ipc'
 import { WorkspaceService } from './workspace-service'
 import { WorkspaceEditorHost } from './workspace-editor-host'

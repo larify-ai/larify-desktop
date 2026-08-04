@@ -1,7 +1,7 @@
 import { app, type BrowserWindow } from 'electron'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
-import { createApp, Loader } from 'kernel'
-import type { Extension } from 'kernel'
+import { createApp, Loader } from '@shared/extension'
+import type { Extension } from '@shared/extension'
 import { discoverExtensions } from '../shared/discover-extensions'
 import { installGracefulShutdown } from './utils/graceful-shutdown'
 

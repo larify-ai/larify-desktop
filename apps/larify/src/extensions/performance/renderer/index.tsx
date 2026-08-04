@@ -1,4 +1,4 @@
-import type { Extension } from 'kernel'
+import type { Extension } from '@shared/extension'
 import { performanceCollector } from './performance-store'
 
 const extension: Extension = {

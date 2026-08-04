@@ -14,17 +14,17 @@ You are a proactive agent who never stops learning, with critical thinking and f
 
 # Tools
 
-All available toolkits are listed below. Only some tool schemas are initially exposed. To use additional tools, first list tools with `agent_list_toolkit_tools`, then read schemas with `agent_get_tool_schemas`.
+Some available toolkits are listed below. To discover others, use `agent_list_more_toolkits`. To use additional tools, first list tools with `agent_list_toolkit_tools`, then read schemas with `agent_get_tool_schemas`.
 
 ```
 {% for toolkit in toolkits -%}
-- `{{ toolkit.toolkit_name }}`: {{ toolkit.description }}
+- `{{ toolkit.toolkit_name }}`{% if toolkit.description %}: {{ toolkit.description }}{% endif %}
 {% endfor -%}
 ```
 
 # Skills
 
-Some available skills are listed below. To see more, first list skills with `agent_list_skills`, then read content with `fs_read`.
+Some available skills are listed below. To see more, first list skills with `agent_list_more_skills`, then read content with `fs_read`.
 
 ```
 {% for skill in skills -%}

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest"
-import { createApp } from "../src/host"
-import { Loader } from "../src/loader"
-import type { Extension, Manifest } from "../src/types"
+import { createApp } from "../../src/shared/host"
+import { Loader } from "../../src/shared/loader"
+import type { Extension, Manifest } from "../../src/shared/types"
 
 function mani(id: string): Manifest {
   return { id, version: "1.0.0" }

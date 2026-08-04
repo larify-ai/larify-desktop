@@ -21,18 +21,37 @@ const fileToolkit: Toolkit = {
 function agentTools() {
   const registry = createToolRegistry([fileToolkit])
   const toolkit = createAgentToolkit(registry)
-  const run = (name: "list_toolkit_tools" | "get_tool_schemas", input: unknown) =>
-    (toolkit.tools[name].execute as any)(input, {})
+  const run = (
+    name: "list_more_toolkits" | "list_toolkit_tools" | "get_tool_schemas",
+    input: unknown,
+  ) => (toolkit.tools[name].execute as any)(input, {})
   return { toolkit, run }
 }
+
+describe("list_more_toolkits", () => {
+  it("lists only toolkits not shown in the system prompt", async () => {
+    const hidden: Toolkit = {
+      name: "github",
+      eager: false,
+      tools: { search: tool({ inputSchema: z.object({}) }) },
+    }
+    const registry = createToolRegistry([fileToolkit, hidden])
+    const toolkit = createAgentToolkit(registry)
+    const output = await (toolkit.tools.list_more_toolkits.execute as any)({}, {})
+    expect(output).toEqual([{ toolkit_name: "github" }])
+  })
+
+  it("is eager", () => {
+    const { toolkit } = agentTools()
+    expect(toolkit.tools.list_more_toolkits.metadata?.eager).toBe(true)
+  })
+})
 
 describe("list_toolkit_tools", () => {
   it("lists a toolkit's tools as markdown with instruction", async () => {
     const { run } = agentTools()
     const out = await run("list_toolkit_tools", { toolkit_names: ["file"] })
-    expect(out).toBe(
-      "## file\n\nUse these for files.\n\n- **file_read**: Read a file",
-    )
+    expect(out).toBe("## file\n\nUse these for files.\n\n- **file_read**: Read a file")
   })
 
   it("lists multiple toolkits as separate sections; one without instruction has no instruction line", async () => {
@@ -85,7 +104,9 @@ describe("get_tool_schemas", () => {
 
   it("returns multiple schemas at once", async () => {
     const { run } = agentTools()
-    const out = JSON.parse(await run("get_tool_schemas", { tool_names: ["file_read", "file_read"] }))
+    const out = JSON.parse(
+      await run("get_tool_schemas", { tool_names: ["file_read", "file_read"] }),
+    )
     expect(out.map((d: { name: string }) => d.name)).toEqual(["file_read", "file_read"])
   })
 

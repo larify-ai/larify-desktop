@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { Registry } from "../src/registry"
+import { Registry } from "../../src/shared/registry"
 
 describe("Registry", () => {
   it("register 后能 get 回来", () => {

@@ -1,4 +1,4 @@
-import type { Extension } from 'kernel'
+import type { Extension } from '@shared/extension'
 import { EmbeddingWorker } from './worker-client'
 
 let worker: EmbeddingWorker | undefined

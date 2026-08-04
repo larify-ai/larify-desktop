@@ -9,7 +9,7 @@ import {
 import { MessageCirclePlusIcon } from 'lucide-react'
 import { ThemeProvider } from 'next-themes'
 import type { ImperativePanelHandle } from 'react-resizable-panels'
-import type { App } from 'kernel'
+import type { App } from '@shared/extension'
 import type { View } from '@renderer/types/view'
 import {
   Sidebar,

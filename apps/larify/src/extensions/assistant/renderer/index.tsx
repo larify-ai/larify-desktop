@@ -1,4 +1,4 @@
-import type { Extension } from "kernel"
+import type { Extension } from "@shared/extension"
 import type { View } from "@renderer/types/view"
 import { AssistantPanel } from "./components/assistant-panel"
 

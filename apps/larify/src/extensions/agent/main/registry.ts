@@ -80,11 +80,13 @@ export class ToolRegistry {
       .map(([name]) => name)
   }
 
-  listToolkits(): Array<{ toolkit_name: string; description: string }> {
-    return [...this.toolkits.values()].map((toolkit) => ({
-      toolkit_name: toolkit.name,
-      description: toolkit.description,
-    }))
+  listToolkits(eager?: boolean): Array<{ toolkit_name: string; description?: string }> {
+    return [...this.toolkits.values()]
+      .filter((toolkit) => eager === undefined || (toolkit.eager !== false) === eager)
+      .map((toolkit) => ({
+        toolkit_name: toolkit.name,
+        ...(toolkit.description ? { description: toolkit.description } : {}),
+      }))
   }
 
   listTools(toolkit_name: string):

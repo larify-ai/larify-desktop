@@ -98,11 +98,11 @@ describe('createGitStatusColors', () => {
   })
 
   it('does not propagate ignored colors to parent directories', () => {
-    const ignored = path.join(root, 'packages', 'kernel', 'node_modules')
+    const ignored = path.join(root, 'packages', 'plugin-host', 'node_modules')
     const colors = createGitStatusColors(root, [status(ignored, '!', '!')])
 
     expect(colors.get(ignored)).toContain('ignoredResourceForeground')
-    expect(colors.has(path.join(root, 'packages', 'kernel'))).toBe(false)
+    expect(colors.has(path.join(root, 'packages', 'plugin-host'))).toBe(false)
     expect(colors.has(path.join(root, 'packages'))).toBe(false)
     expect(colors.has(root)).toBe(false)
   })

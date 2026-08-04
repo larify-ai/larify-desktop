@@ -1,4 +1,4 @@
-import type { Extension } from 'kernel'
+import type { Extension } from '@shared/extension'
 import type { View } from '@renderer/types/view'
 import { Shell } from './components/shell'
 

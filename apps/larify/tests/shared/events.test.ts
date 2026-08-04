@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest"
-import { Events } from "../src/events"
+import { Events } from "../../src/shared/events"
 
 describe("Events", () => {
   it("emit 会调用订阅的 handler,并把 payload 传进去", () => {

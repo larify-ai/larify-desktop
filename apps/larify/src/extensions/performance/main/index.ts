@@ -1,7 +1,7 @@
 import { app, BrowserWindow, globalShortcut, ipcMain } from 'electron'
 import { join } from 'node:path'
 import { is } from '@electron-toolkit/utils'
-import type { Extension } from 'kernel'
+import type { Extension } from '@shared/extension'
 import type {
   PerformanceHistory,
   PerformanceMeasureRecord,

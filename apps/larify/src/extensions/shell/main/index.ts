@@ -1,7 +1,7 @@
 import { app, screen, ipcMain, nativeTheme, BrowserWindow, dialog } from 'electron'
 import { join } from 'path'
 import { is } from '@electron-toolkit/utils'
-import type { Extension } from 'kernel'
+import type { Extension } from '@shared/extension'
 import { NativeTooltip, type NativeTooltipOptions } from './native-tooltip'
 
 const isMac = process.platform === 'darwin'

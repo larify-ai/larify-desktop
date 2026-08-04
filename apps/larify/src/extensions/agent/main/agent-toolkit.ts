@@ -17,8 +17,15 @@ export function createAgentToolkit(
     name: "agent",
     description: "List tools, read schemas, list skills, and search context.",
     tools: {
+      list_more_toolkits: tool({
+        description: "List more toolkits.",
+        inputSchema: z.object({}).strict(),
+        metadata: { eager: true, icon: "search" },
+        execute: async () => registry.listToolkits(false),
+      }),
       list_toolkit_tools: tool({
-        description: "First list tools with agent_list_toolkit_tools, then read schemas with agent_get_tool_schemas.",
+        description:
+          "First list tools with agent_list_toolkit_tools, then read schemas with agent_get_tool_schemas.",
         inputSchema: z
           .object({ toolkit_names: z.array(z.string()).min(1).describe("The toolkit names") })
           .strict(),
@@ -40,7 +47,8 @@ export function createAgentToolkit(
         },
       }),
       get_tool_schemas: tool({
-        description: "First list tools with agent_list_toolkit_tools, then read schemas with agent_get_tool_schemas.",
+        description:
+          "First list tools with agent_list_toolkit_tools, then read schemas with agent_get_tool_schemas.",
         inputSchema: z
           .object({
             tool_names: z.array(z.string()).min(1).describe("The tool names"),
@@ -64,17 +72,20 @@ export function createAgentToolkit(
           return JSON.stringify(definitions)
         },
       }),
-      list_skills: tool({
-        description: "First list skills with agent_list_skills, then read content with fs_read.",
+      list_more_skills: tool({
+        description: "List more skills.",
         inputSchema: z.object({}).strict(),
         metadata: { eager: true, icon: "search" },
         execute: async () =>
-          skills?.list().map(({ name, description, eager, path }) => ({
-            name,
-            description,
-            eager,
-            path,
-          })) ?? [],
+          skills
+            ?.list()
+            .filter(({ eager }) => !eager)
+            .map(({ name, description, eager, path }) => ({
+              name,
+              description,
+              eager,
+              path,
+            })) ?? [],
       }),
       search_context: defineTool({
         description: "Search relevant context using hybrid retrieval (bm25 and vector).",
@@ -83,7 +94,9 @@ export function createAgentToolkit(
           cwd: z
             .string()
             .optional()
-            .describe("Workspace directory; defaults to cwd. Find others in `~/.larify/indexes/registry.json`"),
+            .describe(
+              "Workspace directory; defaults to cwd. Find others in `~/.larify/indexes/registry.json`",
+            ),
           limit: z.number().int().positive().max(200).default(100).describe("Maximum results"),
         }),
         metadata: { eager: true, icon: "search" },

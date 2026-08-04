@@ -1,4 +1,4 @@
-import type { Extension } from 'kernel'
+import type { Extension } from '@shared/extension'
 import { SettingsIcon } from 'lucide-react'
 import type { View } from '@renderer/types/view'
 import { SettingsPane } from './components/settings-pane'

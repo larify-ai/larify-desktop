@@ -1,6 +1,6 @@
 import { type UIMessage, type UIMessageChunk } from 'ai'
 import { randomUUID } from 'node:crypto'
-import type { App } from 'kernel'
+import type { App } from '@shared/extension'
 import { runAgentSession } from '../../agent/main/run-session'
 import { createAgentRuntime } from '../../agent/main/runtime'
 import { createSessionStore } from '../../agent/main/session-store'

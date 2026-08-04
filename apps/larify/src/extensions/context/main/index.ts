@@ -1,5 +1,5 @@
 import { join, resolve } from 'node:path'
-import type { Disposable, Extension } from 'kernel'
+import type { Disposable, Extension } from '@shared/extension'
 import { createContextDiagnosticsProvider } from './diagnostics'
 import { cleanContextRegistry, registerContext } from './workspace'
 import { ContextWorker } from './worker-client'

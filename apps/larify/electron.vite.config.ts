@@ -1,4 +1,4 @@
-import { resolve } from 'path'
+﻿import { resolve } from 'path'
 import { defineConfig } from 'electron-vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
@@ -30,16 +30,18 @@ const vscodeDiffBrowser = (): Plugin => ({
 
 export default defineConfig({
   main: {
+    resolve: {
+      alias: { '@shared': resolve('src/shared') }
+    },
     build: {
-      externalizeDeps: { exclude: ['kernel'] },
       rollupOptions: {
         external: ['canvas']
       }
     }
   },
   preload: {
-    build: {
-      externalizeDeps: { exclude: ['kernel'] }
+    resolve: {
+      alias: { '@shared': resolve('src/shared') }
     }
   },
   renderer: {
@@ -63,6 +65,7 @@ export default defineConfig({
     },
     resolve: {
       alias: {
+        '@shared': resolve('src/shared'),
         '@renderer': resolve('src/renderer/src')
       }
     },

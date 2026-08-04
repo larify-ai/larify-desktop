@@ -53,7 +53,11 @@ describe("createSkillFactory", () => {
 
   it("discovers SKILL.md files recursively and ignores other Markdown files", () => {
     const root = createRoot()
-    writeSkill(root, join("embedded", "testing"), "name: hardware-testing\ndescription: Test hardware.")
+    writeSkill(
+      root,
+      join("embedded", "testing"),
+      "name: hardware-testing\ndescription: Test hardware.",
+    )
     writeFileSync(join(root, "README.md"), "# Not a skill")
 
     expect(createSkillFactory([root]).list()).toMatchObject([
@@ -124,7 +128,7 @@ describe("createSkillFactory", () => {
     warn.mockRestore()
   })
 
-  it("exposes all skills and their eager state through agent_list_skills", async () => {
+  it("exposes non-eager skills through agent_list_more_skills", async () => {
     const root = createRoot()
     writeSkill(root, "review", "name: review\ndescription: Review changes.\neager: false")
     writeSkill(root, "grounding", "name: grounding\ndescription: Ground information.\neager: true")
@@ -133,9 +137,9 @@ describe("createSkillFactory", () => {
 
     registry.addToolkit(createAgentToolkit(registry, skills))
 
-    const listSkills = registry.tool("agent_list_skills")
+    const listSkills = registry.tool("agent_list_more_skills")
     expect(listSkills).toBeDefined()
-    expect(registry.activeToolNames()).toContain("agent_list_skills")
+    expect(registry.activeToolNames()).toContain("agent_list_more_skills")
 
     const output = await listSkills!.execute!(
       { _title: "List skills" },
@@ -149,12 +153,6 @@ describe("createSkillFactory", () => {
 
     expect(output).toEqual([
       {
-        name: "grounding",
-        description: "Ground information.",
-        eager: true,
-        path: join(root, "grounding", "SKILL.md"),
-      },
-      {
         name: "review",
         description: "Review changes.",
         eager: false,
@@ -166,7 +164,7 @@ describe("createSkillFactory", () => {
   it("returns an empty list when no skill factory is configured", async () => {
     const registry = createToolRegistry([])
     registry.addToolkit(createAgentToolkit(registry))
-    const listSkills = registry.tool("agent_list_skills")!
+    const listSkills = registry.tool("agent_list_more_skills")!
 
     const output = await listSkills.execute!(
       { _title: "List skills" },
@@ -195,8 +193,7 @@ describe("createSkillFactory", () => {
     expect(prompt).not.toContain("Review changes.")
     expect(prompt).toContain(`The progress directory is \`${larifyPath("tasks")}\`.`)
     expect(prompt).toContain(
-      "Some available skills are listed below. To see more, first list skills with `agent_list_skills`, then read content with `fs_read`.",
+      "Some available skills are listed below. To see more, first list skills with `agent_list_more_skills`, then read content with `fs_read`.",
     )
   })
-
 })

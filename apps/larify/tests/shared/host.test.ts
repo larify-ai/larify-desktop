@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest"
-import { createApp } from "../src/host"
+import { createApp } from "../../src/shared/host"
 
 describe("createApp (host 门面)", () => {
   it("register/get/getAll 转发到内部 registry", () => {

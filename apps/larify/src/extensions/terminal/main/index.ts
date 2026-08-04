@@ -1,5 +1,5 @@
 import type { BrowserWindow } from 'electron'
-import type { Extension } from 'kernel'
+import type { Extension } from '@shared/extension'
 import { registerTerminalIpc } from './ipc'
 import { TerminalService } from './terminal-service'
 import { createTerminalToolkit } from './tools'

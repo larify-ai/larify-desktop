@@ -1,7 +1,7 @@
 import './assets/main.css'
 import { createRoot } from 'react-dom/client'
-import { createApp, Loader } from 'kernel'
-import type { Extension } from 'kernel'
+import { createApp, Loader } from '@shared/extension'
+import type { Extension } from '@shared/extension'
 import type { View } from '@renderer/types/view'
 import { discoverExtensions } from '../../shared/discover-extensions'
 

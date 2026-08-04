@@ -1,4 +1,4 @@
-import type { App } from 'kernel'
+import type { App } from '@shared/extension'
 import type { UIMessageChunk } from 'ai'
 import { get } from '../utils/frontmatter'
 import { childTaskFiles } from '../utils/task'

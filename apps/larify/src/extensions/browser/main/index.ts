@@ -1,5 +1,5 @@
 import type { BrowserWindow } from "electron"
-import type { Extension } from "kernel"
+import type { Extension } from "@shared/extension"
 import { BrowserService } from "./browser-service"
 import { registerBrowserIpc } from "./ipc"
 import { createBrowserToolkit } from "./tools"

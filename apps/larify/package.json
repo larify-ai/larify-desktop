@@ -76,7 +76,6 @@
     "gray-matter": "^4.0.3",
     "iconv-lite": "^0.6.3",
     "jieba-wasm": "2.3.0",
-    "kernel": "*",
     "liquidjs": "^10.27.2",
     "lucide-react": "^1.24.0",
     "mdast-util-from-markdown": "^2.0.3",

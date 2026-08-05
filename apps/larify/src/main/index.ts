@@ -6,11 +6,13 @@ import { createApp } from '../shared/host'
 import { Loader } from '../shared/loader'
 import type { Extension as LegacyExtension } from '../shared/types'
 import { installGracefulShutdown } from './utils/graceful-shutdown'
+import { SessionStore } from './core/session'
+import { sessionDatabasePath } from './utils/app-paths'
 
 const { extensions, loaders } = discoverExtensions(
   builtinModules as unknown as Record<string, () => Promise<{ default: LegacyExtension }>>
 )
-const migratedExtensionNames = new Set(['git', 'fs', 'sqlite', 'worker'])
+const migratedExtensionNames = new Set(['fs', 'worker'])
 const legacyExtensions = extensions.filter(({ id }) => !migratedExtensionNames.has(id))
 const migratedModules = Object.fromEntries(
   Object.entries(builtinModules).filter(([path]) =>
@@ -29,6 +31,8 @@ app.whenReady().then(async () => {
   app.on('browser-window-created', (_, window) => optimizer.watchWindowShortcuts(window))
 
   const host = createApp()
+  const sessions = new SessionStore(sessionDatabasePath())
+  host.register('service', 'session', sessions)
   const loader = new Loader(host, (m) => loaders.get(m.id)!())
   const extensionHost = new ExtensionHost()
   const discovered = await new BuiltinExtensionSource(migratedModules).discover()
@@ -65,6 +69,7 @@ app.whenReady().then(async () => {
     } finally {
       await Promise.all([...migratedExtensionNames].map((name) => extensionHost.deactivate(name)))
       await loader.unloadAll()
+      sessions.close()
       app.exit(exitCode)
     }
     return
@@ -85,6 +90,7 @@ app.whenReady().then(async () => {
   installGracefulShutdown(app, async () => {
     await Promise.all([...migratedExtensionNames].map((name) => extensionHost.deactivate(name)))
     await loader.unloadAll()
+    sessions.close()
   })
 })
 

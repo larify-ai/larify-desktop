@@ -10,14 +10,6 @@ export type { Skill } from './skill'
 export { defineTool, toolContextSchema } from './tool'
 export type { Tool, ToolContext, ToolRunContext } from './tool'
 export type { View } from './view'
-export { ExtensionHost } from './host'
-export {
-  BuiltinExtensionSource,
-  builtinExtensionSource,
-  builtinModules,
-  discoverExtensions
-} from './discovery'
-export type { ExtensionLoader, ExtensionSource } from './discovery'
 
 export interface Extension {
   name: string

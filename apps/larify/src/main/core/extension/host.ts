@@ -1,8 +1,8 @@
-import type { App, Extension } from '.'
-import type { Service } from './service'
-import type { Skill } from './skill'
-import type { Tool } from './tool'
-import type { View } from './view'
+import type { App, Extension } from '../../../shared/extension'
+import type { Service } from '../../../shared/extension/service'
+import type { Skill } from '../../../shared/extension/skill'
+import type { Tool } from '../../../shared/extension/tool'
+import type { View } from '../../../shared/extension/view'
 
 interface RegisteredExtension {
   extension: Extension

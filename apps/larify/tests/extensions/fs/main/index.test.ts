@@ -3,7 +3,7 @@ import {
   BuiltinExtensionSource,
   builtinModules,
   ExtensionHost
-} from '../../../../src/shared/extension'
+} from '../../../../src/main/core/extension'
 
 describe('FS extension', () => {
   it('discovers and registers its tools', async () => {

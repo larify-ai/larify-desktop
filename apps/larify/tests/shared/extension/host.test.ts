@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { ExtensionHost, type Extension } from '../../../src/shared/extension'
+import { ExtensionHost } from '../../../src/main/core/extension'
+import type { Extension } from '../../../src/shared/extension'
 
 describe('ExtensionHost', () => {
   it('runs the extension lifecycle', async () => {

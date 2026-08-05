@@ -1,5 +1,12 @@
-import type { Extension } from '..'
-import type { ExtensionLoader, ExtensionSource } from '.'
+import type { Extension } from '../../../shared/extension'
+
+export interface ExtensionLoader {
+  load(): Promise<Extension>
+}
+
+export interface ExtensionSource {
+  discover(): Promise<ExtensionLoader[]>
+}
 
 type ExtensionModule = { default: Extension }
 type ModuleLoader = () => Promise<ExtensionModule>
@@ -19,3 +26,7 @@ export const builtinModules = import.meta.glob<ExtensionModule>(
 )
 
 export const builtinExtensionSource = new BuiltinExtensionSource(builtinModules)
+
+export async function discoverExtensions(sources: ExtensionSource[]): Promise<ExtensionLoader[]> {
+  return (await Promise.all(sources.map((source) => source.discover()))).flat()
+}

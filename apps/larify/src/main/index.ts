@@ -1,6 +1,6 @@
 import { app, type BrowserWindow } from 'electron'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
-import { BuiltinExtensionSource, builtinModules, ExtensionHost } from '@shared/extension'
+import { BuiltinExtensionSource, builtinModules, ExtensionHost } from './core/extension'
 import { discoverExtensions } from '../shared/discover-extensions'
 import { createApp } from '../shared/host'
 import { Loader } from '../shared/loader'

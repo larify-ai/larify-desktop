@@ -6,7 +6,7 @@ import {
   builtinModules,
   discoverExtensions,
   type ExtensionSource
-} from '../../../src/shared/extension'
+} from '../../../src/main/core/extension'
 
 const extension: Extension = {
   name: 'git',

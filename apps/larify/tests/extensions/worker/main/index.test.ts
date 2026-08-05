@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ExtensionHost } from '../../../../src/shared/extension'
+import { ExtensionHost } from '../../../../src/main/core/extension'
 import extension, { workerService } from '../../../../src/extensions/worker/main'
 import { WorkerService } from '../../../../src/extensions/worker/main/worker-service'
 

@@ -1,7 +1,8 @@
-import type { Bridge } from "./index"
+import type { Bridge, FileSystem } from './index'
 
 declare global {
   interface Window {
     bridge: Bridge
+    fs: FileSystem
   }
 }

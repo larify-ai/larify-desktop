@@ -240,7 +240,7 @@ const useOptionalProviderAttachments = () =>
 
 const getFilePath = (file: File): string => {
   try {
-    return window.bridge.getPathForFile(file);
+    return window.fs.getPathForFile(file);
   } catch {
     return "";
   }
@@ -248,7 +248,7 @@ const getFilePath = (file: File): string => {
 
 const isDirectoryPath = (path: string): boolean => {
   try {
-    return window.bridge.isDirectoryPath(path);
+    return window.fs.isDirectoryPath(path);
   } catch {
     return false;
   }

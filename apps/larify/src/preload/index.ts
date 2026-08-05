@@ -1,9 +1,17 @@
-import { contextBridge, ipcRenderer, webUtils } from "electron"
-import { statSync } from "fs"
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
+import { statSync } from 'fs'
 
 const bridge = {
-  getPathForFile: (file: File) => webUtils.getPathForFile(file),
   invoke: (channel: string, ...args: unknown[]) => ipcRenderer.invoke(channel, ...args),
+  on: (channel: string, listener: (...args: unknown[]) => void) => {
+    const handler = (_event: unknown, ...args: unknown[]): void => listener(...args)
+    ipcRenderer.on(channel, handler)
+    return () => ipcRenderer.removeListener(channel, handler)
+  },
+}
+
+const fs = {
+  getPathForFile: (file: File) => webUtils.getPathForFile(file),
   isDirectoryPath: (path: string) => {
     try {
       return statSync(path).isDirectory()
@@ -11,13 +19,10 @@ const bridge = {
       return false
     }
   },
-  on: (channel: string, cb: (...args: unknown[]) => void) => {
-    const handler = (_e: unknown, ...a: unknown[]): void => cb(...a)
-    ipcRenderer.on(channel, handler)
-    return () => ipcRenderer.removeListener(channel, handler)
-  },
 }
 
 contextBridge.exposeInMainWorld("bridge", bridge)
+contextBridge.exposeInMainWorld("fs", fs)
 
 export type Bridge = typeof bridge
+export type FileSystem = typeof fs

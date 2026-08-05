@@ -10,7 +10,7 @@ import { installGracefulShutdown } from './utils/graceful-shutdown'
 const { extensions, loaders } = discoverExtensions(
   builtinModules as unknown as Record<string, () => Promise<{ default: LegacyExtension }>>
 )
-const migratedExtensionNames = new Set(['git', 'fs'])
+const migratedExtensionNames = new Set(['git', 'fs', 'sqlite', 'worker'])
 const legacyExtensions = extensions.filter(({ id }) => !migratedExtensionNames.has(id))
 const migratedModules = Object.fromEntries(
   Object.entries(builtinModules).filter(([path]) =>

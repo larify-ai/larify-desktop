@@ -12,7 +12,7 @@ import { sessionDatabasePath } from './utils/app-paths'
 const { extensions, loaders } = discoverExtensions(
   builtinModules as unknown as Record<string, () => Promise<{ default: LegacyExtension }>>
 )
-const migratedExtensionNames = new Set(['fs', 'worker'])
+const migratedExtensionNames = new Set(['fs'])
 const legacyExtensions = extensions.filter(({ id }) => !migratedExtensionNames.has(id))
 const migratedModules = Object.fromEntries(
   Object.entries(builtinModules).filter(([path]) =>

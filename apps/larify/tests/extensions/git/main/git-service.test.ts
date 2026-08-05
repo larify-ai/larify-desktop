@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { GitService } from '../../../../src/extensions/git/main/git-service'
+import { GitService } from '../../../../src/main/core/git'
 
 const directories: string[] = []
 

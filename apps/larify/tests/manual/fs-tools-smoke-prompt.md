@@ -10,7 +10,7 @@
 > - GBK 等非 UTF-8（write 一律写 UTF-8）、CRLF 保留（write 新建一律 LF）。
 > - modified-since-read 竞态（需带外修改文件）。
 >
-> 这些看 `tests/extensions/file/main/*.test.ts`。
+> 这些看 `tests/extensions/fs/main/*.test.ts`。
 
 ---
 

@@ -14,7 +14,7 @@ import {
 } from 'ai'
 import type { LanguageModelV4 } from '@ai-sdk/provider'
 import type { DeepSeekLanguageModelOptions } from '@ai-sdk/deepseek'
-import type { ToolContext } from '../../../shared/tool'
+import type { ToolContext } from '../../../shared/extension/tool'
 import { createModel } from './model'
 
 export type AgentOutput = NonNullable<Parameters<typeof streamText>[0]['output']>

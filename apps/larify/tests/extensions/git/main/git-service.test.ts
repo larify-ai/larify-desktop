@@ -27,6 +27,15 @@ describe('GitService', () => {
     expect((await git.status()).not_added).toEqual(['example.txt'])
   })
 
+  it('falls back to embedded Git when the system binary is unavailable', async () => {
+    const directory = await temporaryDirectory()
+    const git = await new GitService('larify-missing-git-binary').open(directory)
+
+    await git.init()
+
+    expect(await git.checkIsRepo()).toBe(true)
+  })
+
   it('exposes Dugite exec with stdin', async () => {
     const directory = await temporaryDirectory()
     const result = await new GitService().exec(['hash-object', '--stdin'], directory, {

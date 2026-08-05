@@ -3,7 +3,7 @@ import { basename } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import matter from 'gray-matter'
 import { DiagnosticSeverity, Range, type Diagnostic } from 'vscode-languageserver-protocol'
-import type { FileDiagnosticsProvider } from '../../file/main/diagnostics'
+import type { FileDiagnosticsProvider } from '../../fs/main/diagnostics'
 import { isWithin } from '../../context/main/files'
 
 const statuses = new Set(['in_progress', 'completed'])

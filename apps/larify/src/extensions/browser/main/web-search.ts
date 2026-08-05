@@ -1,5 +1,6 @@
 import { z } from 'zod'
-import { defineTool, type Toolkit, type ToolRunContext } from '../../../shared/tool'
+import { defineTool, type ToolRunContext } from '../../../shared/extension/tool'
+import type { Toolkit } from '../../../shared/toolkit'
 import type { BrowserService } from './browser-service'
 import { waitForOperationOrAbort } from './waits'
 

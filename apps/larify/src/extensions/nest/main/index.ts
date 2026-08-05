@@ -1,6 +1,6 @@
 import type { Extension } from '@shared/extension'
 import { larifyPath } from '../../../main/utils/app-paths'
-import { registerFileDiagnosticsProvider } from '../../file/main/diagnostics'
+import { registerFileDiagnosticsProvider } from '../../fs/main/diagnostics'
 import { createTaskDiagnosticsProvider } from './diagnostics'
 
 const extension: Extension = {

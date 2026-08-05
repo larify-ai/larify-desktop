@@ -1,6 +1,7 @@
 import { asSchema, tool } from "ai"
 import { z } from "zod"
-import { defineTool, type Toolkit } from "../../../shared/tool"
+import { defineTool } from "../../../shared/extension/tool"
+import type { Toolkit } from "../../../shared/toolkit"
 import type { ToolRegistry } from "./registry"
 import type { SkillFactory } from "./skill-factory"
 

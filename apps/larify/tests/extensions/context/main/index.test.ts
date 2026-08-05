@@ -21,7 +21,7 @@ vi.mock('../../../../src/extensions/context/main/diagnostics', () => ({
   createContextDiagnosticsProvider: mocks.createDiagnostics
 }))
 
-vi.mock('../../../../src/extensions/file/main/diagnostics', () => ({
+vi.mock('../../../../src/extensions/fs/main/diagnostics', () => ({
   registerFileDiagnosticsProvider: mocks.registerDiagnostics
 }))
 

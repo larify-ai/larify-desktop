@@ -1,6 +1,6 @@
 import type { Tool } from "ai"
 import { z } from "zod"
-import type { Toolkit } from "../../../shared/tool"
+import type { Toolkit } from "../../../shared/toolkit"
 
 const qualify = (toolkit: string, tool: string): string => `${toolkit}_${tool}`
 

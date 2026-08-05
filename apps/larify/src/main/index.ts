@@ -1,12 +1,24 @@
 import { app, type BrowserWindow } from 'electron'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
-import { createApp, Loader } from '@shared/extension'
-import type { Extension } from '@shared/extension'
+import { BuiltinExtensionSource, builtinModules, ExtensionHost } from '@shared/extension'
 import { discoverExtensions } from '../shared/discover-extensions'
+import { createApp } from '../shared/host'
+import { Loader } from '../shared/loader'
+import type { Extension as LegacyExtension } from '../shared/types'
 import { installGracefulShutdown } from './utils/graceful-shutdown'
 
-const modules = import.meta.glob<{ default: Extension }>('../extensions/*/main/index.ts')
-const { extensions, loaders } = discoverExtensions(modules)
+const { extensions, loaders } = discoverExtensions(
+  builtinModules as unknown as Record<string, () => Promise<{ default: LegacyExtension }>>
+)
+const migratedExtensionNames = new Set(['git', 'fs'])
+const legacyExtensions = extensions.filter(({ id }) => !migratedExtensionNames.has(id))
+const migratedModules = Object.fromEntries(
+  Object.entries(builtinModules).filter(([path]) =>
+    [...migratedExtensionNames].some((name) =>
+      path.replaceAll('\\', '/').includes(`/extensions/${name}/main/`)
+    )
+  )
+)
 
 if (process.platform === 'darwin') {
   app.commandLine.appendSwitch('disable-features', 'MacWebContentsOcclusion')
@@ -18,13 +30,23 @@ app.whenReady().then(async () => {
 
   const host = createApp()
   const loader = new Loader(host, (m) => loaders.get(m.id)!())
-  const shell = extensions.find(({ id }) => id === 'shell')
+  const extensionHost = new ExtensionHost()
+  const discovered = await new BuiltinExtensionSource(migratedModules).discover()
+  const migrated = (await Promise.all(discovered.map((loader) => loader.load()))).filter(
+    ({ name }) => migratedExtensionNames.has(name)
+  )
+  if (migrated.length !== migratedExtensionNames.size) {
+    throw new Error('Not all migrated extensions were discovered')
+  }
+  for (const extension of migrated) await extensionHost.activate(extension)
+
+  const shell = legacyExtensions.find(({ id }) => id === 'shell')
   if (!shell) throw new Error('shell extension is not registered')
 
   await loader.load(shell)
 
   const deferredIds = new Set(['browser', 'workspace'])
-  const immediate = extensions.filter(({ id }) => id !== shell.id && !deferredIds.has(id))
+  const immediate = legacyExtensions.filter(({ id }) => id !== shell.id && !deferredIds.has(id))
   await loader.loadAll(immediate)
 
   const deferred = extensions.filter(({ id }) => deferredIds.has(id))
@@ -41,6 +63,7 @@ app.whenReady().then(async () => {
       exitCode = 1
       console.error('[nest]', error)
     } finally {
+      await Promise.all([...migratedExtensionNames].map((name) => extensionHost.deactivate(name)))
       await loader.unloadAll()
       app.exit(exitCode)
     }
@@ -59,7 +82,10 @@ app.whenReady().then(async () => {
     loadDeferred()
   }
 
-  installGracefulShutdown(app, () => loader.unloadAll())
+  installGracefulShutdown(app, async () => {
+    await Promise.all([...migratedExtensionNames].map((name) => extensionHost.deactivate(name)))
+    await loader.unloadAll()
+  })
 })
 
 app.on('window-all-closed', () => {

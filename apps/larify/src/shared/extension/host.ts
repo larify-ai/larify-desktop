@@ -1,17 +1,13 @@
-import type { App, Extension } from "."
-import type { Service } from "./service"
-import type { Skill } from "./skill"
-import type { Tool } from "./tool"
-import type { View } from "./view"
-
-interface Entry<T> {
-  value: T
-  eager: boolean
-}
+import type { App, Extension } from '.'
+import type { Service } from './service'
+import type { Skill } from './skill'
+import type { Tool } from './tool'
+import type { View } from './view'
 
 interface RegisteredExtension {
-  tools: Map<string, Entry<Tool>>
-  skills: Map<string, Entry<Skill>>
+  extension: Extension
+  tools: Map<string, Tool>
+  skills: Map<string, Skill>
   views: Map<string, View<unknown>>
   services: Map<Service<unknown>, unknown>
 }
@@ -19,14 +15,16 @@ interface RegisteredExtension {
 export class ExtensionHost {
   private readonly extensions = new Map<string, RegisteredExtension>()
 
-  async register(extension: Extension): Promise<void> {
-    if (this.extensions.has(extension.name)) throw new Error(`Extension already registered: ${extension.name}`)
+  async activate(extension: Extension): Promise<void> {
+    if (this.extensions.has(extension.name))
+      throw new Error(`Extension already registered: ${extension.name}`)
 
     const registered: RegisteredExtension = {
+      extension,
       tools: new Map(),
       skills: new Map(),
       views: new Map(),
-      services: new Map(),
+      services: new Map()
     }
     this.extensions.set(extension.name, registered)
 
@@ -38,16 +36,20 @@ export class ExtensionHost {
     }
   }
 
-  unregister(name: string): void {
+  async deactivate(name: string): Promise<void> {
+    const registered = this.extensions.get(name)
+    if (!registered) return
+
     this.extensions.delete(name)
+    await registered.extension.deactivate?.()
   }
 
   getTool(extension: string, name: string): Tool | undefined {
-    return this.extensions.get(extension)?.tools.get(name)?.value
+    return this.extensions.get(extension)?.tools.get(name)
   }
 
   getSkill(extension: string, name: string): Skill | undefined {
-    return this.extensions.get(extension)?.skills.get(name)?.value
+    return this.extensions.get(extension)?.skills.get(name)
   }
 
   getView(extension: string, name: string): View<unknown> | undefined {
@@ -63,10 +65,10 @@ export class ExtensionHost {
 
   private createApp(registered: RegisteredExtension): App {
     return {
-      registerTool: (name, tool, eager = false) => registered.tools.set(name, { value: tool, eager }),
-      registerSkill: (name, skill, eager = false) => registered.skills.set(name, { value: skill, eager }),
+      registerTool: (name, tool) => registered.tools.set(name, tool),
+      registerSkill: (name, skill) => registered.skills.set(name, skill),
       registerView: (name, view) => registered.views.set(name, view as View<unknown>),
-      registerService: (name, service) => registered.services.set(name, service),
+      registerService: (name, service) => registered.services.set(name, service)
     }
   }
 }

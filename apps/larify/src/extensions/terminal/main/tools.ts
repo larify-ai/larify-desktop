@@ -3,7 +3,8 @@ import {
   normalizeTerminalInputLineBreaks,
   trimTrailingLineBreak
 } from '../../../main/utils/text'
-import { defineTool, type Toolkit } from '../../../shared/tool'
+import { defineTool } from '../../../shared/extension/tool'
+import type { Toolkit } from '../../../shared/toolkit'
 import type { TerminalService } from './terminal-service'
 import type { TerminalAgentSnapshot } from '../shared/types'
 

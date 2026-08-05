@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import matter from 'gray-matter'
 import { DiagnosticSeverity, Range, type Diagnostic } from 'vscode-languageserver-protocol'
-import type { FileDiagnosticsProvider } from '../../file/main/diagnostics'
+import type { FileDiagnosticsProvider } from '../../fs/main/diagnostics'
 import { isMarkdown, isWithin, markdownLinks, resolveContextLink } from './files'
 
 type DuplicateName = (file: string, name: string) => Promise<boolean>

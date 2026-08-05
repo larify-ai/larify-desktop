@@ -4,7 +4,7 @@ import { createContextDiagnosticsProvider } from './diagnostics'
 import { cleanContextRegistry, registerContext } from './workspace'
 import { ContextWorker } from './worker-client'
 import type { EmbeddingWorker } from '../../embedding/main/worker-client'
-import { registerFileDiagnosticsProvider } from '../../file/main/diagnostics'
+import { registerFileDiagnosticsProvider } from '../../fs/main/diagnostics'
 
 const extension: Extension = {
   activate(app, context) {

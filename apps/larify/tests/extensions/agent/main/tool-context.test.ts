@@ -7,9 +7,9 @@ import { readUIMessageStream, type UIMessage } from "ai"
 import { afterAll, describe, expect, it } from "vitest"
 import { runAgentUIStream, toolsContextFor } from "../../../../src/extensions/agent/main/agent"
 import { asDiffMeta, toolIcon } from "../../../../src/extensions/assistant/renderer/lib/diff-meta"
-import { editFileTool } from "../../../../src/extensions/file/main/edit"
-import { readFileTool } from "../../../../src/extensions/file/main/read"
-import { callTool, freshSession } from "../../file/main/harness"
+import { editFileTool } from "../../../../src/extensions/fs/main/edit"
+import { readFileTool } from "../../../../src/extensions/fs/main/read"
+import { callTool, freshSession } from "../../fs/main/harness"
 
 const root = mkdtempSync(join(tmpdir(), "larify-tool-context-"))
 afterAll(() => rmSync(root, { force: true, recursive: true }))

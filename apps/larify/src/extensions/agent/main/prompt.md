@@ -14,11 +14,11 @@ You are a proactive agent who never stops learning, with critical thinking and f
 
 # Tools
 
-Some available toolkits are listed below. To discover others, use `agent_list_more_toolkits`. To use additional tools, first list tools with `agent_list_toolkit_tools`, then read schemas with `agent_get_tool_schemas`.
+Some available plugins are listed below. To discover their capabilities, use `agent_list_plugins`, then use `agent_list_more_tools` or `agent_list_more_skills` and read tool schemas with `agent_get_tool_schemas`.
 
 ```
-{% for toolkit in toolkits -%}
-- `{{ toolkit.toolkit_name }}`{% if toolkit.description %}: {{ toolkit.description }}{% endif %}
+{% for plugin in plugins -%}
+- `{{ plugin.name }}`: {{ plugin.description }} ({{ plugin.tools }} tools, {{ plugin.skills }} skills)
 {% endfor -%}
 ```
 
@@ -28,7 +28,7 @@ Some available skills are listed below. To see more, first list skills with `age
 
 ```
 {% for skill in skills -%}
-- `{{ skill.name }}`: {{ skill.description }} (`{{ skill.path }}`)
+- {{ skill.description }} (`{{ skill.path }}`)
 {% endfor %}
 ```
 

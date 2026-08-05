@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { tool } from 'ai'
 import { z } from 'zod'
 import { ExtensionHost } from '../../../src/main/core/extension'
-import type { Extension } from '../../../src/shared/extension'
+import { defineService, type Extension } from '../../../src/shared/extension'
 
 describe('ExtensionHost', () => {
   it('runs the extension lifecycle', async () => {
@@ -44,7 +44,9 @@ describe('ExtensionHost', () => {
       }
     })
 
-    expect(host.listPlugins()).toEqual([{ name: 'files', description: 'Files' }])
+    expect(host.listPlugins()).toEqual([
+      { name: 'files', description: 'Files', tools: 2, skills: 0 }
+    ])
     expect(host.listTools('files', false)).toEqual([
       { name: 'files_read', description: 'Read' },
       { name: 'files_write' }
@@ -58,5 +60,39 @@ describe('ExtensionHost', () => {
         _title: 'Read file'
       }).success
     ).toBe(true)
+  })
+
+  it('hides extensions without model capabilities', async () => {
+    const host = new ExtensionHost()
+    await host.activate({
+      name: 'service',
+      description: 'Service only',
+      activate() {}
+    })
+
+    expect(host.listPlugins()).toEqual([])
+  })
+
+  it('shares typed services between extensions', async () => {
+    const service = defineService<{ value: number }>('test')
+    const host = new ExtensionHost()
+    await host.activate({
+      name: 'provider',
+      description: 'Provider',
+      activate(app) {
+        app.registerService(service, { value: 42 })
+      }
+    })
+
+    let received: { value: number } | undefined
+    await host.activate({
+      name: 'consumer',
+      description: 'Consumer',
+      activate(app) {
+        received = app.getService(service)
+      }
+    })
+
+    expect(received).toEqual({ value: 42 })
   })
 })

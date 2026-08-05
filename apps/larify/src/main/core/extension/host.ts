@@ -16,6 +16,10 @@ interface RegisteredExtension {
 export class ExtensionHost {
   private readonly extensions = new Map<string, RegisteredExtension>()
 
+  has(name: string): boolean {
+    return this.extensions.has(name)
+  }
+
   async activate(extension: Extension): Promise<void> {
     if (this.extensions.has(extension.name))
       throw new Error(`Extension already registered: ${extension.name}`)
@@ -57,9 +61,17 @@ export class ExtensionHost {
     )
   }
 
-  listPlugins(): Array<Pick<Extension, 'name' | 'description'>> {
+  listPlugins(): Array<
+    Pick<Extension, 'name' | 'description'> & { tools: number; skills: number }
+  > {
     return [...this.extensions.values()]
-      .map(({ extension }) => ({ name: extension.name, description: extension.description }))
+      .filter(({ tools, skills }) => tools.size > 0 || skills.size > 0)
+      .map(({ extension, tools, skills }) => ({
+        name: extension.name,
+        description: extension.description,
+        tools: tools.size,
+        skills: skills.size
+      }))
       .sort((a, b) => a.name.localeCompare(b.name))
   }
 
@@ -81,16 +93,20 @@ export class ExtensionHost {
   listSkills(
     extension: string,
     eager?: boolean
-  ): Array<{ name: string; description: string }> | undefined {
+  ): Array<{ path: string; description: string }> | undefined {
     const registered = this.extensions.get(extension)
     if (!registered) return undefined
     return [...registered.skills.entries()]
       .filter(([, skill]) => eager === undefined || (skill.metadata?.eager === true) === eager)
-      .map(([name, skill]) => ({
-        name,
+      .map(([, skill]) => ({
+        path: skill.path,
         description: skill.description
       }))
-      .sort((a, b) => a.name.localeCompare(b.name))
+      .sort((a, b) => a.path.localeCompare(b.path))
+  }
+
+  eagerSkills(): Array<{ path: string; description: string }> {
+    return [...this.extensions.keys()].flatMap((name) => this.listSkills(name, true) ?? [])
   }
 
   getSkill(extension: string, name: string): Skill | undefined {
@@ -127,7 +143,8 @@ export class ExtensionHost {
       },
       registerService: (name, service) => {
         registered.services.set(name, service)
-      }
+      },
+      getService: (service) => this.getService(service)
     }
   }
 }

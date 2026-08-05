@@ -1,21 +1,24 @@
+import type { DeepSeekLanguageModelOptions } from '@ai-sdk/deepseek'
+import type { LanguageModelV4 } from '@ai-sdk/provider'
 import {
-  streamText,
-  isLoopFinished,
-  smoothStream,
-  toUIMessageStream,
+  convertToModelMessages,
   createUIMessageStream,
+  isLoopFinished,
+  readUIMessageStream,
+  smoothStream,
+  streamText,
+  toUIMessageStream,
   wrapLanguageModel,
   type LanguageModelMiddleware,
   type ModelMessage,
   type PrepareStepFunction,
   type StopCondition,
   type ToolSet,
+  type UIMessage,
   type UIMessageChunk
 } from 'ai'
-import type { LanguageModelV4 } from '@ai-sdk/provider'
-import type { DeepSeekLanguageModelOptions } from '@ai-sdk/deepseek'
 import type { ToolContext } from '../../../shared/extension/tool'
-import { createModel } from './model'
+import { createModel } from '../model'
 
 export type AgentOutput = NonNullable<Parameters<typeof streamText>[0]['output']>
 
@@ -89,16 +92,60 @@ export function runAgentUIStream(
       writer.merge(
         toUIMessageStream({
           stream: result.stream,
-          onError: (e) => {
-            console.error('[agent tool error]', e)
-            return e instanceof Error ? e.message : String(e)
+          onError: (error) => {
+            console.error('[agent tool error]', error)
+            return error instanceof Error ? error.message : String(error)
           }
         })
       )
     },
-    onError: (e) => {
-      console.error('[agent stream error]', e)
-      return e instanceof Error ? e.message : String(e)
+    onError: (error) => {
+      console.error('[agent stream error]', error)
+      return error instanceof Error ? error.message : String(error)
     }
   })
+}
+
+export interface AgentSessionResult<OUTPUT extends AgentOutput> {
+  result: ReturnType<typeof runAgent<OUTPUT>>
+  messages: Promise<UIMessage[]>
+  latest: () => UIMessage[]
+}
+
+function appendResponse(messages: UIMessage[], response: UIMessage): UIMessage[] {
+  return messages.at(-1)?.id === response.id
+    ? [...messages.slice(0, -1), response]
+    : [...messages, response]
+}
+
+export async function runAgentSession<OUTPUT extends AgentOutput = AgentOutput>(
+  messages: UIMessage[],
+  options: Omit<Parameters<typeof runAgent<OUTPUT>>[0], 'messages'>,
+  onChunk?: (chunk: UIMessageChunk) => void
+): Promise<AgentSessionResult<OUTPUT>> {
+  const result = runAgent({
+    ...options,
+    messages: await convertToModelMessages(messages)
+  })
+
+  let latest = messages
+  const stream = toUIMessageStream({
+    stream: result.stream,
+    originalMessages: messages,
+    onError: (error) => (error instanceof Error ? error.message : String(error)),
+    onEnd: ({ messages }) => {
+      latest = messages
+    }
+  })
+  const [updates, chunks] = stream.tee()
+  const completed = Promise.all([
+    (async () => {
+      for await (const response of readUIMessageStream({ stream: updates })) {
+        latest = appendResponse(messages, response)
+      }
+    })(),
+    chunks.pipeTo(new WritableStream({ write: onChunk }))
+  ]).then(() => latest)
+
+  return { result, messages: completed, latest: () => latest }
 }

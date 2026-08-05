@@ -4,6 +4,7 @@ import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { simpleGit } from 'simple-git'
 import { GitService } from '../../../../src/extensions/workspace/main/git/git-service'
+import { GitService as GitRuntime } from '../../../../src/main/core/git'
 
 const temporaryDirectories: string[] = []
 const gitTestTimeout = 15_000
@@ -119,7 +120,7 @@ describe('GitService', () => {
       const file = path.join(root, 'fallback.txt')
       await writeFile(file, 'fallback')
 
-      const statuses = await new GitService('larify-missing-git-binary').status(root)
+      const statuses = await new GitService(new GitRuntime('larify-missing-git-binary')).status(root)
 
       expect(statuses.map((status) => status.path)).toContain(file)
     },

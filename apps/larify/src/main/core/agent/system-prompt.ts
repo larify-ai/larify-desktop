@@ -1,8 +1,6 @@
 import { Liquid } from 'liquidjs'
-import template from './prompt.md?raw'
-import type { ToolRegistry } from './registry'
-import type { SkillFactory } from './skill-factory'
-import { larifyPath } from '../../../main/utils/app-paths'
+import type { ExtensionHost } from '../extension'
+import { larifyPath } from '../../utils/app-paths'
 
 const liquid = new Liquid()
 
@@ -14,19 +12,15 @@ function platformName(): string {
 }
 
 export function buildSystemPrompt(
-  registry: ToolRegistry,
+  template: string,
+  host: ExtensionHost,
   cwd: string,
-  skillFactory?: SkillFactory,
   additionalPrompt?: string
 ): string {
-  const toolkits = registry.listToolkits(true)
-  const skills = skillFactory
-    ?.eager()
-    .map(({ name, description, path }) => ({ name, description, path }))
   const prompt = liquid
     .parseAndRenderSync(template, {
-      toolkits,
-      skills,
+      plugins: host.listPlugins(),
+      skills: host.eagerSkills(),
       platform: platformName(),
       cwd,
       taskDirectory: larifyPath('tasks')

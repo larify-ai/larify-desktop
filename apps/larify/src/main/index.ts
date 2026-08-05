@@ -32,9 +32,10 @@ app.whenReady().then(async () => {
 
   const host = createApp()
   const sessions = new SessionStore(sessionDatabasePath())
-  host.register('service', 'session', sessions)
-  const loader = new Loader(host, (m) => loaders.get(m.id)!())
   const extensionHost = new ExtensionHost()
+  host.register('service', 'session', sessions)
+  host.register('service', 'extension-host', extensionHost)
+  const loader = new Loader(host, (m) => loaders.get(m.id)!())
   const discovered = await new BuiltinExtensionSource(migratedModules).discover()
   const migrated = (await Promise.all(discovered.map((loader) => loader.load()))).filter(
     ({ name }) => migratedExtensionNames.has(name)

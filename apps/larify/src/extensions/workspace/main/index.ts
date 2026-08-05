@@ -2,6 +2,8 @@ import type { Extension } from '@shared/extension'
 import { registerWorkspaceIpc } from './ipc'
 import { WorkspaceService } from './workspace-service'
 import { WorkspaceEditorHost } from './workspace-editor-host'
+import { gitService } from '../../../main/core/git'
+import { GitService } from './git/git-service'
 
 interface MainWindowService {
   get(): import('electron').BrowserWindow
@@ -9,7 +11,7 @@ interface MainWindowService {
 
 const extension: Extension = {
   activate(_app, context) {
-    const service = new WorkspaceService()
+    const service = new WorkspaceService(new GitService(gitService))
     let editor: WorkspaceEditorHost | null = null
     const getEditor = (): WorkspaceEditorHost => {
       if (editor) return editor

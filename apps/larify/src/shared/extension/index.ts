@@ -24,4 +24,5 @@ export interface App {
   registerSkill(name: string, skill: Skill): void
   registerView<Props>(name: string, view: View<Props>): void
   registerService<T>(name: Service<T>, service: T): void
+  getService<T>(service: Service<T>): T | undefined
 }

@@ -216,7 +216,9 @@ export function AssistantPanel(): React.JSX.Element {
 
   const refreshSessions = async (): Promise<void> => {
     try {
-      const rows = await window.bridge.invoke('agent:session-list')
+      const cwd = cwdBySessionIdRef.current[selectedSessionIdRef.current]
+      if (!cwd) return
+      const rows = await window.bridge.invoke('agent:session-list', cwd)
       setSessions(rows as SessionMeta[])
     } catch (error) {
       console.error('[agent:session-list]', error)
@@ -299,15 +301,15 @@ export function AssistantPanel(): React.JSX.Element {
 
     window.addEventListener('agent:new-session', handleNewSession)
     window.addEventListener('agent:select-session', handleSelectSession)
-    window.addEventListener('agent:sessions-changed', refreshSessions)
+    const handleSessionsChanged = (): void => void refreshSessions()
+    window.addEventListener('agent:sessions-changed', handleSessionsChanged)
     queueMicrotask(() => {
-      void refreshSessions()
-      void loadSession(sessionId)
+      void loadSession(sessionId).then(refreshSessions)
     })
     return () => {
       window.removeEventListener('agent:new-session', handleNewSession)
       window.removeEventListener('agent:select-session', handleSelectSession)
-      window.removeEventListener('agent:sessions-changed', refreshSessions)
+      window.removeEventListener('agent:sessions-changed', handleSessionsChanged)
     }
   }, [])
 

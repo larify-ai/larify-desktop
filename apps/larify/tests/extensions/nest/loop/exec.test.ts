@@ -5,27 +5,19 @@ import { dirname, join } from 'node:path'
 import type { Tool } from 'ai'
 
 const mocks = vi.hoisted(() => {
-  const registry = {
-    addToolkit: vi.fn(),
-    activeToolNames: vi.fn(() => ['agent_list_toolkit_tools']),
-    toolSet: vi.fn(() => ({ test_tool: {} }))
-  }
   return {
-    registry,
-    buildSystemPrompt: vi.fn(() => 'system prompt'),
-    createAgentToolkit: vi.fn(() => ({ name: 'agent', tools: {} })),
-    createToolRegistry: vi.fn(() => registry),
+    runtime: vi.fn(() => ({
+      system: 'system prompt',
+      tools: { test_tool: {} },
+      activeTools: ['agent_list_plugins'],
+      toolsContext: { test_tool: {} }
+    })),
     runAgent: vi.fn(() => ({})),
-    saveSession: vi.fn(),
-    toolsContextFor: vi.fn((_tools, context) => ({ test_tool: context }))
+    saveSession: vi.fn()
   }
 })
 
-vi.mock('../../../../src/extensions/agent/main/agent', () => ({
-  toolsContextFor: mocks.toolsContextFor
-}))
-
-vi.mock('../../../../src/extensions/agent/main/run-session', () => ({
+vi.mock('../../../../src/main/core/agent', () => ({
   runAgentSession: async (
     messages: unknown,
     options: { tools: Record<string, Tool>; [key: string]: unknown }
@@ -40,20 +32,8 @@ vi.mock('../../../../src/extensions/agent/main/run-session', () => ({
   }
 }))
 
-vi.mock('../../../../src/extensions/agent/main/session-store', () => ({
-  createSessionStore: () => ({ saveSession: mocks.saveSession })
-}))
-
-vi.mock('../../../../src/extensions/agent/main/agent-toolkit', () => ({
-  createAgentToolkit: mocks.createAgentToolkit
-}))
-
-vi.mock('../../../../src/extensions/agent/main/registry', () => ({
-  createToolRegistry: mocks.createToolRegistry
-}))
-
-vi.mock('../../../../src/extensions/agent/main/system-prompt', () => ({
-  buildSystemPrompt: mocks.buildSystemPrompt
+vi.mock('../../../../src/main/core/agent/runtime', () => ({
+  createAgentRuntime: mocks.runtime
 }))
 
 import { exec, type ExecInput } from '../../../../src/extensions/nest/loop/exec'
@@ -91,12 +71,16 @@ function input(taskFile: string): ExecInput {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  app.get.mockImplementation((_kind, name) =>
+    name === 'session'
+      ? { saveSession: mocks.saveSession }
+      : name === 'extension-host'
+        ? {}
+        : undefined
+  )
   app.getAll.mockReturnValue([])
   mocks.runAgent.mockReturnValue({})
-  mocks.registry.activeToolNames.mockReturnValue(['agent_list_toolkit_tools'])
-  mocks.registry.toolSet.mockReturnValue({ test_tool: {} })
-  mocks.createToolRegistry.mockReturnValue(mocks.registry)
-  mocks.buildSystemPrompt.mockReturnValue('system prompt')
+  mocks.runtime.mockClear()
 })
 
 describe('nest loop exec', () => {
@@ -129,7 +113,13 @@ describe('nest loop exec', () => {
 
     await expect(exec(input(taskFile))).rejects.toThrow('aborted')
 
-    expect(mocks.saveSession).toHaveBeenLastCalledWith(expect.any(String), partial, 'D:\\workspace')
+    expect(mocks.saveSession).toHaveBeenLastCalledWith({
+      id: expect.any(String),
+      title: 'Test task',
+      cwd: 'D:\\workspace',
+      tasks: [taskFile],
+      messages: partial
+    })
   })
 
   it('uses an independent background session', async () => {
@@ -137,23 +127,16 @@ describe('nest loop exec', () => {
 
     await exec(input(taskFile))
 
-    expect(mocks.toolsContextFor).toHaveBeenCalledWith(
-      { test_tool: {} },
-      { cwd: 'D:\\workspace', sessionId: expect.any(String) }
-    )
     const options = mocks.runAgent.mock.calls[0][0]
     expect(options).toEqual(
       expect.objectContaining({
         system: 'system prompt',
         tools: { test_tool: {} },
-        activeTools: ['agent_list_toolkit_tools']
+        activeTools: ['agent_list_plugins']
       })
     )
-    expect(mocks.buildSystemPrompt).toHaveBeenCalledWith(
-      mocks.registry,
-      'D:\\workspace',
-      expect.anything(),
-      undefined
+    expect(mocks.runtime).toHaveBeenCalledWith(
+      expect.objectContaining({ cwd: 'D:\\workspace', template: expect.any(String) })
     )
     expect(get(taskFile, 'sessions')).toEqual([expect.any(String)])
   })

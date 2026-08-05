@@ -1,12 +1,6 @@
 import path from 'node:path'
-import { vulnerabilityCheck } from '@simple-git/argv-parser'
-import { setupEnvironment } from 'dugite'
-import { simpleGit, type FileStatusResult, type SimpleGit, type SimpleGitOptions } from 'simple-git'
-
-interface GitRuntime {
-  env?: Record<string, string | undefined>
-  options: Pick<SimpleGitOptions, 'binary' | 'unsafe'>
-}
+import type { FileStatusResult, SimpleGit } from 'simple-git'
+import { GitService as GitRuntime } from '../../../../main/core/git'
 
 const isInside = (root: string, candidate: string): boolean => {
   const relative = path.relative(root, candidate)
@@ -14,10 +8,9 @@ const isInside = (root: string, candidate: string): boolean => {
 }
 
 export class GitService {
-  private runtime: Promise<GitRuntime> | null = null
   private readonly repositoryRoots = new Map<string, string>()
 
-  constructor(private readonly systemBinary = 'git') {}
+  constructor(private readonly runtime = new GitRuntime()) {}
 
   async status(workspaceRoot: string): Promise<FileStatusResult[]> {
     const git = await this.createClient(workspaceRoot)
@@ -79,32 +72,6 @@ export class GitService {
   }
 
   private async createClient(baseDir: string): Promise<SimpleGit> {
-    const runtime = await (this.runtime ??= this.resolveRuntime(baseDir))
-    const git = simpleGit({
-      baseDir,
-      maxConcurrentProcesses: 2,
-      ...runtime.options
-    })
-    if (runtime.env) git.env(runtime.env)
-    return git
-  }
-
-  private async resolveRuntime(baseDir: string): Promise<GitRuntime> {
-    try {
-      await simpleGit({ baseDir, binary: this.systemBinary }).version()
-      return { options: { binary: this.systemBinary } }
-    } catch {
-      const { env, gitLocation } = setupEnvironment({})
-      const unsafe = Object.fromEntries(
-        vulnerabilityCheck([], env).map(({ category }) => [category, true])
-      ) as NonNullable<SimpleGitOptions['unsafe']>
-      return {
-        env,
-        options: {
-          binary: gitLocation,
-          unsafe
-        }
-      }
-    }
+    return this.runtime.open(baseDir)
   }
 }

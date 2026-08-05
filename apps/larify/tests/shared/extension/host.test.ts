@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
+import { tool } from 'ai'
+import { z } from 'zod'
 import { ExtensionHost } from '../../../src/main/core/extension'
 import type { Extension } from '../../../src/shared/extension'
 
@@ -21,5 +23,40 @@ describe('ExtensionHost', () => {
 
   it('ignores an extension that is not active', async () => {
     await expect(new ExtensionHost().deactivate('missing')).resolves.toBeUndefined()
+  })
+
+  it('wraps and lists registered tools consistently', async () => {
+    const host = new ExtensionHost()
+    await host.activate({
+      name: 'files',
+      description: 'Files',
+      activate(app) {
+        app.registerTool(
+          'read',
+          tool({
+            description: 'Read',
+            metadata: { eager: false },
+            inputSchema: z.object({ path: z.string() })
+          })
+        )
+        app.registerTool('write', tool({ inputSchema: z.object({}) }))
+        app.registerTool('invalid', { inputSchema: {} } as never)
+      }
+    })
+
+    expect(host.listPlugins()).toEqual([{ name: 'files', description: 'Files' }])
+    expect(host.listTools('files', false)).toEqual([
+      { name: 'files_read', description: 'Read' },
+      { name: 'files_write' }
+    ])
+    expect(host.listTools('files', true)).toEqual([])
+    expect(host.getTools().has('files_read')).toBe(true)
+    expect(host.getTools().has('files_invalid')).toBe(false)
+    expect(
+      (host.getTool('files', 'read')!.inputSchema as z.ZodType).safeParse({
+        path: 'a.txt',
+        _title: 'Read file'
+      }).success
+    ).toBe(true)
   })
 })

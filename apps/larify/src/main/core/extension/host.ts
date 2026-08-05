@@ -3,6 +3,7 @@ import type { Service } from '../../../shared/extension/service'
 import type { Skill } from '../../../shared/extension/skill'
 import type { Tool } from '../../../shared/extension/tool'
 import type { View } from '../../../shared/extension/view'
+import { toolName, wrapTool } from './tool'
 
 interface RegisteredExtension {
   extension: Extension
@@ -48,6 +49,50 @@ export class ExtensionHost {
     return this.extensions.get(extension)?.tools.get(name)
   }
 
+  getTools(): Map<string, Tool> {
+    return new Map(
+      [...this.extensions.entries()].flatMap(([plugin, { tools }]) =>
+        [...tools].map(([name, tool]) => [toolName(plugin, name), tool] as const)
+      )
+    )
+  }
+
+  listPlugins(): Array<Pick<Extension, 'name' | 'description'>> {
+    return [...this.extensions.values()]
+      .map(({ extension }) => ({ name: extension.name, description: extension.description }))
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }
+
+  listTools(
+    extension: string,
+    eager?: boolean
+  ): Array<{ name: string; description?: string }> | undefined {
+    const registered = this.extensions.get(extension)
+    if (!registered) return undefined
+    return [...registered.tools.entries()]
+      .filter(([, tool]) => eager === undefined || (tool.metadata?.eager === true) === eager)
+      .map(([name, tool]) => ({
+        name: toolName(extension, name),
+        ...(typeof tool.description === 'string' ? { description: tool.description } : {})
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }
+
+  listSkills(
+    extension: string,
+    eager?: boolean
+  ): Array<{ name: string; description: string }> | undefined {
+    const registered = this.extensions.get(extension)
+    if (!registered) return undefined
+    return [...registered.skills.entries()]
+      .filter(([, skill]) => eager === undefined || (skill.metadata?.eager === true) === eager)
+      .map(([name, skill]) => ({
+        name,
+        description: skill.description
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }
+
   getSkill(extension: string, name: string): Skill | undefined {
     return this.extensions.get(extension)?.skills.get(name)
   }
@@ -65,10 +110,24 @@ export class ExtensionHost {
 
   private createApp(registered: RegisteredExtension): App {
     return {
-      registerTool: (name, tool) => registered.tools.set(name, tool),
-      registerSkill: (name, skill) => registered.skills.set(name, skill),
-      registerView: (name, view) => registered.views.set(name, view as View<unknown>),
-      registerService: (name, service) => registered.services.set(name, service)
+      registerTool: (name, tool) => {
+        try {
+          registered.tools.set(name, wrapTool(tool))
+        } catch (error) {
+          console.warn(
+            `[agent tools] Skipped invalid tool "${toolName(registered.extension.name, name)}": ${error instanceof Error ? error.message : String(error)}`
+          )
+        }
+      },
+      registerSkill: (name, skill) => {
+        registered.skills.set(name, skill)
+      },
+      registerView: (name, view) => {
+        registered.views.set(name, view as View<unknown>)
+      },
+      registerService: (name, service) => {
+        registered.services.set(name, service)
+      }
     }
   }
 }

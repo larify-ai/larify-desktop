@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import type { UIMessage } from 'ai'
 import { afterEach, describe, expect, it } from 'vitest'
 import { SessionStore } from '../../../../src/main/core/session'
+import { saveSessionMessages } from '../../../../src/main/core/session/save'
 
 const directories: string[] = []
 
@@ -40,6 +41,13 @@ const save = (
 ): void => store.saveSession({ id, title, cwd, tasks, messages })
 
 describe('SessionStore', () => {
+  it('uses a custom title when saving messages', async () => {
+    const store = await createStore()
+    saveSessionMessages(store, 'chat', '/cwd', [message('one', 'derived')], 'Custom title')
+    expect(store.loadSession('chat')?.title).toBe('Custom title')
+    store.close()
+  })
+
   it('returns null for a missing session', async () => {
     const store = await createStore()
     expect(await store.loadSession('missing')).toBeNull()

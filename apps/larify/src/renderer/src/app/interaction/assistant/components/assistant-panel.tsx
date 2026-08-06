@@ -13,7 +13,7 @@ import {
 } from 'lucide-react'
 import { Chat, useChat } from '@ai-sdk/react'
 import type { FileUIPart, UIMessage } from 'ai'
-import { VirtuosoMessageList } from '@virtuoso.dev/message-list'
+import { Virtuoso } from 'react-virtuoso'
 import { formatDistanceToNow } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
 import {
@@ -51,7 +51,11 @@ import { createIpcTransport } from '../lib/transport'
 import { RunActivity } from './run-activity'
 import { toggleSessionGroup } from '../lib/session-groups'
 import { readModelConfig, writeModelConfig } from '../lib/model-config'
-import { modelIds, modelLabels, type AgentModelConfig } from '../../../../../../extensions/agent/shared/model'
+import {
+  modelIds,
+  modelLabels,
+  type AgentModelConfig
+} from '../../../../../../extensions/agent/shared/model'
 
 const MemoizedMessageView = memo(MessageView)
 const RECENT_CWDS_KEY = 'larify.recentCwds'
@@ -863,18 +867,13 @@ function AssistantChat({
 
   return (
     <div className="flex h-full min-w-0 flex-1 flex-col">
-      <VirtuosoMessageList<UIMessage, undefined>
+      <Virtuoso<UIMessage>
         className="min-w-0 flex-1"
-        initialLocation={{ index: 'LAST' }}
-        data={{
-          data: messages,
-          scrollModifier: isLive
-            ? { type: 'auto-scroll-to-bottom', autoScroll: 'smooth' }
-            : undefined
-        }}
-        itemIdentity={(message) => message.id}
-        computeItemKey={({ data }) => data.id}
-        ItemContent={({ data: message, index }) => (
+        data={messages}
+        initialTopMostItemIndex={Math.max(messages.length - 1, 0)}
+        followOutput={isLive ? 'smooth' : false}
+        computeItemKey={(_, message) => message.id}
+        itemContent={(index, message) => (
           <div className="mx-auto w-full max-w-3xl px-6">
             <MemoizedMessageView
               message={message}
@@ -882,11 +881,13 @@ function AssistantChat({
             />
           </div>
         )}
-        Footer={() => (
-          <div className="mx-auto w-full max-w-3xl px-6">
-            <RunActivity active={isLive} cancelled={runCancelled} failed={status === 'error'} />
-          </div>
-        )}
+        components={{
+          Footer: () => (
+            <div className="mx-auto w-full max-w-3xl px-6">
+              <RunActivity active={isLive} cancelled={runCancelled} failed={status === 'error'} />
+            </div>
+          )
+        }}
       />
       {input}
     </div>

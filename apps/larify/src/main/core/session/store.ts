@@ -1,6 +1,7 @@
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite'
 import type { UIMessage } from 'ai'
 import { openDatabase, transaction } from '../sqlite'
+import type { Disposable } from '../../infra/disposable'
 
 export interface Session {
   id: string
@@ -23,7 +24,7 @@ interface SessionRow extends Record<string, SQLOutputValue> {
   updated_at: number
 }
 
-export class SessionStore {
+export class SessionStore implements Disposable {
   private readonly database: DatabaseSync
 
   constructor(path: string) {
@@ -137,7 +138,7 @@ export class SessionStore {
     return rows.map(({ cwd }) => cwd as string)
   }
 
-  close(): void {
+  dispose(): void {
     this.database.close()
   }
 

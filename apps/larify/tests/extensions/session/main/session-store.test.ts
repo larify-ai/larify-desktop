@@ -45,13 +45,13 @@ describe('SessionStore', () => {
     const store = await createStore()
     saveSessionMessages(store, 'chat', '/cwd', [message('one', 'derived')], 'Custom title')
     expect(store.loadSession('chat')?.title).toBe('Custom title')
-    store.close()
+    store.dispose()
   })
 
   it('returns null for a missing session', async () => {
     const store = await createStore()
     expect(await store.loadSession('missing')).toBeNull()
-    store.close()
+    store.dispose()
   })
 
   it('saves and loads messages', async () => {
@@ -69,7 +69,7 @@ describe('SessionStore', () => {
       title: 'hello',
       cwd: '/workspace'
     })
-    store.close()
+    store.dispose()
   })
 
   it('appends messages while preserving metadata and task links', async () => {
@@ -86,7 +86,7 @@ describe('SessionStore', () => {
     expect(second?.createdAt).toBe(first?.createdAt)
     expect(second?.title).toBe('first')
     expect(second?.tasks).toEqual(['/a.md', '/b.md'])
-    store.close()
+    store.dispose()
   })
 
   it('updates existing messages without removing omitted history', async () => {
@@ -105,7 +105,7 @@ describe('SessionStore', () => {
       messages: [message('one', 'one'), message('two', 'changed'), message('three', 'three')],
       cwd: '/cwd'
     })
-    store.close()
+    store.dispose()
   })
 
   it('preserves messages when no new messages are provided', async () => {
@@ -118,7 +118,7 @@ describe('SessionStore', () => {
 
     store.saveSession({ id: 'chat', title: 'renamed', cwd: '/cwd', messages: [] })
     expect(store.loadSession('chat')).toMatchObject({ messages })
-    store.close()
+    store.dispose()
   })
 
   it('loads model messages from the latest compaction', async () => {
@@ -139,7 +139,7 @@ describe('SessionStore', () => {
       },
       message('two', 'new')
     ])
-    store.close()
+    store.dispose()
   })
 
   it('uses only the latest compaction for model messages', async () => {
@@ -162,7 +162,7 @@ describe('SessionStore', () => {
       },
       message('three', 'new')
     ])
-    store.close()
+    store.dispose()
   })
 
   it('paginates visible messages without compaction messages', async () => {
@@ -176,7 +176,7 @@ describe('SessionStore', () => {
       message('three', 'three')
     ])
     expect(store.loadSession('chat', 2, 2)?.messages).toEqual([message('one', 'one')])
-    store.close()
+    store.dispose()
   })
 
   it('lists sessions by recent activity', async () => {
@@ -189,7 +189,7 @@ describe('SessionStore', () => {
       { id: 'second', cwd: '/workspace' },
       { id: 'first', cwd: '/workspace' }
     ])
-    store.close()
+    store.dispose()
   })
 
   it('lists sessions by page', async () => {
@@ -199,7 +199,7 @@ describe('SessionStore', () => {
     await save(store, 'second', [], '/workspace', 'second')
 
     expect(await store.listSessions('/workspace', 1, 1)).toMatchObject([{ id: 'first' }])
-    store.close()
+    store.dispose()
   })
 
   it('lists workspaces by recent activity', async () => {
@@ -209,7 +209,7 @@ describe('SessionStore', () => {
     await save(store, 'second', [], '/second', 'second')
 
     expect(await store.listCwds()).toEqual(['/second', '/first'])
-    store.close()
+    store.dispose()
   })
 
   it('rolls back a failed save', async () => {
@@ -222,7 +222,7 @@ describe('SessionStore', () => {
       messages: [message('one', 'valid')],
       cwd: '/cwd'
     })
-    store.close()
+    store.dispose()
   })
 
   it('rolls back a failed start update', async () => {
@@ -240,6 +240,6 @@ describe('SessionStore', () => {
       },
       message('two', 'new')
     ])
-    store.close()
+    store.dispose()
   })
 })

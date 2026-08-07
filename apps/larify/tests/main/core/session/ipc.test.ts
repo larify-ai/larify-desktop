@@ -16,10 +16,6 @@ vi.mock('electron', () => ({
   }
 }))
 
-vi.mock('../../../../src/main/core/agent/message-sanitizer', () => ({
-  sanitizeAndValidateMessages: async (messages: unknown[]) => messages
-}))
-
 import { registerSessionHandlers } from '../../../../src/main/core/session/ipc'
 import { createSessionQueries } from '../../../../src/main/core/session/queries'
 
@@ -62,5 +58,4 @@ describe('session IPC', () => {
     expect(store.listSessions).toHaveBeenCalledWith('/cwd', 10, 20)
     expect(store.loadSession).toHaveBeenCalledWith('session', 30, 40)
   })
-
 })

@@ -37,7 +37,10 @@ const save = (
   messages: UIMessage[],
   cwd: string,
   title: string
-): void => store.saveSession({ id, title, cwd, messages })
+): void => {
+  store.createSession({ id, title, cwd })
+  store.saveMessages(id, messages)
+}
 
 describe('SessionStore', () => {
   it('uses a custom title when saving messages', async () => {
@@ -71,16 +74,33 @@ describe('SessionStore', () => {
     store.dispose()
   })
 
+  it('persists sessions after reopening the database', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'larify-sessions-'))
+    directories.push(directory)
+    const path = join(directory, 'sessions.db')
+    const first = new SessionStore(path)
+    save(first, 'chat', [message('one', 'hello')], '/workspace', 'hello')
+    first.dispose()
+
+    const reopened = new SessionStore(path)
+    expect(reopened.loadSession('chat')).toMatchObject({
+      title: 'hello',
+      cwd: '/workspace',
+      messages: [message('one', 'hello')]
+    })
+    reopened.dispose()
+  })
+
   it('appends messages while preserving metadata', async () => {
     const store = await createStore()
     await save(store, 'chat', [message('one', 'first')], '/one', 'first')
     const first = await store.loadSession('chat')
-    await save(store, 'chat', [message('two', 'second')], '/two', 'first')
+    await save(store, 'chat', [message('two', 'second')], '/two', 'second')
     const second = await store.loadSession('chat')
 
     expect(await store.loadSession('chat')).toMatchObject({
       messages: [message('one', 'first'), message('two', 'second')],
-      cwd: '/two'
+      cwd: '/one'
     })
     expect(second?.createdAt).toBe(first?.createdAt)
     expect(second?.title).toBe('first')
@@ -111,10 +131,10 @@ describe('SessionStore', () => {
     const messages = [message('one', 'one')]
     await save(store, 'chat', messages, '/cwd', 'chat')
 
-    store.saveSession({ id: 'chat', title: 'renamed', cwd: '/cwd' })
+    store.renameSession('chat', 'renamed')
     expect(store.loadSession('chat')).toMatchObject({ title: 'renamed', messages })
 
-    store.saveSession({ id: 'chat', title: 'renamed', cwd: '/cwd', messages: [] })
+    store.saveMessages('chat', [])
     expect(store.loadSession('chat')).toMatchObject({ messages })
     store.dispose()
   })
@@ -187,6 +207,18 @@ describe('SessionStore', () => {
       { id: 'second', cwd: '/workspace' },
       { id: 'first', cwd: '/workspace' }
     ])
+    store.dispose()
+  })
+
+  it('moves a session to the top after saving a new message', async () => {
+    const store = await createStore()
+    save(store, 'first', [message('one', 'first')], '/workspace', 'first')
+    await new Promise((resolve) => setTimeout(resolve, 2))
+    save(store, 'second', [message('two', 'second')], '/workspace', 'second')
+    await new Promise((resolve) => setTimeout(resolve, 2))
+    store.saveMessages('first', [message('three', 'new')])
+
+    expect(store.listSessions('/workspace').map(({ id }) => id)).toEqual(['first', 'second'])
     store.dispose()
   })
 

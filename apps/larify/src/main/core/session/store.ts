@@ -86,12 +86,36 @@ export class SessionStore implements Disposable {
     return messages.map(({ value }) => JSON.parse(value as string) as UIMessage)
   }
 
-  saveSession(session: Session): void {
+  createSession(session: Pick<Session, 'id' | 'title' | 'cwd'>): void {
     const now = Date.now()
-    const saved = { ...session, createdAt: session.createdAt ?? now, updatedAt: now }
+    this.database
+      .prepare(
+        `INSERT INTO sessions (id, title, cwd, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO NOTHING`
+      )
+      .run(session.id, session.title, session.cwd, now, now)
+  }
+
+  renameSession(id: string, title: string): void {
+    this.database
+      .prepare('UPDATE sessions SET title = ?, updated_at = ? WHERE id = ?')
+      .run(title, Date.now(), id)
+  }
+
+  saveMessages(sessionId: string, messages: UIMessage[]): void {
+    if (!messages.length) return
+    const save = this.database.prepare(
+      `INSERT INTO messages (session_id, id, value)
+       VALUES (?, ?, ?)
+       ON CONFLICT(session_id, id) DO UPDATE SET value = excluded.value
+       WHERE messages.value <> excluded.value`
+    )
     transaction(this.database, () => {
-      this.upsertSession(saved)
-      if (session.messages) this.saveMessages(session.id, session.messages)
+      for (const message of messages) save.run(sessionId, message.id, JSON.stringify(message))
+      this.database
+        .prepare('UPDATE sessions SET updated_at = ? WHERE id = ?')
+        .run(Date.now(), sessionId)
     })
   }
 
@@ -146,34 +170,6 @@ export class SessionStore implements Disposable {
          FROM sessions WHERE id = ?`
       )
       .get(id) as SessionRow | undefined
-  }
-
-  private upsertSession(session: Session & { createdAt: number; updatedAt: number }): void {
-    this.database
-      .prepare(
-        `
-        INSERT INTO sessions (id, title, cwd, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET
-          title = excluded.title,
-          cwd = excluded.cwd,
-          updated_at = excluded.updated_at
-      `
-      )
-      .run(session.id, session.title, session.cwd, session.createdAt, session.updatedAt)
-  }
-
-  private saveMessages(sessionId: string, messages: UIMessage[]): void {
-    const save = this.database.prepare(
-      `INSERT INTO messages (session_id, id, value)
-       VALUES (?, ?, ?)
-       ON CONFLICT(session_id, id) DO UPDATE SET value = excluded.value
-       WHERE messages.value <> excluded.value`
-    )
-
-    for (const message of messages) {
-      save.run(sessionId, message.id, JSON.stringify(message))
-    }
   }
 }
 

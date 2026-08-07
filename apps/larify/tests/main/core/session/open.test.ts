@@ -40,10 +40,7 @@ describe('registerSession', () => {
 
     registerSession({ registry: { register } } as never)
 
-    expect(mocks.stores.map(({ path }) => path)).toEqual([
-      'sessions.db',
-      'background-sessions.db'
-    ])
+    expect(mocks.stores.map(({ path }) => path)).toEqual(['sessions.db', 'background-sessions.db'])
     expect(mocks.registerHandlers).toHaveBeenCalledWith(mocks.stores[0])
     expect(register.mock.calls.map(([, resource]) => resource)).toEqual([
       mocks.stores[0],

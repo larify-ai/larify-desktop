@@ -16,6 +16,9 @@ export function saveSessionMessages(
   cwd: string,
   messages: UIMessage[],
   title?: string
-): void {
-  store.saveSession({ id, cwd, messages, title: title ?? deriveTitle(messages) })
+): string {
+  const resolvedTitle = title ?? deriveTitle(messages)
+  store.createSession({ id, cwd, title: resolvedTitle })
+  store.saveMessages(id, messages)
+  return resolvedTitle
 }

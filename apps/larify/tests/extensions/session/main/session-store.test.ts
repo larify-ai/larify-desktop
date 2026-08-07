@@ -36,9 +36,8 @@ const save = (
   id: string,
   messages: UIMessage[],
   cwd: string,
-  title: string,
-  tasks?: string[]
-): void => store.saveSession({ id, title, cwd, tasks, messages })
+  title: string
+): void => store.saveSession({ id, title, cwd, messages })
 
 describe('SessionStore', () => {
   it('uses a custom title when saving messages', async () => {
@@ -72,11 +71,11 @@ describe('SessionStore', () => {
     store.dispose()
   })
 
-  it('appends messages while preserving metadata and task links', async () => {
+  it('appends messages while preserving metadata', async () => {
     const store = await createStore()
-    await save(store, 'chat', [message('one', 'first')], '/one', 'first', ['/a.md'])
+    await save(store, 'chat', [message('one', 'first')], '/one', 'first')
     const first = await store.loadSession('chat')
-    await save(store, 'chat', [message('two', 'second')], '/two', 'first', ['/a.md', '/b.md'])
+    await save(store, 'chat', [message('two', 'second')], '/two', 'first')
     const second = await store.loadSession('chat')
 
     expect(await store.loadSession('chat')).toMatchObject({
@@ -85,7 +84,6 @@ describe('SessionStore', () => {
     })
     expect(second?.createdAt).toBe(first?.createdAt)
     expect(second?.title).toBe('first')
-    expect(second?.tasks).toEqual(['/a.md', '/b.md'])
     store.dispose()
   })
 

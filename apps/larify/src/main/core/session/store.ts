@@ -7,7 +7,6 @@ export interface Session {
   id: string
   title: string
   cwd: string
-  tasks?: string[]
   start?: number
   messages?: UIMessage[]
   createdAt?: number
@@ -18,7 +17,6 @@ interface SessionRow extends Record<string, SQLOutputValue> {
   id: string
   title: string
   cwd: string
-  tasks: string
   start: number | null
   created_at: number
   updated_at: number
@@ -36,7 +34,6 @@ export class SessionStore implements Disposable {
         id TEXT PRIMARY KEY,
         title TEXT NOT NULL,
         cwd TEXT NOT NULL,
-        tasks TEXT NOT NULL DEFAULT '[]',
         start INTEGER,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL
@@ -123,7 +120,7 @@ export class SessionStore implements Disposable {
   listSessions(cwd: string, offset = 0, limit = 10): Session[] {
     const rows = this.database
       .prepare(
-        `SELECT id, title, cwd, tasks, start, created_at, updated_at
+        `SELECT id, title, cwd, start, created_at, updated_at
          FROM sessions WHERE cwd = ?
          ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?`
       )
@@ -145,7 +142,7 @@ export class SessionStore implements Disposable {
   private getSession(id: string): SessionRow | undefined {
     return this.database
       .prepare(
-        `SELECT id, title, cwd, tasks, start, created_at, updated_at
+        `SELECT id, title, cwd, start, created_at, updated_at
          FROM sessions WHERE id = ?`
       )
       .get(id) as SessionRow | undefined
@@ -155,23 +152,15 @@ export class SessionStore implements Disposable {
     this.database
       .prepare(
         `
-        INSERT INTO sessions (id, title, cwd, tasks, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO sessions (id, title, cwd, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           title = excluded.title,
           cwd = excluded.cwd,
-          tasks = excluded.tasks,
           updated_at = excluded.updated_at
       `
       )
-      .run(
-        session.id,
-        session.title,
-        session.cwd,
-        JSON.stringify(session.tasks ?? []),
-        session.createdAt,
-        session.updatedAt
-      )
+      .run(session.id, session.title, session.cwd, session.createdAt, session.updatedAt)
   }
 
   private saveMessages(sessionId: string, messages: UIMessage[]): void {
@@ -189,12 +178,10 @@ export class SessionStore implements Disposable {
 }
 
 function toSession(row: SessionRow): Session {
-  const tasks = JSON.parse(row.tasks) as string[]
   return {
     id: row.id,
     title: row.title,
     cwd: row.cwd,
-    tasks: tasks.length ? tasks : undefined,
     start: row.start ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at

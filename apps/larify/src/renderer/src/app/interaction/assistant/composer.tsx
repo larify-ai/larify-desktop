@@ -1,13 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type RefObject } from 'react'
 import type { ChatStatus } from 'ai'
-import { FolderIcon } from 'lucide-react'
+import { ArrowUpIcon, SquareIcon } from 'lucide-react'
 import {
   PromptInput,
-  PromptInputActionAddAttachments,
-  PromptInputActionMenu,
-  PromptInputActionMenuContent,
-  PromptInputActionMenuItem,
-  PromptInputActionMenuTrigger,
   PromptInputBody,
   PromptInputFooter,
   PromptInputHeader,
@@ -25,6 +20,7 @@ import {
   Attachments
 } from '@renderer/components/ai-elements/attachments'
 import { useComposerHistory } from './composer-history'
+import { ComposerMenu } from './composer-menu'
 
 interface AssistantComposerProps {
   history: string[]
@@ -53,38 +49,13 @@ function AttachmentList(): React.JSX.Element | null {
   )
 }
 
-function DirectoryAttachment(): React.JSX.Element {
-  const attachments = usePromptInputAttachments()
-
-  const select = async (): Promise<void> => {
-    const paths = await window.bridge.invoke('dialog:pick-directories')
-    if (!Array.isArray(paths)) return
-    attachments.addParts(
-      paths
-        .filter((path): path is string => typeof path === 'string')
-        .map((path) => ({
-          id: crypto.randomUUID(),
-          type: 'file',
-          filename: path.split(/[\\/]/).filter(Boolean).at(-1) ?? path,
-          mediaType: 'inode/directory',
-          url: path
-        }))
-    )
-  }
-
-  return (
-    <PromptInputActionMenuItem className="gap-2" onSelect={() => void select()}>
-      <FolderIcon className="size-4" />
-      目录
-    </PromptInputActionMenuItem>
-  )
-}
-
 function ComposerFooter({
+  inputRef,
   status,
   text,
   onStop
 }: {
+  inputRef: RefObject<HTMLDivElement | null>
   status: ChatStatus
   text: string
   onStop: () => void
@@ -94,21 +65,17 @@ function ComposerFooter({
 
   return (
     <PromptInputFooter className="justify-between">
-      <PromptInputTools>
-        <PromptInputActionMenu>
-          <PromptInputActionMenuTrigger tooltip="添加附件" />
-          <PromptInputActionMenuContent>
-            <PromptInputActionAddAttachments label="文件" />
-            <DirectoryAttachment />
-          </PromptInputActionMenuContent>
-        </PromptInputActionMenu>
+      <PromptInputTools className="flex-1 overflow-hidden">
+        <ComposerMenu inputRef={inputRef} />
       </PromptInputTools>
       <PromptInputSubmit
         status={status}
         onStop={onStop}
         disabled={!running && !text.trim() && attachments.files.length === 0}
-        className="rounded-full"
-      />
+        className="rounded-full disabled:bg-primary disabled:text-primary-foreground disabled:opacity-50"
+      >
+        {running ? <SquareIcon className="size-4" /> : <ArrowUpIcon className="size-4" />}
+      </PromptInputSubmit>
     </PromptInputFooter>
   )
 }
@@ -120,6 +87,7 @@ export function AssistantComposer({
   onStop
 }: AssistantComposerProps): React.JSX.Element {
   const [text, setText] = useState('')
+  const inputRef = useRef<HTMLDivElement>(null)
   const submitting = useRef(false)
   const stopping = useRef(false)
   const running = status === 'submitted' || status === 'streaming'
@@ -149,8 +117,8 @@ export function AssistantComposer({
   }
 
   return (
-    <div className="pr-[var(--larify-scrollbar-size)]">
-      <div className="mx-auto w-full max-w-3xl px-6 pb-4">
+    <div className="mx-auto w-full max-w-3xl px-6 pb-4">
+      <div ref={inputRef} className="w-full">
         <PromptInput onSubmit={submit} multiple className="[&_[data-slot=input-group]]:rounded-2xl">
           <AttachmentList />
           <PromptInputBody>
@@ -162,7 +130,7 @@ export function AssistantComposer({
               className="max-h-48 min-h-12 overflow-y-auto pl-3"
             />
           </PromptInputBody>
-          <ComposerFooter status={status} text={text} onStop={stop} />
+          <ComposerFooter inputRef={inputRef} status={status} text={text} onStop={stop} />
         </PromptInput>
       </div>
     </div>

@@ -85,6 +85,13 @@ describe('AssistantComposer', () => {
     expect(container.querySelector('textarea')!.placeholder).toBe('描述任务...')
     const button = container.querySelector('button[type="submit"]') as HTMLButtonElement
     expect(button.disabled).toBe(true)
+    expect(button.querySelector('.lucide-arrow-up')).not.toBeNull()
+    const attachment = container.querySelector('[data-slot="dropdown-menu-trigger"]')
+    expect(attachment?.getAttribute('style')).toContain('border-radius: 9999px')
+    expect(attachment?.classList.contains('text-secondary-foreground')).toBe(true)
+    expect(attachment?.classList.contains('bg-secondary')).toBe(true)
+    expect(button.classList.contains('disabled:opacity-50')).toBe(true)
+    expect(container.querySelector('.max-w-3xl')?.className).not.toContain('scrollbar-size')
     await act(async () => submit())
     expect(onSubmit).not.toHaveBeenCalled()
   })

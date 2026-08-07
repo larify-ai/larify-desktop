@@ -3,7 +3,7 @@ import type { SessionStore } from '../session'
 import type { AgentOptions } from './engine'
 import { runStoredAgentSession } from './persist'
 
-export interface AgentInput {
+export interface AgentWorkerInput {
   sessionId: string
   cwd: string
   message: UIMessage
@@ -25,7 +25,7 @@ export class AgentWorker {
     private readonly sink: AgentSink
   ) {}
 
-  async run(input: AgentInput): Promise<void> {
+  async run(input: AgentWorkerInput): Promise<void> {
     if (this.controller || this.closed) return
     const controller = new AbortController()
     this.controller = controller

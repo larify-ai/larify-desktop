@@ -3,11 +3,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   toModel: vi.fn(),
-  run: vi.fn()
+  run: vi.fn(),
+  runtime: vi.fn()
 }))
 
 vi.mock('../../../../src/main/core/agent/persist', () => ({
   runStoredAgentSession: mocks.run
+}))
+vi.mock('../../../../src/main/core/agent/runtime', () => ({
+  createAgentRuntime: mocks.runtime
 }))
 
 import { Agent } from '../../../../src/main/core/agent/agent'
@@ -18,7 +22,7 @@ const message: UIMessage = {
   parts: [{ type: 'text', text: 'hello' }]
 }
 
-const input = { sessionId: 'session', message, cwd: 'cwd', runtime: {} }
+const input = { sessionId: 'session', message, cwd: 'cwd' }
 
 const sessions = {
   loadSession: vi.fn(),
@@ -31,6 +35,7 @@ beforeEach(() => {
   sessions.loadMessages.mockReturnValue([])
   mocks.toModel.mockResolvedValue([])
   mocks.run.mockResolvedValue(undefined)
+  mocks.runtime.mockReturnValue({ system: 'runtime' })
 })
 
 describe('Agent', () => {
@@ -98,15 +103,28 @@ describe('Agent', () => {
     await vi.waitFor(() => expect(mocks.run).toHaveBeenCalledTimes(2))
   })
 
-  it('does not mutate the supplied runtime', async () => {
-    const prepareStep = vi.fn()
-    const runtime = { prepareStep }
+  it('assembles the runtime from the request', async () => {
     const agent = new Agent(sessions as never)
 
-    agent.send({ ...input, runtime }, { chunk: vi.fn(), error: vi.fn(), end: vi.fn() })
+    agent.send(input, { chunk: vi.fn(), error: vi.fn(), end: vi.fn() })
 
     await vi.waitFor(() => expect(mocks.run).toHaveBeenCalledOnce())
-    expect(runtime.prepareStep).toBe(prepareStep)
+    expect(mocks.runtime).toHaveBeenCalledWith(input)
+    expect(mocks.run.mock.calls[0][1].options.system).toBe('runtime')
+  })
+
+  it('can retry after runtime assembly fails', async () => {
+    mocks.runtime.mockImplementationOnce(() => {
+      throw new Error('runtime failed')
+    })
+    const agent = new Agent(sessions as never)
+
+    expect(() => agent.send(input, { chunk: vi.fn(), error: vi.fn(), end: vi.fn() })).toThrow(
+      'runtime failed'
+    )
+    agent.send(input, { chunk: vi.fn(), error: vi.fn(), end: vi.fn() })
+
+    await vi.waitFor(() => expect(mocks.run).toHaveBeenCalledOnce())
   })
 
   it('reports an error without also ending the stream', async () => {

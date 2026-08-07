@@ -2,7 +2,7 @@ import {
   defaultModelConfig,
   isAgentModelConfig,
   type AgentModelConfig
-} from '../../../../../../extensions/agent/shared/model'
+} from '../../../../../main/core/model/config'
 
 export const MODEL_CONFIG_KEY = 'larify.modelConfig'
 

@@ -4,7 +4,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   toModel: vi.fn(),
   run: vi.fn(),
-  runtime: vi.fn()
+  runtime: vi.fn(),
+  workspace: 'default-workspace'
 }))
 
 vi.mock('../../../../src/main/core/agent/persist', () => ({
@@ -12,6 +13,9 @@ vi.mock('../../../../src/main/core/agent/persist', () => ({
 }))
 vi.mock('../../../../src/main/core/agent/runtime', () => ({
   createAgentRuntime: mocks.runtime
+}))
+vi.mock('../../../../src/main/utils/app-paths', () => ({
+  larifyWorkspacePath: () => mocks.workspace
 }))
 
 import { Agent } from '../../../../src/main/core/agent/agent'
@@ -111,6 +115,17 @@ describe('Agent', () => {
     await vi.waitFor(() => expect(mocks.run).toHaveBeenCalledOnce())
     expect(mocks.runtime).toHaveBeenCalledWith(input)
     expect(mocks.run.mock.calls[0][1].options.system).toBe('runtime')
+  })
+
+  it('uses the default workspace when cwd is absent', async () => {
+    const agent = new Agent(sessions as never)
+    const request = { sessionId: 'session', message }
+
+    agent.send(request, { chunk: vi.fn(), error: vi.fn(), end: vi.fn() })
+
+    await vi.waitFor(() => expect(mocks.run).toHaveBeenCalledOnce())
+    expect(mocks.runtime).toHaveBeenCalledWith({ ...request, cwd: mocks.workspace })
+    expect(mocks.run.mock.calls[0][1].cwd).toBe(mocks.workspace)
   })
 
   it('can retry after runtime assembly fails', async () => {

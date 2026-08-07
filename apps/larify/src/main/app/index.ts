@@ -3,7 +3,9 @@ import { electronApp } from '@electron-toolkit/utils'
 import { Registry } from '../infra/registry'
 import { installShutdown } from './shutdown'
 import { registerSession } from '../core/session/open'
+import { registerAgent } from '../core/agent'
 import { registerTheme } from '../theme'
+import { registerDialog } from '../dialog'
 import { openMainWindow, registerWindow } from '../window'
 import type { Application } from './application'
 
@@ -17,7 +19,9 @@ function createApplication(electron: App): Application {
   }
   registerWindow(application)
   registerTheme(application)
+  registerDialog(application)
   registerSession(application)
+  registerAgent(application)
   return application
 }
 

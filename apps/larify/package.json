@@ -88,7 +88,7 @@
     "radix-ui": "^1.6.2",
     "react-arborist": "^3.4.3",
     "react-resizable-panels": "^4.12.0",
-    "react-virtuoso": "^4.18.11",
+    "react-virtuoso": "4.18.11",
     "shiki": "^3.23.0",
     "simple-git": "^3.36.0",
     "streamdown": "^2.5.0",

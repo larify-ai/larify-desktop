@@ -7,6 +7,7 @@ import {
   PromptInput,
   PromptInputProvider,
   PromptInputTextarea,
+  usePromptInputAttachments,
   usePromptInputController
 } from '../../../../src/renderer/src/components/ai-elements/prompt-input'
 
@@ -21,6 +22,7 @@ describe('PromptInputProvider', () => {
   afterEach(() => {
     act(() => root?.unmount())
     container?.remove()
+    Reflect.deleteProperty(window, 'fs')
     reactEnvironment.IS_REACT_ACT_ENVIRONMENT = false
   })
 
@@ -99,5 +101,46 @@ describe('PromptInputProvider', () => {
     })
 
     expect(textarea!.value).toBe('retry this')
+  })
+
+  it('marks a dropped directory for the folder icon', async () => {
+    reactEnvironment.IS_REACT_ACT_ENVIRONMENT = true
+    Object.defineProperty(window, 'fs', {
+      configurable: true,
+      value: { getPathForFile: () => 'C:\\folder' }
+    })
+    let mediaType: string | undefined
+
+    const Probe = (): null => {
+      mediaType = usePromptInputAttachments().files[0]?.mediaType
+      return null
+    }
+
+    container = document.createElement('div')
+    document.body.append(container)
+    root = createRoot(container)
+    await act(async () => {
+      root.render(createElement(PromptInput, { onSubmit: () => undefined }, createElement(Probe)))
+    })
+
+    const file = new File([], 'folder')
+    const drop = new Event('drop', { bubbles: true, cancelable: true })
+    Object.defineProperty(drop, 'dataTransfer', {
+      value: {
+        items: {
+          0: {
+            getAsFile: () => file,
+            webkitGetAsEntry: () => ({ isDirectory: true })
+          },
+          length: 1
+        },
+        types: ['Files']
+      }
+    })
+    await act(async () => {
+      container.querySelector('form')!.dispatchEvent(drop)
+    })
+
+    expect(mediaType).toBe('inode/directory')
   })
 })

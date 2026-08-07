@@ -246,26 +246,35 @@ const getFilePath = (file: File): string => {
   }
 };
 
-const isDirectoryPath = (path: string): boolean => {
-  try {
-    return window.fs.isDirectoryPath(path);
-  } catch {
-    return false;
-  }
-};
-
 const createFilePart = (file: File): FileUIPart & { id: string } => {
   const path = getFilePath(file);
-  const isDirectory = path ? isDirectoryPath(path) : false;
   return {
     filename: file.name,
     id: nanoid(),
-    mediaType: isDirectory
-      ? "inode/directory"
-      : file.type || "application/octet-stream",
+    mediaType: file.type || "application/octet-stream",
     type: "file",
     url: path || URL.createObjectURL(file),
   };
+};
+
+const classifyDroppedItems = (
+  items: DataTransferItemList,
+): { files: File[]; directories: (FileUIPart & { id: string })[] } => {
+  const files: File[] = [];
+  const directories: (FileUIPart & { id: string })[] = [];
+  for (const item of Array.from(items)) {
+    const file = item.getAsFile();
+    if (!file) continue;
+    if (item.webkitGetAsEntry()?.isDirectory) {
+      directories.push({
+        ...createFilePart(file),
+        mediaType: "inode/directory",
+      });
+    } else {
+      files.push(file);
+    }
+  }
+  return { directories, files };
 };
 
 const revokeAttachmentUrl = (url?: string): void => {
@@ -788,7 +797,11 @@ export const PromptInput = ({
       if (e.dataTransfer?.types?.includes("Files")) {
         e.preventDefault();
       }
-      if (e.dataTransfer?.files && e.dataTransfer.files.length > 0) {
+      if (e.dataTransfer?.items.length) {
+        const dropped = classifyDroppedItems(e.dataTransfer.items);
+        if (dropped.files.length) add(dropped.files);
+        if (dropped.directories.length) addParts(dropped.directories);
+      } else if (e.dataTransfer?.files.length) {
         add(e.dataTransfer.files);
       }
     };
@@ -798,7 +811,7 @@ export const PromptInput = ({
       form.removeEventListener("dragover", onDragOver);
       form.removeEventListener("drop", onDrop);
     };
-  }, [add, globalDrop]);
+  }, [add, addParts, globalDrop]);
 
   useEffect(() => {
     if (!globalDrop) {
@@ -814,7 +827,11 @@ export const PromptInput = ({
       if (e.dataTransfer?.types?.includes("Files")) {
         e.preventDefault();
       }
-      if (e.dataTransfer?.files && e.dataTransfer.files.length > 0) {
+      if (e.dataTransfer?.items.length) {
+        const dropped = classifyDroppedItems(e.dataTransfer.items);
+        if (dropped.files.length) add(dropped.files);
+        if (dropped.directories.length) addParts(dropped.directories);
+      } else if (e.dataTransfer?.files.length) {
         add(e.dataTransfer.files);
       }
     };
@@ -824,7 +841,7 @@ export const PromptInput = ({
       document.removeEventListener("dragover", onDragOver, { capture: true });
       document.removeEventListener("drop", onDrop, { capture: true });
     };
-  }, [add, globalDrop]);
+  }, [add, addParts, globalDrop]);
 
   useEffect(
     () => () => {

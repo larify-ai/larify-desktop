@@ -1,11 +1,20 @@
 import { createDeepSeek } from '@ai-sdk/deepseek'
-import type { ModelId } from './config'
+import type { ProviderOptions } from '@ai-sdk/provider-utils'
+import { defaultModelConfig, type AgentModelConfig } from './config'
 
 const deepseek = createDeepSeek({
   baseURL: 'https://api.deepseek.com',
   apiKey: 'sk-51d1b62d722148e6973c420d5d900faf'
 })
 
-export function createModel(id: ModelId = 'deepseek-v4-flash'): ReturnType<typeof deepseek> {
-  return deepseek(id)
+export interface ModelRuntime {
+  model: ReturnType<typeof deepseek>
+  providerOptions: ProviderOptions
+}
+
+export function createModelRuntime(config: AgentModelConfig = defaultModelConfig): ModelRuntime {
+  return {
+    model: deepseek(config.modelId),
+    providerOptions: { deepseek: { thinking: { type: config.thinking } } }
+  }
 }

@@ -1,4 +1,9 @@
+import { useState } from 'react'
 import { Interaction } from '../interaction/interaction'
+import {
+  ConversationHeader,
+  type ConversationHeading
+} from '../interaction/assistant/conversation-header'
 import { Navigation } from '../navigation/navigation'
 import { Workbench } from '../workbench/workbench'
 import { ResizablePanel, ResizablePanelGroup } from '../../components/ui/resizable'
@@ -13,6 +18,7 @@ const workbenchCollapsed = { interaction: 100, workbench: 0 }
 const workbenchExpanded = { interaction: 64, workbench: 36 }
 
 export function LayoutPanels(): React.JSX.Element {
+  const [heading, setHeading] = useState<ConversationHeading | null>(null)
   const navigation = useGroupToggle('navigation', navigationCollapsed, navigationExpanded)
   const workbench = useGroupToggle('workbench', workbenchCollapsed, workbenchExpanded, true)
 
@@ -43,7 +49,9 @@ export function LayoutPanels(): React.JSX.Element {
           workbenchCollapsed={workbench.collapsed}
           onToggleNavigation={navigation.toggle}
           onToggleWorkbench={workbench.toggle}
-        />
+        >
+          {heading && <ConversationHeader cwd={heading.cwd} title={heading.title} />}
+        </Titlebar>
         <ResizablePanelGroup
           id="content"
           className="min-h-0 flex-1"
@@ -51,7 +59,7 @@ export function LayoutPanels(): React.JSX.Element {
           groupRef={workbench.groupRef}
         >
           <ResizablePanel id="interaction" minSize={layoutSpec.interaction.minSize}>
-            <Interaction />
+            <Interaction onHeadingChange={setHeading} />
           </ResizablePanel>
           <ResizeHandle label="Resize workbench" hidden={workbench.collapsed} feedback />
           <ResizablePanel

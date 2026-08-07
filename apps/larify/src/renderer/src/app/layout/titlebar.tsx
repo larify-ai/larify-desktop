@@ -1,8 +1,10 @@
+import type { ReactNode } from 'react'
 import { PanelLeftOpenIcon, PanelRightCloseIcon, PanelRightOpenIcon } from 'lucide-react'
 
 import { PanelToggle } from './panel-toggle'
 
 interface TitlebarProps {
+  children?: ReactNode
   navigationCollapsed: boolean
   workbenchCollapsed: boolean
   onToggleNavigation: () => void
@@ -10,6 +12,7 @@ interface TitlebarProps {
 }
 
 export function Titlebar({
+  children,
   navigationCollapsed,
   workbenchCollapsed,
   onToggleNavigation,
@@ -20,6 +23,7 @@ export function Titlebar({
       {navigationCollapsed && (
         <PanelToggle label="切换侧边栏" icon={PanelLeftOpenIcon} onClick={onToggleNavigation} />
       )}
+      <div className="ml-1 min-w-0 flex-1 pr-12">{children}</div>
       <div
         className="absolute top-1/2 -translate-y-1/2"
         style={{

@@ -20,7 +20,7 @@ export function AssistantMessageList({
       followOutput="auto"
       computeItemKey={(_, message) => message.id}
       itemContent={(index, message) => (
-        <div className="mx-auto w-full max-w-3xl px-6 py-3">
+        <div className="mx-auto w-full px-6 py-3 lg:w-4/5">
           <Message message={message} streaming={live && index === messages.length - 1} />
         </div>
       )}

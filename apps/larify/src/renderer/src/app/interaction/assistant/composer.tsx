@@ -21,10 +21,14 @@ import {
 } from '@renderer/components/ai-elements/attachments'
 import { useComposerHistory } from './composer-history'
 import { ComposerMenu } from './composer-menu'
+import { WorkspaceSelector } from './workspace-selector'
 
 interface AssistantComposerProps {
+  cwd: string
   history: string[]
   status: ChatStatus
+  showWorkspace: boolean
+  onCwdChange: (cwd: string) => void
   onSubmit: (message: PromptInputMessage) => void
   onStop: () => void
 }
@@ -81,8 +85,11 @@ function ComposerFooter({
 }
 
 export function AssistantComposer({
+  cwd,
   history,
   status,
+  showWorkspace,
+  onCwdChange,
   onSubmit,
   onStop
 }: AssistantComposerProps): React.JSX.Element {
@@ -94,11 +101,11 @@ export function AssistantComposer({
   const inputHistory = useComposerHistory(history, setText)
 
   useEffect(() => {
-    if (!running) {
+    if (status !== 'submitted' && status !== 'streaming') {
       submitting.current = false
       stopping.current = false
     }
-  }, [running])
+  }, [status])
 
   const submit = (message: PromptInputMessage): void => {
     if (running || submitting.current) return
@@ -117,9 +124,21 @@ export function AssistantComposer({
   }
 
   return (
-    <div className="mx-auto w-full max-w-3xl px-6 pb-4">
-      <div ref={inputRef} className="w-full">
-        <PromptInput onSubmit={submit} multiple className="[&_[data-slot=input-group]]:rounded-2xl">
+    <div className="mx-auto w-full px-6 pb-4 lg:w-4/5">
+      <div
+        ref={inputRef}
+        className="w-full overflow-hidden rounded-2xl border border-border bg-card shadow-sm"
+      >
+        {showWorkspace && (
+          <div className="w-full border-b border-border">
+            <WorkspaceSelector cwd={cwd} disabled={running} onChange={onCwdChange} />
+          </div>
+        )}
+        <PromptInput
+          onSubmit={submit}
+          multiple
+          className="[&_[data-slot=input-group]]:rounded-2xl [&_[data-slot=input-group]]:border-0 [&_[data-slot=input-group]]:bg-transparent [&_[data-slot=input-group]]:shadow-none dark:[&_[data-slot=input-group]]:bg-transparent"
+        >
           <AttachmentList />
           <PromptInputBody>
             <PromptInputTextarea

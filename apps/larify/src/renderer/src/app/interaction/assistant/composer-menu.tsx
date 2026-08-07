@@ -58,7 +58,7 @@ function DirectoryAttachment(): React.JSX.Element {
   const attachments = usePromptInputAttachments()
 
   const select = async (): Promise<void> => {
-    const paths = await window.bridge.invoke('dialog:pick-directories')
+    const paths = await window.bridge.invoke('dialog:pick-directories').catch(() => [])
     if (!Array.isArray(paths)) return
     attachments.addParts(
       paths
@@ -74,7 +74,7 @@ function DirectoryAttachment(): React.JSX.Element {
   }
 
   return (
-    <PromptInputActionMenuItem className="gap-2" onSelect={() => void select()}>
+    <PromptInputActionMenuItem className="gap-2 rounded-lg" onSelect={() => void select()}>
       <FolderIcon className="size-4" />
       目录
     </PromptInputActionMenuItem>
@@ -105,7 +105,7 @@ export function ComposerMenu({ inputRef }: ComposerMenuProps): React.JSX.Element
         style={{ width: metrics.width }}
       >
         <div className="px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground">添加附件</div>
-        <PromptInputActionAddAttachments label="文件" />
+        <PromptInputActionAddAttachments label="文件" className="gap-2 rounded-lg" />
         <DirectoryAttachment />
       </PromptInputActionMenuContent>
     </PromptInputActionMenu>

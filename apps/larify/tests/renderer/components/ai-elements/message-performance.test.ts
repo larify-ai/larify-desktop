@@ -201,7 +201,7 @@ describe("message rendering performance guards", () => {
       )
     })
 
-    expect(container.textContent).toContain("Result")
+    expect(container.textContent).toContain("结果")
     expect(container.textContent).toContain(expected)
   })
 

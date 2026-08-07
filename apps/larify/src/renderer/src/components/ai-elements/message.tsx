@@ -30,7 +30,7 @@ import {
   useMemo,
   useState,
 } from "react";
-import { Streamdown } from "streamdown";
+import { Streamdown, type StreamdownTranslations } from "streamdown";
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
   from: UIMessage["role"];
@@ -260,7 +260,7 @@ export const MessageBranchPrevious = ({
 
   return (
     <Button
-      aria-label="Previous branch"
+      aria-label="上一个分支"
       disabled={totalBranches <= 1}
       onClick={goToPrevious}
       size="icon-sm"
@@ -283,7 +283,7 @@ export const MessageBranchNext = ({
 
   return (
     <Button
-      aria-label="Next branch"
+      aria-label="下一个分支"
       disabled={totalBranches <= 1}
       onClick={goToNext}
       size="icon-sm"
@@ -324,6 +324,37 @@ const streamdownControls = {
   table: { fullscreen: false },
   mermaid: { fullscreen: false },
 };
+const streamdownTranslations = {
+  close: "关闭",
+  copied: "已复制",
+  copyCode: "复制代码",
+  copyLink: "复制链接",
+  copyTable: "复制表格",
+  copyTableAsCsv: "复制为 CSV",
+  copyTableAsMarkdown: "复制为 Markdown",
+  copyTableAsTsv: "复制为 TSV",
+  downloadDiagram: "下载图表",
+  downloadDiagramAsMmd: "下载为 MMD",
+  downloadDiagramAsPng: "下载为 PNG",
+  downloadDiagramAsSvg: "下载为 SVG",
+  downloadFile: "下载文件",
+  downloadImage: "下载图片",
+  downloadTable: "下载表格",
+  downloadTableAsCsv: "下载为 CSV",
+  downloadTableAsMarkdown: "下载为 Markdown",
+  exitFullscreen: "退出全屏",
+  externalLinkWarning: "即将打开外部链接",
+  imageNotAvailable: "图片不可用",
+  mermaidFormatMmd: "MMD",
+  mermaidFormatPng: "PNG",
+  mermaidFormatSvg: "SVG",
+  openExternalLink: "打开外部链接",
+  openLink: "打开链接",
+  tableFormatCsv: "CSV",
+  tableFormatMarkdown: "Markdown",
+  tableFormatTsv: "TSV",
+  viewFullscreen: "全屏查看",
+} satisfies StreamdownTranslations;
 
 export const MessageResponse = memo(
   ({ className, ...props }: MessageResponseProps) => (
@@ -334,6 +365,7 @@ export const MessageResponse = memo(
       )}
       controls={streamdownControls}
       plugins={streamdownPlugins}
+      translations={streamdownTranslations}
       {...props}
     />
   ),

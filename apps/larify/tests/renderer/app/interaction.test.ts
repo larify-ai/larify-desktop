@@ -51,7 +51,7 @@ describe('Interaction', () => {
 
   beforeEach(() => {
     globalThis.IS_REACT_ACT_ENVIRONMENT = true
-    refresh.mockReset()
+    refresh.mockReset().mockResolvedValue(undefined)
     mocks.renders.clear()
     mocks.props.clear()
     container = document.createElement('div')
@@ -96,14 +96,14 @@ describe('Interaction', () => {
 
     expect(setHeading).toHaveBeenCalledWith('second', heading)
     expect(second.title).toBe('Stored title')
-    expect(refresh).toHaveBeenCalledOnce()
+    expect(refresh).toHaveBeenCalledTimes(3)
     expect(setPersisted).toHaveBeenCalledWith('first')
     expect(container.querySelector('section')?.textContent).toBe('firstsecond')
     expect(container.querySelector('span')?.parentElement?.className).toBe('hidden')
     expect(container.querySelectorAll('span')[1].parentElement?.className).toBe('h-full')
   })
 
-  it('refreshes the directory only once while the first save is pending', async () => {
+  it('refreshes the directory for overlapping saves', async () => {
     const deferred = Promise.withResolvers<void>()
     refresh.mockReturnValue(deferred.promise)
     mockSessions([session('first')], 'first')
@@ -119,10 +119,22 @@ describe('Interaction', () => {
     await render(1)
     const second = mocks.props.get('first')!.onSaved()
 
-    expect(refresh).toHaveBeenCalledOnce()
+    expect(refresh).toHaveBeenCalledTimes(2)
     deferred.resolve()
     await Promise.all([first, second])
     expect(setPersisted).toHaveBeenCalledOnce()
+  })
+
+  it('refreshes an existing session after every completed save', async () => {
+    mockSessions([session('stored', true)], 'stored')
+    await render(0)
+
+    const saved = mocks.props.get('stored')!.onSaved
+    await saved()
+    await saved()
+
+    expect(refresh).toHaveBeenCalledTimes(2)
+    expect(setPersisted).not.toHaveBeenCalled()
   })
 
   it('allows the first save refresh to be retried after failure', async () => {
@@ -154,5 +166,5 @@ function mockSessions(sessions: Array<{ id: string; persisted: boolean }>, activ
 }
 
 function session(id: string, persisted = false): AssistantSessionState {
-  return { id, persisted, heading: null, messages: [], hasMore: false }
+  return { id, persisted, heading: null, messages: [], messageCount: 0 }
 }

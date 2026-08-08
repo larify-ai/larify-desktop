@@ -61,14 +61,17 @@ describe('AssistantChat', () => {
     const chat = { id: 'session' }
     const onCwdChange = vi.fn()
     const onHeadingChange = vi.fn()
-    const onLoadOlder = vi.fn()
+    const onLoadRange = vi.fn()
+    const olderMessages = new Map()
     await act(async () =>
       root.render(
         createElement(AssistantChat, {
           chat: chat as never,
           cwd: '',
-          firstItemIndex: 42,
-          onLoadOlder,
+          initialMessageCount: 3,
+          recentStart: 0,
+          olderMessages,
+          onLoadRange,
           onCwdChange,
           onHeadingChange
         })
@@ -80,8 +83,10 @@ describe('AssistantChat', () => {
       expect.objectContaining({
         live: true,
         messages: mocks.useChat.mock.results[0].value.messages,
-        firstItemIndex: 42,
-        onLoadOlder
+        initialMessageCount: 3,
+        recentStart: 0,
+        olderMessages,
+        onLoadRange
       })
     )
 

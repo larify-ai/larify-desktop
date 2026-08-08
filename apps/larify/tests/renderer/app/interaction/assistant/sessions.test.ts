@@ -47,7 +47,7 @@ describe('AssistantSessionsProvider', () => {
         heading: null,
         persisted: false,
         messages: [],
-        hasMore: false
+        messageCount: 0
       }
     ])
     expect(sessions.activeSession).toEqual(sessions.sessions[0])
@@ -103,6 +103,7 @@ describe('AssistantSessionsProvider', () => {
       if (channel === 'session:msgs') {
         return Promise.resolve([{ id: 'message', role: 'user', parts: [] }])
       }
+      if (channel === 'session:msg-count') return Promise.resolve(1)
       if (channel === 'attachment:load') return Promise.resolve(args[0])
       return Promise.resolve([])
     })
@@ -119,7 +120,7 @@ describe('AssistantSessionsProvider', () => {
       heading: { cwd: 'D:\\Workspace', title: 'Stored' },
       persisted: true,
       messages: [{ id: 'message', role: 'user', parts: [] }],
-      hasMore: false
+      messageCount: 1
     })
   })
 
@@ -173,14 +174,14 @@ describe('AssistantSessionsProvider', () => {
         heading: { cwd: 'D:\\One', title: 'First' },
         persisted: true,
         messages: [],
-        hasMore: false
+        messageCount: 0
       },
       {
         id: secondId,
         heading: { cwd: 'D:\\Two', title: 'Second' },
         persisted: false,
         messages: [],
-        hasMore: false
+        messageCount: 0
       }
     ])
   })

@@ -49,7 +49,7 @@ describe('AssistantSession', () => {
           id: 'session',
           title: 'Renamed',
           initialMessages: [],
-          initialHasMore: false,
+          initialMessageCount: 0,
           initialCwd: '',
           onHeadingChange: vi.fn(),
           onSaved
@@ -106,7 +106,7 @@ describe('AssistantSession', () => {
         createElement(AssistantSession, {
           id: 'session',
           initialMessages: latest,
-          initialHasMore: true,
+          initialMessageCount: 2,
           initialCwd: 'D:\\Workspace',
           onHeadingChange: vi.fn(),
           onSaved: vi.fn()
@@ -115,22 +115,146 @@ describe('AssistantSession', () => {
     })
     const initial = mocks.assistant.mock.calls.at(-1)![0] as {
       chat: { messages: UIMessage[] }
-      firstItemIndex: number
-      onLoadOlder: () => Promise<void>
+      olderMessages: Map<number, UIMessage>
+      onLoadRange: (firstPage: number, lastPage: number) => void
     }
 
-    await act(async () => initial.onLoadOlder())
+    await act(async () => initial.onLoadRange(0, 0))
     const loaded = mocks.assistant.mock.calls.at(-1)![0] as {
       chat: { messages: UIMessage[] }
-      firstItemIndex: number
-      onLoadOlder?: () => Promise<void>
+      olderMessages: Map<number, UIMessage>
     }
 
-    expect(invoke).toHaveBeenCalledWith('session:msgs', 'session', 1, 51)
-    expect(loaded.chat.messages.map(({ id }) => id)).toEqual(['older', 'latest'])
-    expect(loaded.firstItemIndex).toBe(initial.firstItemIndex - 1)
-    expect(loaded.onLoadOlder).toBeUndefined()
+    expect(invoke).toHaveBeenCalledWith('session:msgs', 'session', 0, 1)
+    expect(loaded.chat.messages.map(({ id }) => id)).toEqual(['latest'])
+    expect(loaded.olderMessages.get(0)?.id).toBe('older')
+
+    await act(async () => root.unmount())
+  })
+
+  it('does not load the same page twice while it is pending', async () => {
+    let resolvePage!: (messages: UIMessage[]) => void
+    const page = new Promise<UIMessage[]>((resolve) => {
+      resolvePage = resolve
+    })
+    const invoke = vi.fn((channel: string, value: unknown) =>
+      channel === 'session:msgs' ? page : Promise.resolve(value)
+    )
+    Object.defineProperty(window, 'bridge', {
+      configurable: true,
+      value: { invoke, on: vi.fn(() => () => undefined) }
+    })
+    const root = createRoot(document.createElement('div'))
+
+    await act(async () => {
+      root.render(
+        createElement(AssistantSession, {
+          id: 'session',
+          initialMessages: [message('latest')],
+          initialMessageCount: 2,
+          initialCwd: '',
+          onHeadingChange: vi.fn(),
+          onSaved: vi.fn()
+        })
+      )
+    })
+    const session = mocks.assistant.mock.calls.at(-1)![0] as {
+      onLoadRange: (firstPage: number, lastPage: number) => void
+    }
+
+    act(() => {
+      session.onLoadRange(0, 0)
+      session.onLoadRange(0, 0)
+    })
+    expect(invoke.mock.calls.filter(([channel]) => channel === 'session:msgs')).toHaveLength(1)
+
+    await act(async () => resolvePage([message('older')]))
+    await act(async () => root.unmount())
+  })
+
+  it('keeps virtual indexes non-negative when the initial count is stale', async () => {
+    Object.defineProperty(window, 'bridge', {
+      configurable: true,
+      value: { invoke: vi.fn(), on: vi.fn(() => () => undefined) }
+    })
+    const root = createRoot(document.createElement('div'))
+
+    await act(async () => {
+      root.render(
+        createElement(AssistantSession, {
+          id: 'session',
+          initialMessages: [message('one'), message('two')],
+          initialMessageCount: 1,
+          initialCwd: '',
+          onHeadingChange: vi.fn(),
+          onSaved: vi.fn()
+        })
+      )
+    })
+
+    expect(mocks.assistant.mock.calls.at(-1)![0]).toEqual(
+      expect.objectContaining({ initialMessageCount: 2, recentStart: 0 })
+    )
+    await act(async () => root.unmount())
+  })
+
+  it('keeps only the active page window and discards stale responses', async () => {
+    let resolveFirst!: (messages: UIMessage[]) => void
+    let resolveSecond!: (messages: UIMessage[]) => void
+    const first = new Promise<UIMessage[]>((resolve) => {
+      resolveFirst = resolve
+    })
+    const second = new Promise<UIMessage[]>((resolve) => {
+      resolveSecond = resolve
+    })
+    const invoke = vi.fn((channel: string, _id: string, offset?: number) => {
+      if (channel === 'attachment:load') return Promise.resolve(_id)
+      if (channel !== 'session:msgs') return Promise.resolve(undefined)
+      return offset === 0 ? first : second
+    })
+    Object.defineProperty(window, 'bridge', {
+      configurable: true,
+      value: { invoke, on: vi.fn(() => () => undefined) }
+    })
+    const root = createRoot(document.createElement('div'))
+
+    await act(async () => {
+      root.render(
+        createElement(AssistantSession, {
+          id: 'session',
+          initialMessages: [message('latest')],
+          initialMessageCount: 101,
+          initialCwd: 'D:\\Workspace',
+          onHeadingChange: vi.fn(),
+          onSaved: vi.fn()
+        })
+      )
+    })
+    const initial = mocks.assistant.mock.calls.at(-1)![0] as {
+      onLoadRange: (firstPage: number, lastPage: number) => void
+    }
+
+    act(() => initial.onLoadRange(0, 0))
+    act(() => initial.onLoadRange(1, 1))
+    await act(async () => resolveSecond([message('page-1')]))
+    await vi.waitFor(() => {
+      const current = mocks.assistant.mock.calls.at(-1)![0] as {
+        olderMessages: Map<number, UIMessage>
+      }
+      expect(current.olderMessages.get(50)?.id).toBe('page-1')
+    })
+
+    await act(async () => resolveFirst([message('stale')]))
+    const current = mocks.assistant.mock.calls.at(-1)![0] as {
+      olderMessages: Map<number, UIMessage>
+    }
+    expect(current.olderMessages.has(0)).toBe(false)
+    expect(current.olderMessages.get(50)?.id).toBe('page-1')
 
     await act(async () => root.unmount())
   })
 })
+
+function message(id: string): UIMessage {
+  return { id, role: 'assistant', parts: [{ type: 'text', text: id }] }
+}

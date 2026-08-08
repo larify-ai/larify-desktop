@@ -17,26 +17,19 @@ const SessionView = memo(function SessionView({
   setPersisted: (id: string) => void
   setHeading: (id: string, heading: ConversationHeading | null) => void
 }): React.JSX.Element {
-  const { id, persisted, heading, messages, hasMore } = session
+  const { id, persisted, heading, messages, messageCount } = session
   const persistedRef = useRef(persisted)
-  const refreshedRef = useRef(persisted)
   const updateHeading = useCallback(
     (heading: ConversationHeading | null) => setHeading(id, heading),
     [id, setHeading]
   )
   const saved = useCallback(async () => {
-    if (refreshedRef.current) return
-    refreshedRef.current = true
     if (!persistedRef.current) {
       persistedRef.current = true
       setPersisted(id)
     }
-    try {
-      await refresh()
-    } catch (error) {
-      refreshedRef.current = false
-      throw error
-    }
+
+    await refresh()
   }, [id, refresh, setPersisted])
 
   return (
@@ -45,7 +38,7 @@ const SessionView = memo(function SessionView({
         id={id}
         title={heading?.title}
         initialMessages={messages}
-        initialHasMore={hasMore}
+        initialMessageCount={messageCount}
         initialCwd={heading?.cwd ?? ''}
         onHeadingChange={updateHeading}
         onSaved={saved}

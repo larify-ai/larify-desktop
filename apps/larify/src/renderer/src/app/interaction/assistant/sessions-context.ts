@@ -8,7 +8,7 @@ export interface AssistantSessionState {
   heading: ConversationHeading | null
   persisted: boolean
   messages: UIMessage[]
-  hasMore: boolean
+  messageCount: number
 }
 
 export interface AssistantSessions {

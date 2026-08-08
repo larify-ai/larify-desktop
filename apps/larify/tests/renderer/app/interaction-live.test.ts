@@ -116,6 +116,46 @@ describe.skipIf(!process.env.LIVE)('Interaction live integration', () => {
       await devtools.evaluate(`document.body.innerText.split(${JSON.stringify(marker)}).length - 1`)
     ).toBeGreaterThanOrEqual(2)
   }, 70_000)
+
+  it('keeps placeholders visible during high-speed history scrolling', async () => {
+    devtools = await DevTools.connect()
+    await devtools.click(
+      `(() => {
+        const label = [...document.querySelectorAll('*')].find(
+          (element) => !element.children.length && element.textContent?.includes('5000')
+        );
+        return label?.closest('button, [role="button"]') ?? label?.parentElement;
+      })()`
+    )
+
+    await waitFor(async () =>
+      devtools?.evaluate(
+        `Math.max(...[...document.querySelectorAll('[data-testid="virtuoso-scroller"]')].map((element) => element.scrollHeight)) > 10000`
+      )
+    )
+
+    const emptyFrames = await devtools.evaluate<number>(`(async () => {
+      const scroller = [...document.querySelectorAll('[data-testid="virtuoso-scroller"]')]
+        .sort((left, right) => right.scrollHeight - left.scrollHeight)[0];
+      if (!(scroller instanceof HTMLElement)) throw new Error('Message scroller was not found.');
+      let empty = 0;
+      for (let frame = 0; frame < 90; frame++) {
+        scroller.scrollTop = Math.max(0, scroller.scrollHeight - frame * 5000);
+        await new Promise(requestAnimationFrame);
+        if (scroller.parentElement?.querySelector('[data-scroll-overlay]')) continue;
+        const items = [...scroller.querySelectorAll('[data-item-index]')];
+        const visible = items.some((item) => {
+          const rect = item.getBoundingClientRect();
+          const viewport = scroller.getBoundingClientRect();
+          return rect.bottom > viewport.top && rect.top < viewport.bottom;
+        });
+        if (!visible) empty++;
+      }
+      return empty;
+    })()`)
+
+    expect(emptyFrames).toBe(0)
+  }, 20_000)
 })
 
 async function waitFor(check: () => Promise<unknown>, timeout = 10_000): Promise<void> {

@@ -30,16 +30,20 @@ export function AssistantChat({
   chat,
   title,
   cwd,
-  firstItemIndex,
-  onLoadOlder,
+  initialMessageCount,
+  recentStart,
+  olderMessages,
+  onLoadRange,
   onCwdChange,
   onHeadingChange
 }: {
   chat: Chat<UIMessage>
   title?: string
   cwd: string
-  firstItemIndex: number
-  onLoadOlder?: () => Promise<void>
+  initialMessageCount: number
+  recentStart: number
+  olderMessages: Map<number, UIMessage>
+  onLoadRange: (firstPage: number, lastPage: number) => void
   onCwdChange: (cwd: string) => void
   onHeadingChange: (heading: ConversationHeading | null) => void
 }): React.JSX.Element {
@@ -60,8 +64,10 @@ export function AssistantChat({
       <AssistantMessageList
         messages={messages}
         live={running}
-        firstItemIndex={firstItemIndex}
-        onLoadOlder={onLoadOlder}
+        initialMessageCount={initialMessageCount}
+        recentStart={recentStart}
+        olderMessages={olderMessages}
+        onLoadRange={onLoadRange}
       />
       <AssistantComposer
         cwd={cwd}

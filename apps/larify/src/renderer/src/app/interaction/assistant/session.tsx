@@ -5,15 +5,13 @@ import { createIpcTransport } from './transport'
 import { readModelConfig } from './model-config'
 import { AssistantChat } from './chat'
 import type { ConversationHeading } from './conversation-header'
-import { loadMessagePage } from './session-messages'
-
-const initialListIndex = 1_000_000
+import { loadVisibleMessages, messagePageSize } from './session-messages'
 
 export function AssistantSession({
   id,
   title,
   initialMessages,
-  initialHasMore,
+  initialMessageCount,
   initialCwd,
   onHeadingChange,
   onSaved
@@ -21,15 +19,18 @@ export function AssistantSession({
   id: string
   title?: string
   initialMessages: UIMessage[]
-  initialHasMore: boolean
+  initialMessageCount: number
   initialCwd: string
   onHeadingChange: (heading: ConversationHeading | null) => void
   onSaved: () => Promise<void>
 }): React.JSX.Element {
   const [cwd, setCwd] = useState(initialCwd)
-  const [hasMore, setHasMore] = useState(initialHasMore)
-  const [firstItemIndex, setFirstItemIndex] = useState(initialListIndex)
-  const loading = useRef(false)
+  const recentStart = Math.max(0, initialMessageCount - initialMessages.length)
+  const messageCount = recentStart + initialMessages.length
+  const cache = useRef(new Map<number, UIMessage>())
+  const [olderMessages, setOlderMessages] = useState(() => new Map<number, UIMessage>())
+  const loading = useRef(new Set<number>())
+  const range = useRef({ firstPage: 0, lastPage: -1 })
   const [{ chat, setTransportCwd }] = useState(() => {
     let transportCwd = initialCwd
     return {
@@ -47,37 +48,59 @@ export function AssistantSession({
       }
     }
   })
-  const chatRef = useRef(chat)
 
   const changeCwd = (next: string): void => {
     setTransportCwd(next)
     setCwd(next)
   }
 
-  const loadOlder = useCallback(async () => {
-    if (!hasMore || loading.current) return
-    loading.current = true
-    try {
-      const page = await loadMessagePage(id, chatRef.current.messages.length)
-      if (page.messages.length) {
-        chatRef.current.messages = [...page.messages, ...chatRef.current.messages]
-        setFirstItemIndex((index) => index - page.messages.length)
+  const loadRange = useCallback(
+    (firstPage: number, lastPage: number) => {
+      range.current = { firstPage, lastPage }
+
+      let pruned = false
+      for (const index of cache.current.keys()) {
+        const page = Math.floor(index / messagePageSize)
+        if (page < firstPage || page > lastPage) {
+          cache.current.delete(index)
+          pruned = true
+        }
       }
-      setHasMore(page.hasMore)
-    } catch {
-      // Keep older messages available for retry.
-    } finally {
-      loading.current = false
-    }
-  }, [hasMore, id])
+      if (pruned) setOlderMessages(new Map(cache.current))
+
+      for (let page = firstPage; page <= lastPage; page++) {
+        const pageStart = page * messagePageSize
+        const pageEnd = Math.min(pageStart + messagePageSize, recentStart)
+        if (pageEnd <= pageStart || cache.current.has(pageStart) || loading.current.has(page)) {
+          continue
+        }
+
+        loading.current.add(page)
+        void loadVisibleMessages(id, pageStart, pageEnd - pageStart)
+          .then((messages) => {
+            const active = range.current
+            if (page < active.firstPage || page > active.lastPage) return
+            messages.forEach((message, index) => cache.current.set(pageStart + index, message))
+            setOlderMessages(new Map(cache.current))
+          })
+          .catch(() => {
+            // Keep the page available for retry.
+          })
+          .finally(() => loading.current.delete(page))
+      }
+    },
+    [id, recentStart]
+  )
 
   return (
     <AssistantChat
       chat={chat}
       title={title}
       cwd={cwd}
-      firstItemIndex={firstItemIndex}
-      onLoadOlder={hasMore ? loadOlder : undefined}
+      initialMessageCount={messageCount}
+      recentStart={recentStart}
+      olderMessages={olderMessages}
+      onLoadRange={loadRange}
       onCwdChange={changeCwd}
       onHeadingChange={onHeadingChange}
     />

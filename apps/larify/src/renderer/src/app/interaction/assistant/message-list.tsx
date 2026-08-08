@@ -1,22 +1,43 @@
 import { memo, useEffect, useRef, useState } from 'react'
 import type { UIMessage } from 'ai'
 import { ArrowDownIcon } from 'lucide-react'
-import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
+import { Virtuoso, type ListRange, type VirtuosoHandle } from 'react-virtuoso'
 import { Button } from '@renderer/components/ui/button'
 import { MessageView } from './message-view'
+import { messagePageSize } from './session-messages'
 
 const Message = memo(MessageView)
+const pageBuffer = 1
+const estimatedMessageHeight = 80
+
+function ScrollPlaceholder({ height }: { height: number }): React.JSX.Element {
+  return (
+    <div
+      className="mx-auto flex w-full flex-col justify-center gap-3 px-6 py-3 lg:w-4/5"
+      style={{ height }}
+      data-scroll-placeholder
+      aria-hidden="true"
+    >
+      <div className="h-3 w-1/4 rounded bg-muted-foreground/15" />
+      <div className="h-3 w-3/4 rounded bg-muted-foreground/15" />
+    </div>
+  )
+}
 
 export function AssistantMessageList({
   messages,
   live = false,
-  firstItemIndex = 0,
-  onLoadOlder
+  initialMessageCount,
+  recentStart,
+  olderMessages,
+  onLoadRange
 }: {
   messages: UIMessage[]
   live?: boolean
-  firstItemIndex?: number
-  onLoadOlder?: () => Promise<void>
+  initialMessageCount: number
+  recentStart: number
+  olderMessages: Map<number, UIMessage>
+  onLoadRange: (firstPage: number, lastPage: number) => void
 }): React.JSX.Element {
   const list = useRef<VirtuosoHandle>(null)
   const [atBottom, setAtBottom] = useState(true)
@@ -25,24 +46,54 @@ export function AssistantMessageList({
     if (live && atBottom) list.current?.autoscrollToBottom()
   }, [atBottom, live, messages])
 
+  const totalCount = recentStart + messages.length
+  const scrollToBottom = (): void => {
+    list.current?.scrollToIndex({ index: totalCount - 1, align: 'end', behavior: 'auto' })
+    requestAnimationFrame(() =>
+      list.current?.scrollTo({ top: Number.MAX_SAFE_INTEGER, behavior: 'auto' })
+    )
+  }
+  const item = (index: number): UIMessage | undefined =>
+    index < recentStart ? olderMessages.get(index) : messages[index - recentStart]
+  const rangeChanged = ({ startIndex, endIndex }: ListRange): void => {
+    if (recentStart <= 0) return
+    const firstPage = Math.max(0, Math.floor(startIndex / messagePageSize) - pageBuffer)
+    const lastPage = Math.min(
+      Math.floor((recentStart - 1) / messagePageSize),
+      Math.floor(endIndex / messagePageSize) + pageBuffer
+    )
+    onLoadRange(firstPage, lastPage)
+  }
+
   return (
     <div className="relative min-h-0 min-w-0 flex-1">
       <Virtuoso
         ref={list}
         role="log"
         className="size-full"
-        data={messages}
-        firstItemIndex={firstItemIndex}
-        initialTopMostItemIndex={Math.max(firstItemIndex + messages.length - 1, firstItemIndex)}
+        totalCount={totalCount}
+        defaultItemHeight={estimatedMessageHeight}
+        initialTopMostItemIndex={Math.max(initialMessageCount - 1, 0)}
+        increaseViewportBy={{ top: 600, bottom: 600 }}
+        components={{ ScrollSeekPlaceholder: ScrollPlaceholder }}
+        scrollSeekConfiguration={{
+          enter: (velocity) => Math.abs(velocity) > 1000,
+          exit: (velocity) => Math.abs(velocity) < 100
+        }}
         followOutput="auto"
-        startReached={onLoadOlder ? () => void onLoadOlder() : undefined}
+        rangeChanged={rangeChanged}
         atBottomStateChange={setAtBottom}
-        computeItemKey={(_, message) => message.id}
-        itemContent={(_, message) => (
-          <div className="mx-auto w-full px-6 py-3 lg:w-4/5">
-            <Message message={message} streaming={live && message.id === messages.at(-1)?.id} />
-          </div>
-        )}
+        computeItemKey={(index) => item(index)?.id ?? index}
+        itemContent={(index) => {
+          const message = item(index)
+          return message ? (
+            <div className="mx-auto w-full min-w-0 px-6 py-3 lg:w-4/5">
+              <Message message={message} streaming={live && message.id === messages.at(-1)?.id} />
+            </div>
+          ) : (
+            <ScrollPlaceholder height={estimatedMessageHeight} />
+          )
+        }}
       />
       {!atBottom && messages.length > 0 && (
         <Button
@@ -51,13 +102,7 @@ export function AssistantMessageList({
           size="icon"
           className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full dark:bg-background dark:hover:bg-muted"
           aria-label="返回底部"
-          onClick={() =>
-            list.current?.scrollToIndex({
-              index: firstItemIndex + messages.length - 1,
-              align: 'end',
-              behavior: 'smooth'
-            })
-          }
+          onClick={scrollToBottom}
         >
           <ArrowDownIcon className="size-4" />
         </Button>

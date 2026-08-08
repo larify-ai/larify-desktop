@@ -1,117 +1,110 @@
 // @vitest-environment jsdom
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { loadMessagePage } from '../../../../../src/renderer/src/app/interaction/assistant/session-messages'
+import type { UIMessage } from 'ai'
+import {
+  loadMessagePage,
+  loadVisibleMessages
+} from '../../../../../src/renderer/src/app/interaction/assistant/session-messages'
 
 const invoke = vi.fn()
 
 beforeEach(() => {
   invoke.mockReset()
-  invoke.mockImplementation((channel: string, ...args: unknown[]) =>
-    Promise.resolve(channel === 'attachment:load' ? args[0] : undefined)
-  )
   Object.defineProperty(window, 'bridge', {
     configurable: true,
     value: { invoke }
   })
 })
 
-describe('loadMessagePage', () => {
-  it('loads the latest 50 messages and detects an older page', async () => {
-    invoke.mockImplementation((channel: string, ...args: unknown[]) =>
-      Promise.resolve(
-        channel === 'attachment:load'
-          ? args[0]
-          : Array.from({ length: 51 }, (_, index) => ({
-              id: String(index),
-              role: 'assistant',
-              parts: []
-            }))
-      )
-    )
-
-    const page = await loadMessagePage('session', 10)
-
-    expect(invoke).toHaveBeenCalledWith('session:msgs', 'session', 10, 51)
-    expect(invoke).toHaveBeenCalledWith(
-      'attachment:load',
-      expect.arrayContaining([{ id: '1', role: 'assistant', parts: [] }])
-    )
-    expect(invoke.mock.calls[1][1]).toHaveLength(50)
-    expect(page.messages.map(({ id }) => id)).toEqual(
-      Array.from({ length: 50 }, (_, index) => String(index + 1))
-    )
-    expect(page.hasMore).toBe(true)
-  })
-
-  it('keeps a final partial page intact', async () => {
-    invoke.mockImplementation((channel: string, ...args: unknown[]) =>
-      Promise.resolve(
-        channel === 'attachment:load' ? args[0] : [{ id: 'oldest', role: 'user', parts: [] }]
-      )
-    )
+describe('session messages', () => {
+  it('loads and hydrates the latest message page', async () => {
+    const stored = messages(50, 50)
+    const hydrated = messages(50, 100)
+    invoke.mockImplementation((channel: string, ...args: unknown[]) => {
+      if (channel === 'session:msg-count') return Promise.resolve(100)
+      if (channel === 'session:msgs') return Promise.resolve(stored)
+      if (channel === 'attachment:load') return Promise.resolve(hydrated)
+      return Promise.resolve(args[0])
+    })
 
     await expect(loadMessagePage('session')).resolves.toEqual({
-      messages: [{ id: 'oldest', role: 'user', parts: [] }],
-      hasMore: false
+      messages: hydrated,
+      messageCount: 100
     })
+    expect(invoke).toHaveBeenCalledWith('session:msg-count', 'session')
+    expect(invoke).toHaveBeenCalledWith('session:msgs', 'session', 50, 50)
   })
 
-  it('does not report another page for exactly 50 messages', async () => {
-    const stored = Array.from({ length: 50 }, (_, index) => ({
-      id: String(index),
-      role: 'assistant',
-      parts: []
-    }))
+  it('loads an absolute visible range directly', async () => {
+    const stored = messages(50, 100)
     invoke.mockImplementation((channel: string, ...args: unknown[]) =>
       Promise.resolve(channel === 'attachment:load' ? args[0] : stored)
     )
 
-    await expect(loadMessagePage('session')).resolves.toEqual({
-      messages: stored,
-      hasMore: false
-    })
+    await expect(loadVisibleMessages('session', 100, 50)).resolves.toEqual(stored)
+    expect(invoke).toHaveBeenCalledWith('session:msgs', 'session', 100, 50)
   })
 
-  it('uses hydrated image URLs returned by the attachment service', async () => {
-    const stored = {
-      id: 'image',
-      role: 'user',
-      parts: [{ type: 'file', mediaType: 'image/png', url: 'C:/attachments/image.png' }]
-    }
-    const hydrated = {
-      ...stored,
-      parts: [{ ...stored.parts[0], url: 'data:image/png;base64,aGVsbG8=' }]
-    }
+  it('hydrates attachments in a loaded page', async () => {
+    const stored = messages(1)
+    const hydrated = [{ ...stored[0], parts: [{ type: 'text' as const, text: 'hydrated' }] }]
     invoke.mockImplementation((channel: string) =>
-      Promise.resolve(channel === 'attachment:load' ? [hydrated] : [stored])
+      Promise.resolve(channel === 'attachment:load' ? hydrated : stored)
     )
 
-    await expect(loadMessagePage('session')).resolves.toEqual({
-      messages: [hydrated],
-      hasMore: false
-    })
+    await expect(loadVisibleMessages('session', 0, 1)).resolves.toEqual(hydrated)
   })
 
-  it('treats an invalid response as an empty page', async () => {
-    invoke.mockResolvedValue(undefined)
+  it('does not load a message range for an empty session', async () => {
+    invoke.mockResolvedValue(0)
 
-    await expect(loadMessagePage('session')).resolves.toEqual({ messages: [], hasMore: false })
+    await expect(loadMessagePage('session')).resolves.toEqual({
+      messages: [],
+      messageCount: 0
+    })
     expect(invoke).toHaveBeenCalledTimes(1)
   })
 
-  it('keeps pagination metadata when attachment loading fails', async () => {
-    const stored = Array.from({ length: 51 }, (_, index) => ({
-      id: String(index),
-      role: 'assistant',
-      parts: []
-    }))
+  it.each([undefined, -1, 1.5, Number.NaN])(
+    'treats an invalid count (%s) as an empty session',
+    async (count) => {
+      invoke.mockImplementation((channel: string) =>
+        Promise.resolve(channel === 'session:msg-count' ? count : undefined)
+      )
+
+      await expect(loadMessagePage('session')).resolves.toEqual({
+        messages: [],
+        messageCount: 0
+      })
+      expect(invoke).toHaveBeenCalledTimes(1)
+    }
+  )
+
+  it('falls back to stored messages when attachment hydration is invalid', async () => {
+    const stored = messages(1)
     invoke.mockImplementation((channel: string) =>
       Promise.resolve(channel === 'attachment:load' ? undefined : stored)
     )
 
-    const page = await loadMessagePage('session')
-    expect(page.messages).toEqual(stored.slice(1))
-    expect(page.hasMore).toBe(true)
+    await expect(loadVisibleMessages('session', 0, 1)).resolves.toEqual(stored)
+  })
+
+  it('falls back to stored messages when attachment hydration fails', async () => {
+    const stored = messages(1)
+    invoke.mockImplementation((channel: string) => {
+      if (channel === 'attachment:load') return Promise.reject(new Error('Unavailable'))
+      return Promise.resolve(stored)
+    })
+
+    await expect(loadVisibleMessages('session', 0, 1)).resolves.toEqual(stored)
   })
 })
+
+function messages(count: number, start = 0): UIMessage[] {
+  return Array.from({ length: count }, (_, index) => ({
+    id: String(start + index),
+    role: 'assistant' as const,
+    parts: []
+  }))
+}

@@ -9,7 +9,13 @@ import {
 import { loadMessagePage } from './session-messages'
 
 function createSession(): AssistantSessionState {
-  return { id: crypto.randomUUID(), heading: null, persisted: false, messages: [], hasMore: false }
+  return {
+    id: crypto.randomUUID(),
+    heading: null,
+    persisted: false,
+    messages: [],
+    messageCount: 0
+  }
 }
 
 interface SessionsState {

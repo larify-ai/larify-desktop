@@ -30,7 +30,7 @@ export function LayoutPanels(): React.JSX.Element {
         groupResizeBehavior="preserve-pixel-size"
       >
         <div className="h-full w-full overflow-hidden">
-          <Navigation onCollapse={navigation.toggle} />
+          <Navigation onCollapse={navigation.toggle} showToggle={!navigation.collapsed} />
         </div>
       </ResizablePanel>
       <ResizeHandle label="Resize navigation" hidden={navigation.collapsed} />

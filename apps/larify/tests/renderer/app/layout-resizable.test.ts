@@ -9,8 +9,16 @@ vi.mock('../../../src/renderer/src/app/interaction/interaction', () => ({
 }))
 
 vi.mock('../../../src/renderer/src/app/navigation/navigation', () => ({
-  Navigation: ({ onCollapse }: { onCollapse: () => void }) =>
-    createElement('button', { 'aria-label': '隐藏侧边栏', onClick: onCollapse })
+  Navigation: ({
+    onCollapse,
+    showToggle
+  }: {
+    onCollapse: () => void
+    showToggle?: boolean
+  }) =>
+    showToggle
+      ? createElement('button', { 'aria-label': '隐藏侧边栏', onClick: onCollapse })
+      : null
 }))
 
 vi.mock('../../../src/renderer/src/app/workbench/workbench', () => ({
@@ -61,6 +69,7 @@ describe('layout with the real resizable component', () => {
     expect(buttons('显示侧边栏')).toHaveLength(0)
 
     await click('隐藏侧边栏')
+    expect(buttons('隐藏侧边栏')).toHaveLength(0)
     expect(buttons('显示侧边栏')).toHaveLength(1)
 
     await click('显示侧边栏')

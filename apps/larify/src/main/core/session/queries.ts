@@ -24,7 +24,10 @@ export function createSessionQueries(store: SessionStore): SessionQueries {
       ...new Set(store.listCwds().map((cwd) => (cwd === defaultCwd ? '' : cwd)))
     ],
     'session:list': (_event: unknown, cwd: string, offset?: number, limit?: number) =>
-      store.listSessions(cwd || defaultCwd, offset, limit),
+      store.listSessions(cwd || defaultCwd, offset, limit).map((session) => ({
+        ...session,
+        cwd: session.cwd === defaultCwd ? '' : session.cwd
+      })),
     'session:msgs': (_event: unknown, id: string, offset?: number, limit?: number) =>
       store.loadSession(id, offset, limit)?.messages ?? []
   }

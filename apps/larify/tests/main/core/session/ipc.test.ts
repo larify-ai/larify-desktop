@@ -64,13 +64,13 @@ describe('session IPC', () => {
     const defaultCwd = larifyPath('workspace')
     const store = {
       listCwds: vi.fn(() => [defaultCwd, '/cwd', defaultCwd]),
-      listSessions: vi.fn(() => []),
+      listSessions: vi.fn(() => [{ id: 'session', cwd: defaultCwd }]),
       loadSession: vi.fn()
     }
     const queries = createSessionQueries(store as never)
 
     expect(queries['session:cwds']()).toEqual(['', '/cwd'])
-    queries['session:list']({}, '')
+    expect(queries['session:list']({}, '')).toEqual([{ id: 'session', cwd: '' }])
     expect(store.listSessions).toHaveBeenCalledWith(defaultCwd, undefined, undefined)
   })
 })

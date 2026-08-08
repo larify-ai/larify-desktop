@@ -10,8 +10,8 @@
 .dark .light {
   color-scheme: light;
   --traffic-light-inset: 70px;
-  --titlebar-h: env(titlebar-area-height, 2rem);
-  --titlebar-inset-left: max(0.5rem, env(titlebar-area-x, var(--traffic-light-inset)));
+  --titlebar-h: 46px;
+  --titlebar-inset-left: max(0.75rem, env(titlebar-area-x, var(--traffic-light-inset)));
   --background: #fafafa;
   --foreground: #000000e5;
   --card: #f7f7f7;

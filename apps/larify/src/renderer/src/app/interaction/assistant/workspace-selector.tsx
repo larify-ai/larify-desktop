@@ -20,8 +20,8 @@ export function WorkspaceSelector({
   disabled,
   onChange
 }: WorkspaceSelectorProps): React.JSX.Element {
-  const [recent, setRecent] = useState<string[]>([''])
-  const workspaces = uniqueWorkspaces([cwd, ...recent])
+  const [recent, setRecent] = useState<string[]>([])
+  const workspaces = uniqueWorkspaces([cwd, '', ...recent])
 
   useEffect(() => {
     let active = true
@@ -29,11 +29,7 @@ export function WorkspaceSelector({
       .invoke('session:cwds')
       .then((paths) => {
         if (active) {
-          setRecent(
-            Array.isArray(paths)
-              ? uniqueWorkspaces(['', ...paths.filter((path) => typeof path === 'string')])
-              : ['']
-          )
+          setRecent(Array.isArray(paths) ? paths.filter((path) => typeof path === 'string') : [])
         }
       })
       .catch(() => undefined)

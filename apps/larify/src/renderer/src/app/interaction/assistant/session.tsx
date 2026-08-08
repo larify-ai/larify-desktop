@@ -7,30 +7,31 @@ import { AssistantChat } from './chat'
 import type { ConversationHeading } from './conversation-header'
 
 export function AssistantSession({
+  id,
   onHeadingChange
 }: {
+  id: string
   onHeadingChange: (heading: ConversationHeading | null) => void
 }): React.JSX.Element {
   const [cwd, setCwd] = useState('')
-  const [{ chat, updateCwd }] = useState(() => {
-    let currentCwd = ''
+  const [{ chat, setTransportCwd }] = useState(() => {
+    let transportCwd = ''
     return {
       chat: new Chat<UIMessage>({
-        id: crypto.randomUUID(),
-        messages: [],
+        id,
         transport: createIpcTransport(
-          () => currentCwd,
+          () => transportCwd,
           () => readModelConfig(localStorage)
         )
       }),
-      updateCwd(next: string) {
-        currentCwd = next
+      setTransportCwd(next: string) {
+        transportCwd = next
       }
     }
   })
 
   const changeCwd = (next: string): void => {
-    updateCwd(next)
+    setTransportCwd(next)
     setCwd(next)
   }
 

@@ -41,10 +41,6 @@ export function AssistantChat({
     onHeadingChange(started ? { cwd, title } : null)
   }, [cwd, onHeadingChange, started, title])
 
-  useEffect(() => {
-    return () => onHeadingChange(null)
-  }, [onHeadingChange])
-
   return (
     <div className="flex h-full min-w-0 flex-col">
       <AssistantMessageList messages={messages} live={running} />

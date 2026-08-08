@@ -7,15 +7,29 @@ import {
   MessageCirclePlusIcon,
   type LucideIcon
 } from 'lucide-react'
+import { useAssistantSessions } from '../interaction/assistant/sessions-context'
+
+interface SessionPreview {
+  id: string
+  name: string
+  active?: boolean
+  onClick?: () => void
+}
 
 interface WorkspacePreview {
   name: string
-  sessions: string[]
+  sessions: SessionPreview[]
 }
 
 const workspaces: WorkspacePreview[] = [
-  { name: 'larify-desktop', sessions: ['重构渲染器布局', '检查插件架构'] },
-  { name: '音频采集', sessions: ['设计 BLE 音频流程', '验证设备连接'] }
+  {
+    name: 'larify-desktop',
+    sessions: ['重构渲染器布局', '检查插件架构'].map((name) => ({ id: name, name }))
+  },
+  {
+    name: '音频采集',
+    sessions: ['设计 BLE 音频流程', '验证设备连接'].map((name) => ({ id: name, name }))
+  }
 ]
 
 const navigationItem =
@@ -58,9 +72,15 @@ function Workspace({ workspace }: { workspace: WorkspacePreview }): React.JSX.El
       {expanded && (
         <div className="space-y-0.5">
           {workspace.sessions.map((session) => (
-            <button key={session} type="button" className={`${navigationItem} h-8`}>
+            <button
+              key={session.id}
+              type="button"
+              aria-current={session.active ? 'page' : undefined}
+              className={`${navigationItem} h-8 ${session.active ? 'bg-sidebar-accent' : ''}`}
+              onClick={session.onClick}
+            >
               <span aria-hidden="true" />
-              <span className="truncate">{session}</span>
+              <span className="truncate">{session.name}</span>
             </button>
           ))}
         </div>
@@ -69,11 +89,28 @@ function Workspace({ workspace }: { workspace: WorkspacePreview }): React.JSX.El
   )
 }
 
-export function NavigationContent({ onNewTask }: { onNewTask: () => void }): React.JSX.Element {
+export function NavigationContent(): React.JSX.Element {
+  const sessions = useAssistantSessions()
+  const defaultWorkspace: WorkspacePreview = {
+    name: '默认空间',
+    sessions: sessions.sessions.flatMap((session) =>
+      session.heading
+        ? [
+            {
+              id: session.id,
+              name: session.heading.title,
+              active: session.id === sessions.activeId,
+              onClick: () => sessions.select(session.id)
+            }
+          ]
+        : []
+    )
+  }
+
   return (
     <div className="flex h-full min-h-0 flex-col pb-2">
       <nav aria-label="全局入口" className="space-y-0.5">
-        <NavigationAction icon={MessageCirclePlusIcon} onClick={onNewTask}>
+        <NavigationAction icon={MessageCirclePlusIcon} onClick={sessions.create}>
           新建任务
         </NavigationAction>
         <NavigationAction icon={BoxIcon}>百宝箱</NavigationAction>
@@ -90,7 +127,7 @@ export function NavigationContent({ onNewTask }: { onNewTask: () => void }): Rea
           {workspaces.map((workspace) => (
             <Workspace key={workspace.name} workspace={workspace} />
           ))}
-          <Workspace workspace={{ name: '默认空间', sessions: [] }} />
+          <Workspace workspace={defaultWorkspace} />
         </div>
       </div>
     </div>

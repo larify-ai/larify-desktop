@@ -19,9 +19,14 @@ export function Titlebar({
   onToggleWorkbench
 }: TitlebarProps): React.JSX.Element {
   return (
-    <header className="relative flex h-(--titlebar-h) shrink-0 items-center border-b-[0.5px] border-border-strong px-2 [-webkit-app-region:drag]">
+    <header
+      className="relative flex h-(--titlebar-h) shrink-0 items-center border-b-[0.5px] border-border-strong px-2 [-webkit-app-region:drag]"
+      style={
+        navigationCollapsed ? { paddingLeft: 'calc(var(--titlebar-inset-left) - 6px)' } : undefined
+      }
+    >
       {navigationCollapsed && (
-        <PanelToggle label="切换侧边栏" icon={PanelLeftOpenIcon} onClick={onToggleNavigation} />
+        <PanelToggle label="显示侧边栏" icon={PanelLeftOpenIcon} onClick={onToggleNavigation} />
       )}
       <div className="ml-1 min-w-0 flex-1 pr-12">{children}</div>
       <div
@@ -31,7 +36,7 @@ export function Titlebar({
         }}
       >
         <PanelToggle
-          label="切换工作区"
+          label={workbenchCollapsed ? '显示工作台' : '隐藏工作台'}
           icon={workbenchCollapsed ? PanelRightOpenIcon : PanelRightCloseIcon}
           onClick={onToggleWorkbench}
         />

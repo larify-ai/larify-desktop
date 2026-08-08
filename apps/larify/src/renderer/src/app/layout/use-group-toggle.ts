@@ -1,7 +1,6 @@
 import { useLayoutEffect, useRef, useState } from 'react'
-import { useGroupRef } from 'react-resizable-panels'
-
-type Layout = Record<string, number>
+import { flushSync } from 'react-dom'
+import { type Layout, useGroupRef } from 'react-resizable-panels'
 
 interface GroupToggle {
   collapsed: boolean
@@ -12,33 +11,44 @@ interface GroupToggle {
 export function useGroupToggle(
   panel: string,
   collapsedLayout: Layout,
-  expandedLayout: Layout,
   initiallyCollapsed = false
 ): GroupToggle {
   const [collapsed, setCollapsed] = useState(initiallyCollapsed)
   const groupRef = useGroupRef()
-  const expanded = useRef(expandedLayout)
+  const expandedLayout = useRef<Layout | undefined>(undefined)
 
   useLayoutEffect(() => {
+    if (!initiallyCollapsed) return
     const group = groupRef.current
     if (!group) return
 
     const frame = requestAnimationFrame(() => {
-      if (collapsed) {
-        const current = group.getLayout()
-        if ((current[panel] ?? 0) > 0) expanded.current = current
-        group.setLayout(collapsedLayout)
-      } else {
-        group.setLayout(expanded.current)
-      }
+      const current = group.getLayout()
+      if ((current[panel] ?? 0) > 0) expandedLayout.current = current
+      group.setLayout(collapsedLayout)
     })
 
     return () => cancelAnimationFrame(frame)
-  }, [collapsed, collapsedLayout, groupRef, panel])
+  }, [collapsedLayout, groupRef, initiallyCollapsed, panel])
+
+  const toggle = (): void => {
+    const group = groupRef.current
+    if (!group) return
+
+    if (collapsed) {
+      flushSync(() => setCollapsed(false))
+      if (expandedLayout.current) group.setLayout(expandedLayout.current)
+    } else {
+      const current = group.getLayout()
+      if ((current[panel] ?? 0) > 0) expandedLayout.current = current
+      flushSync(() => setCollapsed(true))
+      group.setLayout(collapsedLayout)
+    }
+  }
 
   return {
     collapsed,
     groupRef,
-    toggle: () => setCollapsed((value) => !value)
+    toggle
   }
 }

@@ -44,18 +44,6 @@ describe('WorkspaceSelector', () => {
       )
     })
     expect(container.textContent).toContain('larify-desktop')
-
-    await act(async () => {
-      root.render(
-        createElement(WorkspaceSelector, {
-          cwd: 'C:\\Users\\test\\.larify\\workspace',
-          disabled: false,
-          onChange: vi.fn()
-        })
-      )
-    })
-    expect(container.textContent).toContain('默认空间')
-    expect(container.textContent).not.toContain('workspace')
   })
 
   it('locks the selector while the first message is being submitted', async () => {
@@ -80,9 +68,7 @@ describe('WorkspaceSelector', () => {
     Object.defineProperty(window, 'bridge', {
       configurable: true,
       value: {
-        invoke: vi
-          .fn()
-          .mockResolvedValue(['', 'C:\\Users\\test\\.larify\\workspace', 'D:\\Workspace\\project'])
+        invoke: vi.fn().mockResolvedValue(['', 'D:\\Workspace\\project'])
       }
     })
     container = document.createElement('div')
@@ -107,5 +93,49 @@ describe('WorkspaceSelector', () => {
     const items = [...document.querySelectorAll('[role="menuitem"]')]
     expect(items.some((item) => item.textContent?.includes('project'))).toBe(true)
     expect(items.filter((item) => item.textContent?.includes('默认空间'))).toHaveLength(1)
+  })
+
+  it('selects a recent workspace and a directory from the system dialog', async () => {
+    reactEnvironment.IS_REACT_ACT_ENVIRONMENT = true
+    const invoke = vi.fn((channel: string) =>
+      Promise.resolve(
+        channel === 'session:cwds'
+          ? ['D:\\Workspace\\recent']
+          : ['D:\\Workspace\\selected', 'D:\\Workspace\\ignored']
+      )
+    )
+    Object.defineProperty(window, 'bridge', {
+      configurable: true,
+      value: { invoke }
+    })
+    container = document.createElement('div')
+    document.body.append(container)
+    root = createRoot(container)
+    const onChange = vi.fn()
+
+    await act(async () => {
+      root.render(createElement(WorkspaceSelector, { cwd: '', disabled: false, onChange }))
+    })
+    const trigger = container.querySelector('button')!
+    const open = async (): Promise<void> => {
+      await act(async () => {
+        trigger.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 }))
+      })
+    }
+
+    await open()
+    const recent = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+      (item) => item.textContent === 'recent'
+    )!
+    await act(async () => recent.click())
+    expect(onChange).toHaveBeenLastCalledWith('D:\\Workspace\\recent')
+
+    await open()
+    const selectDirectory = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+      (item) => item.textContent === '选择其他目录'
+    )!
+    await act(async () => selectDirectory.click())
+    expect(invoke).toHaveBeenCalledWith('dialog:pick-directories')
+    expect(onChange).toHaveBeenLastCalledWith('D:\\Workspace\\selected')
   })
 })

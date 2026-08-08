@@ -81,6 +81,10 @@ describe('AssistantComposer', () => {
 
     await act(async () => render({ status: 'error', onSubmit }))
     await act(async () => input('again'))
+    const inputGroup = container.querySelector('[data-slot="input-group"]')
+    expect(inputGroup?.className).toContain('border-input')
+    expect(inputGroup?.parentElement?.className).toContain('rounded-2xl')
+    expect(inputGroup?.parentElement?.className).not.toContain('border-0')
     await act(async () => submit())
     expect(onSubmit).toHaveBeenCalledTimes(2)
   })
@@ -100,14 +104,45 @@ describe('AssistantComposer', () => {
     expect(attachment?.getAttribute('style')).toContain('border-radius: 9999px')
     expect(attachment?.classList.contains('text-secondary-foreground')).toBe(true)
     expect(attachment?.classList.contains('bg-secondary')).toBe(true)
+    expect(attachment?.getAttribute('aria-label')).toBe('添加附件')
     expect(button.classList.contains('disabled:opacity-50')).toBe(true)
     expect(container.querySelector('.mx-auto')?.className).toContain('lg:w-4/5')
     expect(container.textContent).toContain('默认空间')
+    const workspaceButton = container.querySelector('button[title="默认空间"]')
+    expect(workspaceButton?.parentElement?.parentElement?.className).toContain('rounded-2xl')
+    expect(workspaceButton?.parentElement?.parentElement?.className).toContain('overflow-hidden')
     expect(container.querySelector('[data-slot="input-group"]')?.textContent).not.toContain(
       '默认空间'
     )
     await act(async () => submit())
     expect(onSubmit).not.toHaveBeenCalled()
+  })
+
+  it('keeps the attachment menu open while selecting a directory', async () => {
+    reactEnvironment.IS_REACT_ACT_ENVIRONMENT = true
+    container = document.createElement('div')
+    document.body.append(container)
+    root = createRoot(container)
+    const invoke = vi.fn().mockResolvedValue(['C:\\workspace'])
+    Object.defineProperty(window, 'bridge', {
+      configurable: true,
+      value: { invoke }
+    })
+
+    await act(async () => render())
+    const trigger = container.querySelector<HTMLButtonElement>('button[aria-label="添加附件"]')!
+    await act(async () => {
+      trigger.dispatchEvent(
+        new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' })
+      )
+    })
+    const directory = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+      (item) => item.textContent === '目录'
+    )!
+    await act(async () => directory.click())
+
+    expect(invoke).toHaveBeenCalledWith('dialog:pick-directories')
+    expect(document.querySelector('[role="menu"]')).not.toBeNull()
   })
 
   it('hides the workspace selector after the conversation starts', async () => {

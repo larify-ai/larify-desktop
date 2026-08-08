@@ -7,14 +7,28 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 type Layout = Record<string, number>
 
 const layouts = new Map<string, Layout>()
+const expandedWorkbenchLayout = { interaction: 70, workbench: 30 }
 const sessionIds: string[] = []
+const unmountedSessionIds: string[] = []
+const headingChanges = new Map<string, (heading: { cwd: string; title: string } | null) => void>()
 
 vi.mock('../../../src/renderer/src/app/interaction/assistant/session', async () => {
-  const { useState } = await vi.importActual<typeof import('react')>('react')
+  const { useEffect, useState } = await vi.importActual<typeof import('react')>('react')
   return {
-    AssistantSession: () => {
+    AssistantSession: ({
+      onHeadingChange
+    }: {
+      onHeadingChange: (heading: { cwd: string; title: string } | null) => void
+    }) => {
       const [id] = useState(() => crypto.randomUUID())
-      sessionIds.push(id)
+      useEffect(() => {
+        sessionIds.push(id)
+        headingChanges.set(id, onHeadingChange)
+        return () => {
+          headingChanges.delete(id)
+          unmountedSessionIds.push(id)
+        }
+      }, [id, onHeadingChange])
       return null
     }
   }
@@ -23,15 +37,14 @@ vi.mock('../../../src/renderer/src/app/interaction/assistant/session', async () 
 vi.mock('../../../src/renderer/src/components/ui/resizable', () => ({
   ResizablePanelGroup: ({
     children,
-    groupRef,
-    id
+    id,
+    groupRef
   }: {
     children?: ReactNode
-    groupRef?: { current: unknown }
     id: string
+    groupRef?: { current: unknown }
   }) => {
-    const initial =
-      id === 'main' ? { navigation: 15, content: 85 } : { interaction: 64, workbench: 36 }
+    const initial = id === 'main' ? { navigation: 15, content: 85 } : expandedWorkbenchLayout
     layouts.set(id, layouts.get(id) ?? initial)
     if (groupRef) {
       groupRef.current = {
@@ -58,14 +71,16 @@ describe('layout panel behavior', () => {
   let root: Root
 
   beforeEach(async () => {
-    layouts.clear()
-    sessionIds.length = 0
-    globalThis.IS_REACT_ACT_ENVIRONMENT = true
     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
       callback(0)
       return 0
     })
     vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    layouts.clear()
+    sessionIds.length = 0
+    unmountedSessionIds.length = 0
+    headingChanges.clear()
+    globalThis.IS_REACT_ACT_ENVIRONMENT = true
     Object.defineProperty(window, 'bridge', {
       configurable: true,
       value: { invoke: vi.fn().mockResolvedValue([]) }
@@ -86,29 +101,43 @@ describe('layout panel behavior', () => {
   it('restores the workbench layout after toggling twice', async () => {
     expect(layouts.get('content')).toEqual({ interaction: 100, workbench: 0 })
 
-    await click('切换工作区')
-    expect(layouts.get('content')).toEqual({ interaction: 64, workbench: 36 })
+    await click('显示工作台')
+    expect(layouts.get('content')).toEqual(expandedWorkbenchLayout)
 
-    await click('切换工作区')
+    await click('隐藏工作台')
     expect(layouts.get('content')).toEqual({ interaction: 100, workbench: 0 })
   })
 
   it('preserves a resized navigation layout across collapse and expand', async () => {
     layouts.set('main', { navigation: 20, content: 80 })
 
-    await click('切换侧边栏')
+    await click('隐藏侧边栏')
     expect(layouts.get('main')).toEqual({ navigation: 0, content: 100 })
 
-    await click('切换侧边栏')
+    await click('显示侧边栏')
     expect(layouts.get('main')).toEqual({ navigation: 20, content: 80 })
   })
 
-  it('starts a fresh assistant session from the navigation', async () => {
-    const initial = sessionIds.at(-1)
+  it('creates a task record only after the draft is sent', async () => {
+    const initial = sessionIds[0]
 
     await click('新建任务')
+    expect(sessionIds).toHaveLength(1)
 
-    expect(sessionIds.at(-1)).not.toBe(initial)
+    await act(async () => headingChanges.get(initial)?.({ cwd: '', title: '第一个任务' }))
+    await click('新建任务')
+
+    expect(sessionIds).toHaveLength(2)
+    expect(sessionIds[1]).not.toBe(initial)
+    expect(unmountedSessionIds).not.toContain(initial)
+
+    const taskButtons = [...container.querySelectorAll<HTMLButtonElement>('button')].filter(
+      (button) => button.textContent === '第一个任务'
+    )
+    expect(taskButtons).toHaveLength(1)
+    await act(async () => taskButtons[0].click())
+    expect(taskButtons[0].ariaCurrent).toBe('page')
+    expect(unmountedSessionIds).not.toContain(initial)
   })
 
   async function click(label: string): Promise<void> {

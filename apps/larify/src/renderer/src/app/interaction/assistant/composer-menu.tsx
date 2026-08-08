@@ -74,7 +74,13 @@ function DirectoryAttachment(): React.JSX.Element {
   }
 
   return (
-    <PromptInputActionMenuItem className="gap-2 rounded-lg" onSelect={() => void select()}>
+    <PromptInputActionMenuItem
+      className="gap-2 rounded-lg"
+      onSelect={(event) => {
+        event.preventDefault()
+        void select()
+      }}
+    >
       <FolderIcon className="size-4" />
       目录
     </PromptInputActionMenuItem>
@@ -89,6 +95,7 @@ export function ComposerMenu({ inputRef }: ComposerMenuProps): React.JSX.Element
     <PromptInputActionMenu>
       <div ref={triggerRef}>
         <PromptInputActionMenuTrigger
+          aria-label="添加附件"
           size="icon-sm"
           style={{ borderRadius: 9999 }}
           className="border border-transparent bg-secondary text-secondary-foreground hover:border-border hover:bg-muted hover:text-foreground data-[state=open]:border-border data-[state=open]:bg-muted data-[state=open]:text-foreground focus-visible:border-transparent focus-visible:ring-0"

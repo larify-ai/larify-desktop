@@ -33,7 +33,7 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
 describe('AssistantChat', () => {
   let container: HTMLDivElement
-  let root: Root
+  let root: Root | null
 
   beforeEach(() => {
     container = document.createElement('div')
@@ -52,7 +52,7 @@ describe('AssistantChat', () => {
   })
 
   afterEach(() => {
-    act(() => root.unmount())
+    act(() => root?.unmount())
     container.remove()
     vi.clearAllMocks()
   })
@@ -106,6 +106,49 @@ describe('AssistantChat', () => {
       title: 'first message'
     })
     expect(onHeadingChange).not.toHaveBeenCalledWith(null)
+  })
+
+  it('does not clear a started session heading when unmounted', async () => {
+    const onHeadingChange = vi.fn()
+    await act(async () =>
+      root?.render(
+        createElement(AssistantChat, {
+          chat: { id: 'session' } as never,
+          cwd: '',
+          onCwdChange: vi.fn(),
+          onHeadingChange
+        })
+      )
+    )
+    onHeadingChange.mockClear()
+
+    act(() => root?.unmount())
+    root = null
+
+    expect(onHeadingChange).not.toHaveBeenCalledWith(null)
+  })
+
+  it('reports a null heading for an empty session', async () => {
+    mocks.useChat.mockReturnValue({
+      messages: [],
+      sendMessage: mocks.sendMessage,
+      status: 'ready',
+      stop: mocks.stop
+    })
+    const onHeadingChange = vi.fn()
+
+    await act(async () =>
+      root?.render(
+        createElement(AssistantChat, {
+          chat: { id: 'session' } as never,
+          cwd: '',
+          onCwdChange: vi.fn(),
+          onHeadingChange
+        })
+      )
+    )
+
+    expect(onHeadingChange).toHaveBeenCalledWith(null)
   })
 })
 

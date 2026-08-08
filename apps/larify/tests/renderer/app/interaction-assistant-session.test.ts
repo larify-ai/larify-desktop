@@ -40,7 +40,7 @@ describe('AssistantSession', () => {
     const root = createRoot(container)
 
     await act(async () => {
-      root.render(createElement(AssistantSession, { onHeadingChange: vi.fn() }))
+      root.render(createElement(AssistantSession, { id: 'session', onHeadingChange: vi.fn() }))
     })
     const initial = mocks.assistant.mock.calls.at(-1)![0] as {
       chat: { options: { transport: ChatTransport<UIMessage> } }
@@ -51,6 +51,7 @@ describe('AssistantSession', () => {
     const changed = mocks.assistant.mock.calls.at(-1)![0] as { chat: unknown; cwd: string }
 
     expect(mocks.chat).toHaveBeenCalledOnce()
+    expect(mocks.chat).toHaveBeenCalledWith(expect.objectContaining({ id: 'session' }))
     expect(changed.chat).toBe(initial.chat)
     expect(changed.cwd).toBe('D:\\Workspace\\project')
 

@@ -11,24 +11,31 @@ const expandedWorkbenchLayout = { interaction: 70, workbench: 30 }
 const sessionIds: string[] = []
 const unmountedSessionIds: string[] = []
 const headingChanges = new Map<string, (heading: { cwd: string; title: string } | null) => void>()
+const savedCallbacks = new Map<string, () => void>()
+let storedSession: { id: string; title: string; cwd: string } | undefined
 
 vi.mock('../../../src/renderer/src/app/interaction/assistant/session', async () => {
-  const { useEffect, useState } = await vi.importActual<typeof import('react')>('react')
+  const { useEffect } = await vi.importActual<typeof import('react')>('react')
   return {
     AssistantSession: ({
-      onHeadingChange
+      id,
+      onHeadingChange,
+      onSaved
     }: {
+      id: string
       onHeadingChange: (heading: { cwd: string; title: string } | null) => void
+      onSaved: () => void
     }) => {
-      const [id] = useState(() => crypto.randomUUID())
       useEffect(() => {
         sessionIds.push(id)
         headingChanges.set(id, onHeadingChange)
+        savedCallbacks.set(id, onSaved)
         return () => {
           headingChanges.delete(id)
+          savedCallbacks.delete(id)
           unmountedSessionIds.push(id)
         }
-      }, [id, onHeadingChange])
+      }, [id, onHeadingChange, onSaved])
       return null
     }
   }
@@ -80,10 +87,19 @@ describe('layout panel behavior', () => {
     sessionIds.length = 0
     unmountedSessionIds.length = 0
     headingChanges.clear()
+    savedCallbacks.clear()
+    storedSession = undefined
     globalThis.IS_REACT_ACT_ENVIRONMENT = true
     Object.defineProperty(window, 'bridge', {
       configurable: true,
-      value: { invoke: vi.fn().mockResolvedValue([]) }
+      value: {
+        invoke: vi.fn((channel: string) => {
+          if (!storedSession) return Promise.resolve([])
+          if (channel === 'session:cwds') return Promise.resolve([storedSession.cwd])
+          if (channel === 'session:list') return Promise.resolve([storedSession])
+          return Promise.resolve([])
+        })
+      }
     })
     container = document.createElement('div')
     document.body.appendChild(container)
@@ -125,6 +141,8 @@ describe('layout panel behavior', () => {
     expect(sessionIds).toHaveLength(1)
 
     await act(async () => headingChanges.get(initial)?.({ cwd: '', title: '第一个任务' }))
+    storedSession = { id: initial, cwd: '', title: '第一个任务' }
+    await act(async () => savedCallbacks.get(initial)?.())
     await click('新建任务')
 
     expect(sessionIds).toHaveLength(2)

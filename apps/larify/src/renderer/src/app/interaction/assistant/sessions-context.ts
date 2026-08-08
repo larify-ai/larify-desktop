@@ -1,5 +1,6 @@
 import { createContext, useContext } from 'react'
 import type { ConversationHeading } from './conversation-header'
+import type { SessionDirectoryGroup } from './session-directory'
 
 export interface AssistantSessionState {
   id: string
@@ -8,10 +9,13 @@ export interface AssistantSessionState {
 
 export interface AssistantSessions {
   sessions: AssistantSessionState[]
+  directory: SessionDirectoryGroup[]
   activeId: string
   activeSession: AssistantSessionState
   create(): void
   select(id: string): void
+  loadMore(cwd: string): Promise<void>
+  refresh(): Promise<void>
   setHeading(id: string, heading: ConversationHeading | null): void
 }
 

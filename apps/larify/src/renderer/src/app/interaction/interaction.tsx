@@ -1,16 +1,18 @@
-import { useCallback } from 'react'
+import { memo, useCallback } from 'react'
 import { Region } from '../layout/region'
 import { AssistantSession } from './assistant/session'
 import { useAssistantSessions } from './assistant/sessions-context'
 import type { ConversationHeading } from './assistant/conversation-header'
 
-function SessionView({
+const SessionView = memo(function SessionView({
   id,
   active,
+  refresh,
   setHeading
 }: {
   id: string
   active: boolean
+  refresh: () => Promise<void>
   setHeading: (id: string, heading: ConversationHeading | null) => void
 }): React.JSX.Element {
   const updateHeading = useCallback(
@@ -20,13 +22,13 @@ function SessionView({
 
   return (
     <div className={active ? 'h-full' : 'hidden'}>
-      <AssistantSession id={id} onHeadingChange={updateHeading} />
+      <AssistantSession id={id} onHeadingChange={updateHeading} onSaved={refresh} />
     </div>
   )
-}
+})
 
 export function Interaction(): React.JSX.Element {
-  const { sessions, activeId, setHeading } = useAssistantSessions()
+  const { sessions, activeId, refresh, setHeading } = useAssistantSessions()
 
   return (
     <Region label="Interaction" className="h-full min-w-0 overflow-hidden">
@@ -35,6 +37,7 @@ export function Interaction(): React.JSX.Element {
           key={session.id}
           id={session.id}
           active={session.id === activeId}
+          refresh={refresh}
           setHeading={setHeading}
         />
       ))}

@@ -8,10 +8,12 @@ import type { ConversationHeading } from './conversation-header'
 
 export function AssistantSession({
   id,
-  onHeadingChange
+  onHeadingChange,
+  onSaved
 }: {
   id: string
   onHeadingChange: (heading: ConversationHeading | null) => void
+  onSaved: () => void
 }): React.JSX.Element {
   const [cwd, setCwd] = useState('')
   const [{ chat, setTransportCwd }] = useState(() => {
@@ -21,7 +23,8 @@ export function AssistantSession({
         id,
         transport: createIpcTransport(
           () => transportCwd,
-          () => readModelConfig(localStorage)
+          () => readModelConfig(localStorage),
+          onSaved
         )
       }),
       setTransportCwd(next: string) {

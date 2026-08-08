@@ -59,7 +59,8 @@ function openAgentStream(
 
 export function createIpcTransport(
   getCwd: () => string,
-  getModelConfig: () => AgentModelConfig
+  getModelConfig: () => AgentModelConfig,
+  onSaved?: () => void
 ): ChatTransport<UIMessage> {
   return {
     async sendMessages({ chatId, messages, abortSignal }) {
@@ -72,7 +73,10 @@ export function createIpcTransport(
         modelConfig: getModelConfig()
       }
 
-      return openAgentStream(chatId, abortSignal, () => window.bridge.invoke('agent:send', input))
+      return openAgentStream(chatId, abortSignal, async () => {
+        await window.bridge.invoke('agent:send', input)
+        onSaved?.()
+      })
     },
 
     async reconnectToStream() {

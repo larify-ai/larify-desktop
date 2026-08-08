@@ -18,10 +18,9 @@ const toggle = readFileSync(resolve('src/renderer/src/app/layout/panel-toggle.ts
 const groupToggle = readFileSync(resolve('src/renderer/src/app/layout/use-group-toggle.ts'), 'utf8')
 const resizeHandle = readFileSync(resolve('src/renderer/src/app/layout/resize-handle.tsx'), 'utf8')
 const resizable = readFileSync(resolve('src/renderer/src/components/ui/resizable.tsx'), 'utf8')
-const navigation = readFileSync(
-  resolve('src/renderer/src/app/navigation/navigation-content.tsx'),
-  'utf8'
-)
+const navigation = ['navigation-content.tsx', 'navigation-action.tsx', 'workspace.tsx']
+  .map((file) => readFileSync(resolve('src/renderer/src/app/navigation', file), 'utf8'))
+  .join('\n')
 const navigationRegion = readFileSync(
   resolve('src/renderer/src/app/navigation/navigation.tsx'),
   'utf8'
@@ -87,19 +86,22 @@ describe('workbench layout specification', () => {
     expect(navigation).toContain('百宝箱')
     expect(navigation).toContain('知识库')
     expect(navigation).toContain('工作空间')
-    expect(navigation).toContain('默认空间')
-    expect(navigation).toContain('larify-desktop')
-    expect(navigation).toContain('音频采集')
     expect(navigation).toContain('aria-expanded={expanded}')
     expect(navigation).toContain('FolderOpenIcon')
     expect(navigation).toContain('FolderClosedIcon')
     expect(navigation).not.toContain('ChevronDownIcon')
     expect(navigation).not.toContain('ChevronRightIcon')
-    expect(navigation).toContain('grid-cols-[20px_max-content]')
+    expect(navigation).toContain('grid-cols-[20px_minmax(0,1fr)]')
+    expect(navigation).toContain('className="h-14 shrink-0"')
     expect(navigation).toContain('rounded-lg')
     expect(navigation).toContain('mx-1')
     expect(navigation).toContain('w-[calc(100%-0.5rem)]')
     expect(navigation).toContain('space-y-0.5')
+    expect(navigation).toContain('const pageSize = 5')
+    expect(navigation).toContain('workspace.sessions.slice(0, visibleCount)')
+    expect(navigation).toContain('setVisibleCount((count) => count + pageSize)')
+    expect(navigation).toContain('if (expanded) setVisibleCount(pageSize)')
+    expect(navigation).toContain('<span>更多</span>')
     expect(navigation).not.toContain('space-y-2')
     expect(navigation).not.toContain('navigationItem} h-7')
     expect(navigation).not.toContain('border-t border-border-strong')

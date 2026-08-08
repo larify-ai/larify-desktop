@@ -38,6 +38,26 @@ describe('interaction assistant transport', () => {
     expect(bridge.listenerCount()).toBe(0)
   })
 
+  it('notifies after the backend accepts and stores the message', async () => {
+    const bridge = createBridge()
+    const onSaved = vi.fn()
+    vi.stubGlobal('window', { bridge })
+    const transport = createIpcTransport(
+      () => 'C:/workspace',
+      () => defaultModelConfig,
+      onSaved
+    )
+
+    const stream = await transport.sendMessages({
+      chatId: 'session-1',
+      messageId: undefined,
+      messages: [{ id: 'message-1', role: 'user', parts: [{ type: 'text', text: 'hello' }] }],
+      trigger: 'submit-message'
+    })
+    await vi.waitFor(() => expect(onSaved).toHaveBeenCalledOnce())
+    await stream.cancel()
+  })
+
   it('errors the stream and releases listeners when starting the run fails', async () => {
     const error = new Error('run failed')
     const bridge = createBridge(async () => {

@@ -17,7 +17,6 @@ export interface WorkspacePreview {
 }
 
 export function createWorkspaces(source: AssistantSessions): WorkspacePreview[] {
-  const openSessions = new Set(source.sessions.map(({ id }) => id))
   const directory = [
     ...source.directory.filter(({ cwd }) => cwd),
     ...source.directory.filter(({ cwd }) => !cwd)
@@ -30,7 +29,7 @@ export function createWorkspaces(source: AssistantSessions): WorkspacePreview[] 
         id: session.id,
         name: session.title,
         active: session.id === source.activeId,
-        ...(openSessions.has(session.id) ? { onClick: () => source.select(session.id) } : {})
+        onClick: () => void source.select(session.id)
       }
     }),
     hasMore: group.hasMore,

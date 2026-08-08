@@ -41,7 +41,15 @@ afterEach(() => {
 
 describe('AssistantSessionsProvider', () => {
   it('starts with one active draft', () => {
-    expect(sessions.sessions).toEqual([{ id: sessions.activeId, heading: null, persisted: false }])
+    expect(sessions.sessions).toEqual([
+      {
+        id: sessions.activeId,
+        heading: null,
+        persisted: false,
+        messages: [],
+        hasMore: false
+      }
+    ])
     expect(sessions.activeSession).toEqual(sessions.sessions[0])
   })
 
@@ -85,6 +93,68 @@ describe('AssistantSessionsProvider', () => {
     expect(sessions.activeSession.id).toBe(activeId)
   })
 
+  it('opens a stored session with its latest messages', async () => {
+    act(() => root.unmount())
+    invoke.mockImplementation((channel: string, ...args: unknown[]) => {
+      if (channel === 'session:cwds') return Promise.resolve(['D:\\Workspace'])
+      if (channel === 'session:list') {
+        return Promise.resolve([{ id: 'stored', title: 'Stored', cwd: 'D:\\Workspace' }])
+      }
+      if (channel === 'session:msgs') {
+        return Promise.resolve([{ id: 'message', role: 'user', parts: [] }])
+      }
+      if (channel === 'attachment:load') return Promise.resolve(args[0])
+      return Promise.resolve([])
+    })
+    root = createRoot(document.createElement('div'))
+    await act(async () => {
+      root.render(createElement(AssistantSessionsProvider, null, createElement(Probe)))
+    })
+
+    await act(async () => sessions.select('stored'))
+
+    expect(sessions.activeId).toBe('stored')
+    expect(sessions.activeSession).toMatchObject({
+      id: 'stored',
+      heading: { cwd: 'D:\\Workspace', title: 'Stored' },
+      persisted: true,
+      messages: [{ id: 'message', role: 'user', parts: [] }],
+      hasMore: false
+    })
+  })
+
+  it('keeps a new draft selected when an older open request finishes later', async () => {
+    act(() => root.unmount())
+    let resolveMessages!: (value: unknown[]) => void
+    const messages = new Promise<unknown[]>((resolve) => {
+      resolveMessages = resolve
+    })
+    invoke.mockImplementation((channel: string) => {
+      if (channel === 'session:cwds') return Promise.resolve(['D:\\Workspace'])
+      if (channel === 'session:list') {
+        return Promise.resolve([{ id: 'stored', title: 'Stored', cwd: 'D:\\Workspace' }])
+      }
+      if (channel === 'session:msgs') return messages
+      return Promise.resolve([])
+    })
+    root = createRoot(document.createElement('div'))
+    await act(async () => {
+      root.render(createElement(AssistantSessionsProvider, null, createElement(Probe)))
+    })
+    const draft = sessions.activeId
+
+    let opening!: Promise<void>
+    act(() => {
+      opening = sessions.select('stored')
+      sessions.create()
+    })
+    resolveMessages([])
+    await act(async () => opening)
+
+    expect(sessions.activeId).toBe(draft)
+    expect(sessions.sessions.some(({ id }) => id === 'stored')).toBe(true)
+  })
+
   it('updates only the selected session heading', async () => {
     const firstId = sessions.activeId
     await act(async () => {
@@ -98,8 +168,20 @@ describe('AssistantSessionsProvider', () => {
     })
 
     expect(sessions.sessions).toEqual([
-      { id: firstId, heading: { cwd: 'D:\\One', title: 'First' }, persisted: true },
-      { id: secondId, heading: { cwd: 'D:\\Two', title: 'Second' }, persisted: false }
+      {
+        id: firstId,
+        heading: { cwd: 'D:\\One', title: 'First' },
+        persisted: true,
+        messages: [],
+        hasMore: false
+      },
+      {
+        id: secondId,
+        heading: { cwd: 'D:\\Two', title: 'Second' },
+        persisted: false,
+        messages: [],
+        hasMore: false
+      }
     ])
   })
 

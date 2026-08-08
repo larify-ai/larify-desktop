@@ -34,8 +34,34 @@ describe('interaction assistant transport', () => {
         modelConfig: defaultModelConfig
       })
     )
-    expect(bridge.invoke.mock.calls[0][1]).not.toHaveProperty('runId')
+    const sendCall = bridge.invoke.mock.calls.find(([channel]) => channel === 'agent:send')
+    expect(sendCall?.[1]).not.toHaveProperty('runId')
+    expect(bridge.invoke.mock.calls.slice(0, 2).map(([channel]) => channel)).toEqual([
+      'attachment:save',
+      'agent:send'
+    ])
     expect(bridge.listenerCount()).toBe(0)
+  })
+
+  it('sends the persisted attachment path to the agent', async () => {
+    const saved = {
+      id: 'message-1',
+      role: 'user' as const,
+      parts: [{ type: 'file' as const, mediaType: 'image/png', url: 'C:/attachments/image.png' }]
+    }
+    const bridge = createBridge(async (channel, value) => {
+      if (channel === 'attachment:save') return saved
+      if (channel === 'agent:send') bridge.emit('agent:end:session-1')
+      return value
+    })
+    vi.stubGlobal('window', { bridge })
+
+    await readAll(await send())
+
+    expect(bridge.invoke).toHaveBeenCalledWith(
+      'agent:send',
+      expect.objectContaining({ message: saved })
+    )
   })
 
   it('notifies after the backend accepts and stores the message', async () => {
@@ -239,7 +265,7 @@ describe('interaction assistant transport', () => {
   })
 })
 
-function createBridge(invokeImplementation?: (channel: string, value?: unknown) => Promise<void>): {
+function createBridge(invokeImplementation?: (channel: string, value?: unknown) => unknown): {
   invoke: ReturnType<typeof vi.fn>
   on: ReturnType<typeof vi.fn>
   emit: (channel: string, value?: unknown) => void

@@ -61,9 +61,9 @@ describe('Interaction', () => {
 
   it('keeps sessions mounted without rerendering hidden sessions unnecessarily', async () => {
     const sessions = [
-      { id: 'first', persisted: false },
-      { id: 'second', persisted: false },
-      { id: 'third', persisted: false }
+      session('first'),
+      session('second'),
+      session('third')
     ]
     mockSessions(sessions, 'first')
     await render(0)
@@ -79,8 +79,8 @@ describe('Interaction', () => {
 
   it('routes session events and exposes only the active session', async () => {
     const sessions = [
-      { id: 'first', persisted: false },
-      { id: 'second', persisted: true }
+      session('first'),
+      session('second', true)
     ]
     mockSessions(sessions, 'second')
     await render(0)
@@ -113,4 +113,8 @@ function Harness({ revision }: { revision: number }): React.JSX.Element {
 
 function mockSessions(sessions: Array<{ id: string; persisted: boolean }>, activeId: string): void {
   mocks.sessions.mockReturnValue({ sessions, activeId, refresh, setPersisted, setHeading })
+}
+
+function session(id: string, persisted = false) {
+  return { id, persisted, heading: null, messages: [], hasMore: false }
 }

@@ -6,7 +6,7 @@ function deriveTitle(messages: UIMessage[]): string {
     messages
       .find(({ role }) => role === 'user')
       ?.parts.find((part) => part.type === 'text')
-      ?.text.trim() || 'Untitled'
+      ?.text.trim() || '未命名任务'
   )
 }
 

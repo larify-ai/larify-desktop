@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useRef } from 'react'
+import type { UIMessage } from 'ai'
 import { Region } from '../layout/region'
 import { AssistantSession } from './assistant/session'
 import { useAssistantSessions } from './assistant/sessions-context'
@@ -8,6 +9,9 @@ const SessionView = memo(function SessionView({
   id,
   active,
   persisted,
+  heading,
+  messages,
+  hasMore,
   refresh,
   setPersisted,
   setHeading
@@ -15,6 +19,9 @@ const SessionView = memo(function SessionView({
   id: string
   active: boolean
   persisted: boolean
+  heading: ConversationHeading | null
+  messages: UIMessage[]
+  hasMore: boolean
   refresh: () => Promise<void>
   setPersisted: (id: string) => void
   setHeading: (id: string, heading: ConversationHeading | null) => void
@@ -36,7 +43,14 @@ const SessionView = memo(function SessionView({
 
   return (
     <div className={active ? 'h-full' : 'hidden'}>
-      <AssistantSession id={id} onHeadingChange={updateHeading} onSaved={saved} />
+      <AssistantSession
+        id={id}
+        initialMessages={messages}
+        initialHasMore={hasMore}
+        initialCwd={heading?.cwd ?? ''}
+        onHeadingChange={updateHeading}
+        onSaved={saved}
+      />
     </div>
   )
 })
@@ -52,6 +66,9 @@ export function Interaction(): React.JSX.Element {
           id={session.id}
           active={session.id === activeId}
           persisted={session.persisted}
+          heading={session.heading}
+          messages={session.messages}
+          hasMore={session.hasMore}
           refresh={refresh}
           setPersisted={setPersisted}
           setHeading={setHeading}

@@ -6,9 +6,10 @@ import {
   loadSessionPage,
   type SessionDirectoryGroup
 } from './session-directory'
+import { loadMessagePage } from './session-messages'
 
 function createSession(): AssistantSessionState {
-  return { id: crypto.randomUUID(), heading: null, persisted: false }
+  return { id: crypto.randomUUID(), heading: null, persisted: false, messages: [], hasMore: false }
 }
 
 interface SessionsState {
@@ -30,6 +31,7 @@ export function AssistantSessionsProvider({
   const [directory, setDirectory] = useState<SessionDirectoryGroup[]>([])
   const refreshVersion = useRef(0)
   const loading = useRef(new Set<string>())
+  const selected = useRef(state.activeId)
 
   const refresh = useCallback(async () => {
     const version = ++refreshVersion.current
@@ -44,17 +46,51 @@ export function AssistantSessionsProvider({
   const create = useCallback(() => {
     setState((current) => {
       const draft = current.sessions.find(({ persisted }) => !persisted)
-      if (draft) return { ...current, activeId: draft.id }
+      if (draft) {
+        selected.current = draft.id
+        return { ...current, activeId: draft.id }
+      }
 
       const session = createSession()
+      selected.current = session.id
       return { sessions: [...current.sessions, session], activeId: session.id }
     })
   }, [])
-  const select = useCallback((activeId: string) => {
-    setState((current) =>
-      current.sessions.some(({ id }) => id === activeId) ? { ...current, activeId } : current
-    )
-  }, [])
+  const select = useCallback(
+    async (activeId: string) => {
+      if (state.sessions.some(({ id }) => id === activeId)) {
+        selected.current = activeId
+        setState((current) => ({ ...current, activeId }))
+        return
+      }
+
+      const stored = directory.flatMap(({ sessions }) => sessions).find(({ id }) => id === activeId)
+      if (!stored) return
+      selected.current = activeId
+      let page
+      try {
+        page = await loadMessagePage(activeId)
+      } catch {
+        return
+      }
+      setState((current) => {
+        const existing = current.sessions.find(({ id }) => id === activeId)
+        const sessions = existing
+          ? current.sessions
+          : [
+              ...current.sessions,
+              {
+                id: activeId,
+                heading: { cwd: stored.cwd, title: stored.title },
+                persisted: true,
+                ...page
+              }
+            ]
+        return { sessions, activeId: selected.current === activeId ? activeId : current.activeId }
+      })
+    },
+    [directory, state.sessions]
+  )
   const loadMore = useCallback(
     async (cwd: string) => {
       const group = directory.find((item) => item.cwd === cwd)

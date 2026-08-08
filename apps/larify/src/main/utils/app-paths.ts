@@ -18,6 +18,12 @@ export const sessionDatabasePath = (): string => join(app.getPath('userData'), '
 export const backgroundSessionDatabasePath = (): string =>
   join(app.getPath('userData'), 'background-sessions.db')
 
+export const sessionAttachmentsPath = (sessionId: string): string => {
+  const path = join(app.getPath('userData'), 'attachments', encodeURIComponent(sessionId))
+  mkdirSync(path, { recursive: true })
+  return path
+}
+
 export const larifyTempPath = (...segments: string[]): string => {
   const root = app?.getPath?.('temp') ?? tmpdir()
   const path = join(root, 'larify', ...segments)

@@ -43,6 +43,18 @@ const save = (
 }
 
 describe('SessionStore', () => {
+  it('uses the Chinese fallback title for a message without text', async () => {
+    const store = await createStore()
+    const attachment: UIMessage = {
+      id: 'attachment',
+      role: 'user',
+      parts: [{ type: 'file', filename: 'image.png', mediaType: 'image/png', url: 'path' }]
+    }
+    saveSessionMessages(store, 'chat', '/cwd', [attachment])
+    expect(store.loadSession('chat')?.title).toBe('未命名任务')
+    store.dispose()
+  })
+
   it('uses a custom title when saving messages', async () => {
     const store = await createStore()
     saveSessionMessages(store, 'chat', '/cwd', [message('one', 'derived')], 'Custom title')

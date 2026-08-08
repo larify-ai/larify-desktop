@@ -16,11 +16,15 @@ function messageText(message: UIMessage): string {
 export function AssistantChat({
   chat,
   cwd,
+  firstItemIndex,
+  onLoadOlder,
   onCwdChange,
   onHeadingChange
 }: {
   chat: Chat<UIMessage>
   cwd: string
+  firstItemIndex: number
+  onLoadOlder?: () => Promise<void>
   onCwdChange: (cwd: string) => void
   onHeadingChange: (heading: ConversationHeading | null) => void
 }): React.JSX.Element {
@@ -35,15 +39,22 @@ export function AssistantChat({
         .filter(Boolean),
     [messages]
   )
-  const title = history[0]?.split(/\r?\n/, 1)[0].slice(0, 60) ?? '新任务'
+  const firstMessage = messages.find((message) => message.role === 'user')
+  const title = firstMessage ? messageText(firstMessage) : ''
+  const heading = title.split(/\r?\n/, 1)[0].slice(0, 60) || '未命名任务'
 
   useEffect(() => {
-    onHeadingChange(started ? { cwd, title } : null)
-  }, [cwd, onHeadingChange, started, title])
+    onHeadingChange(started ? { cwd, title: heading } : null)
+  }, [cwd, heading, onHeadingChange, started])
 
   return (
     <div className="flex h-full min-w-0 flex-col">
-      <AssistantMessageList messages={messages} live={running} />
+      <AssistantMessageList
+        messages={messages}
+        live={running}
+        firstItemIndex={firstItemIndex}
+        onLoadOlder={onLoadOlder}
+      />
       <AssistantComposer
         cwd={cwd}
         history={history}

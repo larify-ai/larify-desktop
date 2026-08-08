@@ -1,4 +1,5 @@
 import { createContext, useContext } from 'react'
+import type { UIMessage } from 'ai'
 import type { ConversationHeading } from './conversation-header'
 import type { SessionDirectoryGroup } from './session-directory'
 
@@ -6,6 +7,8 @@ export interface AssistantSessionState {
   id: string
   heading: ConversationHeading | null
   persisted: boolean
+  messages: UIMessage[]
+  hasMore: boolean
 }
 
 export interface AssistantSessions {
@@ -14,7 +17,7 @@ export interface AssistantSessions {
   activeId: string
   activeSession: AssistantSessionState
   create(): void
-  select(id: string): void
+  select(id: string): Promise<void>
   loadMore(cwd: string): Promise<void>
   refresh(): Promise<void>
   setPersisted(id: string): void

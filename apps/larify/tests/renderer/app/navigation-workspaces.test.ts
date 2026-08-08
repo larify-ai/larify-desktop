@@ -3,7 +3,13 @@ import type { AssistantSessions } from '../../../src/renderer/src/app/interactio
 import { createWorkspaces } from '../../../src/renderer/src/app/navigation/workspaces'
 
 function source(values: Partial<AssistantSessions> = {}): AssistantSessions {
-  const session = { id: 'draft', heading: null, persisted: false }
+  const session = {
+    id: 'draft',
+    heading: null,
+    persisted: false,
+    messages: [],
+    hasMore: false
+  }
   return {
     sessions: [session],
     directory: [],

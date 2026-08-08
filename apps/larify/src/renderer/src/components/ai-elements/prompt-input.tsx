@@ -928,10 +928,12 @@ export const PromptInput = ({
             ) as FileUIPart;
             if (item.url?.startsWith("blob:")) {
               const dataUrl = await convertBlobUrlToDataUrl(item.url);
-              // If conversion failed, keep the original blob URL
+              if (!dataUrl) {
+                throw new Error("Unable to read attachment.");
+              }
               return {
                 ...item,
-                url: dataUrl ?? item.url,
+                url: dataUrl,
               };
             }
             return item;

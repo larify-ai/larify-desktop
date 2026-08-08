@@ -1,0 +1,1 @@
+export { registerAttachment } from './open'

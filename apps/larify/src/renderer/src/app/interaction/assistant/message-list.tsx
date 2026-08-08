@@ -9,10 +9,14 @@ const Message = memo(MessageView)
 
 export function AssistantMessageList({
   messages,
-  live = false
+  live = false,
+  firstItemIndex = 0,
+  onLoadOlder
 }: {
   messages: UIMessage[]
   live?: boolean
+  firstItemIndex?: number
+  onLoadOlder?: () => Promise<void>
 }): React.JSX.Element {
   const list = useRef<VirtuosoHandle>(null)
   const [atBottom, setAtBottom] = useState(true)
@@ -28,13 +32,15 @@ export function AssistantMessageList({
         role="log"
         className="size-full"
         data={messages}
-        initialTopMostItemIndex={Math.max(messages.length - 1, 0)}
+        firstItemIndex={firstItemIndex}
+        initialTopMostItemIndex={Math.max(firstItemIndex + messages.length - 1, firstItemIndex)}
         followOutput="auto"
+        startReached={onLoadOlder ? () => void onLoadOlder() : undefined}
         atBottomStateChange={setAtBottom}
         computeItemKey={(_, message) => message.id}
-        itemContent={(index, message) => (
+        itemContent={(_, message) => (
           <div className="mx-auto w-full px-6 py-3 lg:w-4/5">
-            <Message message={message} streaming={live && index === messages.length - 1} />
+            <Message message={message} streaming={live && message.id === messages.at(-1)?.id} />
           </div>
         )}
       />
@@ -47,7 +53,7 @@ export function AssistantMessageList({
           aria-label="返回底部"
           onClick={() =>
             list.current?.scrollToIndex({
-              index: messages.length - 1,
+              index: firstItemIndex + messages.length - 1,
               align: 'end',
               behavior: 'smooth'
             })

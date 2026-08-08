@@ -7,7 +7,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   chat: vi.fn(function Chat(this: object, options: unknown) {
-    Object.assign(this, { options })
+    Object.assign(this, {
+      options,
+      messages: (options as { messages?: UIMessage[] }).messages ?? []
+    })
   }),
   assistant: vi.fn()
 }))
@@ -44,6 +47,9 @@ describe('AssistantSession', () => {
       root.render(
         createElement(AssistantSession, {
           id: 'session',
+          initialMessages: [],
+          initialHasMore: false,
+          initialCwd: '',
           onHeadingChange: vi.fn(),
           onSaved
         })
@@ -68,12 +74,59 @@ describe('AssistantSession', () => {
       messages: [{ id: 'message', role: 'user', parts: [{ type: 'text', text: 'hello' }] }],
       trigger: 'submit-message'
     })
-    expect(invoke).toHaveBeenCalledWith(
-      'agent:send',
-      expect.objectContaining({ cwd: 'D:\\Workspace\\project' })
+    await vi.waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith(
+        'agent:send',
+        expect.objectContaining({ cwd: 'D:\\Workspace\\project' })
+      )
     )
     await vi.waitFor(() => expect(onSaved).toHaveBeenCalledOnce())
     await stream.cancel()
+
+    await act(async () => root.unmount())
+  })
+
+  it('prepends older messages without moving the virtual list', async () => {
+    const older = [{ id: 'older', role: 'assistant', parts: [] }] as UIMessage[]
+    const latest = [{ id: 'latest', role: 'assistant', parts: [] }] as UIMessage[]
+    const invoke = vi.fn((channel: string) =>
+      Promise.resolve(channel === 'session:msgs' ? older : undefined)
+    )
+    Object.defineProperty(window, 'bridge', {
+      configurable: true,
+      value: { invoke, on: vi.fn(() => () => undefined) }
+    })
+    const root = createRoot(document.createElement('div'))
+
+    await act(async () => {
+      root.render(
+        createElement(AssistantSession, {
+          id: 'session',
+          initialMessages: latest,
+          initialHasMore: true,
+          initialCwd: 'D:\\Workspace',
+          onHeadingChange: vi.fn(),
+          onSaved: vi.fn()
+        })
+      )
+    })
+    const initial = mocks.assistant.mock.calls.at(-1)![0] as {
+      chat: { messages: UIMessage[] }
+      firstItemIndex: number
+      onLoadOlder: () => Promise<void>
+    }
+
+    await act(async () => initial.onLoadOlder())
+    const loaded = mocks.assistant.mock.calls.at(-1)![0] as {
+      chat: { messages: UIMessage[] }
+      firstItemIndex: number
+      onLoadOlder?: () => Promise<void>
+    }
+
+    expect(invoke).toHaveBeenCalledWith('session:msgs', 'session', 1, 51)
+    expect(loaded.chat.messages.map(({ id }) => id)).toEqual(['older', 'latest'])
+    expect(loaded.firstItemIndex).toBe(initial.firstItemIndex - 1)
+    expect(loaded.onLoadOlder).toBeUndefined()
 
     await act(async () => root.unmount())
   })

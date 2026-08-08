@@ -31,6 +31,8 @@ interface VirtuosoProps {
   data: UIMessage[]
   followOutput: string
   initialTopMostItemIndex: number
+  firstItemIndex: number
+  startReached?: () => void
   role: string
   atBottomStateChange(atBottom: boolean): void
   computeItemKey(index: number, message: UIMessage): string
@@ -71,6 +73,23 @@ describe('interaction assistant message list', () => {
     renderToStaticMarkup(createElement(AssistantMessageList, { messages: [] }))
 
     expect((captured.props as VirtuosoProps).initialTopMostItemIndex).toBe(0)
+  })
+
+  it('preserves the viewport while loading older messages', () => {
+    const onLoadOlder = vi.fn()
+    renderToStaticMarkup(
+      createElement(AssistantMessageList, {
+        messages: [message('older'), message('latest')],
+        firstItemIndex: 999_998,
+        onLoadOlder
+      })
+    )
+
+    const props = captured.props as VirtuosoProps
+    expect(props.firstItemIndex).toBe(999_998)
+    expect(props.initialTopMostItemIndex).toBe(999_999)
+    props.startReached?.()
+    expect(onLoadOlder).toHaveBeenCalledOnce()
   })
 
   it('delegates large conversations to Virtuoso without eagerly rendering messages', () => {
@@ -114,6 +133,22 @@ describe('interaction assistant message list', () => {
     act(() => button?.click())
     expect(captured.scrollToIndex).toHaveBeenCalledWith({
       index: 1,
+      align: 'end',
+      behavior: 'smooth'
+    })
+  })
+
+  it('returns to the absolute latest index after older messages are prepended', async () => {
+    const messages = [message('older'), message('latest')]
+    await act(async () =>
+      root.render(createElement(AssistantMessageList, { messages, firstItemIndex: 999_998 }))
+    )
+    act(() => (captured.props as VirtuosoProps).atBottomStateChange(false))
+
+    act(() => container.querySelector<HTMLButtonElement>('button')?.click())
+
+    expect(captured.scrollToIndex).toHaveBeenCalledWith({
+      index: 999_999,
       align: 'end',
       behavior: 'smooth'
     })

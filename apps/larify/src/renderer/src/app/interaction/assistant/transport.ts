@@ -67,15 +67,17 @@ export function createIpcTransport(
     async sendMessages({ chatId, messages, abortSignal }) {
       const message = messages.at(-1)
       if (!message) throw new Error('A message is required.')
-      const input = {
-        sessionId: chatId,
-        message,
-        cwd: getCwd(),
-        modelConfig: getModelConfig()
-      }
+      const cwd = getCwd()
+      const modelConfig = getModelConfig()
 
       return openAgentStream(chatId, abortSignal, async () => {
-        await window.bridge.invoke('agent:send', input)
+        const saved = (await window.bridge.invoke('attachment:save', chatId, message)) ?? message
+        await window.bridge.invoke('agent:send', {
+          sessionId: chatId,
+          message: saved,
+          cwd,
+          modelConfig
+        })
         await onSaved?.()
       })
     },

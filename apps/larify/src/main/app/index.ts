@@ -4,6 +4,7 @@ import { Registry } from '../infra/registry'
 import { installShutdown } from './shutdown'
 import { registerSession } from '../core/session/open'
 import { registerAgent } from '../core/agent'
+import { registerAttachment } from '../core/attachment'
 import { registerTheme } from '../theme'
 import { registerDialog } from '../dialog'
 import { openMainWindow, registerWindow } from '../window'
@@ -21,6 +22,7 @@ function createApplication(electron: App): Application {
   registerTheme(application)
   registerDialog(application)
   registerSession(application)
+  registerAttachment(application)
   registerAgent(application)
   return application
 }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { useTheme } from "next-themes"
+import { useTheme } from "@renderer/app/theme/theme"
 import { FitAddon } from "@xterm/addon-fit"
 import { Unicode11Addon } from "@xterm/addon-unicode11"
 import { Terminal as XTerm, type ITheme } from "@xterm/xterm"

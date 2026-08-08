@@ -59,7 +59,18 @@ describe('AssistantChat', () => {
 
   it('connects chat state to the message list and composer', async () => {
     const chat = { id: 'session' }
-    await act(async () => root.render(createElement(AssistantChat, { chat: chat as never })))
+    const onCwdChange = vi.fn()
+    const onHeadingChange = vi.fn()
+    await act(async () =>
+      root.render(
+        createElement(AssistantChat, {
+          chat: chat as never,
+          cwd: '',
+          onCwdChange,
+          onHeadingChange
+        })
+      )
+    )
 
     expect(mocks.useChat).toHaveBeenCalledWith({ chat, throttle: 50 })
     expect(mocks.list).toHaveBeenCalledWith(
@@ -71,10 +82,30 @@ describe('AssistantChat', () => {
 
     const composer = mocks.composer.mock.calls[0][0]
     expect(composer.history).toEqual(['first message', 'second'])
+    expect(composer.showWorkspace).toBe(false)
+    expect(composer.onCwdChange).toBe(onCwdChange)
+    expect(onHeadingChange).toHaveBeenCalledWith({ cwd: '', title: 'first message' })
     composer.onSubmit({ text: 'hello', files: [] })
     composer.onStop()
     expect(mocks.sendMessage).toHaveBeenCalledWith({ text: 'hello', files: [] })
     expect(mocks.stop).toHaveBeenCalledOnce()
+
+    onHeadingChange.mockClear()
+    await act(async () =>
+      root.render(
+        createElement(AssistantChat, {
+          chat: chat as never,
+          cwd: 'D:\\Workspace\\project',
+          onCwdChange,
+          onHeadingChange
+        })
+      )
+    )
+    expect(onHeadingChange).toHaveBeenCalledWith({
+      cwd: 'D:\\Workspace\\project',
+      title: 'first message'
+    })
+    expect(onHeadingChange).not.toHaveBeenCalledWith(null)
   })
 })
 

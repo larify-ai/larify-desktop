@@ -1,9 +1,10 @@
 import type { UIMessage } from 'ai'
 import { describe, expect, it } from 'vitest'
 import {
-  sanitizeAndValidateMessages,
-  sanitizeMessages
-} from '../../../../src/main/core/agent/message-sanitizer'
+  prepareMessages,
+  sanitizeMessages,
+  toModelMessages
+} from '../../../../src/main/core/agent/messages'
 
 describe('message sanitizer', () => {
   it('removes interrupted assistant tool calls without results', () => {
@@ -56,6 +57,16 @@ describe('message sanitizer', () => {
     expect(sanitizeMessages([message])).toEqual([message])
   })
 
+  it.each(['output-error', 'output-denied'])('keeps tools in the %s state', (state) => {
+    const message = {
+      id: 'assistant-1',
+      role: 'assistant',
+      parts: [{ type: 'dynamic-tool', toolCallId: 'call-1', toolName: 'test', state }]
+    } as UIMessage
+
+    expect(sanitizeMessages([message])).toEqual([message])
+  })
+
   it('removes empty assistant messages after dropping incomplete tools', () => {
     const message = {
       id: 'assistant-1',
@@ -87,6 +98,63 @@ describe('message sanitizer', () => {
       }
     ] as unknown as UIMessage[]
 
-    expect(await sanitizeAndValidateMessages(messages)).toEqual([messages[1]])
+    expect(await prepareMessages(messages)).toEqual([messages[1]])
+  })
+
+  it('preserves message order while dropping invalid messages', async () => {
+    const messages = [
+      { id: 'first', role: 'user', parts: [{ type: 'text', text: 'first' }] },
+      { id: 'bad', role: 'assistant', parts: [{ type: 'text' }] },
+      { id: 'last', role: 'assistant', parts: [{ type: 'text', text: 'last' }] }
+    ] as unknown as UIMessage[]
+
+    expect((await prepareMessages(messages)).map(({ id }) => id)).toEqual(['first', 'last'])
+  })
+
+  it('handles empty input', async () => {
+    expect(sanitizeMessages([])).toEqual([])
+    expect(await prepareMessages([])).toEqual([])
+    expect(await toModelMessages([])).toEqual([])
+  })
+
+  it('converts attachments to paths only for model input', async () => {
+    const message: UIMessage = {
+      id: 'user-1',
+      role: 'user',
+      parts: [
+        { type: 'file', url: 'C:/work/input.pdf', mediaType: 'application/pdf' },
+        { type: 'text', text: '总结附件' }
+      ]
+    }
+
+    expect(await toModelMessages([message])).toEqual([
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Attached paths:\n- C:/work/input.pdf\n\n' },
+          { type: 'text', text: '总结附件' }
+        ]
+      }
+    ])
+    expect(message.parts[0].type).toBe('file')
+  })
+
+  it('converts multiple attachments in their original order', async () => {
+    const message: UIMessage = {
+      id: 'user-1',
+      role: 'user',
+      parts: [
+        { type: 'file', url: 'C:/one.txt', mediaType: 'text/plain' },
+        { type: 'file', url: 'C:/two.txt', mediaType: 'text/plain' }
+      ]
+    }
+
+    expect(await toModelMessages([message])).toEqual([
+      {
+        role: 'user',
+        content: [{ type: 'text', text: 'Attached paths:\n- C:/one.txt\n- C:/two.txt\n\n' }]
+      }
+    ])
+    expect(message.parts).toHaveLength(2)
   })
 })

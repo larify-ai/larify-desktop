@@ -55,7 +55,7 @@ import { createIpcTransport } from '../lib/transport'
 import { RunActivity } from './run-activity'
 import { toggleSessionGroup } from '../lib/session-groups'
 import { readModelConfig, writeModelConfig } from '../lib/model-config'
-import { modelIds, modelLabels, type AgentModelConfig } from '../../../agent/shared/model'
+import { modelIds, modelLabels, type AgentModelConfig } from '../../../../main/core/model/config'
 
 const MemoizedMessageView = memo(MessageView)
 const RECENT_CWDS_KEY = 'larify.recentCwds'
@@ -116,7 +116,7 @@ export function AssistantPanel(): React.JSX.Element {
   const cwdBySessionIdRef = useRef(cwdBySessionId)
   const cwdRevisionRef = useRef<Record<string, number>>({})
   const defaultCwdRef = useRef('')
-  const [defaultCwd, setDefaultCwd] = useState('')
+  const defaultCwd = ''
   const [recentCwds, setRecentCwds] = useState<string[]>(readRecentCwds)
   const recentCwdsRef = useRef(recentCwds)
   const chatsBySessionIdRef = useRef<Record<string, Chat<UIMessage>>>({})
@@ -185,12 +185,9 @@ export function AssistantPanel(): React.JSX.Element {
     rememberRecentCwd(cwd)
   }
 
-  const saveSessionMessages = (id: string, messages: UIMessage[], cwd: string): void => {
+  const cacheMessages = (id: string, messages: UIMessage[]): void => {
     cacheSessionMessages(id, messages)
-    void window.bridge
-      .invoke('agent:session-save', id, messages, cwd)
-      .then(() => window.dispatchEvent(new Event('agent:sessions-changed')))
-      .catch((error) => console.error('[agent:session-save]', error))
+    window.dispatchEvent(new Event('agent:sessions-changed'))
   }
 
   const createChat = (id: string, messages: UIMessage[]): Chat<UIMessage> => {
@@ -201,8 +198,7 @@ export function AssistantPanel(): React.JSX.Element {
         () => cwdBySessionIdRef.current[id] ?? '',
         () => modelConfigRef.current
       ),
-      onFinish: ({ messages: finishedMessages }) =>
-        saveSessionMessages(id, finishedMessages, cwdBySessionIdRef.current[id] ?? '')
+      onFinish: ({ messages: finishedMessages }) => cacheMessages(id, finishedMessages)
     })
     chatsBySessionIdRef.current[id] = chat
     return chat
@@ -218,10 +214,10 @@ export function AssistantPanel(): React.JSX.Element {
     try {
       const cwd = cwdBySessionIdRef.current[selectedSessionIdRef.current]
       if (!cwd) return
-      const rows = await window.bridge.invoke('agent:session-list', cwd)
+      const rows = await window.bridge.invoke('session:list', cwd)
       setSessions(rows as SessionMeta[])
     } catch (error) {
-      console.error('[agent:session-list]', error)
+      console.error('[session:list]', error)
     }
   }
 
@@ -242,25 +238,16 @@ export function AssistantPanel(): React.JSX.Element {
       createChat(id, messages)
     }
     try {
-      const loaded = (await window.bridge.invoke('agent:session-load', id)) as {
-        messages: UIMessage[]
-        cwd: string
-        defaultCwd: string
-      }
-      const result = loaded ?? { messages: [], cwd: '', defaultCwd: '' }
-      defaultCwdRef.current = result.defaultCwd
-      setDefaultCwd(result.defaultCwd)
-      rememberRecentCwd(result.defaultCwd)
-      const cwd =
-        result.messages.length === 0 ? (recentCwdsRef.current[0] ?? result.cwd) : result.cwd
-      applyLoadedMessages(result.messages)
+      const messages = (await window.bridge.invoke('session:msgs', id)) as UIMessage[]
+      const cwd = cwdBySessionIdRef.current[id] ?? recentCwdsRef.current[0] ?? ''
+      applyLoadedMessages(messages)
       if ((cwdRevisionRef.current[id] ?? 0) === cwdRevision) {
         cacheSessionCwd(id, cwd)
         rememberRecentCwd(cwd)
       }
-      return { ...result, cwd }
+      return { messages, cwd, defaultCwd: defaultCwdRef.current }
     } catch (error) {
-      console.error('[agent:session-load]', error)
+      console.error('[session:msgs]', error)
       applyLoadedMessages([])
       return { messages: [], cwd: '', defaultCwd: defaultCwdRef.current }
     }

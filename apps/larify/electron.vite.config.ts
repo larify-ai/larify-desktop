@@ -73,9 +73,7 @@ export default defineConfig({
     build: {
       rollupOptions: {
         input: {
-          index: resolve('src/renderer/index.html'),
-          performance: resolve('src/renderer/performance.html'),
-          workspaceEditor: resolve('src/renderer/workspace-editor.html')
+          index: resolve('src/renderer/index.html')
         }
       }
     },

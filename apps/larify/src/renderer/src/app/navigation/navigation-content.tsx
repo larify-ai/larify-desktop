@@ -24,14 +24,16 @@ const navigationItem =
 function NavigationAction({
   icon: Icon,
   children,
-  iconClassName = 'size-[18px]'
+  iconClassName = 'size-[18px]',
+  onClick
 }: {
   icon: LucideIcon
   children: string
   iconClassName?: string
+  onClick?: () => void
 }): React.JSX.Element {
   return (
-    <button type="button" className={`${navigationItem} h-8`}>
+    <button type="button" className={`${navigationItem} h-8`} onClick={onClick}>
       <Icon className={`${iconClassName} shrink-0`} />
       <span>{children}</span>
     </button>
@@ -67,11 +69,13 @@ function Workspace({ workspace }: { workspace: WorkspacePreview }): React.JSX.El
   )
 }
 
-export function NavigationContent(): React.JSX.Element {
+export function NavigationContent({ onNewTask }: { onNewTask: () => void }): React.JSX.Element {
   return (
     <div className="flex h-full min-h-0 flex-col pb-2">
       <nav aria-label="全局入口" className="space-y-0.5">
-        <NavigationAction icon={MessageCirclePlusIcon}>新建任务</NavigationAction>
+        <NavigationAction icon={MessageCirclePlusIcon} onClick={onNewTask}>
+          新建任务
+        </NavigationAction>
         <NavigationAction icon={BoxIcon}>百宝箱</NavigationAction>
         <NavigationAction icon={BookOpenIcon} iconClassName="size-[17px]">
           知识库

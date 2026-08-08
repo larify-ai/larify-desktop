@@ -4,6 +4,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { Layout } from '../../../src/renderer/src/app/layout/layout'
+import { TooltipProvider } from '../../../src/renderer/src/components/ui/tooltip'
 import {
   expandedContentMinSize,
   layoutSpec
@@ -17,6 +18,14 @@ const toggle = readFileSync(resolve('src/renderer/src/app/layout/panel-toggle.ts
 const groupToggle = readFileSync(resolve('src/renderer/src/app/layout/use-group-toggle.ts'), 'utf8')
 const resizeHandle = readFileSync(resolve('src/renderer/src/app/layout/resize-handle.tsx'), 'utf8')
 const resizable = readFileSync(resolve('src/renderer/src/components/ui/resizable.tsx'), 'utf8')
+const navigation = readFileSync(
+  resolve('src/renderer/src/app/navigation/navigation-content.tsx'),
+  'utf8'
+)
+
+function renderLayout(): string {
+  return renderToStaticMarkup(createElement(TooltipProvider, null, createElement(Layout)))
+}
 
 describe('workbench layout specification', () => {
   it('uses the specified navigation width range', () => {
@@ -57,7 +66,7 @@ describe('workbench layout specification', () => {
   })
 
   it('renders all regions in order', () => {
-    const markup = renderToStaticMarkup(createElement(Layout))
+    const markup = renderLayout()
     const navigation = markup.indexOf('aria-label="Navigation"')
     const interaction = markup.indexOf('aria-label="Interaction"')
     expect(navigation).toBeGreaterThanOrEqual(0)
@@ -65,8 +74,31 @@ describe('workbench layout specification', () => {
     expect(markup).toContain('aria-label="Workbench"')
   })
 
+  it('renders the static navigation structure', () => {
+    expect(navigation).toContain('新建任务')
+    expect(navigation).toContain('百宝箱')
+    expect(navigation).toContain('知识库')
+    expect(navigation).toContain('工作空间')
+    expect(navigation).toContain('默认空间')
+    expect(navigation).toContain('larify-desktop')
+    expect(navigation).toContain('音频采集')
+    expect(navigation).toContain('aria-expanded={expanded}')
+    expect(navigation).toContain('FolderOpenIcon')
+    expect(navigation).toContain('FolderClosedIcon')
+    expect(navigation).not.toContain('ChevronDownIcon')
+    expect(navigation).not.toContain('ChevronRightIcon')
+    expect(navigation).toContain('grid-cols-[20px_max-content]')
+    expect(navigation).toContain('rounded-lg')
+    expect(navigation).toContain('mx-1')
+    expect(navigation).toContain('w-[calc(100%-0.5rem)]')
+    expect(navigation).toContain('space-y-0.5')
+    expect(navigation).not.toContain('space-y-2')
+    expect(navigation).not.toContain('navigationItem} h-7')
+    expect(navigation).not.toContain('border-t border-border-strong')
+  })
+
   it('keeps the title bar empty and separates it from both content columns', () => {
-    const markup = renderToStaticMarkup(createElement(Layout))
+    const markup = renderLayout()
 
     expect(markup).not.toContain('新任务')
     expect(markup).toContain('border-b-[0.5px]')
@@ -138,7 +170,7 @@ describe('workbench layout specification', () => {
   })
 
   it('uses the sidebar color outside the rounded main content', () => {
-    const markup = renderToStaticMarkup(createElement(Layout))
+    const markup = renderLayout()
 
     expect(markup).toContain('bg-sidebar')
     expect(markup).not.toContain('bg-workbench-chrome')

@@ -72,7 +72,7 @@ function input(taskFile: string): ExecInput {
 beforeEach(() => {
   vi.clearAllMocks()
   app.get.mockImplementation((_kind, name) =>
-    name === 'session'
+    name === 'background-session'
       ? { saveSession: mocks.saveSession }
       : name === 'extension-host'
         ? {}

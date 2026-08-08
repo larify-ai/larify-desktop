@@ -7,6 +7,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 type Layout = Record<string, number>
 
 const layouts = new Map<string, Layout>()
+const sessionIds: string[] = []
+
+vi.mock('../../../src/renderer/src/app/interaction/assistant/session', async () => {
+  const { useState } = await vi.importActual<typeof import('react')>('react')
+  return {
+    AssistantSession: () => {
+      const [id] = useState(() => crypto.randomUUID())
+      sessionIds.push(id)
+      return null
+    }
+  }
+})
 
 vi.mock('../../../src/renderer/src/components/ui/resizable', () => ({
   ResizablePanelGroup: ({
@@ -39,6 +51,7 @@ vi.mock('react-resizable-panels', async () => {
 })
 
 import { Layout } from '../../../src/renderer/src/app/layout/layout'
+import { TooltipProvider } from '../../../src/renderer/src/components/ui/tooltip'
 
 describe('layout panel behavior', () => {
   let container: HTMLDivElement
@@ -46,21 +59,27 @@ describe('layout panel behavior', () => {
 
   beforeEach(async () => {
     layouts.clear()
+    sessionIds.length = 0
     globalThis.IS_REACT_ACT_ENVIRONMENT = true
     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
       callback(0)
       return 0
     })
     vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    Object.defineProperty(window, 'bridge', {
+      configurable: true,
+      value: { invoke: vi.fn().mockResolvedValue([]) }
+    })
     container = document.createElement('div')
     document.body.appendChild(container)
     root = createRoot(container)
-    await act(async () => root.render(createElement(Layout)))
+    await act(async () => root.render(createElement(TooltipProvider, null, createElement(Layout))))
   })
 
   afterEach(() => {
     act(() => root.unmount())
     container.remove()
+    Reflect.deleteProperty(window, 'bridge')
     vi.unstubAllGlobals()
   })
 
@@ -84,8 +103,18 @@ describe('layout panel behavior', () => {
     expect(layouts.get('main')).toEqual({ navigation: 20, content: 80 })
   })
 
+  it('starts a fresh assistant session from the navigation', async () => {
+    const initial = sessionIds.at(-1)
+
+    await click('新建任务')
+
+    expect(sessionIds.at(-1)).not.toBe(initial)
+  })
+
   async function click(label: string): Promise<void> {
-    const button = container.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)
+    const button = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => button.ariaLabel === label || button.textContent === label
+    )
     expect(button).not.toBeNull()
     await act(async () => button?.click())
   }

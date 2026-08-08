@@ -4,7 +4,13 @@ import { PanelToggle } from '../layout/panel-toggle'
 import { Region } from '../layout/region'
 import { NavigationContent } from './navigation-content'
 
-export function Navigation({ onCollapse }: { onCollapse: () => void }): React.JSX.Element {
+export function Navigation({
+  onCollapse,
+  onNewTask
+}: {
+  onCollapse: () => void
+  onNewTask: () => void
+}): React.JSX.Element {
   return (
     <Region label="Navigation" className="h-full bg-sidebar">
       <div className="flex h-(--titlebar-h) shrink-0 items-center px-3 [-webkit-app-region:drag]">
@@ -15,7 +21,7 @@ export function Navigation({ onCollapse }: { onCollapse: () => void }): React.JS
           className="justify-start"
         />
       </div>
-      <NavigationContent />
+      <NavigationContent onNewTask={onNewTask} />
     </Region>
   )
 }

@@ -3,9 +3,9 @@ import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { MockLanguageModelV4, convertArrayToReadableStream } from 'ai/test'
-import { readUIMessageStream, type UIMessage } from 'ai'
+import { isLoopFinished, type UIMessage } from 'ai'
 import { afterAll, describe, expect, it } from 'vitest'
-import { runAgentUIStream, toolsContextFor } from '../../../../src/main/core/agent'
+import { runAgentSession, toolsContextFor } from '../../../../src/main/core/agent'
 import { asDiffMeta, toolIcon } from '../../../../src/extensions/assistant/renderer/lib/diff-meta'
 import { editFileTool } from '../../../../src/extensions/fs/main/edit'
 import { readFileTool } from '../../../../src/extensions/fs/main/read'
@@ -50,13 +50,6 @@ function twoStepModel(toolCall: {
   })
 }
 
-async function assemble(stream: ReadableStream): Promise<UIMessage> {
-  let last: UIMessage | undefined
-  for await (const msg of readUIMessageStream({ stream })) last = msg
-  if (!last) throw new Error('no message assembled')
-  return last
-}
-
 const toolPartOf = (message: UIMessage): { output?: unknown; toolMetadata?: unknown } =>
   message.parts.find(
     (p) => (p as { type?: string }).type?.startsWith('tool-') && 'output' in (p as object)
@@ -86,26 +79,29 @@ describe('经过 agent 的工具调用拿得到会话上下文', () => {
     writeFileSync(file, 'const a = 1\nconst b = 2\nconst c = 3\n')
     await callTool(readFileTool, { file_path: file }, { sessionId: session, cwd: root })
 
-    const stream = runAgentUIStream({
-      messages: [{ role: 'user', content: 'edit it' }],
-      tools: { edit: editFileTool } as never,
-      activeTools: [],
-      toolsContext: toolsContextFor({ edit: editFileTool } as never, {
-        sessionId: session,
-        cwd: root
-      }),
-      model: twoStepModel({
-        toolCallId: 'call-1',
-        toolName: 'edit',
-        input: JSON.stringify({
-          file_path: file,
-          old_string: 'const b = 2',
-          new_string: 'const b = 20'
-        })
-      })
-    })
+    const run = await runAgentSession(
+      [{ id: 'user-1', role: 'user', parts: [{ type: 'text', text: 'edit it' }] }],
+      {
+        tools: { edit: editFileTool } as never,
+        activeTools: [],
+        toolsContext: toolsContextFor({ edit: editFileTool } as never, {
+          sessionId: session,
+          cwd: root
+        }),
+        model: twoStepModel({
+          toolCallId: 'call-1',
+          toolName: 'edit',
+          input: JSON.stringify({
+            file_path: file,
+            old_string: 'const b = 2',
+            new_string: 'const b = 20'
+          })
+        }),
+        stopWhen: isLoopFinished()
+      }
+    )
 
-    const message = await assemble(stream)
+    const message = run.at(-1)!
     const output = outputOf(message) as { kind?: string; errorText?: string } | undefined
 
     expect(output, '工具应当产出结果而不是 undefined').toBeTruthy()
@@ -119,22 +115,25 @@ describe('经过 agent 的工具调用拿得到会话上下文', () => {
     writeFileSync(file, 'line one\nline two\nline three\n')
     await callTool(readFileTool, { file_path: file }, { sessionId: session, cwd: root })
 
-    const stream = runAgentUIStream({
-      messages: [{ role: 'user', content: 'edit it' }],
-      tools: { edit: editFileTool } as never,
-      activeTools: [],
-      toolsContext: toolsContextFor({ edit: editFileTool } as never, {
-        sessionId: session,
-        cwd: root
-      }),
-      model: twoStepModel({
-        toolCallId: 'call-2',
-        toolName: 'edit',
-        input: JSON.stringify({ file_path: file, old_string: 'line two', new_string: 'LINE TWO' })
-      })
-    })
+    const run = await runAgentSession(
+      [{ id: 'user-1', role: 'user', parts: [{ type: 'text', text: 'edit it' }] }],
+      {
+        tools: { edit: editFileTool } as never,
+        activeTools: [],
+        toolsContext: toolsContextFor({ edit: editFileTool } as never, {
+          sessionId: session,
+          cwd: root
+        }),
+        model: twoStepModel({
+          toolCallId: 'call-2',
+          toolName: 'edit',
+          input: JSON.stringify({ file_path: file, old_string: 'line two', new_string: 'LINE TWO' })
+        }),
+        stopWhen: isLoopFinished()
+      }
+    )
 
-    const message = await assemble(stream)
+    const message = run.at(-1)!
     const part = deserialize(serialize(toolPartOf(message))) as {
       output?: unknown
       toolMetadata?: unknown

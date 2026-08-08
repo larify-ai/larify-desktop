@@ -2,7 +2,6 @@ import { lazy, Suspense } from 'react'
 import type { Extension } from '@shared/extension'
 import { SquareTerminalIcon } from 'lucide-react'
 import type { View } from '@renderer/types/view'
-import { preloadAfterPageLoad } from '@renderer/lib/preload'
 
 let terminalViewPromise: Promise<{
   default: typeof import('./terminal-view').TerminalView
@@ -36,10 +35,6 @@ const extension: Extension = {
         </Suspense>
       )
     } satisfies View)
-    const cancelPreload = preloadAfterPageLoad(() => {
-      void loadTerminalView().catch((error) => console.error('[terminal:preload]', error))
-    })
-    context.subscriptions.push({ dispose: cancelPreload })
   }
 }
 

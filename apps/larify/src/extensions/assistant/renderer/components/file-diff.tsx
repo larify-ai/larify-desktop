@@ -1,6 +1,6 @@
 import { DiffView, DiffModeEnum } from "@git-diff-view/react"
 import "@git-diff-view/react/styles/diff-view.css"
-import { useTheme } from "next-themes"
+import { useTheme } from "@renderer/app/theme/theme"
 import type { DiffMeta } from "../lib/diff-meta"
 
 export type { DiffMeta }

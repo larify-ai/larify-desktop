@@ -1,7 +1,6 @@
 import { lazy, Suspense } from 'react'
 import type { Extension } from '@shared/extension'
 import type { View } from '@renderer/types/view'
-import { preloadAfterPageLoad } from '@renderer/lib/preload'
 import './workspace.css'
 import { WorkspaceEmptyState } from './workspace-empty-state'
 import { workspaceEditorClient } from './workspace-editor-client'
@@ -50,12 +49,6 @@ const extension: Extension = {
         </Suspense>
       )
     } satisfies View)
-    const cancelPreload = preloadAfterPageLoad(() => {
-      void workspaceEditorClient
-        .theme(currentTheme())
-        .catch((error) => console.error('[workspace:editor-theme]', error))
-      void loadWorkspaceView().catch((error) => console.error('[workspace:preload]', error))
-    })
     const observer = new MutationObserver(() => {
       void workspaceEditorClient
         .theme(currentTheme())
@@ -64,7 +57,6 @@ const extension: Extension = {
     observer.observe(document.documentElement, { attributeFilter: ['class'] })
     context.subscriptions.push({
       dispose: () => {
-        cancelPreload()
         observer.disconnect()
       }
     })

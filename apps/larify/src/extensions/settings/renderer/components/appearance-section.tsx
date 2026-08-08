@@ -1,4 +1,4 @@
-import { useTheme } from 'next-themes'
+import { useTheme } from '@renderer/app/theme/theme'
 import { cn } from '@renderer/lib/utils'
 
 const THEMES = [

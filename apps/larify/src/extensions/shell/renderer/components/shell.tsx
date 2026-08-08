@@ -7,7 +7,7 @@ import {
   type CSSProperties
 } from 'react'
 import { MessageCirclePlusIcon } from 'lucide-react'
-import { ThemeProvider } from 'next-themes'
+import { ThemeProvider } from '@renderer/app/theme/theme'
 import type { ImperativePanelHandle } from 'react-resizable-panels'
 import type { App } from '@shared/extension'
 import type { View } from '@renderer/types/view'
@@ -26,7 +26,6 @@ import {
   ResizablePanel,
   ResizableHandle
 } from '@renderer/components/ui/resizable'
-import { useNativeThemeSync } from '../hooks/use-native-theme-sync'
 
 const dragRegion = { WebkitAppRegion: 'drag' } as CSSProperties
 
@@ -85,7 +84,7 @@ function useNativeTooltip(): {
 
 export function Shell({ app }: { app: App }): React.JSX.Element {
   return (
-    <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+    <ThemeProvider>
       <ShellBody app={app} />
     </ThemeProvider>
   )
@@ -96,7 +95,6 @@ function ShellBody({ app }: { app: App }): React.JSX.Element {
   const [mountedWorkbenches, setMountedWorkbenches] = useState<string[]>([])
   const workbenchPanelRef = useRef<ImperativePanelHandle>(null)
   const { hideTooltip, showTooltip } = useNativeTooltip()
-  useNativeThemeSync()
 
   const sidebarViews = app
     .getAll<View>('view')

@@ -1,13 +1,13 @@
 import { type UIMessage, type UIMessageChunk } from 'ai'
 import { randomUUID } from 'node:crypto'
 import type { App } from '../../../shared/types'
-import { runAgentSession } from '../../../main/core/agent'
+import { runStoredAgentSession } from '../../../main/core/agent'
 import { createAgentRuntime } from '../../../main/core/agent/runtime'
 import type { ExtensionHost } from '../../../main/core/extension'
 import template from '../../agent/main/prompt.md?raw'
 import { createMetaTools, type ContextSearch } from '../../agent/main/meta-tools'
 import type { SessionStore } from '../../../main/core/session'
-import type { AgentModelConfig } from '../../agent/shared/model'
+import type { AgentModelConfig } from '../../../main/core/model/config'
 import type { SessionResource } from '../../../main/utils/session-resource'
 import { appendToList, get } from '../utils/frontmatter'
 
@@ -42,17 +42,10 @@ export interface ExecInput {
 
 export async function exec(input: ExecInput): Promise<void> {
   const sessionId = randomUUID()
-  const sessions = input.app.get<SessionStore>('service', 'session')
-  if (!sessions) throw new Error('Session service is unavailable.')
+  const sessions = input.app.get<SessionStore>('service', 'background-session')
+  if (!sessions) throw new Error('Background session service is unavailable.')
   const messages = [userMessage(input.prompt)]
   const title = String(get(input.taskFile, 'name'))
-  await sessions.saveSession({
-    id: sessionId,
-    title,
-    cwd: input.cwd,
-    tasks: [input.taskFile],
-    messages
-  })
   appendToList(input.taskFile, 'sessions', sessionId)
 
   const host = input.app.get<ExtensionHost>('service', 'extension-host')
@@ -67,22 +60,15 @@ export async function exec(input: ExecInput): Promise<void> {
   })
 
   try {
-    const run = await runAgentSession(
+    await runStoredAgentSession(sessions, {
+      id: sessionId,
+      title,
+      cwd: input.cwd,
+      tasks: [input.taskFile],
       messages,
-      { ...runtime, abortSignal: input.signal },
-      input.onChunk
-    )
-    try {
-      await run.messages
-    } finally {
-      await sessions.saveSession({
-        id: sessionId,
-        title,
-        cwd: input.cwd,
-        tasks: [input.taskFile],
-        messages: run.latest()
-      })
-    }
+      options: { ...runtime, abortSignal: input.signal },
+      onChunk: input.onChunk
+    })
   } finally {
     await destroySessionResources(input.app, sessionId)
   }

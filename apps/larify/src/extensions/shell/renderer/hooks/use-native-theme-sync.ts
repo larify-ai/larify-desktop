@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { useTheme } from 'next-themes'
+import { useTheme } from '@renderer/app/theme/use-theme'
 
 export function useNativeThemeSync(): void {
   const { theme } = useTheme()

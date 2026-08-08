@@ -5,6 +5,7 @@ import type { Extension } from '@shared/extension'
 import { NativeTooltip, type NativeTooltipOptions } from './native-tooltip'
 
 const isMac = process.platform === 'darwin'
+const titleBarHeight = 45
 const titleBarSymbolColor = (): string => (nativeTheme.shouldUseDarkColors ? '#ffffff' : '#000000')
 
 function syncTitleBar(window: BrowserWindow): void {
@@ -12,7 +13,7 @@ function syncTitleBar(window: BrowserWindow): void {
   window.setTitleBarOverlay({
     color: 'rgba(0,0,0,0)',
     symbolColor: titleBarSymbolColor(),
-    height: 32
+    height: titleBarHeight
   })
 }
 
@@ -64,7 +65,7 @@ function createWindow(): BrowserWindow {
           titleBarOverlay: {
             color: 'rgba(0,0,0,0)',
             symbolColor: titleBarSymbolColor(),
-            height: 32
+            height: titleBarHeight
           }
         }),
     webPreferences: {

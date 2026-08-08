@@ -1,13 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
-  handlers: new Map<string, (...args: any[]) => any>(),
+  handlers: new Map<string, (...args: never[]) => unknown>(),
   removeHandler: vi.fn()
 }))
 
 vi.mock('electron', () => ({
   ipcMain: {
-    handle: (channel: string, handler: (...args: any[]) => any) =>
+    handle: (channel: string, handler: (...args: never[]) => unknown) =>
       mocks.handlers.set(channel, handler),
     removeHandler: (channel: string) => {
       mocks.removeHandler(channel)
@@ -16,12 +16,7 @@ vi.mock('electron', () => ({
   }
 }))
 
-vi.mock('../../../../src/main/core/agent/message-sanitizer', () => ({
-  sanitizeAndValidateMessages: async (messages: unknown[]) => messages
-}))
-
-import { registerRunHandlers } from '../../../../src/extensions/agent/main/runner'
-import { registerSessionHandlers } from '../../../../src/extensions/agent/main/sessions'
+import { registerAgentHandlers } from '../../../../src/main/core/agent/ipc'
 
 beforeEach(() => {
   mocks.handlers.clear()
@@ -29,38 +24,10 @@ beforeEach(() => {
 })
 
 describe('agent IPC', () => {
-  it('uses the registered session service and removes every session handler', async () => {
-    const sessions = {
-      loadSession: vi.fn(),
-      saveSession: vi.fn(),
-      listSessions: vi.fn(),
-      listCwds: vi.fn()
-    }
-    const app = { get: vi.fn(() => sessions) }
-    const disposable = registerSessionHandlers(app as never)
+  it('registers and removes agent handlers', async () => {
+    const disposable = registerAgentHandlers({ send: vi.fn(), cancel: vi.fn() } as never)
 
-    expect(app.get).toHaveBeenCalledWith('service', 'session')
-    expect([...mocks.handlers.keys()].sort()).toEqual([
-      'agent:session-cwds',
-      'agent:session-list',
-      'agent:session-load',
-      'agent:session-save'
-    ])
-
-    await disposable.dispose()
-    expect(mocks.handlers.size).toBe(0)
-  })
-
-  it('fails clearly when the session service is unavailable', () => {
-    expect(() => registerSessionHandlers({ get: () => undefined } as never)).toThrow(
-      'Session service is unavailable.'
-    )
-  })
-
-  it('registers and removes run handlers', async () => {
-    const disposable = registerRunHandlers({} as never, 'prompt')
-
-    expect([...mocks.handlers.keys()].sort()).toEqual(['agent:cancel', 'agent:run'])
+    expect([...mocks.handlers.keys()].sort()).toEqual(['agent:cancel', 'agent:send'])
     await disposable.dispose()
     expect(mocks.handlers.size).toBe(0)
   })

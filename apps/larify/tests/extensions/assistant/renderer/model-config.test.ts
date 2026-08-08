@@ -4,7 +4,7 @@ import {
   readModelConfig,
   writeModelConfig
 } from '../../../../src/extensions/assistant/renderer/lib/model-config'
-import { defaultModelConfig } from '../../../../src/extensions/agent/shared/model'
+import { defaultModelConfig } from '../../../../src/main/core/model/config'
 
 describe('model configuration persistence', () => {
   it('restores a persisted model and thinking mode', () => {

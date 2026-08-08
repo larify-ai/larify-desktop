@@ -3,6 +3,7 @@ import type { Service } from '../../../shared/extension/service'
 import type { Skill } from '../../../shared/extension/skill'
 import type { Tool } from '../../../shared/extension/tool'
 import type { View } from '../../../shared/extension/view'
+import { errorMessage } from '../../utils/error'
 import { toolName, wrapTool } from './tool'
 
 interface RegisteredExtension {
@@ -131,7 +132,7 @@ export class ExtensionHost {
           registered.tools.set(name, wrapTool(tool))
         } catch (error) {
           console.warn(
-            `[agent tools] Skipped invalid tool "${toolName(registered.extension.name, name)}": ${error instanceof Error ? error.message : String(error)}`
+            `[agent tools] Skipped invalid tool "${toolName(registered.extension.name, name)}": ${errorMessage(error)}`
           )
         }
       },

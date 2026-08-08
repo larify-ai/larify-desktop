@@ -3,7 +3,6 @@ import { GlobeIcon } from 'lucide-react'
 import type { Extension } from '@shared/extension'
 import type { View } from '@renderer/types/view'
 import { getAgentSessionId } from '@renderer/lib/agent-session'
-import { preloadAfterPageLoad } from '@renderer/lib/preload'
 
 let browserViewPromise: Promise<{ default: typeof import('./browser-view').BrowserView }> | null =
   null
@@ -44,10 +43,6 @@ const extension: Extension = {
         unsubscribe()
       }
     })
-    const cancelPreload = preloadAfterPageLoad(() => {
-      void loadBrowserView().catch((error) => console.error('[browser:preload]', error))
-    })
-    context.subscriptions.push({ dispose: cancelPreload })
   }
 }
 

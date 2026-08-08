@@ -3,7 +3,7 @@ import type { UIMessageChunk } from 'ai'
 import { get } from '../utils/frontmatter'
 import { childTaskFiles } from '../utils/task'
 import { exec } from './exec'
-import type { AgentModelConfig } from '../../agent/shared/model'
+import type { AgentModelConfig } from '../../../main/core/model/config'
 import { VerdictNotAcceptedError } from './verdict'
 
 const MAX_ATTEMPTS = 3

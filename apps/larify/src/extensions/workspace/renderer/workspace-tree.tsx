@@ -1,7 +1,7 @@
 import { forwardRef, useEffect, useRef, useState, type HTMLProps } from 'react'
 import { Tree, type NodeRendererProps, type TreeApi } from 'react-arborist'
 import { ChevronRightIcon, CircleAlertIcon, GitBranchIcon } from 'lucide-react'
-import { useTheme } from 'next-themes'
+import { useTheme } from '@renderer/app/theme/theme'
 import type { WorkspaceEntry } from '../shared/types'
 import { getWorkspaceIcon } from './workspace-icon-theme'
 import { findTreeEntryPath } from './workspace-tree-path'

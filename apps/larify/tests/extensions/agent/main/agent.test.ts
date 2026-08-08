@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { z } from 'zod'
 import { MockLanguageModelV4, convertArrayToReadableStream } from 'ai/test'
-import { readUIMessageStream, type UIMessage } from 'ai'
-import { runAgentSession, runAgentUIStream } from '../../../../src/main/core/agent'
+import { isLoopFinished, type UIMessage } from 'ai'
+import { runAgentSession } from '../../../../src/main/core/agent'
 
 const USAGE = {
   inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
@@ -38,17 +38,16 @@ function textOf(message: UIMessage): string {
 }
 
 async function assemble(model: MockLanguageModelV4): Promise<UIMessage> {
-  const stream = runAgentUIStream({
-    messages: [{ role: 'user', content: 'hi' }],
-    tools: {},
-    activeTools: [],
-    toolsContext: {},
-    model
-  })
-  let last: UIMessage | undefined
-  for await (const msg of readUIMessageStream({ stream })) last = msg
-  if (!last) throw new Error('no message assembled')
-  return last
+  const session = await runAgentSession(
+    [{ id: 'user-1', role: 'user', parts: [{ type: 'text', text: 'hi' }] }],
+    {
+      tools: {},
+      activeTools: [],
+      toolsContext: {},
+      model
+    }
+  )
+  return session.at(-1)!
 }
 
 describe('runAgent', () => {
@@ -78,7 +77,7 @@ describe('runAgentSession', () => {
       model: mockModel(['hello'])
     })
 
-    const messages = await session.messages
+    const messages = session
     expect(messages.slice(0, -1)).toEqual(original)
     expect(textOf(messages.at(-1)!)).toBe('hello')
   })
@@ -96,7 +95,7 @@ describe('runAgentSession', () => {
       (chunk) => chunks.push(chunk.type)
     )
 
-    await session.messages
+    expect(session.at(-1)?.role).toBe('assistant')
     expect(chunks).toContain('text-delta')
   })
 
@@ -127,6 +126,7 @@ describe('runAgentSession', () => {
       })
     })
     const chunks: string[] = []
+    const steps: UIMessage[] = []
     const session = await runAgentSession(
       [{ id: 'user-1', role: 'user', parts: [{ type: 'text', text: 'go' }] }],
       {
@@ -139,15 +139,21 @@ describe('runAgentSession', () => {
         },
         activeTools: ['echo'],
         toolsContext: {},
-        model
+        model,
+        stopWhen: isLoopFinished()
       },
-      (chunk) => chunks.push(chunk.type)
+      (chunk) => chunks.push(chunk.type),
+      (message) => steps.push(message)
     )
 
-    await session.messages
+    expect(session.at(-1)?.role).toBe('assistant')
     expect(chunks).toEqual(
       expect.arrayContaining(['tool-input-available', 'tool-output-available', 'text-delta'])
     )
+    expect(steps).toHaveLength(2)
+    expect(steps[0].parts.some((part) => part.type === 'tool-echo')).toBe(true)
+    expect(textOf(steps[1])).toBe('done')
+    expect(steps[1]).toEqual(session.at(-1))
   })
 
   it('preserves tool error messages', async () => {
@@ -188,11 +194,11 @@ describe('runAgentSession', () => {
       }
     )
 
-    await session.messages
+    expect(session.at(-1)?.role).toBe('assistant')
     expect(errors).toEqual(['navigation failed: ERR_CONNECTION_RESET'])
   })
 
-  it('keeps the latest partial message when streaming is interrupted', async () => {
+  it('forwards streaming errors to the UI', async () => {
     const parts = [
       { type: 'stream-start' as const, warnings: [] },
       { type: 'text-start' as const, id: '0' },
@@ -212,15 +218,23 @@ describe('runAgentSession', () => {
     const original: UIMessage[] = [
       { id: 'user-1', role: 'user', parts: [{ type: 'text', text: 'go' }] }
     ]
-    const session = await runAgentSession(original, {
-      tools: {},
-      activeTools: [],
-      toolsContext: {},
-      model
-    })
+    const errors: string[] = []
+    const session = await runAgentSession(
+      original,
+      {
+        tools: {},
+        activeTools: [],
+        toolsContext: {},
+        model
+      },
+      (chunk) => {
+        if (chunk.type === 'error') errors.push(chunk.errorText)
+      }
+    )
 
-    await expect(session.messages).rejects.toThrow('interrupted')
-    expect(textOf(session.latest().at(-1)!)).toBe('partial response')
+    expect(session.at(-1)?.role).toBe('assistant')
+    expect(textOf(session.at(-1)!)).toBe('partial response')
+    expect(errors).toEqual(['interrupted'])
   })
 })
 
@@ -270,16 +284,17 @@ describe('prompt-cache middleware', () => {
       }
     })
 
-    const stream = runAgentUIStream({
-      messages: [{ role: 'user', content: 'go' }],
-      tools: tools as never,
-      activeTools: ['eager_tool'],
-      toolsContext: {},
-      model
-    })
-    for await (const _ of readUIMessageStream({ stream })) {
-      void _
-    }
+    const session = await runAgentSession(
+      [{ id: 'user-1', role: 'user', parts: [{ type: 'text', text: 'go' }] }],
+      {
+        tools: tools as never,
+        activeTools: ['eager_tool'],
+        toolsContext: {},
+        model,
+        stopWhen: isLoopFinished()
+      }
+    )
+    expect(session.at(-1)?.role).toBe('assistant')
 
     expect(sentToolNames).toEqual(['eager_tool'])
     expect(lazyRan).toBe(true)

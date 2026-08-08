@@ -2,7 +2,7 @@
 
 import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AssistantComposer } from '../../../src/renderer/src/app/interaction/assistant/composer'
 import { TooltipProvider } from '../../../src/renderer/src/components/ui/tooltip'
 
@@ -18,8 +18,11 @@ describe('AssistantComposer', () => {
         TooltipProvider,
         null,
         createElement(AssistantComposer, {
+          cwd: '',
           history: [],
           status: 'ready',
+          showWorkspace: true,
+          onCwdChange: vi.fn(),
           onSubmit: vi.fn(),
           onStop: vi.fn(),
           ...props
@@ -43,9 +46,17 @@ describe('AssistantComposer', () => {
       .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
   }
 
+  beforeEach(() => {
+    Object.defineProperty(window, 'bridge', {
+      configurable: true,
+      value: { invoke: vi.fn().mockResolvedValue([]) }
+    })
+  })
+
   afterEach(() => {
     act(() => root?.unmount())
     container?.remove()
+    Reflect.deleteProperty(window, 'bridge')
     Reflect.deleteProperty(window, 'fs')
     reactEnvironment.IS_REACT_ACT_ENVIRONMENT = false
   })
@@ -68,8 +79,7 @@ describe('AssistantComposer', () => {
     expect(onSubmit).toHaveBeenCalledWith({ text: 'hello', files: [] })
     expect(container.querySelector('textarea')!.value).toBe('')
 
-    await act(async () => render({ status: 'streaming', onSubmit }))
-    await act(async () => render({ status: 'ready', onSubmit }))
+    await act(async () => render({ status: 'error', onSubmit }))
     await act(async () => input('again'))
     await act(async () => submit())
     expect(onSubmit).toHaveBeenCalledTimes(2)
@@ -86,14 +96,29 @@ describe('AssistantComposer', () => {
     const button = container.querySelector('button[type="submit"]') as HTMLButtonElement
     expect(button.disabled).toBe(true)
     expect(button.querySelector('.lucide-arrow-up')).not.toBeNull()
-    const attachment = container.querySelector('[data-slot="dropdown-menu-trigger"]')
+    const attachment = container.querySelector('.lucide-plus')?.closest('button')
     expect(attachment?.getAttribute('style')).toContain('border-radius: 9999px')
     expect(attachment?.classList.contains('text-secondary-foreground')).toBe(true)
     expect(attachment?.classList.contains('bg-secondary')).toBe(true)
     expect(button.classList.contains('disabled:opacity-50')).toBe(true)
-    expect(container.querySelector('.max-w-3xl')?.className).not.toContain('scrollbar-size')
+    expect(container.querySelector('.mx-auto')?.className).toContain('lg:w-4/5')
+    expect(container.textContent).toContain('默认空间')
+    expect(container.querySelector('[data-slot="input-group"]')?.textContent).not.toContain(
+      '默认空间'
+    )
     await act(async () => submit())
     expect(onSubmit).not.toHaveBeenCalled()
+  })
+
+  it('hides the workspace selector after the conversation starts', async () => {
+    reactEnvironment.IS_REACT_ACT_ENVIRONMENT = true
+    container = document.createElement('div')
+    document.body.append(container)
+    root = createRoot(container)
+
+    await act(async () => render({ showWorkspace: false }))
+
+    expect(container.textContent).not.toContain('默认空间')
   })
 
   it('stops a streaming response only once', async () => {

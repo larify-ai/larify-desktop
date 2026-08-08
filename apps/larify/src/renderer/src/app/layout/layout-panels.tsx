@@ -19,6 +19,7 @@ const workbenchExpanded = { interaction: 64, workbench: 36 }
 
 export function LayoutPanels(): React.JSX.Element {
   const [heading, setHeading] = useState<ConversationHeading | null>(null)
+  const [sessionKey, setSessionKey] = useState(0)
   const navigation = useGroupToggle('navigation', navigationCollapsed, navigationExpanded)
   const workbench = useGroupToggle('workbench', workbenchCollapsed, workbenchExpanded, true)
 
@@ -34,7 +35,13 @@ export function LayoutPanels(): React.JSX.Element {
         maxSize={layoutSpec.navigation.maxSize}
         groupResizeBehavior="preserve-pixel-size"
       >
-        <Navigation onCollapse={navigation.toggle} />
+        <Navigation
+          onCollapse={navigation.toggle}
+          onNewTask={() => {
+            setHeading(null)
+            setSessionKey((key) => key + 1)
+          }}
+        />
       </ResizablePanel>
       <ResizeHandle label="Resize navigation" hidden={navigation.collapsed} />
       <ResizablePanel
@@ -59,7 +66,7 @@ export function LayoutPanels(): React.JSX.Element {
           groupRef={workbench.groupRef}
         >
           <ResizablePanel id="interaction" minSize={layoutSpec.interaction.minSize}>
-            <Interaction onHeadingChange={setHeading} />
+            <Interaction sessionKey={sessionKey} onHeadingChange={setHeading} />
           </ResizablePanel>
           <ResizeHandle label="Resize workbench" hidden={workbench.collapsed} feedback />
           <ResizablePanel

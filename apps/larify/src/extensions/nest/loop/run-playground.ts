@@ -4,7 +4,7 @@ import { basename, dirname, isAbsolute } from 'node:path'
 import type { App } from '@shared/extension'
 import type { UIMessageChunk } from 'ai'
 import iconv from 'iconv-lite'
-import { defaultModelConfig } from '../../agent/shared/model'
+import { defaultModelConfig } from '../../../main/core/model/config'
 import { larifyPath } from '../../../main/utils/app-paths'
 import { runLoop } from './loop'
 

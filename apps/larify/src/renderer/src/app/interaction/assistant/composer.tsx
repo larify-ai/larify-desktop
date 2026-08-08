@@ -42,10 +42,15 @@ function AttachmentList(): React.JSX.Element | null {
     <PromptInputHeader className="w-full px-3 pt-3 pb-0">
       <Attachments variant="inline" className="ml-0 w-full">
         {attachments.files.map((file) => (
-          <Attachment data={file} key={file.id} onRemove={() => attachments.remove(file.id)}>
+          <Attachment
+            className={file.filename ? undefined : 'gap-0'}
+            data={file}
+            key={file.id}
+            onRemove={() => attachments.remove(file.id)}
+          >
             <AttachmentPreview />
-            <AttachmentInfo />
-            <AttachmentRemove />
+            {file.filename && <AttachmentInfo />}
+            <AttachmentRemove className={file.filename ? undefined : 'absolute -top-2 -right-2'} />
           </Attachment>
         ))}
       </Attachments>

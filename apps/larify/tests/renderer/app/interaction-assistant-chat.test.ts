@@ -61,11 +61,14 @@ describe('AssistantChat', () => {
     const chat = { id: 'session' }
     const onCwdChange = vi.fn()
     const onHeadingChange = vi.fn()
+    const onLoadOlder = vi.fn()
     await act(async () =>
       root.render(
         createElement(AssistantChat, {
           chat: chat as never,
           cwd: '',
+          firstItemIndex: 42,
+          onLoadOlder,
           onCwdChange,
           onHeadingChange
         })
@@ -76,12 +79,15 @@ describe('AssistantChat', () => {
     expect(mocks.list).toHaveBeenCalledWith(
       expect.objectContaining({
         live: true,
-        messages: mocks.useChat.mock.results[0].value.messages
+        messages: mocks.useChat.mock.results[0].value.messages,
+        firstItemIndex: 42,
+        onLoadOlder
       })
     )
 
     const composer = mocks.composer.mock.calls[0][0]
     expect(composer.history).toEqual(['first message', 'second'])
+    expect(composer.status).toBe('streaming')
     expect(composer.showWorkspace).toBe(false)
     expect(composer.onCwdChange).toBe(onCwdChange)
     expect(onHeadingChange).toHaveBeenCalledWith({ cwd: '', title: 'first message' })
@@ -101,11 +107,7 @@ describe('AssistantChat', () => {
         })
       )
     )
-    expect(onHeadingChange).toHaveBeenCalledWith({
-      cwd: 'D:\\Workspace\\project',
-      title: 'first message'
-    })
-    expect(onHeadingChange).not.toHaveBeenCalledWith(null)
+    expect(onHeadingChange).not.toHaveBeenCalled()
   })
 
   it('does not clear a started session heading when unmounted', async () => {
@@ -128,7 +130,7 @@ describe('AssistantChat', () => {
     expect(onHeadingChange).not.toHaveBeenCalledWith(null)
   })
 
-  it('reports a null heading for an empty session', async () => {
+  it('does not create a heading for an empty session', async () => {
     mocks.useChat.mockReturnValue({
       messages: [],
       sendMessage: mocks.sendMessage,
@@ -148,7 +150,103 @@ describe('AssistantChat', () => {
       )
     )
 
-    expect(onHeadingChange).toHaveBeenCalledWith(null)
+    expect(onHeadingChange).not.toHaveBeenCalled()
+  })
+
+  it('keeps an unnamed heading when the first user message has no text', async () => {
+    mocks.useChat.mockReturnValue({
+      messages: [{ id: 'attachment', role: 'user', parts: [] }, message('user', ['later title'])],
+      sendMessage: mocks.sendMessage,
+      status: 'ready',
+      stop: mocks.stop
+    })
+    const onHeadingChange = vi.fn()
+
+    await act(async () =>
+      root?.render(
+        createElement(AssistantChat, {
+          chat: { id: 'session' } as never,
+          cwd: '',
+          onCwdChange: vi.fn(),
+          onHeadingChange
+        })
+      )
+    )
+
+    expect(onHeadingChange).toHaveBeenCalledWith({ cwd: '', title: '未命名任务' })
+    expect(mocks.composer.mock.calls[0][0].history).toEqual(['later title'])
+  })
+
+  it('does not replace an existing title when messages change', async () => {
+    const onHeadingChange = vi.fn()
+    const chat = { id: 'session' } as never
+    const props = {
+      chat,
+      title: 'Renamed',
+      cwd: '',
+      onCwdChange: vi.fn(),
+      onHeadingChange
+    }
+
+    await act(async () => root?.render(createElement(AssistantChat, props)))
+    mocks.useChat.mockReturnValue({
+      messages: [message('user', ['new message'])],
+      sendMessage: mocks.sendMessage,
+      status: 'ready',
+      stop: mocks.stop
+    })
+    await act(async () => root?.render(createElement(AssistantChat, props)))
+
+    expect(onHeadingChange).not.toHaveBeenCalled()
+  })
+
+  it('creates a title only once while input history keeps updating', async () => {
+    const onHeadingChange = vi.fn()
+    const chat = { id: 'session' } as never
+    const props = {
+      chat,
+      cwd: '',
+      onCwdChange: vi.fn(),
+      onHeadingChange
+    }
+
+    await act(async () => root?.render(createElement(AssistantChat, props)))
+    onHeadingChange.mockClear()
+    mocks.useChat.mockReturnValue({
+      messages: [message('user', ['first message']), message('user', ['later message'])],
+      sendMessage: mocks.sendMessage,
+      status: 'ready',
+      stop: mocks.stop
+    })
+    await act(async () => root?.render(createElement(AssistantChat, props)))
+
+    expect(onHeadingChange).not.toHaveBeenCalled()
+    expect(mocks.composer.mock.lastCall?.[0].history).toEqual(['first message', 'later message'])
+  })
+
+  it('uses only the first line and limits a generated title to 60 characters', async () => {
+    const firstLine = 'a'.repeat(70)
+    mocks.useChat.mockReturnValue({
+      messages: [message('user', [`${firstLine}\nsecond line`])],
+      sendMessage: mocks.sendMessage,
+      status: 'ready',
+      stop: mocks.stop
+    })
+    const onHeadingChange = vi.fn()
+
+    await act(async () =>
+      root?.render(
+        createElement(AssistantChat, {
+          chat: { id: 'session' } as never,
+          cwd: '',
+          onCwdChange: vi.fn(),
+          onHeadingChange
+        })
+      )
+    )
+
+    expect(onHeadingChange).toHaveBeenCalledWith({ cwd: '', title: 'a'.repeat(60) })
+    expect(mocks.list.mock.lastCall?.[0].live).toBe(false)
   })
 })
 

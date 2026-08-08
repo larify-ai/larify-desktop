@@ -73,6 +73,12 @@ describe('attachments', () => {
     expect(await readFile(file.url, 'utf8')).toBe('hello world')
   })
 
+  it('does not save an attachment twice', async () => {
+    await root()
+    const saved = await saveAttachments('session', message('data:image/png;base64,aGVsbG8='))
+    await expect(saveAttachments('session', saved)).resolves.toEqual(saved)
+  })
+
   it('keeps selected files at their existing paths', async () => {
     const directory = await root()
     const source = join(directory, 'source.txt')

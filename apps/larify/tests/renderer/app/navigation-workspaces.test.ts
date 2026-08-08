@@ -134,4 +134,34 @@ describe('createWorkspaces', () => {
     expect(workspaces[0].sessions.map(({ id }) => id)).toEqual(['newest', 'older'])
     expect(directory).toEqual(snapshot)
   })
+
+  it('maps active state and delegates session selection and pagination', async () => {
+    const select = vi.fn().mockResolvedValue(undefined)
+    const loadMore = vi.fn().mockResolvedValue(undefined)
+    const workspaces = createWorkspaces(
+      source({
+        activeId: 'second',
+        select,
+        loadMore,
+        directory: [
+          {
+            cwd: 'D:\\Workspace',
+            sessions: [
+              { id: 'first', title: 'First', cwd: 'D:\\Workspace' },
+              { id: 'second', title: 'Second', cwd: 'D:\\Workspace' }
+            ],
+            hasMore: true
+          }
+        ]
+      })
+    )
+
+    expect(workspaces[0].sessions.map(({ active }) => active)).toEqual([false, true])
+    workspaces[0].sessions[1].onClick()
+    await workspaces[0].onMore()
+
+    expect(select).toHaveBeenCalledWith('second')
+    expect(loadMore).toHaveBeenCalledWith('D:\\Workspace')
+    expect(workspaces[0].hasMore).toBe(true)
+  })
 })

@@ -40,7 +40,7 @@ export function AssistantSessionsProvider({
   }, [])
 
   useEffect(() => {
-    void refresh()
+    void refresh().catch(() => undefined)
   }, [refresh])
 
   const create = useCallback(() => {

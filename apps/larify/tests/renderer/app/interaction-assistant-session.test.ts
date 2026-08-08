@@ -47,6 +47,7 @@ describe('AssistantSession', () => {
       root.render(
         createElement(AssistantSession, {
           id: 'session',
+          title: 'Renamed',
           initialMessages: [],
           initialHasMore: false,
           initialCwd: '',
@@ -57,9 +58,11 @@ describe('AssistantSession', () => {
     })
     const initial = mocks.assistant.mock.calls.at(-1)![0] as {
       chat: { options: { transport: ChatTransport<UIMessage> } }
+      title: string
       onCwdChange: (cwd: string) => void
     }
 
+    expect(initial.title).toBe('Renamed')
     await act(async () => initial.onCwdChange('D:\\Workspace\\project'))
     const changed = mocks.assistant.mock.calls.at(-1)![0] as { chat: unknown; cwd: string }
 

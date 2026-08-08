@@ -103,6 +103,15 @@ describe('interaction assistant message list', () => {
     expect(props.initialTopMostItemIndex).toBe(99_999)
   })
 
+  it('marks only the latest message as streaming', () => {
+    const messages = [message('first'), message('last')]
+    renderToStaticMarkup(createElement(AssistantMessageList, { messages, live: true }))
+
+    const props = captured.props as VirtuosoProps
+    expect(props.itemContent(0, messages[0]).props.children.props.streaming).toBe(false)
+    expect(props.itemContent(1, messages[1]).props.children.props.streaming).toBe(true)
+  })
+
   it('follows streaming growth only while the reader is at the bottom', async () => {
     const messages = [message('streaming')]
     await act(async () =>
@@ -126,6 +135,8 @@ describe('interaction assistant message list', () => {
   it('offers a button that returns a scrolled conversation to the latest message', async () => {
     const messages = [message('first'), message('last')]
     await act(async () => root.render(createElement(AssistantMessageList, { messages })))
+    expect(container.querySelector('button')).toBeNull()
+
     act(() => (captured.props as VirtuosoProps).atBottomStateChange(false))
 
     const button = container.querySelector<HTMLButtonElement>('[aria-label="返回底部"]')
@@ -136,6 +147,13 @@ describe('interaction assistant message list', () => {
       align: 'end',
       behavior: 'smooth'
     })
+  })
+
+  it('does not offer a return button for an empty conversation', async () => {
+    await act(async () => root.render(createElement(AssistantMessageList, { messages: [] })))
+    act(() => (captured.props as VirtuosoProps).atBottomStateChange(false))
+
+    expect(container.querySelector('button')).toBeNull()
   })
 
   it('returns to the absolute latest index after older messages are prepended', async () => {

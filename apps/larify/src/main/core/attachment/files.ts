@@ -1,5 +1,5 @@
 import { readFile, writeFile } from 'node:fs/promises'
-import { extname, join } from 'node:path'
+import { extname, isAbsolute, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { isFileUIPart, type FileUIPart, type UIMessage } from 'ai'
 import { sessionAttachmentsPath } from '../../utils/app-paths'
@@ -26,7 +26,7 @@ export async function saveAttachments(sessionId: string, message: UIMessage): Pr
 }
 
 async function loadFile(part: FileUIPart): Promise<FileUIPart> {
-  if (!part.mediaType.startsWith('image/')) return part
+  if (!part.mediaType.startsWith('image/') || !isAbsolute(part.url)) return part
   const data = await readFile(part.url).catch(() => undefined)
   return data ? { ...part, url: `data:${part.mediaType};base64,${data.toString('base64')}` } : part
 }

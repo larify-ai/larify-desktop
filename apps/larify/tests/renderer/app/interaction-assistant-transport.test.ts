@@ -84,7 +84,7 @@ describe('interaction assistant transport', () => {
     await stream.cancel()
   })
 
-  it('does not finish the stream before the directory refresh completes', async () => {
+  it('does not delay the stream while the directory refresh completes', async () => {
     const bridge = createBridge()
     const refresh = Promise.withResolvers<void>()
     vi.stubGlobal('window', { bridge })
@@ -105,15 +105,12 @@ describe('interaction assistant transport', () => {
       expect(bridge.invoke).toHaveBeenCalledWith('agent:send', expect.anything())
     )
     bridge.emit('agent:end:session-1')
-    await expect(
-      Promise.race([read.then(() => 'finished'), Promise.resolve('pending')])
-    ).resolves.toBe('pending')
+    await expect(read).resolves.toEqual({ done: true, value: undefined })
 
     refresh.resolve()
-    await expect(read).resolves.toEqual({ done: true, value: undefined })
   })
 
-  it('reports a directory refresh failure through the stream', async () => {
+  it('keeps the agent stream independent from a directory refresh failure', async () => {
     const error = new Error('refresh failed')
     const bridge = createBridge()
     const onSaved = vi.fn().mockRejectedValue(error)
@@ -131,8 +128,34 @@ describe('interaction assistant transport', () => {
       trigger: 'submit-message'
     })
 
-    await expect(stream.getReader().read()).rejects.toBe(error)
+    await vi.waitFor(() => expect(onSaved).toHaveBeenCalledOnce())
+    bridge.emit('agent:end:session-1')
+    await expect(stream.getReader().read()).resolves.toEqual({ done: true, value: undefined })
     expect(bridge.listenerCount()).toBe(0)
+  })
+
+  it('keeps the agent stream independent when directory refresh throws synchronously', async () => {
+    const bridge = createBridge()
+    const onSaved = vi.fn(() => {
+      throw new Error('refresh failed')
+    })
+    vi.stubGlobal('window', { bridge })
+    const transport = createIpcTransport(
+      () => 'C:/workspace',
+      () => defaultModelConfig,
+      onSaved
+    )
+
+    const stream = await transport.sendMessages({
+      chatId: 'session-1',
+      messageId: undefined,
+      messages: [{ id: 'message-1', role: 'user', parts: [{ type: 'text', text: 'hello' }] }],
+      trigger: 'submit-message'
+    })
+
+    await vi.waitFor(() => expect(onSaved).toHaveBeenCalledOnce())
+    bridge.emit('agent:end:session-1')
+    await expect(stream.getReader().read()).resolves.toEqual({ done: true, value: undefined })
   })
 
   it('errors the stream and releases listeners when starting the run fails', async () => {
@@ -183,14 +206,13 @@ describe('interaction assistant transport', () => {
     expect(bridge.listenerCount()).toBe(0)
   })
 
-  it('cancels a running request and waits for its end event', async () => {
+  it('cancels a running request and closes its stream', async () => {
     const bridge = createBridge()
     const abort = new AbortController()
     vi.stubGlobal('window', { bridge })
     const stream = await send(abort.signal)
     abort.abort()
     expect(bridge.invoke).toHaveBeenCalledWith('agent:cancel', 'session-1')
-    bridge.emit('agent:end:session-1')
 
     expect(await readAll(stream)).toEqual([])
     expect(bridge.listenerCount()).toBe(0)
@@ -211,6 +233,23 @@ describe('interaction assistant transport', () => {
     expect(bridge.listenerCount()).toBe(0)
   })
 
+  it('does not start the agent when cancelled while saving attachments', async () => {
+    const attachments = Promise.withResolvers<unknown>()
+    const bridge = createBridge(async (channel) => {
+      if (channel === 'attachment:save') return attachments.promise
+    })
+    const abort = new AbortController()
+    vi.stubGlobal('window', { bridge })
+    const stream = await send(abort.signal)
+
+    abort.abort()
+    attachments.resolve({ id: 'message-1', role: 'user', parts: [] })
+    expect(await readAll(stream)).toEqual([])
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(bridge.invoke.mock.calls.map(([channel]) => channel)).not.toContain('agent:send')
+  })
+
   it('cancels the backend and releases listeners when the consumer cancels the stream', async () => {
     const bridge = createBridge()
     vi.stubGlobal('window', { bridge })
@@ -219,6 +258,24 @@ describe('interaction assistant transport', () => {
     await reader.cancel()
 
     expect(bridge.invoke).toHaveBeenCalledWith('agent:cancel', 'session-1')
+    expect(bridge.listenerCount()).toBe(0)
+  })
+
+  it('does not start the agent when the consumer cancels while saving attachments', async () => {
+    const attachments = Promise.withResolvers<unknown>()
+    const bridge = createBridge(async (channel) => {
+      if (channel === 'attachment:save') return attachments.promise
+    })
+    vi.stubGlobal('window', { bridge })
+    const reader = (await send()).getReader()
+
+    await reader.cancel()
+    attachments.resolve({ id: 'message-1', role: 'user', parts: [] })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(bridge.invoke).toHaveBeenCalledWith('agent:cancel', 'session-1')
+    expect(bridge.invoke.mock.calls.map(([channel]) => channel)).not.toContain('agent:send')
     expect(bridge.listenerCount()).toBe(0)
   })
 

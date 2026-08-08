@@ -323,6 +323,28 @@ describe('AssistantSessionsProvider', () => {
     expect(sessions.directory[0].sessions.map(({ id }) => id)).toEqual(['newest', 'older'])
   })
 
+  it('recovers after the initial directory load fails', async () => {
+    act(() => root.unmount())
+    invoke
+      .mockImplementationOnce(() => {
+        throw new Error('Unavailable')
+      })
+      .mockImplementation((channel: string, cwd?: string) =>
+        Promise.resolve(
+          channel === 'session:cwds' ? ['D:\\Workspace'] : [{ id: 'stored', title: 'Stored', cwd }]
+        )
+      )
+    root = createRoot(document.createElement('div'))
+
+    await act(async () => {
+      root.render(createElement(AssistantSessionsProvider, null, createElement(Probe)))
+      await Promise.resolve()
+    })
+    await act(async () => sessions.refresh())
+
+    expect(sessions.directory[0].sessions.map(({ id }) => id)).toEqual(['stored'])
+  })
+
   it('does not let an older refresh overwrite a newer one', async () => {
     let resolveOlder!: (value: string[]) => void
     let resolveNewer!: (value: string[]) => void

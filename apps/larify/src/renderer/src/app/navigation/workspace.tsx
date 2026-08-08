@@ -24,7 +24,7 @@ export function Workspace({ workspace }: { workspace: WorkspacePreview }): React
       setVisibleCount((count) => count + pageSize)
       return
     }
-    if (!workspace.hasMore || !workspace.onMore) return
+    if (!workspace.hasMore) return
 
     loadingRef.current = true
     setLoading(true)

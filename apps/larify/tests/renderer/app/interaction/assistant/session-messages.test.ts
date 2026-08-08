@@ -33,7 +33,11 @@ describe('loadMessagePage', () => {
     const page = await loadMessagePage('session', 10)
 
     expect(invoke).toHaveBeenCalledWith('session:msgs', 'session', 10, 51)
-    expect(invoke).toHaveBeenCalledWith('attachment:load', expect.any(Array))
+    expect(invoke).toHaveBeenCalledWith(
+      'attachment:load',
+      expect.arrayContaining([{ id: '1', role: 'assistant', parts: [] }])
+    )
+    expect(invoke.mock.calls[1][1]).toHaveLength(50)
     expect(page.messages.map(({ id }) => id)).toEqual(
       Array.from({ length: 50 }, (_, index) => String(index + 1))
     )
@@ -49,6 +53,22 @@ describe('loadMessagePage', () => {
 
     await expect(loadMessagePage('session')).resolves.toEqual({
       messages: [{ id: 'oldest', role: 'user', parts: [] }],
+      hasMore: false
+    })
+  })
+
+  it('does not report another page for exactly 50 messages', async () => {
+    const stored = Array.from({ length: 50 }, (_, index) => ({
+      id: String(index),
+      role: 'assistant',
+      parts: []
+    }))
+    invoke.mockImplementation((channel: string, ...args: unknown[]) =>
+      Promise.resolve(channel === 'attachment:load' ? args[0] : stored)
+    )
+
+    await expect(loadMessagePage('session')).resolves.toEqual({
+      messages: stored,
       hasMore: false
     })
   })
@@ -77,5 +97,21 @@ describe('loadMessagePage', () => {
     invoke.mockResolvedValue(undefined)
 
     await expect(loadMessagePage('session')).resolves.toEqual({ messages: [], hasMore: false })
+    expect(invoke).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps pagination metadata when attachment loading fails', async () => {
+    const stored = Array.from({ length: 51 }, (_, index) => ({
+      id: String(index),
+      role: 'assistant',
+      parts: []
+    }))
+    invoke.mockImplementation((channel: string) =>
+      Promise.resolve(channel === 'attachment:load' ? undefined : stored)
+    )
+
+    const page = await loadMessagePage('session')
+    expect(page.messages).toEqual(stored.slice(1))
+    expect(page.hasMore).toBe(true)
   })
 })

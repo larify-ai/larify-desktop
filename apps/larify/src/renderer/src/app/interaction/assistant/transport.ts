@@ -4,7 +4,7 @@ import type { AgentModelConfig } from '../../../../../main/core/model/config'
 function openAgentStream(
   sessionId: string,
   signal: AbortSignal | undefined,
-  start: () => Promise<void>
+  start: (cancelled: () => boolean) => Promise<void>
 ): ReadableStream<UIMessageChunk> {
   let finished = false
   let cleanup: Array<() => void> = []
@@ -16,7 +16,6 @@ function openAgentStream(
 
   return new ReadableStream({
     start(controller) {
-      let started = Promise.resolve()
       const finish = (error?: unknown): void => {
         if (finished) return
         finished = true
@@ -29,15 +28,12 @@ function openAgentStream(
         window.bridge.on(`agent:chunk:${sessionId}`, (chunk) => {
           if (!finished) controller.enqueue(chunk as UIMessageChunk)
         }),
-        window.bridge.on(`agent:end:${sessionId}`, () => void started.then(() => finish(), finish)),
-        window.bridge.on(
-          `agent:error:${sessionId}`,
-          (error) => void started.then(() => finish(error), finish)
-        )
+        window.bridge.on(`agent:end:${sessionId}`, () => finish()),
+        window.bridge.on(`agent:error:${sessionId}`, finish)
       )
 
       const cancel = (): void => {
-        void window.bridge.invoke('agent:cancel', sessionId).catch(finish)
+        void window.bridge.invoke('agent:cancel', sessionId).then(() => finish(), finish)
       }
       if (signal?.aborted) return finish()
       if (signal) {
@@ -45,8 +41,9 @@ function openAgentStream(
         cleanup.push(() => signal.removeEventListener('abort', cancel))
       }
 
-      started = Promise.resolve().then(start)
-      void started.catch(finish)
+      void Promise.resolve()
+        .then(() => start(() => finished || signal?.aborted === true))
+        .catch(finish)
     },
 
     async cancel() {
@@ -70,15 +67,19 @@ export function createIpcTransport(
       const cwd = getCwd()
       const modelConfig = getModelConfig()
 
-      return openAgentStream(chatId, abortSignal, async () => {
+      return openAgentStream(chatId, abortSignal, async (cancelled) => {
         const saved = (await window.bridge.invoke('attachment:save', chatId, message)) ?? message
+        if (cancelled()) return
         await window.bridge.invoke('agent:send', {
           sessionId: chatId,
           message: saved,
           cwd,
           modelConfig
         })
-        await onSaved?.()
+        if (onSaved)
+          void Promise.resolve()
+            .then(onSaved)
+            .catch(() => undefined)
       })
     },
 

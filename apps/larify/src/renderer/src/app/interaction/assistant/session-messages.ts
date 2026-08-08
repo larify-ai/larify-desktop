@@ -10,12 +10,13 @@ export interface MessagePage {
 export async function loadMessagePage(id: string, offset = 0): Promise<MessagePage> {
   const value = await window.bridge.invoke('session:msgs', id, offset, pageSize + 1)
   const stored = Array.isArray(value) ? (value as UIMessage[]) : []
-  const valueWithAttachments = await window.bridge.invoke('attachment:load', stored)
-  const messages = Array.isArray(valueWithAttachments)
-    ? (valueWithAttachments as UIMessage[])
-    : stored
+  const hasMore = stored.length > pageSize
+  const messages = hasMore ? stored.slice(1) : stored
+  if (!messages.length) return { messages, hasMore }
+
+  const loaded = await window.bridge.invoke('attachment:load', messages)
   return {
-    messages: messages.length > pageSize ? messages.slice(1) : messages,
-    hasMore: messages.length > pageSize
+    messages: Array.isArray(loaded) ? (loaded as UIMessage[]) : messages,
+    hasMore
   }
 }

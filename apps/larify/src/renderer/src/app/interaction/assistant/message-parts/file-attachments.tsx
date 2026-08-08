@@ -18,9 +18,13 @@ export function FileAttachments({
       {files.map((file, index) => {
         const id = `${messageId}-${index}`
         return (
-          <Attachment data={{ ...file, id }} key={id}>
+          <Attachment
+            className={file.filename ? undefined : 'gap-0'}
+            data={{ ...file, id }}
+            key={id}
+          >
             <AttachmentPreview />
-            <AttachmentInfo />
+            {file.filename && <AttachmentInfo />}
           </Attachment>
         )
       })}

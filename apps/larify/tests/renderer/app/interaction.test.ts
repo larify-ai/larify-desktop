@@ -3,6 +3,7 @@
 import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { AssistantSessionState } from '../../../src/renderer/src/app/interaction/assistant/sessions-context'
 
 const mocks = vi.hoisted(() => ({
   sessions: vi.fn(),
@@ -10,8 +11,9 @@ const mocks = vi.hoisted(() => ({
   props: new Map<
     string,
     {
+      title?: string
       onHeadingChange: (heading: { cwd: string; title: string } | null) => void
-      onSaved: () => void
+      onSaved: () => Promise<void>
     }
   >()
 }))
@@ -22,15 +24,17 @@ vi.mock('../../../src/renderer/src/app/interaction/assistant/sessions-context', 
 vi.mock('../../../src/renderer/src/app/interaction/assistant/session', () => ({
   AssistantSession: ({
     id,
+    title,
     onHeadingChange,
     onSaved
   }: {
     id: string
+    title?: string
     onHeadingChange: (heading: { cwd: string; title: string } | null) => void
-    onSaved: () => void
+    onSaved: () => Promise<void>
   }) => {
     mocks.renders.set(id, (mocks.renders.get(id) ?? 0) + 1)
-    mocks.props.set(id, { onHeadingChange, onSaved })
+    mocks.props.set(id, { title, onHeadingChange, onSaved })
     return createElement('span', null, id)
   }
 }))
@@ -47,6 +51,7 @@ describe('Interaction', () => {
 
   beforeEach(() => {
     globalThis.IS_REACT_ACT_ENVIRONMENT = true
+    refresh.mockReset()
     mocks.renders.clear()
     mocks.props.clear()
     container = document.createElement('div')
@@ -60,11 +65,7 @@ describe('Interaction', () => {
   })
 
   it('keeps sessions mounted without rerendering hidden sessions unnecessarily', async () => {
-    const sessions = [
-      session('first'),
-      session('second'),
-      session('third')
-    ]
+    const sessions = [session('first'), session('second'), session('third')]
     mockSessions(sessions, 'first')
     await render(0)
 
@@ -80,7 +81,7 @@ describe('Interaction', () => {
   it('routes session events and exposes only the active session', async () => {
     const sessions = [
       session('first'),
-      session('second', true)
+      { ...session('second', true), heading: { cwd: 'D:\\workspace', title: 'Stored title' } }
     ]
     mockSessions(sessions, 'second')
     await render(0)
@@ -94,11 +95,48 @@ describe('Interaction', () => {
     await second.onSaved()
 
     expect(setHeading).toHaveBeenCalledWith('second', heading)
+    expect(second.title).toBe('Stored title')
     expect(refresh).toHaveBeenCalledOnce()
     expect(setPersisted).toHaveBeenCalledWith('first')
     expect(container.querySelector('section')?.textContent).toBe('firstsecond')
     expect(container.querySelector('span')?.parentElement?.className).toBe('hidden')
     expect(container.querySelectorAll('span')[1].parentElement?.className).toBe('h-full')
+  })
+
+  it('refreshes the directory only once while the first save is pending', async () => {
+    const deferred = Promise.withResolvers<void>()
+    refresh.mockReturnValue(deferred.promise)
+    mockSessions([session('first')], 'first')
+    await render(0)
+
+    const saved = mocks.props.get('first')!.onSaved
+    const first = saved()
+    expect(setPersisted).toHaveBeenCalledWith('first')
+    mockSessions(
+      [{ ...session('first'), heading: { cwd: 'D:\\workspace', title: 'Updated' } }],
+      'first'
+    )
+    await render(1)
+    const second = mocks.props.get('first')!.onSaved()
+
+    expect(refresh).toHaveBeenCalledOnce()
+    deferred.resolve()
+    await Promise.all([first, second])
+    expect(setPersisted).toHaveBeenCalledOnce()
+  })
+
+  it('allows the first save refresh to be retried after failure', async () => {
+    refresh.mockRejectedValueOnce(new Error('refresh failed')).mockResolvedValueOnce(undefined)
+    mockSessions([session('first')], 'first')
+    await render(0)
+
+    const saved = mocks.props.get('first')!.onSaved
+    await expect(saved()).rejects.toThrow('refresh failed')
+    expect(setPersisted).toHaveBeenCalledOnce()
+    await saved()
+
+    expect(refresh).toHaveBeenCalledTimes(2)
+    expect(setPersisted).toHaveBeenCalledOnce()
   })
 
   async function render(revision: number): Promise<void> {
@@ -115,6 +153,6 @@ function mockSessions(sessions: Array<{ id: string; persisted: boolean }>, activ
   mocks.sessions.mockReturnValue({ sessions, activeId, refresh, setPersisted, setHeading })
 }
 
-function session(id: string, persisted = false) {
+function session(id: string, persisted = false): AssistantSessionState {
   return { id, persisted, heading: null, messages: [], hasMore: false }
 }

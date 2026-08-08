@@ -62,6 +62,24 @@ describe('interaction assistant message view', () => {
     expect(markup).not.toContain('select-text')
   })
 
+  it('renders pasted images without a fallback filename', () => {
+    const markup = render(
+      message(
+        [
+          {
+            type: 'file',
+            mediaType: 'image/png',
+            url: 'data:image/png;base64,aW1hZ2U='
+          }
+        ],
+        'user'
+      )
+    )
+
+    expect(markup).toContain('<img')
+    expect(markup).not.toContain('>图片<')
+  })
+
   it('does not create an empty message container for unsupported parts', () => {
     expect(render(message([{ type: 'step-start' }]))).toBe('')
   })

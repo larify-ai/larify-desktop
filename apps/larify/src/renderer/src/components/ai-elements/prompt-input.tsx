@@ -78,24 +78,15 @@ import {
 // Helpers
 // ============================================================================
 
-const convertBlobUrlToDataUrl = async (url: string): Promise<string | null> => {
-  try {
-    const response = await fetch(url);
-    const blob = await response.blob();
-    // FileReader uses callback-based API, wrapping in Promise is necessary
-    // oxlint-disable-next-line eslint-plugin-promise(avoid-new)
-    return new Promise((resolve) => {
-      const reader = new FileReader();
-      // oxlint-disable-next-line eslint-plugin-unicorn(prefer-add-event-listener)
-      reader.onloadend = () => resolve(reader.result as string);
-      // oxlint-disable-next-line eslint-plugin-unicorn(prefer-add-event-listener)
-      reader.onerror = () => resolve(null);
-      reader.readAsDataURL(blob);
-    });
-  } catch {
-    return null;
-  }
-};
+const blobFiles = new Map<string, File>();
+
+const fileToDataUrl = (file: File): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error ?? new Error("Unable to read attachment."));
+    reader.readAsDataURL(file);
+  });
 
 const captureScreenshot = async (): Promise<File | null> => {
   if (
@@ -180,7 +171,7 @@ const captureScreenshot = async (): Promise<File | null> => {
 
 export interface AttachmentsContext {
   files: (FileUIPart & { id: string })[];
-  add: (files: File[] | FileList) => void;
+  add: (files: File[] | FileList, options?: { filename?: boolean }) => void;
   addParts: (files: (FileUIPart & { id: string })[]) => void;
   remove: (id: string) => void;
   clear: () => void;
@@ -246,14 +237,19 @@ const getFilePath = (file: File): string => {
   }
 };
 
-const createFilePart = (file: File): FileUIPart & { id: string } => {
+const createFilePart = (
+  file: File,
+  filename = true,
+): FileUIPart & { id: string } => {
   const path = getFilePath(file);
+  const url = path || URL.createObjectURL(file);
+  if (!path) blobFiles.set(url, file);
   return {
-    filename: file.name,
+    filename: filename ? file.name : undefined,
     id: nanoid(),
     mediaType: file.type || "application/octet-stream",
     type: "file",
-    url: path || URL.createObjectURL(file),
+    url,
   };
 };
 
@@ -278,7 +274,10 @@ const classifyDroppedItems = (
 };
 
 const revokeAttachmentUrl = (url?: string): void => {
-  if (url?.startsWith("blob:")) URL.revokeObjectURL(url);
+  if (url?.startsWith("blob:")) {
+    blobFiles.delete(url);
+    URL.revokeObjectURL(url);
+  }
 };
 
 export type PromptInputProviderProps = PropsWithChildren<{
@@ -304,13 +303,16 @@ export const PromptInputProvider = ({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const openRef = useRef<(() => void) | null>(null);
 
-  const add = useCallback((files: File[] | FileList) => {
+  const add = useCallback((files: File[] | FileList, options?: { filename?: boolean }) => {
     const incoming = [...files];
     if (incoming.length === 0) {
       return;
     }
 
-    setAttachmentFiles((prev) => [...prev, ...incoming.map(createFilePart)]);
+    setAttachmentFiles((prev) => [
+      ...prev,
+      ...incoming.map((file) => createFilePart(file, options?.filename)),
+    ]);
   }, []);
 
   const addParts = useCallback((files: (FileUIPart & { id: string })[]) => {
@@ -573,6 +575,8 @@ export const PromptInput = ({
   // Try to use a provider controller if present
   const controller = useOptionalPromptInputController();
   const usingProvider = !!controller;
+  const providerAttachments = controller?.attachments;
+  const registerFileInput = controller?.__registerFileInput;
 
   // Refs
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -610,6 +614,9 @@ export const PromptInput = ({
         .filter(Boolean);
 
       return patterns.some((pattern) => {
+        if (pattern.startsWith(".")) {
+          return f.name.toLowerCase().endsWith(pattern.toLowerCase());
+        }
         if (pattern.endsWith("/*")) {
           // e.g: image/* -> image/
           const prefix = pattern.slice(0, -1);
@@ -622,7 +629,7 @@ export const PromptInput = ({
   );
 
   const addLocal = useCallback(
-    (fileList: File[] | FileList) => {
+    (fileList: File[] | FileList, options?: { filename?: boolean }) => {
       const incoming = [...fileList];
       const accepted = incoming.filter((f) => matchesAccept(f));
       if (incoming.length && accepted.length === 0) {
@@ -658,7 +665,7 @@ export const PromptInput = ({
         }
         const next: (FileUIPart & { id: string })[] = [];
         for (const file of capped) {
-          next.push(createFilePart(file));
+          next.push(createFilePart(file, options?.filename));
         }
         return [...prev, ...next];
       });
@@ -678,7 +685,7 @@ export const PromptInput = ({
 
   // Wrapper that validates files before calling provider's add
   const addWithProviderValidation = useCallback(
-    (fileList: File[] | FileList) => {
+    (fileList: File[] | FileList, options?: { filename?: boolean }) => {
       const incoming = [...fileList];
       const accepted = incoming.filter((f) => matchesAccept(f));
       if (incoming.length && accepted.length === 0) {
@@ -714,23 +721,23 @@ export const PromptInput = ({
       }
 
       if (capped.length > 0) {
-        controller?.attachments.add(capped);
+        providerAttachments?.add(capped, options);
       }
     },
-    [matchesAccept, maxFileSize, maxFiles, onError, files.length, controller],
+    [matchesAccept, maxFileSize, maxFiles, onError, files.length, providerAttachments],
   );
 
   const clearAttachments = useCallback(
     () =>
       usingProvider
-        ? controller?.attachments.clear()
+        ? providerAttachments?.clear()
         : setItems((prev) => {
             for (const file of prev) {
               revokeAttachmentUrl(file.url);
             }
             return [];
           }),
-    [usingProvider, controller],
+    [usingProvider, providerAttachments],
   );
 
   const clearReferencedSources = useCallback(
@@ -739,7 +746,7 @@ export const PromptInput = ({
   );
 
   const add = usingProvider ? addWithProviderValidation : addLocal;
-  const remove = usingProvider ? controller.attachments.remove : removeLocal;
+  const remove = usingProvider ? providerAttachments!.remove : removeLocal;
   const addPartsLocal = useCallback(
     (files: (FileUIPart & { id: string })[]) => {
       setItems((prev) => [...prev, ...files]);
@@ -748,26 +755,34 @@ export const PromptInput = ({
   );
 
   const addParts = usingProvider
-    ? controller.attachments.addParts
+    ? providerAttachments!.addParts
     : addPartsLocal;
   const openFileDialog = usingProvider
-    ? controller.attachments.openFileDialog
+    ? providerAttachments!.openFileDialog
     : openFileDialogLocal;
 
-  const clear = useCallback(() => {
-    clearAttachments();
-    clearReferencedSources();
-  }, [clearAttachments, clearReferencedSources]);
+  const addDroppedFiles = useCallback(
+    (dataTransfer: DataTransfer) => {
+      if (dataTransfer.items.length) {
+        const dropped = classifyDroppedItems(dataTransfer.items);
+        if (dropped.files.length) add(dropped.files);
+        if (dropped.directories.length) addParts(dropped.directories);
+      } else if (dataTransfer.files.length) {
+        add(dataTransfer.files);
+      }
+    },
+    [add, addParts],
+  );
 
   // Let provider know about our hidden file input so external menus can call openFileDialog()
   useEffect(() => {
     if (!usingProvider) {
       return;
     }
-    return controller.__registerFileInput(inputRef, () =>
+    return registerFileInput?.(inputRef, () =>
       inputRef.current?.click(),
     );
-  }, [usingProvider, controller]);
+  }, [usingProvider, registerFileInput]);
 
   // Note: File input cannot be programmatically set for security reasons
   // The syncHiddenInput prop is no longer functional
@@ -797,13 +812,7 @@ export const PromptInput = ({
       if (e.dataTransfer?.types?.includes("Files")) {
         e.preventDefault();
       }
-      if (e.dataTransfer?.items.length) {
-        const dropped = classifyDroppedItems(e.dataTransfer.items);
-        if (dropped.files.length) add(dropped.files);
-        if (dropped.directories.length) addParts(dropped.directories);
-      } else if (e.dataTransfer?.files.length) {
-        add(e.dataTransfer.files);
-      }
+      if (e.dataTransfer) addDroppedFiles(e.dataTransfer);
     };
     form.addEventListener("dragover", onDragOver);
     form.addEventListener("drop", onDrop);
@@ -811,7 +820,7 @@ export const PromptInput = ({
       form.removeEventListener("dragover", onDragOver);
       form.removeEventListener("drop", onDrop);
     };
-  }, [add, addParts, globalDrop]);
+  }, [addDroppedFiles, globalDrop]);
 
   useEffect(() => {
     if (!globalDrop) {
@@ -827,13 +836,7 @@ export const PromptInput = ({
       if (e.dataTransfer?.types?.includes("Files")) {
         e.preventDefault();
       }
-      if (e.dataTransfer?.items.length) {
-        const dropped = classifyDroppedItems(e.dataTransfer.items);
-        if (dropped.files.length) add(dropped.files);
-        if (dropped.directories.length) addParts(dropped.directories);
-      } else if (e.dataTransfer?.files.length) {
-        add(e.dataTransfer.files);
-      }
+      if (e.dataTransfer) addDroppedFiles(e.dataTransfer);
     };
     document.addEventListener("dragover", onDragOver, { capture: true });
     document.addEventListener("drop", onDrop, { capture: true });
@@ -841,7 +844,7 @@ export const PromptInput = ({
       document.removeEventListener("dragover", onDragOver, { capture: true });
       document.removeEventListener("drop", onDrop, { capture: true });
     };
-  }, [add, addParts, globalDrop]);
+  }, [addDroppedFiles, globalDrop]);
 
   useEffect(
     () => () => {
@@ -871,7 +874,7 @@ export const PromptInput = ({
       addParts,
       clear: clearAttachments,
       fileInputRef: inputRef,
-      files: files.map((item) => ({ ...item, id: item.id })),
+      files,
       openFileDialog,
       remove,
     }),
@@ -896,9 +899,16 @@ export const PromptInput = ({
     [referencedSources, clearReferencedSources],
   );
 
+  const submittingRef = useRef(false);
+
   const handleSubmit: FormEventHandler<HTMLFormElement> = useCallback(
     async (event) => {
       event.preventDefault();
+
+      if (submittingRef.current) {
+        return;
+      }
+      submittingRef.current = true;
 
       const form = event.currentTarget;
       const textarea = form.elements.namedItem(
@@ -908,14 +918,16 @@ export const PromptInput = ({
         ? controller.textInput.value
         : (textarea?.value ?? "");
       const restoreText = () => {
-        if (!usingProvider && textarea && textarea.value === "") {
-          textarea.value = text;
-        }
+        if (textarea?.value !== "") return;
+        if (usingProvider) controller.textInput.setInput(text);
+        else if (textarea) textarea.value = text;
       };
 
       // Reset form immediately after capturing text to avoid race condition
       // where user input during async blob conversion would be lost
-      if (!usingProvider) {
+      if (usingProvider) {
+        controller.textInput.clear();
+      } else {
         form.reset();
       }
 
@@ -927,13 +939,11 @@ export const PromptInput = ({
               Object.entries(file).filter(([key]) => key !== "id"),
             ) as FileUIPart;
             if (item.url?.startsWith("blob:")) {
-              const dataUrl = await convertBlobUrlToDataUrl(item.url);
-              if (!dataUrl) {
-                throw new Error("Unable to read attachment.");
-              }
+              const file = blobFiles.get(item.url);
+              if (!file) throw new Error("Unable to read attachment.");
               return {
                 ...item,
-                url: dataUrl,
+                url: await fileToDataUrl(file),
               };
             }
             return item;
@@ -942,15 +952,15 @@ export const PromptInput = ({
 
         const result = onSubmit({ files: convertedFiles, text }, event);
         await result;
-        clear();
-        if (usingProvider) {
-          controller.textInput.clear();
-        }
+        for (const file of files) remove(file.id);
+        clearReferencedSources();
       } catch {
         restoreText();
+      } finally {
+        submittingRef.current = false;
       }
     },
-    [usingProvider, controller, files, onSubmit, clear],
+    [usingProvider, controller, files, onSubmit, remove, clearReferencedSources],
   );
 
   // Render with or without local provider
@@ -1083,7 +1093,7 @@ export const PromptInputTextarea = ({
 
       if (files.length > 0) {
         event.preventDefault();
-        attachments.add(files);
+        attachments.add(files, { filename: false });
       }
     },
     [attachments],

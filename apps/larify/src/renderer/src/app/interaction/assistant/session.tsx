@@ -11,6 +11,7 @@ const initialListIndex = 1_000_000
 
 export function AssistantSession({
   id,
+  title,
   initialMessages,
   initialHasMore,
   initialCwd,
@@ -18,6 +19,7 @@ export function AssistantSession({
   onSaved
 }: {
   id: string
+  title?: string
   initialMessages: UIMessage[]
   initialHasMore: boolean
   initialCwd: string
@@ -72,6 +74,7 @@ export function AssistantSession({
   return (
     <AssistantChat
       chat={chat}
+      title={title}
       cwd={cwd}
       firstItemIndex={firstItemIndex}
       onLoadOlder={hasMore ? loadOlder : undefined}

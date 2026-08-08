@@ -1,50 +1,49 @@
-import { memo, useCallback, useEffect, useRef } from 'react'
-import type { UIMessage } from 'ai'
+import { memo, useCallback, useRef } from 'react'
 import { Region } from '../layout/region'
 import { AssistantSession } from './assistant/session'
-import { useAssistantSessions } from './assistant/sessions-context'
+import { useAssistantSessions, type AssistantSessionState } from './assistant/sessions-context'
 import type { ConversationHeading } from './assistant/conversation-header'
 
 const SessionView = memo(function SessionView({
-  id,
+  session,
   active,
-  persisted,
-  heading,
-  messages,
-  hasMore,
   refresh,
   setPersisted,
   setHeading
 }: {
-  id: string
+  session: AssistantSessionState
   active: boolean
-  persisted: boolean
-  heading: ConversationHeading | null
-  messages: UIMessage[]
-  hasMore: boolean
   refresh: () => Promise<void>
   setPersisted: (id: string) => void
   setHeading: (id: string, heading: ConversationHeading | null) => void
 }): React.JSX.Element {
+  const { id, persisted, heading, messages, hasMore } = session
   const persistedRef = useRef(persisted)
-  useEffect(() => {
-    persistedRef.current = persisted
-  }, [persisted])
+  const refreshedRef = useRef(persisted)
   const updateHeading = useCallback(
     (heading: ConversationHeading | null) => setHeading(id, heading),
     [id, setHeading]
   )
   const saved = useCallback(async () => {
-    if (persistedRef.current) return
-    await refresh()
-    persistedRef.current = true
-    setPersisted(id)
+    if (refreshedRef.current) return
+    refreshedRef.current = true
+    if (!persistedRef.current) {
+      persistedRef.current = true
+      setPersisted(id)
+    }
+    try {
+      await refresh()
+    } catch (error) {
+      refreshedRef.current = false
+      throw error
+    }
   }, [id, refresh, setPersisted])
 
   return (
     <div className={active ? 'h-full' : 'hidden'}>
       <AssistantSession
         id={id}
+        title={heading?.title}
         initialMessages={messages}
         initialHasMore={hasMore}
         initialCwd={heading?.cwd ?? ''}
@@ -63,12 +62,8 @@ export function Interaction(): React.JSX.Element {
       {sessions.map((session) => (
         <SessionView
           key={session.id}
-          id={session.id}
+          session={session}
           active={session.id === activeId}
-          persisted={session.persisted}
-          heading={session.heading}
-          messages={session.messages}
-          hasMore={session.hasMore}
           refresh={refresh}
           setPersisted={setPersisted}
           setHeading={setHeading}

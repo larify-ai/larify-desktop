@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { useChat, type Chat } from '@ai-sdk/react'
 import type { UIMessage } from 'ai'
 import { AssistantMessageList } from './message-list'
@@ -6,15 +6,29 @@ import { AssistantComposer } from './composer'
 import type { ConversationHeading } from './conversation-header'
 
 function messageText(message: UIMessage): string {
-  return message.parts
-    .filter((part) => part.type === 'text')
-    .map((part) => part.text)
-    .join('')
-    .trim()
+  let text = ''
+  for (const part of message.parts) if (part.type === 'text') text += part.text
+  return text.trim()
+}
+
+function inputHistory(messages: UIMessage[]): string[] {
+  const history: string[] = []
+  for (const message of messages) {
+    if (message.role !== 'user') continue
+    const text = messageText(message)
+    if (text) history.push(text)
+  }
+  return history
+}
+
+function firstTitle(messages: UIMessage[]): string {
+  const message = messages.find(({ role }) => role === 'user')
+  return message ? messageText(message).split(/\r?\n/, 1)[0].slice(0, 60) : ''
 }
 
 export function AssistantChat({
   chat,
+  title,
   cwd,
   firstItemIndex,
   onLoadOlder,
@@ -22,6 +36,7 @@ export function AssistantChat({
   onHeadingChange
 }: {
   chat: Chat<UIMessage>
+  title?: string
   cwd: string
   firstItemIndex: number
   onLoadOlder?: () => Promise<void>
@@ -31,21 +46,14 @@ export function AssistantChat({
   const { messages, sendMessage, status, stop } = useChat({ chat, throttle: 50 })
   const running = status === 'submitted' || status === 'streaming'
   const started = messages.length > 0
-  const history = useMemo(
-    () =>
-      messages
-        .filter((message) => message.role === 'user')
-        .map(messageText)
-        .filter(Boolean),
-    [messages]
-  )
-  const firstMessage = messages.find((message) => message.role === 'user')
-  const title = firstMessage ? messageText(firstMessage) : ''
-  const heading = title.split(/\r?\n/, 1)[0].slice(0, 60) || '未命名任务'
+  const history = useMemo(() => inputHistory(messages), [messages])
+  const titleCreated = useRef(Boolean(title))
 
   useEffect(() => {
-    onHeadingChange(started ? { cwd, title: heading } : null)
-  }, [cwd, heading, onHeadingChange, started])
+    if (!started || title || titleCreated.current) return
+    titleCreated.current = true
+    onHeadingChange({ cwd, title: firstTitle(messages) || '未命名任务' })
+  }, [cwd, messages, onHeadingChange, started, title])
 
   return (
     <div className="flex h-full min-w-0 flex-col">

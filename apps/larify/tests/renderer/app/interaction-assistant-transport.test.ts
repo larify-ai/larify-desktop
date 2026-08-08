@@ -40,7 +40,7 @@ describe('interaction assistant transport', () => {
 
   it('notifies after the backend accepts and stores the message', async () => {
     const bridge = createBridge()
-    const onSaved = vi.fn()
+    const onSaved = vi.fn().mockResolvedValue(undefined)
     vi.stubGlobal('window', { bridge })
     const transport = createIpcTransport(
       () => 'C:/workspace',
@@ -56,6 +56,57 @@ describe('interaction assistant transport', () => {
     })
     await vi.waitFor(() => expect(onSaved).toHaveBeenCalledOnce())
     await stream.cancel()
+  })
+
+  it('does not finish the stream before the directory refresh completes', async () => {
+    const bridge = createBridge()
+    const refresh = Promise.withResolvers<void>()
+    vi.stubGlobal('window', { bridge })
+    const transport = createIpcTransport(
+      () => 'C:/workspace',
+      () => defaultModelConfig,
+      () => refresh.promise
+    )
+    const stream = await transport.sendMessages({
+      chatId: 'session-1',
+      messageId: undefined,
+      messages: [{ id: 'message-1', role: 'user', parts: [{ type: 'text', text: 'hello' }] }],
+      trigger: 'submit-message'
+    })
+    const read = stream.getReader().read()
+
+    await vi.waitFor(() =>
+      expect(bridge.invoke).toHaveBeenCalledWith('agent:send', expect.anything())
+    )
+    bridge.emit('agent:end:session-1')
+    await expect(
+      Promise.race([read.then(() => 'finished'), Promise.resolve('pending')])
+    ).resolves.toBe('pending')
+
+    refresh.resolve()
+    await expect(read).resolves.toEqual({ done: true, value: undefined })
+  })
+
+  it('reports a directory refresh failure through the stream', async () => {
+    const error = new Error('refresh failed')
+    const bridge = createBridge()
+    const onSaved = vi.fn().mockRejectedValue(error)
+    vi.stubGlobal('window', { bridge })
+    const transport = createIpcTransport(
+      () => 'C:/workspace',
+      () => defaultModelConfig,
+      onSaved
+    )
+
+    const stream = await transport.sendMessages({
+      chatId: 'session-1',
+      messageId: undefined,
+      messages: [{ id: 'message-1', role: 'user', parts: [{ type: 'text', text: 'hello' }] }],
+      trigger: 'submit-message'
+    })
+
+    await expect(stream.getReader().read()).rejects.toBe(error)
+    expect(bridge.listenerCount()).toBe(0)
   })
 
   it('errors the stream and releases listeners when starting the run fails', async () => {

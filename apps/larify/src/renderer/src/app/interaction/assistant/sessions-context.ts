@@ -5,6 +5,7 @@ import type { SessionDirectoryGroup } from './session-directory'
 export interface AssistantSessionState {
   id: string
   heading: ConversationHeading | null
+  persisted: boolean
 }
 
 export interface AssistantSessions {
@@ -16,6 +17,7 @@ export interface AssistantSessions {
   select(id: string): void
   loadMore(cwd: string): Promise<void>
   refresh(): Promise<void>
+  setPersisted(id: string): void
   setHeading(id: string, heading: ConversationHeading | null): void
 }
 

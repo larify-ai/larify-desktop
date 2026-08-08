@@ -3,7 +3,7 @@ import type { AssistantSessions } from '../../../src/renderer/src/app/interactio
 import { createWorkspaces } from '../../../src/renderer/src/app/navigation/workspaces'
 
 function source(values: Partial<AssistantSessions> = {}): AssistantSessions {
-  const session = { id: 'draft', heading: null }
+  const session = { id: 'draft', heading: null, persisted: false }
   return {
     sessions: [session],
     directory: [],
@@ -13,6 +13,7 @@ function source(values: Partial<AssistantSessions> = {}): AssistantSessions {
     select: vi.fn(),
     loadMore: vi.fn(),
     refresh: vi.fn(),
+    setPersisted: vi.fn(),
     setHeading: vi.fn(),
     ...values
   }
@@ -35,6 +36,7 @@ describe('createWorkspaces', () => {
   it('uses the stored session instead of a live session', () => {
     const live = {
       id: 'session',
+      persisted: true,
       heading: { cwd: 'D:\\Workspace', title: 'Current title' }
     }
     const workspaces = createWorkspaces(
@@ -60,7 +62,11 @@ describe('createWorkspaces', () => {
   })
 
   it('does not insert a live workspace missing from storage', () => {
-    const live = { id: 'session', heading: { cwd: 'D:\\New', title: 'New session' } }
+    const live = {
+      id: 'session',
+      heading: { cwd: 'D:\\New', title: 'New session' },
+      persisted: true
+    }
     const workspaces = createWorkspaces(
       source({
         sessions: [live],
@@ -83,8 +89,8 @@ describe('createWorkspaces', () => {
 
   it('does not expose live sessions before storage returns them', () => {
     const sessions = [
-      { id: 'first', heading: { cwd: 'D:\\New', title: 'First' } },
-      { id: 'second', heading: { cwd: 'D:\\New', title: 'Second' } }
+      { id: 'first', heading: { cwd: 'D:\\New', title: 'First' }, persisted: true },
+      { id: 'second', heading: { cwd: 'D:\\New', title: 'Second' }, persisted: true }
     ]
     const workspaces = createWorkspaces(
       source({ sessions, activeId: 'second', activeSession: sessions[1] })
@@ -109,7 +115,13 @@ describe('createWorkspaces', () => {
     const workspaces = createWorkspaces(
       source({
         directory,
-        sessions: [{ id: 'session', heading: { cwd: 'D:\\Workspace', title: 'Current title' } }]
+        sessions: [
+          {
+            id: 'session',
+            heading: { cwd: 'D:\\Workspace', title: 'Current title' },
+            persisted: true
+          }
+        ]
       })
     )
 

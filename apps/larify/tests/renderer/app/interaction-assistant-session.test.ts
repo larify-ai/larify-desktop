@@ -32,7 +32,7 @@ describe('AssistantSession', () => {
 
   it('keeps the same chat when the workspace changes', async () => {
     const invoke = vi.fn().mockResolvedValue(undefined)
-    const onSaved = vi.fn()
+    const onSaved = vi.fn().mockResolvedValue(undefined)
     Object.defineProperty(window, 'bridge', {
       configurable: true,
       value: { invoke, on: vi.fn(() => () => undefined) }

@@ -38,6 +38,7 @@ vi.mock('../../../src/renderer/src/app/interaction/assistant/session', () => ({
 import { Interaction } from '../../../src/renderer/src/app/interaction/interaction'
 
 const refresh = vi.fn()
+const setPersisted = vi.fn()
 const setHeading = vi.fn()
 
 describe('Interaction', () => {
@@ -59,7 +60,11 @@ describe('Interaction', () => {
   })
 
   it('keeps sessions mounted without rerendering hidden sessions unnecessarily', async () => {
-    const sessions = [{ id: 'first' }, { id: 'second' }, { id: 'third' }]
+    const sessions = [
+      { id: 'first', persisted: false },
+      { id: 'second', persisted: false },
+      { id: 'third', persisted: false }
+    ]
     mockSessions(sessions, 'first')
     await render(0)
 
@@ -73,7 +78,10 @@ describe('Interaction', () => {
   })
 
   it('routes session events and exposes only the active session', async () => {
-    const sessions = [{ id: 'first' }, { id: 'second' }]
+    const sessions = [
+      { id: 'first', persisted: false },
+      { id: 'second', persisted: true }
+    ]
     mockSessions(sessions, 'second')
     await render(0)
 
@@ -81,10 +89,13 @@ describe('Interaction', () => {
     const second = mocks.props.get('second')!
     const heading = { cwd: 'D:\\workspace', title: 'Title' }
     second.onHeadingChange(heading)
-    first.onSaved()
+    await first.onSaved()
+    await first.onSaved()
+    await second.onSaved()
 
     expect(setHeading).toHaveBeenCalledWith('second', heading)
     expect(refresh).toHaveBeenCalledOnce()
+    expect(setPersisted).toHaveBeenCalledWith('first')
     expect(container.querySelector('section')?.textContent).toBe('firstsecond')
     expect(container.querySelector('span')?.parentElement?.className).toBe('hidden')
     expect(container.querySelectorAll('span')[1].parentElement?.className).toBe('h-full')
@@ -100,6 +111,6 @@ function Harness({ revision }: { revision: number }): React.JSX.Element {
   return createElement(Interaction)
 }
 
-function mockSessions(sessions: Array<{ id: string }>, activeId: string): void {
-  mocks.sessions.mockReturnValue({ sessions, activeId, refresh, setHeading })
+function mockSessions(sessions: Array<{ id: string; persisted: boolean }>, activeId: string): void {
+  mocks.sessions.mockReturnValue({ sessions, activeId, refresh, setPersisted, setHeading })
 }

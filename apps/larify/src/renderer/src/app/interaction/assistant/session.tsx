@@ -13,7 +13,7 @@ export function AssistantSession({
 }: {
   id: string
   onHeadingChange: (heading: ConversationHeading | null) => void
-  onSaved: () => void
+  onSaved: () => Promise<void>
 }): React.JSX.Element {
   const [cwd, setCwd] = useState('')
   const [{ chat, setTransportCwd }] = useState(() => {

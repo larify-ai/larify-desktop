@@ -41,7 +41,7 @@ afterEach(() => {
 
 describe('AssistantSessionsProvider', () => {
   it('starts with one active draft', () => {
-    expect(sessions.sessions).toEqual([{ id: sessions.activeId, heading: null }])
+    expect(sessions.sessions).toEqual([{ id: sessions.activeId, heading: null, persisted: false }])
     expect(sessions.activeSession).toEqual(sessions.sessions[0])
   })
 
@@ -56,7 +56,7 @@ describe('AssistantSessionsProvider', () => {
   it('creates and selects a new draft after the current session starts', async () => {
     const previousId = sessions.activeId
     await act(async () => {
-      sessions.setHeading(previousId, { cwd: 'D:\\Workspace', title: 'Started' })
+      sessions.setPersisted(previousId)
       sessions.create()
     })
 
@@ -68,7 +68,7 @@ describe('AssistantSessionsProvider', () => {
   it('selects an existing session', async () => {
     const previousId = sessions.activeId
     await act(async () => {
-      sessions.setHeading(previousId, { cwd: 'D:\\Workspace', title: 'Started' })
+      sessions.setPersisted(previousId)
       sessions.create()
     })
     await act(async () => sessions.select(previousId))
@@ -89,6 +89,7 @@ describe('AssistantSessionsProvider', () => {
     const firstId = sessions.activeId
     await act(async () => {
       sessions.setHeading(firstId, { cwd: 'D:\\One', title: 'First' })
+      sessions.setPersisted(firstId)
       sessions.create()
     })
     const secondId = sessions.activeId
@@ -97,8 +98,8 @@ describe('AssistantSessionsProvider', () => {
     })
 
     expect(sessions.sessions).toEqual([
-      { id: firstId, heading: { cwd: 'D:\\One', title: 'First' } },
-      { id: secondId, heading: { cwd: 'D:\\Two', title: 'Second' } }
+      { id: firstId, heading: { cwd: 'D:\\One', title: 'First' }, persisted: true },
+      { id: secondId, heading: { cwd: 'D:\\Two', title: 'Second' }, persisted: false }
     ])
   })
 

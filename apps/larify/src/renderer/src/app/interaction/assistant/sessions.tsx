@@ -8,7 +8,7 @@ import {
 } from './session-directory'
 
 function createSession(): AssistantSessionState {
-  return { id: crypto.randomUUID(), heading: null }
+  return { id: crypto.randomUUID(), heading: null, persisted: false }
 }
 
 interface SessionsState {
@@ -43,7 +43,7 @@ export function AssistantSessionsProvider({
 
   const create = useCallback(() => {
     setState((current) => {
-      const draft = current.sessions.find(({ heading }) => heading === null)
+      const draft = current.sessions.find(({ persisted }) => !persisted)
       if (draft) return { ...current, activeId: draft.id }
 
       const session = createSession()
@@ -98,10 +98,28 @@ export function AssistantSessionsProvider({
       )
     }))
   }, [])
+  const setPersisted = useCallback((id: string) => {
+    setState((current) => ({
+      ...current,
+      sessions: current.sessions.map((session) =>
+        session.id === id ? { ...session, persisted: true } : session
+      )
+    }))
+  }, [])
   const activeSession = state.sessions.find(({ id }) => id === state.activeId)!
   const value = useMemo(
-    () => ({ ...state, directory, activeSession, create, select, loadMore, refresh, setHeading }),
-    [activeSession, create, directory, loadMore, refresh, select, setHeading, state]
+    () => ({
+      ...state,
+      directory,
+      activeSession,
+      create,
+      select,
+      loadMore,
+      refresh,
+      setPersisted,
+      setHeading
+    }),
+    [activeSession, create, directory, loadMore, refresh, select, setHeading, setPersisted, state]
   )
 
   return (

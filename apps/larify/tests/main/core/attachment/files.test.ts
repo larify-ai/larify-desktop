@@ -53,7 +53,7 @@ describe('attachments', () => {
 
     const saved = await saveAttachments('session', message('data:image/png;base64,aGVsbG8='))
     store.saveMessages('session', [saved])
-    const stored = store.loadSession('session')?.messages ?? []
+    const stored = store.loadVisibleMessages('session')
 
     expect(stored[0].parts[0]).toMatchObject({ type: 'file', url: saved.parts[0].url })
     await expect(loadAttachments(stored)).resolves.toMatchObject([

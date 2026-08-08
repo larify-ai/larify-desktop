@@ -28,7 +28,8 @@ beforeEach(() => {
 describe('session IPC', () => {
   it('registers and removes every handler', async () => {
     const sessions = {
-      loadSession: vi.fn(),
+      loadVisibleMessages: vi.fn(),
+      countMessages: vi.fn(),
       saveSession: vi.fn(),
       listSessions: vi.fn(),
       listCwds: vi.fn()
@@ -38,6 +39,7 @@ describe('session IPC', () => {
     expect([...mocks.handlers.keys()].sort()).toEqual([
       'session:cwds',
       'session:list',
+      'session:msg-count',
       'session:msgs'
     ])
 
@@ -49,15 +51,18 @@ describe('session IPC', () => {
     const store = {
       listCwds: vi.fn(() => ['/cwd']),
       listSessions: vi.fn(() => [{ id: 'session' }]),
-      loadSession: vi.fn(() => ({ messages: [{ id: 'message' }] }))
+      loadVisibleMessages: vi.fn(() => [{ id: 'message' }]),
+      countMessages: vi.fn(() => 42)
     }
     const queries = createSessionQueries(store as never)
 
     expect(queries['session:cwds']()).toEqual(['/cwd'])
     expect(queries['session:list']({}, '/cwd', 10, 20)).toEqual([{ id: 'session' }])
     expect(queries['session:msgs']({}, 'session', 30, 40)).toEqual([{ id: 'message' }])
+    expect(queries['session:msg-count']({}, 'session')).toBe(42)
     expect(store.listSessions).toHaveBeenCalledWith('/cwd', 10, 20)
-    expect(store.loadSession).toHaveBeenCalledWith('session', 30, 40)
+    expect(store.loadVisibleMessages).toHaveBeenCalledWith('session', 30, 40)
+    expect(store.countMessages).toHaveBeenCalledWith('session')
   })
 
   it('represents the default workspace with an empty cwd', () => {
@@ -65,7 +70,8 @@ describe('session IPC', () => {
     const store = {
       listCwds: vi.fn(() => [defaultCwd, '/cwd', defaultCwd]),
       listSessions: vi.fn(() => [{ id: 'session', cwd: defaultCwd }]),
-      loadSession: vi.fn()
+      loadVisibleMessages: vi.fn(),
+      countMessages: vi.fn()
     }
     const queries = createSessionQueries(store as never)
 

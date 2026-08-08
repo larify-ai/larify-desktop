@@ -51,20 +51,21 @@ describe('SessionStore', () => {
       parts: [{ type: 'file', filename: 'image.png', mediaType: 'image/png', url: 'path' }]
     }
     saveSessionMessages(store, 'chat', '/cwd', [attachment])
-    expect(store.loadSession('chat')?.title).toBe('未命名任务')
+    expect(store.listSessions('/cwd')[0]?.title).toBe('未命名任务')
     store.dispose()
   })
 
   it('uses a custom title when saving messages', async () => {
     const store = await createStore()
     saveSessionMessages(store, 'chat', '/cwd', [message('one', 'derived')], 'Custom title')
-    expect(store.loadSession('chat')?.title).toBe('Custom title')
+    expect(store.listSessions('/cwd')[0]?.title).toBe('Custom title')
     store.dispose()
   })
 
   it('returns null for a missing session', async () => {
     const store = await createStore()
-    expect(await store.loadSession('missing')).toBeNull()
+    expect(store.loadVisibleMessages('missing')).toEqual([])
+    expect(store.countMessages('missing')).toBe(0)
     store.dispose()
   })
 
@@ -73,16 +74,11 @@ describe('SessionStore', () => {
     const messages = [message('one', 'hello'), message('two', 'world')]
     await save(store, 'chat/one', messages, '/workspace', 'hello')
 
-    expect(await store.loadSession('chat/one')).toMatchObject({
+    expect(store.listSessions('/workspace')[0]).toMatchObject({
       id: 'chat/one',
-      messages,
       cwd: '/workspace'
     })
-    expect(await store.loadSession('chat/one')).toMatchObject({
-      id: 'chat/one',
-      title: 'hello',
-      cwd: '/workspace'
-    })
+    expect(store.loadVisibleMessages('chat/one')).toEqual(messages)
     store.dispose()
   })
 
@@ -95,25 +91,25 @@ describe('SessionStore', () => {
     first.dispose()
 
     const reopened = new SessionStore(path)
-    expect(reopened.loadSession('chat')).toMatchObject({
+    expect(reopened.listSessions('/workspace')[0]).toMatchObject({
       title: 'hello',
-      cwd: '/workspace',
-      messages: [message('one', 'hello')]
+      cwd: '/workspace'
     })
+    expect(reopened.loadVisibleMessages('chat')).toEqual([message('one', 'hello')])
     reopened.dispose()
   })
 
   it('appends messages while preserving metadata', async () => {
     const store = await createStore()
     await save(store, 'chat', [message('one', 'first')], '/one', 'first')
-    const first = await store.loadSession('chat')
+    const first = store.listSessions('/one')[0]
     await save(store, 'chat', [message('two', 'second')], '/two', 'second')
-    const second = await store.loadSession('chat')
+    const second = store.listSessions('/one')[0]
 
-    expect(await store.loadSession('chat')).toMatchObject({
-      messages: [message('one', 'first'), message('two', 'second')],
-      cwd: '/one'
-    })
+    expect(store.loadVisibleMessages('chat')).toEqual([
+      message('one', 'first'),
+      message('two', 'second')
+    ])
     expect(second?.createdAt).toBe(first?.createdAt)
     expect(second?.title).toBe('first')
     store.dispose()
@@ -131,10 +127,11 @@ describe('SessionStore', () => {
 
     await save(store, 'chat', [message('one', 'one'), message('two', 'changed')], '/cwd', 'chat')
 
-    expect(await store.loadSession('chat')).toMatchObject({
-      messages: [message('one', 'one'), message('two', 'changed'), message('three', 'three')],
-      cwd: '/cwd'
-    })
+    expect(store.loadVisibleMessages('chat')).toEqual([
+      message('one', 'one'),
+      message('two', 'changed'),
+      message('three', 'three')
+    ])
     store.dispose()
   })
 
@@ -144,10 +141,11 @@ describe('SessionStore', () => {
     await save(store, 'chat', messages, '/cwd', 'chat')
 
     store.renameSession('chat', 'renamed')
-    expect(store.loadSession('chat')).toMatchObject({ title: 'renamed', messages })
+    expect(store.listSessions('/cwd')[0]?.title).toBe('renamed')
+    expect(store.loadVisibleMessages('chat')).toEqual(messages)
 
     store.saveMessages('chat', [])
-    expect(store.loadSession('chat')).toMatchObject({ messages })
+    expect(store.loadVisibleMessages('chat')).toEqual(messages)
     store.dispose()
   })
 
@@ -157,10 +155,10 @@ describe('SessionStore', () => {
     store.saveStart('chat', compaction('compact', 'current query', 'previous summary'))
     save(store, 'chat', [message('two', 'new')], '/cwd', 'chat')
 
-    expect(store.loadSession('chat')).toMatchObject({
-      start: expect.any(Number),
-      messages: [message('one', 'old'), message('two', 'new')]
-    })
+    expect(store.loadVisibleMessages('chat')).toEqual([
+      message('one', 'old'),
+      message('two', 'new')
+    ])
     expect(store.loadMessages('chat')).toMatchObject([
       {
         role: 'user',
@@ -172,6 +170,15 @@ describe('SessionStore', () => {
     store.dispose()
   })
 
+  it('keeps the compaction cursor internal', async () => {
+    const store = await createStore()
+    save(store, 'chat', [message('one', 'old')], '/cwd', 'chat')
+    store.saveStart('chat', compaction('compact', 'query', 'summary'))
+
+    expect(store.listSessions('/cwd')[0]).not.toHaveProperty('start')
+    store.dispose()
+  })
+
   it('uses only the latest compaction for model messages', async () => {
     const store = await createStore()
     save(store, 'chat', [message('one', 'old')], '/cwd', 'chat')
@@ -180,7 +187,7 @@ describe('SessionStore', () => {
     store.saveStart('chat', compaction('latest', 'latest query', 'latest summary'))
     save(store, 'chat', [message('three', 'new')], '/cwd', 'chat')
 
-    expect(store.loadSession('chat')?.messages).toEqual([
+    expect(store.loadVisibleMessages('chat')).toEqual([
       message('one', 'old'),
       message('two', 'middle'),
       message('three', 'new')
@@ -192,6 +199,7 @@ describe('SessionStore', () => {
       },
       message('three', 'new')
     ])
+    expect(store.countMessages('chat')).toBe(3)
     store.dispose()
   })
 
@@ -201,11 +209,26 @@ describe('SessionStore', () => {
     store.saveStart('chat', compaction('compact', 'query', 'summary'))
     save(store, 'chat', [message('two', 'two'), message('three', 'three')], '/cwd', 'chat')
 
-    expect(store.loadSession('chat', 0, 2)?.messages).toEqual([
-      message('two', 'two'),
-      message('three', 'three')
+    expect(store.loadVisibleMessages('chat', 0, 2)).toEqual([
+      message('one', 'one'),
+      message('two', 'two')
     ])
-    expect(store.loadSession('chat', 2, 2)?.messages).toEqual([message('one', 'one')])
+    expect(store.loadVisibleMessages('chat', 2, 2)).toEqual([message('three', 'three')])
+    expect(store.countMessages('chat')).toBe(3)
+    store.dispose()
+  })
+
+  it('keeps count and pages aligned for a large conversation', async () => {
+    const store = await createStore()
+    const messages = Array.from({ length: 5000 }, (_, index) =>
+      message(`message-${index}`, `message ${index}`)
+    )
+    save(store, 'large', messages, '/cwd', 'large')
+
+    expect(store.countMessages('large')).toBe(5000)
+    expect(store.loadVisibleMessages('large', 0, 2)).toEqual(messages.slice(0, 2))
+    expect(store.loadVisibleMessages('large', 4998, 2)).toEqual(messages.slice(4998))
+    expect(store.loadVisibleMessages('large', 5000, 2)).toEqual([])
     store.dispose()
   })
 
@@ -260,10 +283,8 @@ describe('SessionStore', () => {
     const invalid = [{ ...message('two', 'invalid'), parts: [1n] }] as unknown as UIMessage[]
 
     expect(() => save(store, 'chat', invalid, '/changed', 'chat')).toThrow()
-    expect(await store.loadSession('chat')).toMatchObject({
-      messages: [message('one', 'valid')],
-      cwd: '/cwd'
-    })
+    expect(store.loadVisibleMessages('chat')).toEqual([message('one', 'valid')])
+    expect(store.listSessions('/cwd')[0]?.cwd).toBe('/cwd')
     store.dispose()
   })
 
@@ -282,6 +303,16 @@ describe('SessionStore', () => {
       },
       message('two', 'new')
     ])
+    store.dispose()
+  })
+
+  it('rejects a compaction for a missing session', async () => {
+    const store = await createStore()
+
+    expect(() => store.saveStart('missing', compaction('compact', 'query', 'summary'))).toThrow(
+      'Session not found: missing'
+    )
+    expect(store.loadMessages('missing')).toEqual([])
     store.dispose()
   })
 })

@@ -1,5 +1,5 @@
-import type { SessionStore } from './store'
 import { larifyPath } from '../../utils/app-paths'
+import type { SessionStore } from './store'
 
 export interface SessionQueries {
   'session:cwds': () => ReturnType<SessionStore['listCwds']>
@@ -14,7 +14,8 @@ export interface SessionQueries {
     id: string,
     offset?: number,
     limit?: number
-  ) => NonNullable<ReturnType<SessionStore['loadSession']>>['messages']
+  ) => ReturnType<SessionStore['loadVisibleMessages']>
+  'session:msg-count': (event: unknown, id: string) => ReturnType<SessionStore['countMessages']>
 }
 
 export function createSessionQueries(store: SessionStore): SessionQueries {
@@ -29,6 +30,7 @@ export function createSessionQueries(store: SessionStore): SessionQueries {
         cwd: session.cwd === defaultCwd ? '' : session.cwd
       })),
     'session:msgs': (_event: unknown, id: string, offset?: number, limit?: number) =>
-      store.loadSession(id, offset, limit)?.messages ?? []
+      store.loadVisibleMessages(id, offset, limit),
+    'session:msg-count': (_event: unknown, id: string) => store.countMessages(id)
   }
 }

@@ -7,19 +7,8 @@ export interface Session {
   id: string
   title: string
   cwd: string
-  start?: number
-  messages?: UIMessage[]
-  createdAt?: number
-  updatedAt?: number
-}
-
-interface SessionRow extends Record<string, SQLOutputValue> {
-  id: string
-  title: string
-  cwd: string
-  start: number | null
-  created_at: number
-  updated_at: number
+  createdAt: number
+  updatedAt: number
 }
 
 export class SessionStore implements Disposable {
@@ -55,35 +44,42 @@ export class SessionStore implements Disposable {
     `)
   }
 
-  loadSession(id: string, offset = 0, limit = 50): Session | null {
-    const row = this.getSession(id)
-    if (!row) return null
-
+  loadMessages(id: string): UIMessage[] {
     const messages = this.database
       .prepare(
-        `SELECT value FROM messages
-         WHERE session_id = ?
-           AND (? IS NULL OR position <> ?)
-         ORDER BY position DESC LIMIT ? OFFSET ?`
+        `SELECT messages.value FROM messages
+         JOIN sessions ON sessions.id = messages.session_id
+         WHERE messages.session_id = ?
+           AND messages.position >= COALESCE(sessions.start, -1)
+         ORDER BY messages.position`
       )
-      .all(id, row.start, row.start, limit, offset)
-    return {
-      ...toSession(row),
-      messages: messages.reverse().map(({ value }) => JSON.parse(value as string) as UIMessage)
-    }
+      .all(id)
+    return messages.map(({ value }) => JSON.parse(value as string) as UIMessage)
   }
 
-  loadMessages(id: string): UIMessage[] {
-    const session = this.getSession(id)
-    if (!session) return []
+  loadVisibleMessages(id: string, offset = 0, limit = 50): UIMessage[] {
     const messages = this.database
       .prepare(
-        `SELECT value FROM messages
-         WHERE session_id = ? AND position >= ?
-         ORDER BY position`
+        `SELECT messages.value FROM messages
+         JOIN sessions ON sessions.id = messages.session_id
+         WHERE messages.session_id = ?
+           AND (sessions.start IS NULL OR messages.position <> sessions.start)
+         ORDER BY messages.position ASC LIMIT ? OFFSET ?`
       )
-      .all(id, session.start ?? -1)
+      .all(id, limit, offset)
     return messages.map(({ value }) => JSON.parse(value as string) as UIMessage)
+  }
+
+  countMessages(id: string): number {
+    const row = this.database
+      .prepare(
+        `SELECT COUNT(*) AS count FROM messages
+         JOIN sessions ON sessions.id = messages.session_id
+         WHERE messages.session_id = ?
+           AND (sessions.start IS NULL OR messages.position <> sessions.start)`
+      )
+      .get(id)
+    return Number(row?.count ?? 0)
   }
 
   createSession(session: Pick<Session, 'id' | 'title' | 'cwd'>): void {
@@ -121,7 +117,9 @@ export class SessionStore implements Disposable {
 
   saveStart(sessionId: string, message: UIMessage): void {
     transaction(this.database, () => {
-      const current = this.getSession(sessionId)
+      const current = this.database
+        .prepare('SELECT start FROM sessions WHERE id = ?')
+        .get(sessionId)
       if (!current) throw new Error(`Session not found: ${sessionId}`)
       if (current.start !== null) {
         this.database
@@ -142,14 +140,15 @@ export class SessionStore implements Disposable {
   }
 
   listSessions(cwd: string, offset = 0, limit = 10): Session[] {
-    const rows = this.database
+    return this.database
       .prepare(
-        `SELECT id, title, cwd, start, created_at, updated_at
+        `SELECT id, title, cwd,
+                created_at AS createdAt,
+                updated_at AS updatedAt
          FROM sessions WHERE cwd = ?
          ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?`
       )
-      .all(cwd, limit, offset) as SessionRow[]
-    return rows.map(toSession)
+      .all(cwd, limit, offset) as Array<Session & Record<string, SQLOutputValue>>
   }
 
   listCwds(): string[] {
@@ -161,25 +160,5 @@ export class SessionStore implements Disposable {
 
   dispose(): void {
     this.database.close()
-  }
-
-  private getSession(id: string): SessionRow | undefined {
-    return this.database
-      .prepare(
-        `SELECT id, title, cwd, start, created_at, updated_at
-         FROM sessions WHERE id = ?`
-      )
-      .get(id) as SessionRow | undefined
-  }
-}
-
-function toSession(row: SessionRow): Session {
-  return {
-    id: row.id,
-    title: row.title,
-    cwd: row.cwd,
-    start: row.start ?? undefined,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at
   }
 }

@@ -29,13 +29,11 @@ const message: UIMessage = {
 const input = { sessionId: 'session', message, cwd: 'cwd' }
 
 const sessions = {
-  loadSession: vi.fn(),
   loadMessages: vi.fn(() => [])
 }
 
 beforeEach(() => {
   vi.clearAllMocks()
-  sessions.loadSession.mockReturnValue(null)
   sessions.loadMessages.mockReturnValue([])
   mocks.toModel.mockResolvedValue([])
   mocks.run.mockResolvedValue(undefined)

@@ -3,7 +3,7 @@ import { BrowserWindow, nativeTheme, screen } from 'electron'
 import { is } from '@electron-toolkit/utils'
 import { resourcePath } from '../utils/app-paths'
 
-export const titleBarHeight = 45
+export const titleBarHeight = 46
 
 export function createWindow(): BrowserWindow {
   const { workArea } = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
@@ -18,7 +18,8 @@ export function createWindow(): BrowserWindow {
     y: Math.round(workArea.y + (workArea.height - height) / 2),
     show: false,
     title: 'Larify',
-    titleBarStyle: 'hidden',
+    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden',
+    ...(process.platform === 'darwin' ? { trafficLightPosition: { x: 16, y: 16 } } : {}),
     ...(process.platform === 'win32'
       ? {
           icon: resourcePath('icon.png'),
@@ -35,10 +36,10 @@ export function createWindow(): BrowserWindow {
     }
   })
   window.on('ready-to-show', () => window.show())
-  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
-    void window.loadURL(process.env['ELECTRON_RENDERER_URL'])
-  } else {
-    void window.loadFile(join(__dirname, '../renderer/index.html'))
-  }
+  const loading =
+    is.dev && process.env['ELECTRON_RENDERER_URL']
+      ? window.loadURL(process.env['ELECTRON_RENDERER_URL'])
+      : window.loadFile(join(__dirname, '../renderer/index.html'))
+  void loading.catch((error) => console.error('Failed to load renderer:', error))
   return window
 }

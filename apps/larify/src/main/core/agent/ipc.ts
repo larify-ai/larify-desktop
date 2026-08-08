@@ -6,10 +6,13 @@ import { Agent, type AgentInput } from './agent'
 export function registerAgentHandlers(agent: Agent): Disposable {
   ipcMain.handle('agent:send', (event, input: AgentInput) => {
     const channel = input.sessionId
+    const send = (name: string, ...args: unknown[]): void => {
+      if (!event.sender.isDestroyed()) event.sender.send(name, ...args)
+    }
     return agent.send(input, {
-      chunk: (chunk) => event.sender.send(`agent:chunk:${channel}`, chunk),
-      error: (error) => event.sender.send(`agent:error:${channel}`, errorMessage(error)),
-      end: () => event.sender.send(`agent:end:${channel}`)
+      chunk: (chunk) => send(`agent:chunk:${channel}`, chunk),
+      error: (error) => send(`agent:error:${channel}`, errorMessage(error)),
+      end: () => send(`agent:end:${channel}`)
     })
   })
 

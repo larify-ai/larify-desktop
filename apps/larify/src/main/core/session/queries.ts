@@ -1,4 +1,5 @@
 import type { SessionStore } from './store'
+import { larifyPath } from '../../utils/app-paths'
 
 export interface SessionQueries {
   'session:cwds': () => ReturnType<SessionStore['listCwds']>
@@ -17,10 +18,13 @@ export interface SessionQueries {
 }
 
 export function createSessionQueries(store: SessionStore): SessionQueries {
+  const defaultCwd = larifyPath('workspace')
   return {
-    'session:cwds': () => store.listCwds(),
+    'session:cwds': () => [
+      ...new Set(store.listCwds().map((cwd) => (cwd === defaultCwd ? '' : cwd)))
+    ],
     'session:list': (_event: unknown, cwd: string, offset?: number, limit?: number) =>
-      store.listSessions(cwd, offset, limit),
+      store.listSessions(cwd || defaultCwd, offset, limit),
     'session:msgs': (_event: unknown, id: string, offset?: number, limit?: number) =>
       store.loadSession(id, offset, limit)?.messages ?? []
   }

@@ -26,6 +26,7 @@ beforeEach(() => {
 describe('agent IPC', () => {
   it('assembles a request and forwards stream events', () => {
     const send = vi.fn()
+    const isDestroyed = vi.fn(() => false)
     const agent = { send: vi.fn(), cancel: vi.fn() }
     registerAgentHandlers(agent as never)
 
@@ -35,7 +36,7 @@ describe('agent IPC', () => {
       message: { id: 'message', role: 'user', parts: [] },
       modelConfig: { modelId: 'deepseek-v4-pro', thinking: 'enabled' }
     }
-    mocks.handlers.get('agent:send')!({ sender: { send } } as never, request as never)
+    mocks.handlers.get('agent:send')!({ sender: { send, isDestroyed } } as never, request as never)
 
     expect(agent.send).toHaveBeenCalledOnce()
     const [input, sink] = agent.send.mock.calls[0]
@@ -47,6 +48,23 @@ describe('agent IPC', () => {
     expect(send).toHaveBeenNthCalledWith(1, 'agent:chunk:session', { type: 'start' })
     expect(send).toHaveBeenNthCalledWith(2, 'agent:error:session', 'failed')
     expect(send).toHaveBeenNthCalledWith(3, 'agent:end:session')
+  })
+
+  it('ignores stream events after the renderer is destroyed', () => {
+    const send = vi.fn()
+    const agent = { send: vi.fn(), cancel: vi.fn() }
+    registerAgentHandlers(agent as never)
+
+    mocks.handlers.get('agent:send')!(
+      { sender: { send, isDestroyed: () => true } } as never,
+      { sessionId: 'session' } as never
+    )
+
+    const sink = agent.send.mock.calls[0][1]
+    sink.chunk({ type: 'start' })
+    sink.error(new Error('failed'))
+    sink.end()
+    expect(send).not.toHaveBeenCalled()
   })
 
   it('forwards cancellation by session', () => {

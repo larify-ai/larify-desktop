@@ -18,6 +18,7 @@ vi.mock('electron', () => ({
 
 import { registerSessionHandlers } from '../../../../src/main/core/session/ipc'
 import { createSessionQueries } from '../../../../src/main/core/session/queries'
+import { larifyPath } from '../../../../src/main/utils/app-paths'
 
 beforeEach(() => {
   mocks.handlers.clear()
@@ -57,5 +58,19 @@ describe('session IPC', () => {
     expect(queries['session:msgs']({}, 'session', 30, 40)).toEqual([{ id: 'message' }])
     expect(store.listSessions).toHaveBeenCalledWith('/cwd', 10, 20)
     expect(store.loadSession).toHaveBeenCalledWith('session', 30, 40)
+  })
+
+  it('represents the default workspace with an empty cwd', () => {
+    const defaultCwd = larifyPath('workspace')
+    const store = {
+      listCwds: vi.fn(() => [defaultCwd, '/cwd', defaultCwd]),
+      listSessions: vi.fn(() => []),
+      loadSession: vi.fn()
+    }
+    const queries = createSessionQueries(store as never)
+
+    expect(queries['session:cwds']()).toEqual(['', '/cwd'])
+    queries['session:list']({}, '')
+    expect(store.listSessions).toHaveBeenCalledWith(defaultCwd, undefined, undefined)
   })
 })

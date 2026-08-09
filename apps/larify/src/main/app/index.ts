@@ -5,6 +5,7 @@ import { installShutdown } from './shutdown'
 import { registerSession } from '../core/session/open'
 import { registerAgent } from '../core/agent'
 import { registerAttachment } from '../core/attachment'
+import { registerPlugin } from '../core/plugin'
 import { registerTheme } from '../theme'
 import { registerDialog } from '../dialog'
 import { openMainWindow, registerWindow } from '../window'
@@ -23,6 +24,7 @@ function createApplication(electron: App): Application {
   registerDialog(application)
   registerSession(application)
   registerAttachment(application)
+  registerPlugin(application)
   registerAgent(application)
   return application
 }

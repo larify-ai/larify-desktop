@@ -1,4 +1,4 @@
-import type { UIMessage } from 'ai'
+import type { ToolSet, UIMessage } from 'ai'
 import { describe, expect, it } from 'vitest'
 import {
   prepareMessages,
@@ -156,5 +156,44 @@ describe('message sanitizer', () => {
       }
     ])
     expect(message.parts).toHaveLength(2)
+  })
+
+  it('uses the stored diagnostics when replaying historical tool output', async () => {
+    let currentDiagnostics = 'diagnostics from the changed file'
+    const tools = {
+      fs_write: {
+        inputSchema: {} as never,
+        toModelOutput: ({ output }: { output: { summary: string; diagnostics?: string } }) => ({
+          type: 'text',
+          value: output.summary + (output.diagnostics ?? currentDiagnostics)
+        })
+      }
+    } as unknown as ToolSet
+    const message = {
+      id: 'assistant-1',
+      role: 'assistant',
+      parts: [
+        {
+          type: 'tool-fs_write',
+          toolCallId: 'call-1',
+          state: 'output-available',
+          input: { path: 'sample.ts', content: 'old' },
+          output: {
+            summary: 'File updated.',
+            diagnostics: '\n- Line 1: stored diagnostic',
+            patch: 'large patch that must not reach the model'
+          }
+        }
+      ]
+    } as UIMessage
+
+    const first = await toModelMessages([message], tools)
+    currentDiagnostics = 'different diagnostics after the file changed'
+    const second = await toModelMessages([message], tools)
+
+    expect(second).toEqual(first)
+    expect(JSON.stringify(second)).toContain('stored diagnostic')
+    expect(JSON.stringify(second)).not.toContain('large patch')
+    expect(JSON.stringify(second)).not.toContain(currentDiagnostics)
   })
 })

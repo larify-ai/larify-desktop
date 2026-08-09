@@ -1,7 +1,7 @@
 import { readdir, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { z } from 'zod'
-import { defineTool } from '../../../shared/extension/tool'
+import { defineTool } from '../../../main/core/plugin/protocol'
 
 const inputSchema = z
   .object({

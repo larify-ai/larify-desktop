@@ -17,11 +17,7 @@ export function wrapTool(tool: Tool): Tool {
     ...tool,
     inputSchema: tool.inputSchema
       .extend({
-        _title: z
-          .string()
-          .trim()
-          .min(1)
-          .describe('Short user-facing phrase describing the step, required')
+        _title: z.string().trim().min(1).describe('Short user-facing phrase describing the step')
       })
       .strict(),
     execute:

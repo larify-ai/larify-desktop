@@ -2,7 +2,7 @@ import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { createTwoFilesPatch } from 'diff'
 import { z } from 'zod'
-import { defineTool } from '../../../shared/extension/tool'
+import { defineTool } from '../../../main/core/plugin/protocol'
 import { applyLineBreaks, dominantLineBreak, normalizeLineBreaks } from '../../../main/utils/text'
 import { decodeText } from './encoding'
 import { formatFileDiagnostics, provideFileDiagnostics } from './diagnostics'
@@ -53,7 +53,7 @@ export const writeFileTool = defineTool({
       await mkdir(dirname(target), { recursive: true })
       await writeFile(target, applyLineBreaks(content, lineBreak))
       markRead(ctx.sessionId, target, (await stat(target)).mtimeMs)
-      const diagnostics = await provideFileDiagnostics(target)
+      const diagnostics = formatFileDiagnostics(await provideFileDiagnostics(target))
 
       const type = oldContent === null ? 'create' : 'update'
       const patch = createTwoFilesPatch(target, target, oldContent ?? '', content, '', '', {
@@ -68,12 +68,12 @@ export const writeFileTool = defineTool({
           type === 'create'
             ? `File created successfully at: ${target}`
             : `The file ${target} has been updated successfully.`,
-        ...(diagnostics.length ? { diagnostics } : {})
+        ...(diagnostics ? { diagnostics } : {})
       }
     })
   },
   toModelOutput: (output) => ({
     type: 'text',
-    value: output.summary + formatFileDiagnostics(output.diagnostics)
+    value: output.summary + (output.diagnostics ?? '')
   })
 })

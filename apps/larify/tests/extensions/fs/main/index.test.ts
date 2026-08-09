@@ -1,26 +1,17 @@
 import { describe, expect, it } from 'vitest'
-import {
-  BuiltinExtensionSource,
-  builtinModules,
-  ExtensionHost
-} from '../../../../src/main/core/extension'
+import fsPlugin from '../../../../src/extensions/fs/main'
+import { PluginHost } from '../../../../src/main/core/plugin'
+import { Registry } from '../../../../src/main/infra/registry'
 
 describe('FS extension', () => {
-  it('discovers and registers its tools', async () => {
-    const modules = Object.fromEntries(
-      Object.entries(builtinModules).filter(([path]) =>
-        path.replaceAll('\\', '/').includes('/extensions/fs/main/')
-      )
-    )
-    const [loader] = await new BuiltinExtensionSource(modules).discover()
-    const extension = await loader.load()
-    const host = new ExtensionHost()
+  it('registers its tools', async () => {
+    const host = new PluginHost(new Registry())
 
-    expect(extension.name).toBe('fs')
-    await host.activate(extension)
+    expect(fsPlugin.manifest.id).toBe('fs')
+    await host.activate(fsPlugin)
 
     for (const name of ['read', 'edit', 'write', 'list', 'glob', 'grep']) {
-      expect(host.getTool('fs', name)).toBeDefined()
+      expect(host.getTools('fs')?.get(`fs_${name}`)).toBeDefined()
     }
   })
 })

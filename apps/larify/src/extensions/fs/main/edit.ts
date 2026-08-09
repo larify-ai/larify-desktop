@@ -2,7 +2,7 @@ import { readFile, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { createTwoFilesPatch } from 'diff'
 import { z } from 'zod'
-import { defineTool } from '../../../shared/extension/tool'
+import { defineTool } from '../../../main/core/plugin/protocol'
 import { applyLineBreaks, dominantLineBreak, normalizeLineBreaks } from '../../../main/utils/text'
 import { decodeText } from './encoding'
 import { formatFileDiagnostics, provideFileDiagnostics } from './diagnostics'
@@ -61,7 +61,7 @@ export const editFileTool = defineTool({
       const updated = content.split(old_string).join(new_string)
       await writeFile(target, applyLineBreaks(updated, lineBreak))
       markRead(ctx.sessionId, target, (await stat(target)).mtimeMs)
-      const diagnostics = await provideFileDiagnostics(target)
+      const diagnostics = formatFileDiagnostics(await provideFileDiagnostics(target))
 
       const patch = createTwoFilesPatch(target, target, content, updated, '', '', { context: 3 })
       return {
@@ -69,12 +69,12 @@ export const editFileTool = defineTool({
         path: target,
         patch,
         summary: replace_all ? `Edited ${target} (${count} replacements).` : `Edited ${target}.`,
-        ...(diagnostics.length ? { diagnostics } : {})
+        ...(diagnostics ? { diagnostics } : {})
       }
     })
   },
   toModelOutput: (output) => ({
     type: 'text',
-    value: output.summary + formatFileDiagnostics(output.diagnostics)
+    value: output.summary + (output.diagnostics ?? '')
   })
 })

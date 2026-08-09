@@ -1,4 +1,4 @@
-import type { Extension } from '@shared/extension'
+import type { Plugin } from '../../../main/core/plugin/protocol'
 import { readFileTool } from './read'
 import { editFileTool } from './edit'
 import { globFilesTool } from './glob'
@@ -6,17 +6,19 @@ import { grepFilesTool } from './grep'
 import { lsTool } from './ls'
 import { writeFileTool } from './write'
 
-const extension: Extension = {
-  name: 'fs',
-  description: 'Read, edit, write, list, glob, and grep files',
-  activate(app) {
-    app.registerTool('read', readFileTool)
-    app.registerTool('edit', editFileTool)
-    app.registerTool('write', writeFileTool)
-    app.registerTool('list', lsTool)
-    app.registerTool('glob', globFilesTool)
-    app.registerTool('grep', grepFilesTool)
+const plugin: Plugin = {
+  manifest: {
+    id: 'fs',
+    description: 'Read, edit, write, list, glob, and grep files'
+  },
+  activate(context) {
+    context.registerTool('read', readFileTool)
+    context.registerTool('edit', editFileTool)
+    context.registerTool('write', writeFileTool)
+    context.registerTool('list', lsTool)
+    context.registerTool('glob', globFilesTool)
+    context.registerTool('grep', grepFilesTool)
   }
 }
 
-export default extension
+export default plugin

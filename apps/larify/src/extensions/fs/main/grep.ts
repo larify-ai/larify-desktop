@@ -3,7 +3,7 @@ import path from 'node:path'
 import iconv from 'iconv-lite'
 import { z } from 'zod'
 import { trimTrailingLineBreak } from '../../../main/utils/text'
-import { defineTool } from '../../../shared/extension/tool'
+import { defineTool } from '../../../main/core/plugin/protocol'
 import { guessEncoding } from './encoding'
 import { runRipgrepStream, toAbsolutePath } from './ripgrep'
 

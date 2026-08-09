@@ -2,6 +2,7 @@ import {
   convertToModelMessages,
   safeValidateUIMessages,
   type ModelMessage,
+  type ToolSet,
   type UIMessage
 } from 'ai'
 
@@ -63,6 +64,9 @@ export async function prepareMessages(messages: UIMessage[]): Promise<UIMessage[
   return valid
 }
 
-export function toModelMessages(messages: UIMessage[]): Promise<ModelMessage[]> {
-  return convertToModelMessages(messages.map(replaceFilesWithPaths))
+export function toModelMessages(
+  messages: UIMessage[],
+  tools: ToolSet = {}
+): Promise<ModelMessage[]> {
+  return convertToModelMessages(messages.map(replaceFilesWithPaths), { tools })
 }

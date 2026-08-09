@@ -1,7 +1,7 @@
 import { stat } from 'node:fs/promises'
 import path from 'node:path'
 import { z } from 'zod'
-import { defineTool, type ToolRunContext } from '../../../shared/extension/tool'
+import { defineTool, type ToolRunContext } from '../../../main/core/plugin/protocol'
 import { normalizedChunks } from './stream'
 import { markRead } from './state'
 

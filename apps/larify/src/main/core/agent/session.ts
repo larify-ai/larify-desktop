@@ -9,7 +9,7 @@ export async function runAgentSession(
   onChunk?: (chunk: UIMessageChunk) => void,
   onMessage?: (message: UIMessage) => void
 ): Promise<UIMessage[]> {
-  const agentStream = runAgent(await toModelMessages(messages), options)
+  const agentStream = runAgent(await toModelMessages(messages, options.tools), options)
   let finalMessages = messages
   const stream = createUIMessageStream({
     originalMessages: messages,

@@ -127,12 +127,12 @@ describe('file diagnostics', () => {
     const root = mkdtempSync(join(tmpdir(), 'larify-file-diagnostics-'))
     try {
       await withProviders([provider], async () => {
-        const result = await callTool<{ summary: string; diagnostics: unknown[] }>(writeFileTool, {
+        const result = await callTool<{ summary: string; diagnostics: string }>(writeFileTool, {
           file_path: join(root, 'subject.md'),
           content: '# Subject'
         })
 
-        expect(result.diagnostics).toHaveLength(1)
+        expect(result.diagnostics).toBe('\n\nDiagnostics:\n- Line 1 Warning: Split this document.')
         expect(writeFileTool.toModelOutput?.({ output: result } as never)).toEqual({
           type: 'text',
           value: `${result.summary}\n\nDiagnostics:\n- Line 1 Warning: Split this document.`
@@ -151,14 +151,14 @@ describe('file diagnostics', () => {
       markRead('test', file, statSync(file).mtimeMs)
 
       await withProviders([provider], async () => {
-        const result = await callTool<{ summary: string; diagnostics: unknown[] }>(editFileTool, {
+        const result = await callTool<{ summary: string; diagnostics: string }>(editFileTool, {
           file_path: file,
           old_string: 'before',
           new_string: 'after',
           replace_all: false
         })
 
-        expect(result.diagnostics).toHaveLength(1)
+        expect(result.diagnostics).toBe('\n\nDiagnostics:\n- Line 1 Warning: Split this document.')
         expect(editFileTool.toModelOutput?.({ output: result } as never)).toEqual({
           type: 'text',
           value: `${result.summary}\n\nDiagnostics:\n- Line 1 Warning: Split this document.`

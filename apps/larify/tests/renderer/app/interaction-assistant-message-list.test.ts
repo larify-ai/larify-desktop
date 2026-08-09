@@ -29,12 +29,14 @@ import { AssistantMessageList } from '../../../src/renderer/src/app/interaction/
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
 interface VirtuosoProps {
+  className: string
   totalCount: number
   defaultItemHeight: number
   initialTopMostItemIndex: number
   increaseViewportBy: { top: number; bottom: number }
   components: {
     ScrollSeekPlaceholder: React.ComponentType<{ height: number }>
+    Footer: React.ComponentType
   }
   scrollSeekConfiguration: {
     enter(velocity: number): boolean
@@ -74,6 +76,7 @@ describe('interaction assistant message list', () => {
     expect(props.defaultItemHeight).toBe(80)
     expect(props.initialTopMostItemIndex).toBe(4999)
     expect(props.computeItemKey(4999)).toBe('latest')
+    expect(props.className).toContain('[scrollbar-gutter:stable_both-edges]')
   })
 
   it('prefetches pages around the visible range without changing the total count', async () => {
@@ -207,6 +210,19 @@ describe('interaction assistant message list', () => {
     expect(container.querySelector<HTMLElement>('[data-scroll-placeholder]')?.style.height).toBe(
       '80px'
     )
+  })
+
+  it('reserves the rounded composer overlap below the final message', async () => {
+    await render({
+      messages: [message('latest')],
+      initialMessageCount: 1,
+      recentStart: 0
+    })
+
+    await act(async () =>
+      root.render(createElement((captured.props as VirtuosoProps).components.Footer))
+    )
+    expect(container.firstElementChild?.className).toContain('h-30')
   })
 })
 

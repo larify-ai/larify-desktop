@@ -129,21 +129,17 @@ export function AssistantComposer({
   }
 
   return (
-    <div className="mx-auto w-full px-6 pb-4 lg:w-4/5">
+    <div className="-mt-4 mx-auto w-full max-w-4xl px-6 pb-4">
       <div
         ref={inputRef}
-        className="w-full overflow-hidden rounded-2xl bg-card shadow-sm"
+        className="relative z-10 w-full overflow-hidden rounded-2xl bg-card shadow-sm"
       >
         {showWorkspace && (
           <div className="w-full">
             <WorkspaceSelector cwd={cwd} disabled={running} onChange={onCwdChange} />
           </div>
         )}
-        <PromptInput
-          onSubmit={submit}
-          multiple
-          className="[&_[data-slot=input-group]]:rounded-2xl"
-        >
+        <PromptInput onSubmit={submit} multiple className="[&_[data-slot=input-group]]:rounded-2xl">
           <AttachmentList />
           <PromptInputBody>
             <PromptInputTextarea

@@ -13,7 +13,7 @@ const estimatedMessageHeight = 80
 function ScrollPlaceholder({ height }: { height: number }): React.JSX.Element {
   return (
     <div
-      className="mx-auto flex w-full flex-col justify-center gap-3 px-6 py-3 lg:w-4/5"
+      className="mx-auto flex w-full max-w-4xl flex-col justify-center gap-3 px-6 py-3"
       style={{ height }}
       data-scroll-placeholder
       aria-hidden="true"
@@ -22,6 +22,10 @@ function ScrollPlaceholder({ height }: { height: number }): React.JSX.Element {
       <div className="h-3 w-3/4 rounded bg-muted-foreground/15" />
     </div>
   )
+}
+
+function MessageListFooter(): React.JSX.Element {
+  return <div className="h-30" aria-hidden="true" />
 }
 
 export function AssistantMessageList({
@@ -70,12 +74,12 @@ export function AssistantMessageList({
       <Virtuoso
         ref={list}
         role="log"
-        className="size-full"
+        className="size-full [scrollbar-gutter:stable_both-edges]"
         totalCount={totalCount}
         defaultItemHeight={estimatedMessageHeight}
         initialTopMostItemIndex={Math.max(initialMessageCount - 1, 0)}
         increaseViewportBy={{ top: 600, bottom: 600 }}
-        components={{ ScrollSeekPlaceholder: ScrollPlaceholder }}
+        components={{ ScrollSeekPlaceholder: ScrollPlaceholder, Footer: MessageListFooter }}
         scrollSeekConfiguration={{
           enter: (velocity) => Math.abs(velocity) > 1000,
           exit: (velocity) => Math.abs(velocity) < 100
@@ -87,7 +91,7 @@ export function AssistantMessageList({
         itemContent={(index) => {
           const message = item(index)
           return message ? (
-            <div className="mx-auto w-full min-w-0 px-6 py-3 lg:w-4/5">
+            <div className="mx-auto w-full max-w-4xl min-w-0 px-6 py-3">
               <Message message={message} streaming={live && message.id === messages.at(-1)?.id} />
             </div>
           ) : (
@@ -100,7 +104,7 @@ export function AssistantMessageList({
           type="button"
           variant="outline"
           size="icon"
-          className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full dark:bg-background dark:hover:bg-muted"
+          className="absolute bottom-10 left-1/2 -translate-x-1/2 rounded-full dark:bg-background dark:hover:bg-muted"
           aria-label="返回底部"
           onClick={scrollToBottom}
         >

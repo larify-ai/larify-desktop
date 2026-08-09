@@ -7,21 +7,21 @@ export function defineService(): ServiceToken {
 }
 
 export class Registry {
-  private readonly services = new Map<ServiceToken, Disposable>()
+  private readonly services = new Map<ServiceToken, unknown>()
 
-  register(token: ServiceToken, value: Disposable): void {
+  register<T>(token: ServiceToken, value: T): void {
     if (this.services.has(token)) throw new Error('Service is already registered.')
     this.services.set(token, value)
   }
 
-  get<T extends Disposable>(token: ServiceToken): T | undefined {
+  get<T>(token: ServiceToken): T | undefined {
     return this.services.get(token) as T | undefined
   }
 
   async dispose(token: ServiceToken): Promise<void> {
     const service = this.services.get(token)
     this.services.delete(token)
-    await service?.dispose()
+    if (isDisposable(service)) await service.dispose()
   }
 
   async disposeAll(): Promise<void> {
@@ -33,4 +33,8 @@ export class Registry {
       }
     }
   }
+}
+
+function isDisposable(value: unknown): value is Disposable {
+  return value != null && typeof (value as Partial<Disposable>).dispose === 'function'
 }

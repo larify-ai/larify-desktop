@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from 'react'
 import { Chat } from '@ai-sdk/react'
-import type { UIMessage } from 'ai'
+import { lastAssistantMessageIsCompleteWithToolCalls, type UIMessage } from 'ai'
 import { createIpcTransport } from './transport'
 import { readModelConfig } from './model-config'
 import { AssistantChat } from './chat'
@@ -37,6 +37,7 @@ export function AssistantSession({
       chat: new Chat<UIMessage>({
         id,
         messages: initialMessages,
+        sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
         transport: createIpcTransport(
           () => transportCwd,
           () => readModelConfig(localStorage),

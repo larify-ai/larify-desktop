@@ -42,6 +42,94 @@ describe('interaction assistant message view', () => {
     expect(markup).toContain('fs_read')
   })
 
+  it('renders an ask-user communication card', () => {
+    const markup = render(
+      message([
+        {
+          type: 'dynamic-tool',
+          toolName: 'agent_ask_user',
+          toolCallId: 'call-1',
+          state: 'input-available',
+          input: {
+            message: 'Choose a mode',
+            options: [
+              { label: 'Fast', description: 'Finish sooner' },
+              { label: 'Safe', description: 'Check more carefully' }
+            ]
+          }
+        }
+      ])
+    )
+
+    expect(markup).toContain('Choose a mode')
+    expect(markup).toContain('Fast')
+    expect(markup).toContain('Finish sooner')
+    expect(markup).toContain('提交')
+    expect(markup).toContain('agent_ask_user')
+  })
+
+  it('collapses a submitted ask-user card', () => {
+    const markup = render(
+      message([
+        {
+          type: 'dynamic-tool',
+          toolName: 'agent_ask_user',
+          toolCallId: 'call-1',
+          state: 'output-available',
+          input: {
+            message: 'Choose a mode',
+            options: [{ label: 'Safe' }]
+          },
+          output: { answers: ['Safe'] }
+        }
+      ])
+    )
+
+    expect(markup).not.toContain('Choose a mode')
+    expect(markup).not.toContain('已回答')
+    expect(markup).toContain('agent_ask_user')
+  })
+
+  it('filters model-provided custom options because free text is always available', () => {
+    const markup = render(
+      message([
+        {
+          type: 'dynamic-tool',
+          toolName: 'agent_ask_user',
+          toolCallId: 'call-1',
+          state: 'input-available',
+          input: {
+            message: 'Choose a mode',
+            options: [
+              { label: 'Safe' },
+              { label: '其它', description: 'Describe another approach' }
+            ]
+          }
+        }
+      ])
+    )
+
+    expect(markup).not.toContain('其它')
+    expect(markup).toContain('其他或补充说明（可选）')
+  })
+
+  it('uses a stable waiting label while ask-user input is streaming', () => {
+    const markup = render(
+      message([
+        {
+          type: 'dynamic-tool',
+          toolName: 'agent_ask_user',
+          toolCallId: 'call-1',
+          state: 'input-streaming',
+          input: {}
+        }
+      ])
+    )
+
+    expect(markup).toContain('等待回答')
+    expect(markup).not.toContain('等待中')
+  })
+
   it('keeps user attachments aligned with user content', () => {
     const markup = render(
       message(

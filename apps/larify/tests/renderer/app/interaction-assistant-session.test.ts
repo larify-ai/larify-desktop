@@ -2,7 +2,7 @@
 
 import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
-import type { ChatTransport, UIMessage } from 'ai'
+import { lastAssistantMessageIsCompleteWithToolCalls, type ChatTransport, type UIMessage } from 'ai'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
@@ -57,12 +57,20 @@ describe('AssistantSession', () => {
       )
     })
     const initial = mocks.assistant.mock.calls.at(-1)![0] as {
-      chat: { options: { transport: ChatTransport<UIMessage> } }
+      chat: {
+        options: {
+          sendAutomaticallyWhen: typeof lastAssistantMessageIsCompleteWithToolCalls
+          transport: ChatTransport<UIMessage>
+        }
+      }
       title: string
       onCwdChange: (cwd: string) => void
     }
 
     expect(initial.title).toBe('Renamed')
+    expect(initial.chat.options.sendAutomaticallyWhen).toBe(
+      lastAssistantMessageIsCompleteWithToolCalls
+    )
     await act(async () => initial.onCwdChange('D:\\Workspace\\project'))
     const changed = mocks.assistant.mock.calls.at(-1)![0] as { chat: unknown; cwd: string }
 

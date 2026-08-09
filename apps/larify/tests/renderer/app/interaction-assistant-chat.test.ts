@@ -6,20 +6,28 @@ import type { UIMessage } from 'ai'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
+  addToolOutput: vi.fn(),
   composer: vi.fn(),
   list: vi.fn(),
   sendMessage: vi.fn(),
   stop: vi.fn(),
+  toolOutput: undefined as
+    ((tool: string, toolCallId: string, output: unknown) => void) | undefined,
   useChat: vi.fn()
 }))
 
 vi.mock('@ai-sdk/react', () => ({ useChat: mocks.useChat }))
-vi.mock('../../../src/renderer/src/app/interaction/assistant/message-list', () => ({
-  AssistantMessageList: (props: unknown) => {
-    mocks.list(props)
-    return null
+vi.mock('../../../src/renderer/src/app/interaction/assistant/message-list', async () => {
+  const { useToolOutput } =
+    await import('../../../src/renderer/src/app/interaction/assistant/tool-output')
+  return {
+    AssistantMessageList: (props: unknown) => {
+      mocks.list(props)
+      mocks.toolOutput = useToolOutput()
+      return null
+    }
   }
-}))
+})
 vi.mock('../../../src/renderer/src/app/interaction/assistant/composer', () => ({
   AssistantComposer: (props: unknown) => {
     mocks.composer(props)
@@ -40,6 +48,7 @@ describe('AssistantChat', () => {
     document.body.append(container)
     root = createRoot(container)
     mocks.useChat.mockReturnValue({
+      addToolOutput: mocks.addToolOutput,
       messages: [
         message('user', ['first', ' message']),
         message('assistant', ['answer']),
@@ -101,6 +110,13 @@ describe('AssistantChat', () => {
     expect(mocks.sendMessage).toHaveBeenCalledWith({ text: 'hello', files: [] })
     expect(mocks.stop).toHaveBeenCalledOnce()
 
+    mocks.toolOutput?.('agent_ask_user', 'call-1', ['Safe'])
+    expect(mocks.addToolOutput).toHaveBeenCalledWith({
+      tool: 'agent_ask_user',
+      toolCallId: 'call-1',
+      output: ['Safe']
+    })
+
     onHeadingChange.mockClear()
     await act(async () =>
       root.render(
@@ -137,6 +153,7 @@ describe('AssistantChat', () => {
 
   it('does not create a heading for an empty session', async () => {
     mocks.useChat.mockReturnValue({
+      addToolOutput: mocks.addToolOutput,
       messages: [],
       sendMessage: mocks.sendMessage,
       status: 'ready',
@@ -160,6 +177,7 @@ describe('AssistantChat', () => {
 
   it('keeps an unnamed heading when the first user message has no text', async () => {
     mocks.useChat.mockReturnValue({
+      addToolOutput: mocks.addToolOutput,
       messages: [{ id: 'attachment', role: 'user', parts: [] }, message('user', ['later title'])],
       sendMessage: mocks.sendMessage,
       status: 'ready',
@@ -195,6 +213,7 @@ describe('AssistantChat', () => {
 
     await act(async () => root?.render(createElement(AssistantChat, props)))
     mocks.useChat.mockReturnValue({
+      addToolOutput: mocks.addToolOutput,
       messages: [message('user', ['new message'])],
       sendMessage: mocks.sendMessage,
       status: 'ready',
@@ -218,6 +237,7 @@ describe('AssistantChat', () => {
     await act(async () => root?.render(createElement(AssistantChat, props)))
     onHeadingChange.mockClear()
     mocks.useChat.mockReturnValue({
+      addToolOutput: mocks.addToolOutput,
       messages: [message('user', ['first message']), message('user', ['later message'])],
       sendMessage: mocks.sendMessage,
       status: 'ready',
@@ -232,6 +252,7 @@ describe('AssistantChat', () => {
   it('uses only the first line and limits a generated title to 60 characters', async () => {
     const firstLine = 'a'.repeat(70)
     mocks.useChat.mockReturnValue({
+      addToolOutput: mocks.addToolOutput,
       messages: [message('user', [`${firstLine}\nsecond line`])],
       sendMessage: mocks.sendMessage,
       status: 'ready',

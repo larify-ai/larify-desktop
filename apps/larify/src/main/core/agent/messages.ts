@@ -1,5 +1,6 @@
 import {
   convertToModelMessages,
+  isToolUIPart,
   safeValidateUIMessages,
   type ModelMessage,
   type ToolSet,
@@ -7,20 +8,26 @@ import {
 } from 'ai'
 
 type MessagePart = UIMessage['parts'][number]
-type ToolPart = MessagePart & { state?: string }
 
-function isToolPart(part: MessagePart): boolean {
-  return part.type === 'dynamic-tool' || part.type.startsWith('tool-')
-}
-
-function isComplete(part: MessagePart): boolean {
-  const state = (part as ToolPart).state
-  return state === 'output-available' || state === 'output-error' || state === 'output-denied'
+function shouldKeepPart(part: MessagePart): boolean {
+  if (!isToolUIPart(part)) return true
+  if (
+    part.state === 'input-available' &&
+    (part.type === 'tool-agent_ask_user' ||
+      (part.type === 'dynamic-tool' && part.toolName === 'agent_ask_user'))
+  ) {
+    return true
+  }
+  return (
+    part.state === 'output-available' ||
+    part.state === 'output-error' ||
+    part.state === 'output-denied'
+  )
 }
 
 function sanitizeMessage(message: UIMessage): UIMessage | undefined {
   if (message.role !== 'assistant') return message
-  const parts = message.parts.filter((part) => !isToolPart(part) || isComplete(part))
+  const parts = message.parts.filter(shouldKeepPart)
   return parts.length ? { ...message, parts } : undefined
 }
 

@@ -4,13 +4,20 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DynamicToolUIPart } from 'ai'
 
 const captured = vi.hoisted(() => ({
+  tool: undefined as Record<string, unknown> | undefined,
   header: undefined as Record<string, unknown> | undefined,
   input: undefined as unknown,
-  output: undefined as unknown
+  output: undefined as unknown,
+  question: undefined as unknown,
+  submitQuestion: undefined as ((answers: string[]) => void) | undefined,
+  toolOutput: vi.fn()
 }))
 
 vi.mock('@renderer/components/ai-elements/tool', () => ({
-  Tool: ({ children }: React.PropsWithChildren) => children,
+  Tool: ({ children, ...props }: React.PropsWithChildren<Record<string, unknown>>) => {
+    captured.tool = props
+    return children
+  },
   ToolContent: ({ children }: React.PropsWithChildren) => children,
   ToolHeader: (props: Record<string, unknown>) => {
     captured.header = props
@@ -26,12 +33,28 @@ vi.mock('@renderer/components/ai-elements/tool', () => ({
   }
 }))
 
+vi.mock('../../../src/renderer/src/app/interaction/assistant/message-parts/ask-user-part', () => ({
+  AskUserPart: ({ input, onSubmit }: { input: unknown; onSubmit: (answers: string[]) => void }) => {
+    captured.question = input
+    captured.submitQuestion = onSubmit
+    return null
+  }
+}))
+
+vi.mock('../../../src/renderer/src/app/interaction/assistant/tool-output', () => ({
+  useToolOutput: () => captured.toolOutput
+}))
+
 import { ToolPart } from '../../../src/renderer/src/app/interaction/assistant/message-parts/tool-part'
 
 beforeEach(() => {
+  captured.tool = undefined
   captured.header = undefined
   captured.input = undefined
   captured.output = undefined
+  captured.question = undefined
+  captured.submitQuestion = undefined
+  captured.toolOutput.mockReset()
 })
 
 describe('interaction assistant tool part', () => {
@@ -66,6 +89,39 @@ describe('interaction assistant tool part', () => {
     })
 
     expect(captured.header?.title).toBe('fs_read')
+  })
+
+  it('does not show an incomplete ask-user form while its input is streaming', () => {
+    render({
+      input: { message: 'Choose', options: [{ label: 'Partially streamed' }] },
+      state: 'input-streaming',
+      toolCallId: 'call-1',
+      toolName: 'agent_ask_user',
+      type: 'dynamic-tool'
+    })
+
+    expect(captured.header).toMatchObject({ statusLabel: '等待回答' })
+    expect(captured.tool?.defaultOpen).toBe(false)
+    expect(captured.question).toBeUndefined()
+  })
+
+  it('shows ask-user content when the complete input is available', () => {
+    const input = { message: 'Choose', options: [{ label: 'Ready' }] }
+    render({
+      input,
+      state: 'input-available',
+      toolCallId: 'call-1',
+      toolName: 'agent_ask_user',
+      type: 'dynamic-tool'
+    })
+
+    expect(captured.question).toBe(input)
+    expect(captured.tool?.defaultOpen).toBe(true)
+    expect(captured.header).toMatchObject({ statusLabel: '等待回答' })
+    captured.submitQuestion?.(['Ready'])
+    expect(captured.toolOutput).toHaveBeenCalledWith('agent_ask_user', 'call-1', {
+      answers: ['Ready']
+    })
   })
 })
 

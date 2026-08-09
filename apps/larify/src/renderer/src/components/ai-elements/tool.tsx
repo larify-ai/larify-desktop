@@ -15,6 +15,7 @@ import {
   ClockIcon,
   FileTextIcon,
   GlobeIcon,
+  MessageSquareTextIcon,
   type LucideIcon,
   SearchIcon,
   SquareTerminalIcon,
@@ -44,7 +45,7 @@ export const Tool = ({
   open,
   onOpenChange,
   ...props
-}: ToolProps) => {
+}: ToolProps): React.JSX.Element => {
   const [internalOpen, setInternalOpen] = useState(Boolean(defaultOpen));
   const currentOpen = open ?? internalOpen;
   const handleOpenChange = useCallback(
@@ -76,6 +77,7 @@ const kindIcons: Record<string, LucideIcon> = {
   execute: TerminalIcon,
   terminal: SquareTerminalIcon,
   browser: GlobeIcon,
+  "message-square-text": MessageSquareTextIcon,
   read: FileTextIcon,
   edit: SquarePenIcon,
   other: WrenchIcon,
@@ -84,6 +86,7 @@ const kindIcons: Record<string, LucideIcon> = {
 export type ToolHeaderProps = {
   title?: string;
   icon?: string;
+  statusLabel?: string;
   className?: string;
 } & (
   | { type: ToolUIPart["type"]; state: ToolUIPart["state"]; toolName?: never }
@@ -114,10 +117,10 @@ const statusIcons: Record<ToolPart["state"], ReactNode> = {
   "output-error": <XCircleIcon className="size-4 text-red-600" />,
 };
 
-export const getStatusBadge = (status: ToolPart["state"]) => (
+const getStatusBadge = (status: ToolPart["state"], label?: string): React.JSX.Element => (
   <Badge className="gap-1.5 rounded-full text-xs" variant="secondary">
     {statusIcons[status]}
-    {statusLabels[status]}
+    {label ?? statusLabels[status]}
   </Badge>
 );
 
@@ -125,11 +128,12 @@ export const ToolHeader = ({
   className,
   title,
   icon,
+  statusLabel,
   type,
   state,
   toolName,
   ...props
-}: ToolHeaderProps) => {
+}: ToolHeaderProps): React.JSX.Element => {
   const derivedName =
     type === "dynamic-tool" ? toolName : type.split("-").slice(1).join("-");
   const KindIcon = kindIcons[icon ?? "other"] ?? WrenchIcon;
@@ -150,7 +154,7 @@ export const ToolHeader = ({
         >
           {title ?? derivedName}
         </span>
-        <span className="shrink-0">{getStatusBadge(state)}</span>
+        <span className="shrink-0">{getStatusBadge(state, statusLabel)}</span>
       </div>
       <ChevronDownIcon className="size-4 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
     </CollapsibleTrigger>
@@ -163,7 +167,7 @@ export const ToolContent = ({
   children,
   className,
   ...props
-}: ToolContentProps) => {
+}: ToolContentProps): React.JSX.Element => {
   const open = useContext(ToolOpenContext);
 
   return (
@@ -183,7 +187,7 @@ export type ToolInputProps = ComponentProps<"div"> & {
   input: ToolPart["input"];
 };
 
-const cleanToolInput = (input: ToolPart["input"]) => {
+const cleanToolInput = (input: ToolPart["input"]): unknown => {
   if (
     input &&
     typeof input === "object" &&
@@ -197,7 +201,7 @@ const cleanToolInput = (input: ToolPart["input"]) => {
   return input;
 };
 
-export const ToolInput = ({ className, input, ...props }: ToolInputProps) => (
+export const ToolInput = ({ className, input, ...props }: ToolInputProps): React.JSX.Element => (
   <div className={cn("space-y-2 overflow-hidden", className)} {...props}>
     <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
       参数
@@ -221,7 +225,7 @@ export const ToolOutput = ({
   output,
   errorText,
   ...props
-}: ToolOutputProps) => {
+}: ToolOutputProps): React.JSX.Element | null => {
   if (output == null && !errorText) {
     return null;
   }

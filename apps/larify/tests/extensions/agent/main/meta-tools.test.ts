@@ -1,9 +1,10 @@
-import { tool } from 'ai'
+import { asSchema, tool } from 'ai'
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import agentPlugin from '../../../../src/extensions/agent/main'
 import { Registry } from '../../../../src/main/infra/registry'
 import { PluginHost, pluginHostToken } from '../../../../src/main/core/plugin'
+import type { Tool } from '../../../../src/main/core/plugin/protocol'
 
 async function createHost(): Promise<PluginHost> {
   const registry = new Registry()
@@ -32,14 +33,34 @@ async function createHost(): Promise<PluginHost> {
   return host
 }
 
-async function createTools() {
+async function createTools(): Promise<Record<string, Tool>> {
   return Object.fromEntries((await createHost()).getTools('agent')!)
 }
 
-const run = async (tool: any, input: unknown, context = {}) =>
-  tool.execute(input, { context, abortSignal: undefined })
+async function run(tool: Tool, input: unknown, context = {}): Promise<unknown> {
+  if (!tool.execute) throw new Error('Tool is not executable.')
+  return tool.execute(input, {
+    context,
+    abortSignal: undefined
+  } as Parameters<typeof tool.execute>[1])
+}
 
 describe('meta tools', () => {
+  it('registers proactive user communication', async () => {
+    const tool = (await createTools()).agent_ask_user
+
+    expect(tool).toBeDefined()
+    expect(tool.execute).toBeUndefined()
+    const schema = await asSchema(tool.inputSchema).jsonSchema
+    expect(schema.properties).toMatchObject({
+      message: { type: 'string' },
+      options: { type: 'array' },
+      multiple: { type: 'boolean' }
+    })
+    expect(schema.required).toContain('message')
+    expect(schema.required).not.toContain('options')
+  })
+
   it('discovers plugins and their non-eager capabilities', async () => {
     const tools = await createTools()
 
@@ -107,5 +128,4 @@ describe('meta tools', () => {
       { name: 'demo', description: 'Demo plugin (2 tools, 2 skills)' }
     ])
   })
-
 })

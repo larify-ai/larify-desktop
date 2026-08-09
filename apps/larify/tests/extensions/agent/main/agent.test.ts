@@ -156,6 +156,45 @@ describe('runAgentSession', () => {
     expect(steps[1]).toEqual(session.at(-1))
   })
 
+  it('preserves client tool metadata in UI messages', async () => {
+    const model = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: convertArrayToReadableStream([
+          { type: 'stream-start', warnings: [] },
+          {
+            type: 'tool-call',
+            toolCallId: 'call-1',
+            toolName: 'ask',
+            input: '{"message":"Continue?"}'
+          },
+          { type: 'finish', finishReason: 'tool-calls', usage: USAGE }
+        ])
+      })
+    })
+    const session = await runAgentSession(
+      [{ id: 'user-1', role: 'user', parts: [{ type: 'text', text: 'go' }] }],
+      {
+        tools: {
+          ask: {
+            description: 'ask',
+            inputSchema: z.object({ message: z.string() }),
+            metadata: { icon: 'message-square-text' }
+          }
+        },
+        activeTools: ['ask'],
+        toolsContext: {},
+        model
+      }
+    )
+
+    expect(session.at(-1)?.parts).toContainEqual(
+      expect.objectContaining({
+        type: 'tool-ask',
+        toolMetadata: { icon: 'message-square-text' }
+      })
+    )
+  })
+
   it('preserves tool error messages', async () => {
     const model = new MockLanguageModelV4({
       doStream: async () => ({

@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { useChat, type Chat } from '@ai-sdk/react'
 import type { UIMessage } from 'ai'
 import { AssistantMessageList } from './message-list'
 import { AssistantComposer } from './composer'
 import type { ConversationHeading } from './conversation-header'
+import { ToolOutputContext } from './tool-output'
 
 function messageText(message: UIMessage): string {
   let text = ''
@@ -47,11 +48,17 @@ export function AssistantChat({
   onCwdChange: (cwd: string) => void
   onHeadingChange: (heading: ConversationHeading | null) => void
 }): React.JSX.Element {
-  const { messages, sendMessage, status, stop } = useChat({ chat, throttle: 50 })
+  const { addToolOutput, messages, sendMessage, status, stop } = useChat({ chat, throttle: 50 })
   const running = status === 'submitted' || status === 'streaming'
   const started = messages.length > 0
   const history = useMemo(() => inputHistory(messages), [messages])
   const titleCreated = useRef(Boolean(title))
+  const submitToolOutput = useCallback(
+    (tool: string, toolCallId: string, output: unknown) => {
+      void addToolOutput({ tool, toolCallId, output })
+    },
+    [addToolOutput]
+  )
 
   useEffect(() => {
     if (!started || title || titleCreated.current) return
@@ -61,14 +68,16 @@ export function AssistantChat({
 
   return (
     <div className="flex h-full min-w-0 flex-col">
-      <AssistantMessageList
-        messages={messages}
-        live={running}
-        initialMessageCount={initialMessageCount}
-        recentStart={recentStart}
-        olderMessages={olderMessages}
-        onLoadRange={onLoadRange}
-      />
+      <ToolOutputContext.Provider value={submitToolOutput}>
+        <AssistantMessageList
+          messages={messages}
+          live={running}
+          initialMessageCount={initialMessageCount}
+          recentStart={recentStart}
+          olderMessages={olderMessages}
+          onLoadRange={onLoadRange}
+        />
+      </ToolOutputContext.Provider>
       <AssistantComposer
         cwd={cwd}
         history={history}

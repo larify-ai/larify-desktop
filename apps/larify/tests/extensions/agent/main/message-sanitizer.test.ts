@@ -57,6 +57,96 @@ describe('message sanitizer', () => {
     expect(sanitizeMessages([message])).toEqual([message])
   })
 
+  it('keeps ask-user calls while waiting for user input', () => {
+    const message = {
+      id: 'assistant-1',
+      role: 'assistant',
+      parts: [
+        {
+          type: 'tool-agent_ask_user',
+          toolCallId: 'call-1',
+          state: 'input-available',
+          toolMetadata: { icon: 'message-square-text' },
+          input: {
+            message: 'Choose a mode',
+            options: [{ label: 'Safe' }]
+          }
+        }
+      ]
+    } as UIMessage
+
+    expect(sanitizeMessages([message])).toEqual([message])
+  })
+
+  it('keeps dynamic ask-user calls while waiting for user input', () => {
+    const message = {
+      id: 'assistant-1',
+      role: 'assistant',
+      parts: [
+        {
+          type: 'dynamic-tool',
+          toolName: 'agent_ask_user',
+          toolCallId: 'call-1',
+          state: 'input-available',
+          input: { message: 'Continue?', options: [{ label: 'Yes' }, { label: 'No' }] }
+        }
+      ]
+    } as UIMessage
+
+    expect(sanitizeMessages([message])).toEqual([message])
+  })
+
+  it('does not keep similarly named or partially streamed ask-user calls', () => {
+    const message = {
+      id: 'assistant-1',
+      role: 'assistant',
+      parts: [
+        {
+          type: 'tool-agent_ask_users',
+          toolCallId: 'call-1',
+          state: 'input-available',
+          input: {}
+        },
+        {
+          type: 'tool-agent_ask_user',
+          toolCallId: 'call-2',
+          state: 'input-streaming',
+          input: {}
+        }
+      ]
+    } as UIMessage
+
+    expect(sanitizeMessages([message])).toEqual([])
+  })
+
+  it('filters tool parts independently without mutating the stored message', () => {
+    const message = {
+      id: 'assistant-1',
+      role: 'assistant',
+      parts: [
+        { type: 'text', text: 'working' },
+        {
+          type: 'tool-fs_read',
+          toolCallId: 'call-1',
+          state: 'input-available',
+          input: { path: 'a.txt' }
+        },
+        {
+          type: 'tool-fs_write',
+          toolCallId: 'call-2',
+          state: 'output-available',
+          input: { path: 'b.txt' },
+          output: 'done'
+        }
+      ]
+    } as UIMessage
+
+    const result = sanitizeMessages([message])
+
+    expect(result[0].parts).toEqual([message.parts[0], message.parts[2]])
+    expect(message.parts).toHaveLength(3)
+  })
+
   it.each(['output-error', 'output-denied'])('keeps tools in the %s state', (state) => {
     const message = {
       id: 'assistant-1',
@@ -111,6 +201,27 @@ describe('message sanitizer', () => {
     expect((await prepareMessages(messages)).map(({ id }) => id)).toEqual(['first', 'last'])
   })
 
+  it('preserves a valid pending ask-user message during preparation', async () => {
+    const message = {
+      id: 'assistant-1',
+      role: 'assistant',
+      parts: [
+        {
+          type: 'tool-agent_ask_user',
+          toolCallId: 'call-1',
+          state: 'input-available',
+          toolMetadata: { icon: 'message-square-text' },
+          input: {
+            message: 'Choose a mode',
+            options: [{ label: 'Fast' }, { label: 'Safe' }]
+          }
+        }
+      ]
+    } as UIMessage
+
+    expect(await prepareMessages([message])).toEqual([message])
+  })
+
   it('handles empty input', async () => {
     expect(sanitizeMessages([])).toEqual([])
     expect(await prepareMessages([])).toEqual([])
@@ -156,6 +267,51 @@ describe('message sanitizer', () => {
       }
     ])
     expect(message.parts).toHaveLength(2)
+  })
+
+  it('does not rewrite assistant file parts', async () => {
+    const message = {
+      id: 'assistant-1',
+      role: 'assistant',
+      parts: [{ type: 'file', url: 'file:///result.txt', mediaType: 'text/plain' }]
+    } as UIMessage
+
+    const [converted] = await toModelMessages([message])
+    const [file] = converted.content as Array<{
+      type: string
+      data: { type: string; url: URL }
+      mediaType: string
+    }>
+
+    expect(converted.role).toBe('assistant')
+    expect(file.type).toBe('file')
+    expect(file.data.url.toString()).toBe('file:///result.txt')
+    expect(file.mediaType).toBe('text/plain')
+  })
+
+  it('converts a submitted ask-user call into a model-visible tool result', async () => {
+    const tools = { agent_ask_user: { inputSchema: {} as never } } as unknown as ToolSet
+    const message = {
+      id: 'assistant-1',
+      role: 'assistant',
+      parts: [
+        {
+          type: 'tool-agent_ask_user',
+          toolCallId: 'call-1',
+          state: 'output-available',
+          input: {
+            message: 'Choose a mode',
+            options: [{ label: 'Fast' }, { label: 'Safe' }]
+          },
+          output: { answers: ['Safe'] }
+        }
+      ]
+    } as UIMessage
+
+    const modelMessages = await toModelMessages([message], tools)
+
+    expect(JSON.stringify(modelMessages)).toContain('agent_ask_user')
+    expect(JSON.stringify(modelMessages)).toContain('Safe')
   })
 
   it('uses the stored diagnostics when replaying historical tool output', async () => {

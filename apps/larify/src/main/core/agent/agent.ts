@@ -2,6 +2,7 @@ import type { UIMessage } from 'ai'
 import type { Disposable } from '../../infra/disposable'
 import { larifyWorkspacePath } from '../../utils/app-paths'
 import type { AgentModelConfig } from '../model/config'
+import type { PluginHost } from '../plugin/host'
 import type { SessionStore } from '../session'
 import { createAgentRuntime } from './runtime'
 import { AgentWorker, type AgentSink } from './worker'
@@ -18,12 +19,15 @@ export interface AgentInput {
 export class Agent implements Disposable {
   private readonly workers = new Map<string, AgentWorker>()
 
-  constructor(private readonly sessions: SessionStore) {}
+  constructor(
+    private readonly sessions: SessionStore,
+    private readonly pluginHost: PluginHost
+  ) {}
 
   send(input: AgentInput, sink: AgentSink): void {
     if (this.workers.has(input.sessionId)) throw new Error('Agent is already running.')
     const request = { ...input, cwd: input.cwd || larifyWorkspacePath() }
-    const runtime = createAgentRuntime(request)
+    const runtime = createAgentRuntime(request, this.pluginHost)
     const worker = new AgentWorker(this.sessions, sink)
     this.workers.set(input.sessionId, worker)
     void worker.run({ ...request, runtime }).finally(() => {

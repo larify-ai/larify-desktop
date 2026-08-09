@@ -27,8 +27,8 @@ describe('PluginHost', () => {
     await host.activate(plugin)
 
     expect(host.listPlugins()).toEqual([{ id: 'test', displayName: 'Test' }])
-    expect(host.getTools('test')?.get('run')?.description).toBe('test tool')
-    expect(host.getSkills('test')?.get('review')).toBe(skill)
+    expect(host.getTools('test')?.get('test_run')?.description).toBe('test tool')
+    expect(host.getSkills('test')?.get('test_review')).toBe(skill)
   })
 
   it('disposes subscriptions in reverse order on deactivation', async () => {
@@ -104,7 +104,7 @@ describe('PluginHost', () => {
     reject?.(new Error('old activation failed'))
 
     await expect(activation).rejects.toThrow('old activation failed')
-    expect(host.getTools('test')?.get('run')?.description).toBe('replacement')
+    expect(host.getTools('test')?.get('test_run')?.description).toBe('replacement')
   })
 
   it('reloads a plugin by deactivating the previous instance', async () => {
@@ -121,12 +121,15 @@ describe('PluginHost', () => {
     await host.reload({
       manifest: { id: 'test' },
       activate(context) {
+        context.registerTool('z', tool('z'))
         context.registerTool('run', tool('new'))
+        context.registerTool('a', tool('a'))
       }
     })
 
     expect(dispose).toHaveBeenCalledOnce()
-    expect(host.getTools('test')?.get('run')?.description).toBe('new')
+    expect(host.getTools('test')?.get('test_run')?.description).toBe('new')
+    expect([...host.getTools('test')!.keys()]).toEqual(['test_a', 'test_run', 'test_z'])
   })
 
   it('leaves a plugin inactive when reload fails', async () => {
@@ -157,7 +160,7 @@ describe('PluginHost', () => {
     const host = new PluginHost(new Registry())
     await host.activate(plugin)
 
-    expect(host.getTools('duplicate')?.get('run')?.description).toBe('second')
+    expect(host.getTools('duplicate')?.get('duplicate_run')?.description).toBe('second')
   })
 
   it('returns contributions by plugin', async () => {
@@ -175,9 +178,9 @@ describe('PluginHost', () => {
     await host.activate(createPlugin('z'))
     await host.activate(createPlugin('a'))
 
-    expect(host.listPlugins().map(({ id }) => id)).toEqual(['z', 'a'])
-    expect([...host.getTools('a')!.keys()]).toEqual(['z', 'a'])
-    expect([...host.getSkills('z')!.keys()]).toEqual(['z', 'a'])
+    expect(host.listPlugins().map(({ id }) => id)).toEqual(['a', 'z'])
+    expect([...host.getTools('a')!.keys()]).toEqual(['a_a', 'a_z'])
+    expect([...host.getSkills('z')!.keys()]).toEqual(['z_a', 'z_z'])
   })
 
   it('returns readonly plugin contributions', async () => {
@@ -206,8 +209,8 @@ describe('PluginHost', () => {
 
     const tools = host.getTools('test')
     const skills = host.getSkills('test')
-    expect([...tools!.keys()]).toEqual(['lazy', 'eager'])
-    expect([...skills!.keys()]).toEqual(['lazy', 'eager'])
+    expect([...tools!.keys()]).toEqual(['test_eager', 'test_lazy'])
+    expect([...skills!.keys()]).toEqual(['test_eager', 'test_lazy'])
     expect(host.getTools('missing')).toBeUndefined()
     expect(host.getSkills('missing')).toBeUndefined()
   })
@@ -229,6 +232,7 @@ describe('PluginHost', () => {
 
   it('continues disposing subscriptions after a failure', async () => {
     const dispose = vi.fn()
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     const host = new PluginHost(new Registry())
     await host.activate({
       manifest: { id: 'test' },
@@ -247,6 +251,8 @@ describe('PluginHost', () => {
     await host.deactivate('test')
 
     expect(dispose).toHaveBeenCalledOnce()
+    expect(error).toHaveBeenCalledOnce()
+    error.mockRestore()
   })
 
   it('disposes plugins in reverse activation order', async () => {

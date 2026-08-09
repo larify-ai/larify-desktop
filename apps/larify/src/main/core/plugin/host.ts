@@ -10,6 +10,10 @@ interface RegisteredPlugin {
   skills: Map<string, Skill>
 }
 
+function sortMap<T>(values: Iterable<readonly [string, T]>): Map<string, T> {
+  return new Map([...values].sort(([a], [b]) => a.localeCompare(b)))
+}
+
 export class PluginHost {
   private readonly plugins = new Map<string, RegisteredPlugin>()
 
@@ -20,7 +24,9 @@ export class PluginHost {
   }
 
   listPlugins(): Manifest[] {
-    return [...this.plugins.values()].map(({ manifest }) => manifest)
+    return [...this.plugins.values()]
+      .map(({ manifest }) => manifest)
+      .sort((a, b) => a.id.localeCompare(b.id))
   }
 
   getTools(pluginId: string): ReadonlyMap<string, Tool> | undefined {
@@ -44,6 +50,8 @@ export class PluginHost {
     this.plugins.set(id, registered)
     try {
       await plugin.activate(this.createContext(registered))
+      registered.tools = sortMap(registered.tools)
+      registered.skills = sortMap(registered.skills)
     } catch (error) {
       if (this.plugins.get(id) === registered) this.plugins.delete(id)
       await this.disposeSubscriptions(registered.subscriptions)
@@ -74,8 +82,10 @@ export class PluginHost {
       manifest: registered.manifest,
       registry: this.registry,
       subscriptions: registered.subscriptions,
-      registerTool: (name, tool) => registered.tools.set(name, wrapTool(tool)),
-      registerSkill: (name, skill) => registered.skills.set(name, skill)
+      registerTool: (name, tool) =>
+        registered.tools.set(`${registered.manifest.id}_${name}`, wrapTool(tool)),
+      registerSkill: (name, skill) =>
+        registered.skills.set(`${registered.manifest.id}_${name}`, skill)
     }
   }
 
@@ -83,8 +93,8 @@ export class PluginHost {
     for (const subscription of [...subscriptions].reverse()) {
       try {
         await subscription.dispose()
-      } catch {
-        continue
+      } catch (error) {
+        console.error('[plugin] Failed to dispose subscription:', error)
       }
     }
   }

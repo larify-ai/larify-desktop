@@ -31,6 +31,7 @@ const input = { sessionId: 'session', message, cwd: 'cwd' }
 const sessions = {
   loadMessages: vi.fn(() => [])
 }
+const pluginHost = {}
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -43,7 +44,7 @@ beforeEach(() => {
 describe('Agent', () => {
   it('assembles and starts a stored run', async () => {
     const sink = { chunk: vi.fn(), error: vi.fn(), end: vi.fn() }
-    const agent = new Agent(sessions as never)
+    const agent = new Agent(sessions as never, pluginHost as never)
 
     agent.send(input, sink)
 
@@ -57,7 +58,7 @@ describe('Agent', () => {
       signal = input.options.abortSignal
       await new Promise<void>((resolve) => signal?.addEventListener('abort', () => resolve()))
     })
-    const agent = new Agent(sessions as never)
+    const agent = new Agent(sessions as never, pluginHost as never)
 
     agent.send(input, { chunk: vi.fn(), error: vi.fn(), end: vi.fn() })
     await vi.waitFor(() => expect(signal).toBeDefined())
@@ -75,7 +76,7 @@ describe('Agent', () => {
       await step
     })
     const first = { chunk: vi.fn(), error: vi.fn(), end: vi.fn() }
-    const agent = new Agent(sessions as never)
+    const agent = new Agent(sessions as never, pluginHost as never)
 
     agent.send(input, first)
     await vi.waitFor(() => expect(mocks.run).toHaveBeenCalledOnce())
@@ -95,7 +96,7 @@ describe('Agent', () => {
         )
       })
       .mockResolvedValueOnce(undefined)
-    const agent = new Agent(sessions as never)
+    const agent = new Agent(sessions as never, pluginHost as never)
 
     agent.send(input, { chunk: vi.fn(), error: vi.fn(), end: vi.fn() })
     await vi.waitFor(() => expect(mocks.run).toHaveBeenCalledOnce())
@@ -106,23 +107,23 @@ describe('Agent', () => {
   })
 
   it('assembles the runtime from the request', async () => {
-    const agent = new Agent(sessions as never)
+    const agent = new Agent(sessions as never, pluginHost as never)
 
     agent.send(input, { chunk: vi.fn(), error: vi.fn(), end: vi.fn() })
 
     await vi.waitFor(() => expect(mocks.run).toHaveBeenCalledOnce())
-    expect(mocks.runtime).toHaveBeenCalledWith(input)
+    expect(mocks.runtime).toHaveBeenCalledWith(input, pluginHost)
     expect(mocks.run.mock.calls[0][1].options.system).toBe('runtime')
   })
 
   it('uses the default workspace when cwd is absent', async () => {
-    const agent = new Agent(sessions as never)
+    const agent = new Agent(sessions as never, pluginHost as never)
     const request = { sessionId: 'session', message }
 
     agent.send(request, { chunk: vi.fn(), error: vi.fn(), end: vi.fn() })
 
     await vi.waitFor(() => expect(mocks.run).toHaveBeenCalledOnce())
-    expect(mocks.runtime).toHaveBeenCalledWith({ ...request, cwd: mocks.workspace })
+    expect(mocks.runtime).toHaveBeenCalledWith({ ...request, cwd: mocks.workspace }, pluginHost)
     expect(mocks.run.mock.calls[0][1].cwd).toBe(mocks.workspace)
   })
 
@@ -130,7 +131,7 @@ describe('Agent', () => {
     mocks.runtime.mockImplementationOnce(() => {
       throw new Error('runtime failed')
     })
-    const agent = new Agent(sessions as never)
+    const agent = new Agent(sessions as never, pluginHost as never)
 
     expect(() => agent.send(input, { chunk: vi.fn(), error: vi.fn(), end: vi.fn() })).toThrow(
       'runtime failed'
@@ -144,7 +145,7 @@ describe('Agent', () => {
     const error = new Error('failed')
     mocks.run.mockRejectedValue(error)
     const sink = { chunk: vi.fn(), error: vi.fn(), end: vi.fn() }
-    const agent = new Agent(sessions as never)
+    const agent = new Agent(sessions as never, pluginHost as never)
 
     agent.send(input, sink)
 
@@ -155,7 +156,7 @@ describe('Agent', () => {
   it('uses a fresh sink for each completed run', async () => {
     const first = { chunk: vi.fn(), error: vi.fn(), end: vi.fn() }
     const second = { chunk: vi.fn(), error: vi.fn(), end: vi.fn() }
-    const agent = new Agent(sessions as never)
+    const agent = new Agent(sessions as never, pluginHost as never)
 
     agent.send(input, first)
     await vi.waitFor(() => expect(first.end).toHaveBeenCalledOnce())

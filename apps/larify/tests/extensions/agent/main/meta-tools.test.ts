@@ -1,32 +1,39 @@
 import { tool } from 'ai'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
-import { createMetaTools } from '../../../../src/extensions/agent/main/meta-tools'
-import { ExtensionHost } from '../../../../src/main/core/extension'
+import agentPlugin from '../../../../src/extensions/agent/main'
+import { Registry } from '../../../../src/main/infra/registry'
+import { PluginHost, pluginHostToken } from '../../../../src/main/core/plugin'
 
-async function createHost(): Promise<ExtensionHost> {
-  const host = new ExtensionHost()
+async function createHost(): Promise<PluginHost> {
+  const registry = new Registry()
+  const host = new PluginHost(registry)
+  registry.register(pluginHostToken, host)
   await host.activate({
-    name: 'demo',
-    description: 'Demo plugin',
-    activate(app) {
-      app.registerTool('eager', tool({ metadata: { eager: true }, inputSchema: z.object({}) }))
-      app.registerTool(
+    manifest: { id: 'demo', description: 'Demo plugin' },
+    activate(context) {
+      context.registerTool('eager', tool({ metadata: { eager: true }, inputSchema: z.object({}) }))
+      context.registerTool(
         'lazy',
         tool({ description: 'Lazy tool', inputSchema: z.object({ value: z.string() }) })
       )
-      app.registerSkill('eager', {
+      context.registerSkill('eager', {
         path: 'eager/SKILL.md',
         description: 'Eager skill',
         metadata: { eager: true }
       })
-      app.registerSkill('lazy', {
+      context.registerSkill('lazy', {
         path: 'lazy/SKILL.md',
         description: 'Lazy skill'
       })
     }
   })
+  await host.activate(agentPlugin)
   return host
+}
+
+async function createTools() {
+  return Object.fromEntries((await createHost()).getTools('agent')!)
 }
 
 const run = async (tool: any, input: unknown, context = {}) =>
@@ -34,22 +41,24 @@ const run = async (tool: any, input: unknown, context = {}) =>
 
 describe('meta tools', () => {
   it('discovers plugins and their non-eager capabilities', async () => {
-    const tools = createMetaTools(await createHost())
+    const tools = await createTools()
 
-    await expect(run(tools.list_plugins, {})).resolves.toEqual([
-      { name: 'demo', description: 'Demo plugin', tools: 2, skills: 2 }
+    await expect(run(tools.agent_list_plugins, {})).resolves.toEqual([
+      { name: 'demo', description: 'Demo plugin (2 tools, 2 skills)' }
     ])
-    await expect(run(tools.list_more_tools, { plugin_names: ['demo'] })).resolves.toEqual([
-      { name: 'demo_lazy', description: 'Lazy tool' }
+    await expect(run(tools.agent_list_tools, { plugin_names: ['demo'] })).resolves.toEqual([
+      { tool_name: 'demo_lazy', description: 'Lazy tool' }
     ])
-    await expect(run(tools.list_more_skills, { plugin_names: ['demo'] })).resolves.toEqual([
+    await expect(run(tools.agent_list_skills, { plugin_names: ['demo'] })).resolves.toEqual([
       { description: 'Lazy skill', path: 'lazy/SKILL.md' }
     ])
   })
 
   it('returns the wrapped tool schema', async () => {
-    const tools = createMetaTools(await createHost())
-    const [definition] = await run(tools.get_tool_schemas, { tool_names: ['demo_lazy'] })
+    const tools = await createTools()
+    const [definition] = await run(tools.agent_get_tool_schemas, {
+      tool_names: ['demo_lazy']
+    })
 
     expect(definition).toMatchObject({
       type: 'function',
@@ -60,38 +69,43 @@ describe('meta tools', () => {
   })
 
   it('rejects unknown plugins and tools clearly', async () => {
-    const tools = createMetaTools(await createHost())
+    const tools = await createTools()
 
-    await expect(run(tools.list_more_tools, { plugin_names: ['missing'] })).rejects.toThrow(
+    await expect(run(tools.agent_list_tools, { plugin_names: ['missing'] })).rejects.toThrow(
       'Plugin "missing" not found.'
     )
-    await expect(run(tools.get_tool_schemas, { tool_names: ['missing'] })).rejects.toThrow(
+    await expect(run(tools.agent_list_skills, { plugin_names: ['missing'] })).rejects.toThrow(
+      'Plugin "missing" not found.'
+    )
+    await expect(run(tools.agent_get_tool_schemas, { tool_names: ['missing'] })).rejects.toThrow(
       'Tool "missing" not found.'
     )
   })
 
-  it('searches the current or selected workspace', async () => {
-    const search = vi.fn().mockResolvedValue(['result'])
-    const tools = createMetaTools(await createHost(), { search })
+  it('hides plugins without discoverable contributions', async () => {
+    const host = await createHost()
+    await host.activate({
+      manifest: { id: 'empty' },
+      activate(context) {
+        void context
+      }
+    })
+    await host.activate({
+      manifest: { id: 'eager-only' },
+      activate(context) {
+        context.registerTool('tool', tool({ metadata: { eager: true }, inputSchema: z.object({}) }))
+        context.registerSkill('skill', {
+          path: 'skill/SKILL.md',
+          description: 'Eager skill',
+          metadata: { eager: true }
+        })
+      }
+    })
+    const tools = Object.fromEntries(host.getTools('agent')!)
 
-    await expect(
-      run(tools.search_context, { query: 'audio', limit: 5 }, { cwd: 'current' })
-    ).resolves.toEqual(['result'])
-    await run(
-      tools.search_context,
-      { query: 'audio', cwd: 'selected', limit: 2 },
-      { cwd: 'current' }
-    )
-
-    expect(search).toHaveBeenNthCalledWith(1, 'current', 'audio', 5)
-    expect(search).toHaveBeenNthCalledWith(2, 'selected', 'audio', 2)
+    await expect(run(tools.agent_list_plugins, {})).resolves.toEqual([
+      { name: 'demo', description: 'Demo plugin (2 tools, 2 skills)' }
+    ])
   })
 
-  it('reports unavailable context search', async () => {
-    const tools = createMetaTools(await createHost())
-
-    await expect(
-      run(tools.search_context, { query: 'audio', limit: 5 }, { cwd: 'current' })
-    ).rejects.toThrow('Context search tool is unavailable.')
-  })
 })

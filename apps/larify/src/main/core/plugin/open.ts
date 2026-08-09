@@ -1,9 +1,10 @@
 import type { Application } from '../../app/application'
-import { defineService } from '../../infra/registry'
 import { PluginHost } from './host'
+import { discoverBuiltinPlugins, loadPlugins } from './loader'
+import { pluginHostToken } from './service'
 
-export const pluginHostToken = defineService()
-
-export function registerPlugin(application: Application): void {
-  application.registry.register(pluginHostToken, new PluginHost(application.registry))
+export async function registerPlugin(application: Application): Promise<void> {
+  const host = new PluginHost(application.registry)
+  application.registry.register(pluginHostToken, host)
+  await loadPlugins(host, discoverBuiltinPlugins())
 }

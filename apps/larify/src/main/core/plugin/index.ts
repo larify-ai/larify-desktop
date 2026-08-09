@@ -1,3 +1,4 @@
 export { PluginHost } from './host'
-export { pluginHostToken, registerPlugin } from './open'
+export { registerPlugin } from './open'
+export { pluginHostToken } from './service'
 export * from './protocol'

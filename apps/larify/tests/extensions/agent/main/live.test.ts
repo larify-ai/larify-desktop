@@ -1,6 +1,8 @@
 import type { UIMessage } from 'ai'
 import { describe, expect, it } from 'vitest'
 import { createAgentRuntime, runAgentSession } from '../../../../src/main/core/agent'
+import { PluginHost } from '../../../../src/main/core/plugin'
+import { Registry } from '../../../../src/main/infra/registry'
 
 function textOf(message: UIMessage): string {
   return message.parts
@@ -13,7 +15,10 @@ describe.skipIf(!process.env.LIVE)('runAgent (live DeepSeek)', () => {
   it('streams a real reply from DeepSeek', async () => {
     const messages = await runAgentSession(
       [{ id: 'user-1', role: 'user', parts: [{ type: 'text', text: '只回复四个字：你好世界' }] }],
-      createAgentRuntime({ sessionId: 'live', cwd: process.cwd() })
+      createAgentRuntime(
+        { sessionId: 'live', cwd: process.cwd() },
+        new PluginHost(new Registry())
+      )
     )
     const last = messages.at(-1)
     const text = last ? textOf(last) : ''

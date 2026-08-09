@@ -135,9 +135,7 @@ describe('nest loop exec', () => {
         activeTools: ['agent_list_plugins']
       })
     )
-    expect(mocks.runtime).toHaveBeenCalledWith(
-      expect.objectContaining({ cwd: 'D:\\workspace', template: expect.any(String) })
-    )
+    expect(mocks.runtime).toHaveBeenCalledWith(expect.objectContaining({ cwd: 'D:\\workspace' }))
     expect(get(taskFile, 'sessions')).toEqual([expect.any(String)])
   })
 

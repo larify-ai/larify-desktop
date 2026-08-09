@@ -11,7 +11,7 @@ import { registerDialog } from '../dialog'
 import { openMainWindow, registerWindow } from '../window'
 import type { Application } from './application'
 
-function createApplication(electron: App): Application {
+async function createApplication(electron: App): Promise<Application> {
   const registry = new Registry()
   const window = openMainWindow(electron)
   const application: Application = {
@@ -24,13 +24,13 @@ function createApplication(electron: App): Application {
   registerDialog(application)
   registerSession(application)
   registerAttachment(application)
-  registerPlugin(application)
+  await registerPlugin(application)
   registerAgent(application)
   return application
 }
 
-export function bootstrap(electron: App): void {
+export async function bootstrap(electron: App): Promise<void> {
   electronApp.setAppUserModelId('ai.larify.app')
-  const application = createApplication(electron)
+  const application = await createApplication(electron)
   installShutdown(electron, () => application.registry.disposeAll())
 }

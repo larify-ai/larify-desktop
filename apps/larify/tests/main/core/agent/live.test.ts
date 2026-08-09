@@ -4,13 +4,15 @@ import { join } from 'node:path'
 import type { UIMessage } from 'ai'
 import { describe, expect, it } from 'vitest'
 import { Agent } from '../../../../src/main/core/agent/agent'
+import { PluginHost } from '../../../../src/main/core/plugin'
+import { Registry } from '../../../../src/main/infra/registry'
 import { SessionStore } from '../../../../src/main/core/session'
 
 describe.skipIf(!process.env.LIVE)('Agent live integration', () => {
   it('streams a real response and persists both messages', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'larify-agent-live-'))
     const sessions = new SessionStore(join(directory, 'sessions.db'))
-    const agent = new Agent(sessions)
+    const agent = new Agent(sessions, new PluginHost(new Registry()))
     const message: UIMessage = {
       id: crypto.randomUUID(),
       role: 'user',

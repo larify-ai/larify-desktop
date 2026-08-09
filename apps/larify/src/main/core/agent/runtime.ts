@@ -1,4 +1,5 @@
 import { isLoopFinished, type ToolSet } from 'ai'
+import type { PluginHost } from '../plugin/host'
 import { createModelRuntime } from '../model'
 import { defaultModelConfig, isAgentModelConfig, type AgentModelConfig } from '../model/config'
 import type { AgentOptions } from './engine'
@@ -9,7 +10,6 @@ export interface AgentRuntimeInput {
   sessionId: string
   cwd: string
   modelConfig?: AgentModelConfig
-  tools?: ToolSet
   stopWhen?: AgentOptions['stopWhen']
 }
 
@@ -17,14 +17,51 @@ export function toolsContextFor<T>(tools: ToolSet, context: T): Record<string, T
   return Object.fromEntries(Object.keys(tools).map((name) => [name, context]))
 }
 
-export function createAgentRuntime(input: AgentRuntimeInput): AgentOptions {
+function collectTools(host: PluginHost): ToolSet {
+  return Object.fromEntries(host.listPlugins().flatMap(({ id }) => [...(host.getTools(id) ?? [])]))
+}
+
+function collectPromptContext(host: PluginHost): {
+  plugins: Array<{ name: string; description: string }>
+  skills: Array<{ name: string; path: string; description: string }>
+} {
+  const plugins: Array<{ name: string; description: string }> = []
+  const skills: Array<{ name: string; path: string; description: string }> = []
+  for (const { id, description } of host.listPlugins()) {
+    const tools = host.getTools(id) ?? new Map()
+    const pluginSkills = host.getSkills(id) ?? new Map()
+    const eager = [...tools.values(), ...pluginSkills.values()].some(
+      ({ metadata }) => metadata?.eager === true
+    )
+    if (eager) {
+      plugins.push({
+        name: id,
+        description: `${description ? `${description} ` : ''}(${tools.size} tools, ${pluginSkills.size} skills)`
+      })
+    }
+    skills.push(
+      ...[...pluginSkills]
+        .filter(([, { metadata }]) => metadata?.eager === true)
+        .map(([name, { path, description: skillDescription }]) => ({
+          name,
+          path,
+          description: skillDescription
+        }))
+    )
+  }
+  return { plugins, skills }
+}
+
+export function createAgentRuntime(input: AgentRuntimeInput, host: PluginHost): AgentOptions {
   const config = isAgentModelConfig(input.modelConfig) ? input.modelConfig : defaultModelConfig
-  const tools = input.tools ?? {}
+  const tools = collectTools(host)
   return {
     ...createModelRuntime(config),
-    system: buildSystemPrompt(template, input.cwd),
+    system: buildSystemPrompt(template, input.cwd, collectPromptContext(host)),
     tools,
-    activeTools: Object.keys(tools),
+    activeTools: Object.entries(tools)
+      .filter(([, tool]) => tool.metadata?.eager === true)
+      .map(([name]) => name),
     toolsContext: toolsContextFor(tools, { sessionId: input.sessionId, cwd: input.cwd }),
     stopWhen: input.stopWhen ?? isLoopFinished()
   }

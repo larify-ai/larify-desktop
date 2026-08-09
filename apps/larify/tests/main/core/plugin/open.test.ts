@@ -7,11 +7,13 @@ import {
 } from '../../../../src/main/core/plugin'
 
 describe('registerPlugin', () => {
-  it('registers the application PluginHost', () => {
+  it('registers the application PluginHost and loads built-ins', async () => {
     const registry = new Registry()
 
-    registerPlugin({ registry } as never)
+    await registerPlugin({ registry } as never)
+    const host = registry.get<PluginHost>(pluginHostToken)
 
-    expect(registry.get(pluginHostToken)).toBeInstanceOf(PluginHost)
+    expect(host).toBeInstanceOf(PluginHost)
+    expect(host?.has('agent')).toBe(true)
   })
 })

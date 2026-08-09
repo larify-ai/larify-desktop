@@ -89,6 +89,19 @@ describe('layout with the real resizable component', () => {
     expect(buttons('隐藏工作台')).toHaveLength(0)
   })
 
+  it('notifies the conversation after either panel button changes the layout', async () => {
+    const changed = vi.fn()
+    window.addEventListener('larify:layout-toggle', changed)
+
+    try {
+      await act(async () => container.querySelectorAll('button')[0]?.click())
+      await act(async () => container.querySelectorAll('button')[1]?.click())
+      expect(changed).toHaveBeenCalledTimes(2)
+    } finally {
+      window.removeEventListener('larify:layout-toggle', changed)
+    }
+  })
+
   it('keeps the navigation separator invisible and workbench feedback visible', () => {
     const separators = [...container.querySelectorAll('[role="separator"]')]
     expect(separators).toHaveLength(2)

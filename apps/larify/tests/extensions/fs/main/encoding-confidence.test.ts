@@ -18,13 +18,13 @@ beforeEach(() => {
 
 afterAll(() => rmSync(root, { force: true, recursive: true }))
 
-const readFile = (name: string, content: Buffer) => {
+const readFile = (name: string, content: Buffer): Promise<string> => {
   const file = path.join(root, name)
   writeFileSync(file, content)
   return callTool<string>(readFileTool, { file_path: file }, { sessionId: session })
 }
 
-const many = (line: string, count: number) =>
+const many = (line: string, count: number): string =>
   Array.from({ length: count }, (_, i) => line.replace("%d", String(i))).join("\n")
 
 describe("认得出的编码照常解码", () => {
@@ -95,7 +95,7 @@ describe("非法字节出现在第一块之后也报同一条信息", () => {
     writeFileSync(file, broken)
 
     await expect(
-      callTool(readFileTool, { file_path: file, line: 99_999 }, { sessionId: session }),
+      callTool(readFileTool, { file_path: file, offset: 99_999 }, { sessionId: session }),
     ).rejects.toThrow(/^Not UTF-8; encoding undetermined \(best guess .+, confidence \d+\)\.$/)
     expect(() => decodeText(broken)).toThrow(/^Not UTF-8; encoding undetermined/)
   }, 120_000)
@@ -108,7 +108,7 @@ describe("非法字节出现在第一块之后也报同一条信息", () => {
 
     const shown = await callTool<string>(
       readFileTool,
-      { file_path: file, line: 1, limit: 40 },
+      { file_path: file, offset: 1, limit: 40 },
       { sessionId: session },
     )
 

@@ -33,7 +33,7 @@ const positionOf = (starts: number[], index: number): string => {
   let line = starts.length
   while (line > 1 && starts[line - 1] > index) line -= 1
   const column = index - starts[line - 1] + 1
-  return column === 1 ? `line ${line}` : `line ${line} column ${column}`
+  return column === 1 ? `offset ${line}` : `offset ${line} column ${column}`
 }
 
 const reference = (content: string, { line, column, limit, scroll }: Params): string => {
@@ -63,8 +63,9 @@ let seq = 0
 const actual = (content: string | Buffer, params: Params): Promise<string> => {
   const file = path.join(root, `f${seq++}.txt`)
   writeFileSync(file, content)
+  const { line, ...rest } = params
   return readFileWindow(
-    { file_path: file, ...params },
+    { file_path: file, offset: line, ...rest },
     { sessionId: freshSession(), cwd: root },
   )
 }
@@ -151,7 +152,7 @@ describe("column 超出行长时夹在该行末尾, 不溢出到下一行", () =
   it("恰好等于行长加一时停在换行符之前", async () => {
     const got = await actual(content, { line: 1, column: 4, limit: 6, scroll: "down" })
 
-    expect(got).toBe("(Omitted before line 1 column 4.)\n\nBBB\nC\n(Continue from line 3 column 2.)")
+    expect(got).toBe("(Omitted before offset 1 column 4.)\n\nBBB\nC\n(Continue from offset 3 column 2.)")
   })
 
   it("远超行长也只停在同一行末尾", async () => {
@@ -164,13 +165,13 @@ describe("column 超出行长时夹在该行末尾, 不溢出到下一行", () =
   it("中间一行同样不越界", async () => {
     const got = await actual(content, { line: 2, column: 999, limit: 4, scroll: "down" })
 
-    expect(got).toBe("(Omitted before line 2 column 4.)\n\nCCC\n(Continue from line 3 column 4.)")
+    expect(got).toBe("(Omitted before offset 2 column 4.)\n\nCCC\n(Continue from offset 3 column 4.)")
   })
 
   it("最后一行超出时夹到文件末尾", async () => {
     const got = await actual(content, { line: 4, column: 999, limit: 10, scroll: "down" })
 
-    expect(got).toBe("(Omitted before line 4 column 4.)\n\n")
+    expect(got).toBe("(Omitted before offset 4 column 4.)\n\n")
   })
 
   it("向上回读时锚点同样夹在行末", async () => {
@@ -184,14 +185,14 @@ describe("column 超出行长时夹在该行末尾, 不溢出到下一行", () =
   it("空行上的大 column 不会跑到下一行", async () => {
     const got = await actual("A\n\nB\n", { line: 2, column: 99, limit: 4, scroll: "down" })
 
-    expect(got).toBe("(Omitted before line 2.)\n\nB\n")
+    expect(got).toBe("(Omitted before offset 2.)\n\nB\n")
   })
 })
 
 describe("窗口边缘正好压在 1MB 分块边界上", () => {
   const CHUNK = 1 << 20
   const filler = "0123456789abcdefghijklmnopqrstuvwxyz".repeat(64)
-  const body = (chars: number) => {
+  const body = (chars: number): string => {
     let out = ""
     while (out.length < chars) out += filler + "\n"
     return out.slice(0, chars)

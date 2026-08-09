@@ -12,7 +12,12 @@ const MAX_READ_UNITS = 100
 const inputSchema = z
   .object({
     file_path: z.string().describe('Absolute path to the file'),
-    line: z.number().int().positive().optional().describe('Start line (1-based)'),
+    offset: z
+      .number()
+      .int()
+      .nonnegative()
+      .optional()
+      .describe('Start line (1-based)'),
     column: z
       .number()
       .int()
@@ -78,8 +83,8 @@ const positionAt = (chunkStart: Position, chunk: string, index: number): Positio
 
 const describePosition = (at: Position): string =>
   at.index === at.lineStart
-    ? `line ${at.line}`
-    : `line ${at.line} column ${at.index - at.lineStart + 1}`
+    ? `offset ${at.line}`
+    : `offset ${at.line} column ${at.index - at.lineStart + 1}`
 
 interface Window {
   text: string
@@ -107,13 +112,14 @@ async function readWindow(target: string, from: number, to: number): Promise<Win
 type ReadFileArgs = z.infer<typeof inputSchema>
 
 export async function readFileWindow(args: ReadFileArgs, ctx: ToolRunContext): Promise<string> {
-  const { file_path, line, column, limit, scroll } = args
+  const { file_path, offset, column, limit, scroll } = args
   const target = path.resolve(ctx.cwd, file_path)
   const stats = await stat(target)
+  const startLine = Math.max(1, offset ?? 1)
 
   const anchor =
-    line !== undefined
-      ? await anchorIndex(target, line, column)
+    offset !== undefined
+      ? await anchorIndex(target, startLine, column)
       : scroll === 'up'
         ? await textLength(target)
         : 0

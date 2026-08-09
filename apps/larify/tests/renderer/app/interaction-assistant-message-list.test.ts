@@ -188,15 +188,31 @@ describe('interaction assistant message list', () => {
     act(() => container.querySelector<HTMLButtonElement>('button')?.click())
 
     expect(captured.scrollToIndex).toHaveBeenCalledWith({
-      index: 4999,
-      align: 'end',
-      behavior: 'auto'
+      index: 'LAST',
+      align: 'end'
     })
+  })
+
+  it('keeps the latest message visible when a panel is toggled at the bottom', async () => {
+    await render({ messages: [message('latest')], initialMessageCount: 1, recentStart: 0 })
+    act(() => (captured.props as VirtuosoProps).atBottomStateChange(true))
+    captured.scrollToIndex.mockClear()
+
+    act(() => window.dispatchEvent(new Event('larify:layout-toggle')))
     await act(async () => new Promise((resolve) => requestAnimationFrame(resolve)))
-    expect(captured.scrollTo).toHaveBeenCalledWith({
-      top: Number.MAX_SAFE_INTEGER,
-      behavior: 'auto'
-    })
+
+    expect(captured.scrollToIndex).toHaveBeenCalledWith({ index: 'LAST', align: 'end' })
+  })
+
+  it('preserves the history position when a panel is toggled away from the bottom', async () => {
+    await render({ messages: [message('latest')], initialMessageCount: 1, recentStart: 0 })
+    act(() => (captured.props as VirtuosoProps).atBottomStateChange(false))
+    captured.scrollToIndex.mockClear()
+
+    act(() => window.dispatchEvent(new Event('larify:layout-toggle')))
+    await act(async () => new Promise((resolve) => requestAnimationFrame(resolve)))
+
+    expect(captured.scrollToIndex).not.toHaveBeenCalled()
   })
 
   it('keeps unloaded items at the configured estimated height', async () => {

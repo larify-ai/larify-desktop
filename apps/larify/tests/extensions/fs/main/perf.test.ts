@@ -48,7 +48,7 @@ describe("fs — performance guards", () => {
     const started = performance.now()
     const out = await callTool<string>(
       readFileTool,
-      { file_path: abs, line: lineCount >> 1, limit: 2000 },
+      { file_path: abs, offset: lineCount >> 1, limit: 2000 },
       { sessionId: freshSession() },
     )
     const elapsed = performance.now() - started

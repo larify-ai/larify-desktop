@@ -11,11 +11,16 @@ import { useGroupToggle } from './use-group-toggle'
 
 const navigationCollapsed = { navigation: 0, content: 100 }
 const workbenchCollapsed = { interaction: 100, workbench: 0 }
+const layoutToggleEvent = 'larify:layout-toggle'
 
 export function LayoutPanels(): React.JSX.Element {
   const { heading } = useAssistantSessions().activeSession
   const navigation = useGroupToggle('navigation', navigationCollapsed)
   const workbench = useGroupToggle('workbench', workbenchCollapsed, true)
+  const toggle = (action: () => void): void => {
+    action()
+    window.dispatchEvent(new Event(layoutToggleEvent))
+  }
 
   return (
     <ResizablePanelGroup id="main" direction="horizontal" groupRef={navigation.groupRef}>
@@ -30,7 +35,10 @@ export function LayoutPanels(): React.JSX.Element {
         groupResizeBehavior="preserve-pixel-size"
       >
         <div className="h-full w-full overflow-hidden">
-          <Navigation onCollapse={navigation.toggle} showToggle={!navigation.collapsed} />
+          <Navigation
+            onCollapse={() => toggle(navigation.toggle)}
+            showToggle={!navigation.collapsed}
+          />
         </div>
       </ResizablePanel>
       <ResizeHandle label="Resize navigation" hidden={navigation.collapsed} />
@@ -44,8 +52,8 @@ export function LayoutPanels(): React.JSX.Element {
         <Titlebar
           navigationCollapsed={navigation.collapsed}
           workbenchCollapsed={workbench.collapsed}
-          onToggleNavigation={navigation.toggle}
-          onToggleWorkbench={workbench.toggle}
+          onToggleNavigation={() => toggle(navigation.toggle)}
+          onToggleWorkbench={() => toggle(workbench.toggle)}
         >
           {heading && <ConversationHeader cwd={heading.cwd} title={heading.title} />}
         </Titlebar>

@@ -9,6 +9,7 @@ import { messagePageSize } from './session-messages'
 const Message = memo(MessageView)
 const pageBuffer = 1
 const estimatedMessageHeight = 80
+const layoutToggleEvent = 'larify:layout-toggle'
 
 function ScrollPlaceholder({ height }: { height: number }): React.JSX.Element {
   return (
@@ -44,7 +45,19 @@ export function AssistantMessageList({
   onLoadRange: (firstPage: number, lastPage: number) => void
 }): React.JSX.Element {
   const list = useRef<VirtuosoHandle>(null)
+  const atBottomRef = useRef(true)
   const [atBottom, setAtBottom] = useState(true)
+
+  useEffect(() => {
+    const keepBottom = (): void => {
+      if (!atBottomRef.current) return
+      requestAnimationFrame(() =>
+        list.current?.scrollToIndex({ index: 'LAST', align: 'end' })
+      )
+    }
+    window.addEventListener(layoutToggleEvent, keepBottom)
+    return () => window.removeEventListener(layoutToggleEvent, keepBottom)
+  }, [])
 
   useEffect(() => {
     if (live && atBottom) list.current?.autoscrollToBottom()
@@ -52,10 +65,7 @@ export function AssistantMessageList({
 
   const totalCount = recentStart + messages.length
   const scrollToBottom = (): void => {
-    list.current?.scrollToIndex({ index: totalCount - 1, align: 'end', behavior: 'auto' })
-    requestAnimationFrame(() =>
-      list.current?.scrollTo({ top: Number.MAX_SAFE_INTEGER, behavior: 'auto' })
-    )
+    list.current?.scrollToIndex({ index: 'LAST', align: 'end' })
   }
   const item = (index: number): UIMessage | undefined =>
     index < recentStart ? olderMessages.get(index) : messages[index - recentStart]
@@ -86,7 +96,10 @@ export function AssistantMessageList({
         }}
         followOutput="auto"
         rangeChanged={rangeChanged}
-        atBottomStateChange={setAtBottom}
+        atBottomStateChange={(value) => {
+          atBottomRef.current = value
+          setAtBottom(value)
+        }}
         computeItemKey={(index) => item(index)?.id ?? index}
         itemContent={(index) => {
           const message = item(index)

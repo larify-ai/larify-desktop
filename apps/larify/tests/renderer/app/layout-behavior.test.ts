@@ -8,7 +8,6 @@ const sessionIds: string[] = []
 const unmountedSessionIds: string[] = []
 const headingChanges = new Map<string, (heading: { cwd: string; title: string } | null) => void>()
 const savedCallbacks = new Map<string, () => void>()
-const allotmentCallbacks = new Map<string, { onDragEnd?: () => void; onDragStart?: () => void }>()
 let storedSession: { id: string; title: string; cwd: string } | undefined
 
 vi.mock('../../../src/renderer/src/app/interaction/assistant/session', async () => {
@@ -41,21 +40,10 @@ vi.mock('../../../src/renderer/src/app/interaction/assistant/session', async () 
 vi.mock('allotment', async () => {
   const React = await vi.importActual<typeof import('react')>('react')
   const MockAllotment = React.forwardRef(function MockAllotment(
-    {
-      children,
-      id,
-      onDragEnd,
-      onDragStart
-    }: {
-      children?: ReactNode
-      id?: string
-      onDragEnd?: () => void
-      onDragStart?: () => void
-    },
+    { children, id }: { children?: ReactNode; id?: string },
     ref
   ) {
     React.useImperativeHandle(ref, () => ({ reset: vi.fn(), resize: vi.fn() }))
-    if (id) allotmentCallbacks.set(id, { onDragEnd, onDragStart })
     return createElement('div', { 'data-allotment': id }, children)
   }) as React.ForwardRefExoticComponent<
     { children?: ReactNode; id?: string } & React.RefAttributes<unknown>
@@ -85,7 +73,6 @@ describe('layout panel behavior', () => {
     unmountedSessionIds.length = 0
     headingChanges.clear()
     savedCallbacks.clear()
-    allotmentCallbacks.clear()
     storedSession = undefined
     globalThis.IS_REACT_ACT_ENVIRONMENT = true
     Object.defineProperty(window, 'bridge', {
@@ -130,28 +117,6 @@ describe('layout panel behavior', () => {
 
     await click('显示侧边栏')
     expect(container.querySelector('[aria-label="Navigation"]')).not.toBeNull()
-  })
-
-  it('notifies consumers when either splitter starts and finishes dragging', () => {
-    const resizeStarted = vi.fn()
-    const layoutChanged = vi.fn()
-    window.addEventListener('larify:layout-resize-start', resizeStarted)
-    window.addEventListener('larify:layout-toggle', layoutChanged)
-
-    try {
-      act(() => {
-        allotmentCallbacks.get('main')?.onDragStart?.()
-        allotmentCallbacks.get('main')?.onDragEnd?.()
-        allotmentCallbacks.get('content')?.onDragStart?.()
-        allotmentCallbacks.get('content')?.onDragEnd?.()
-      })
-
-      expect(resizeStarted).toHaveBeenCalledTimes(2)
-      expect(layoutChanged).toHaveBeenCalledTimes(2)
-    } finally {
-      window.removeEventListener('larify:layout-resize-start', resizeStarted)
-      window.removeEventListener('larify:layout-toggle', layoutChanged)
-    }
   })
 
   it('creates a task record only after the draft is sent', async () => {

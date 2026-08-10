@@ -2,7 +2,7 @@
 
 import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useAllotmentToggle } from '../../../src/renderer/src/app/layout/use-allotment-toggle'
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
@@ -14,7 +14,11 @@ function ToggleHarness({ initiallyCollapsed = false }): React.JSX.Element {
 
   return createElement(
     'button',
-    { 'data-collapsed': panel.collapsed, onClick: panel.toggle },
+    {
+      'data-animating': panel.animating,
+      'data-collapsed': panel.collapsed,
+      onClick: panel.toggle
+    },
     'toggle'
   )
 }
@@ -24,6 +28,7 @@ describe('useAllotmentToggle', () => {
   let root: Root
 
   beforeEach(() => {
+    vi.useFakeTimers()
     container = document.createElement('div')
     document.body.append(container)
     root = createRoot(container)
@@ -32,6 +37,7 @@ describe('useAllotmentToggle', () => {
   afterEach(() => {
     act(() => root.unmount())
     container.remove()
+    vi.useRealTimers()
   })
 
   function button(): HTMLButtonElement {
@@ -42,8 +48,12 @@ describe('useAllotmentToggle', () => {
     act(() => root.render(createElement(ToggleHarness)))
 
     expect(button().dataset.collapsed).toBe('false')
+    expect(button().dataset.animating).toBe('false')
     act(() => button().click())
     expect(button().dataset.collapsed).toBe('true')
+    expect(button().dataset.animating).toBe('true')
+    act(() => vi.advanceTimersByTime(180))
+    expect(button().dataset.animating).toBe('false')
     act(() => button().click())
     expect(button().dataset.collapsed).toBe('false')
   })
@@ -58,5 +68,17 @@ describe('useAllotmentToggle', () => {
       button().click()
     })
     expect(button().dataset.collapsed).toBe('false')
+    expect(button().dataset.animating).toBe('true')
+    act(() => vi.advanceTimersByTime(180))
+    expect(button().dataset.animating).toBe('false')
+  })
+
+  it('clears the animation timer when unmounted', () => {
+    act(() => root.render(createElement(ToggleHarness)))
+    act(() => button().click())
+    expect(vi.getTimerCount()).toBe(1)
+
+    act(() => root.unmount())
+    expect(vi.getTimerCount()).toBe(0)
   })
 })

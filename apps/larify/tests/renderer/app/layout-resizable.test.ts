@@ -81,22 +81,21 @@ describe('layout with the real resizable component', () => {
     expect(buttons('隐藏工作台')).toHaveLength(0)
   })
 
-  it('notifies the conversation after either panel button changes the layout', async () => {
-    const changed = vi.fn()
-    window.addEventListener('larify:layout-toggle', changed)
-
-    try {
-      await act(async () => container.querySelectorAll('button')[0]?.click())
-      await act(async () => container.querySelectorAll('button')[1]?.click())
-      expect(changed).toHaveBeenCalledTimes(2)
-    } finally {
-      window.removeEventListener('larify:layout-toggle', changed)
-    }
-  })
-
   it('uses nested Allotment split views with workbench feedback styling', () => {
     expect(container.querySelectorAll('.larify-allotment')).toHaveLength(2)
     expect(container.querySelector('.larify-workbench-allotment')).not.toBeNull()
+  })
+
+  it('keeps pane content at its minimum width while the outer pane collapses', () => {
+    const navigation = container.querySelector<HTMLElement>(
+      '.larify-allotment > .split-view-container > .split-view-view'
+    )?.firstElementChild as HTMLElement | undefined
+    const workbench = container.querySelector<HTMLElement>(
+      '[data-region="workbench"]'
+    )?.parentElement
+
+    expect(navigation?.style.minWidth).toBe('180px')
+    expect(workbench?.style.minWidth).toBe('280px')
   })
 
   it('clips navigation content when its panel collapses', () => {

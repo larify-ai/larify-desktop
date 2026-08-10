@@ -10,9 +10,6 @@ import { Titlebar } from './titlebar'
 import { useAllotmentToggle } from './use-allotment-toggle'
 import './layout-panels.css'
 
-const layoutToggleEvent = 'larify:layout-toggle'
-const layoutResizeStartEvent = 'larify:layout-resize-start'
-
 export function LayoutPanels(): React.JSX.Element {
   const { heading } = useAssistantSessions().activeSession
   const navigation = useAllotmentToggle()
@@ -22,25 +19,12 @@ export function LayoutPanels(): React.JSX.Element {
       ? layoutSpec.navigation.defaultSize + layoutSpec.interaction.minSize
       : window.innerWidth
   )
-  const notifyLayoutChange = (): void => {
-    window.dispatchEvent(new Event(layoutToggleEvent))
-  }
-  const notifyLayoutResizeStart = (): void => {
-    window.dispatchEvent(new Event(layoutResizeStartEvent))
-  }
-  const toggle = (action: () => void): void => {
-    action()
-    notifyLayoutChange()
-  }
-
   return (
     <Allotment
-      className="larify-allotment"
+      className={`larify-allotment${navigation.animating ? ' larify-allotment-animated' : ''}`}
       defaultSizes={mainDefaultSizes}
       id="main"
       proportionalLayout={false}
-      onDragStart={notifyLayoutResizeStart}
-      onDragEnd={notifyLayoutChange}
     >
       <Allotment.Pane
         maxSize={layoutSpec.navigation.maxSize}
@@ -48,11 +32,11 @@ export function LayoutPanels(): React.JSX.Element {
         preferredSize={layoutSpec.navigation.defaultSize}
         visible={!navigation.collapsed}
       >
-        <div className="h-full w-full overflow-hidden [contain:layout_paint]">
-          <Navigation
-            onCollapse={() => toggle(navigation.toggle)}
-            showToggle={!navigation.collapsed}
-          />
+        <div
+          className="h-full w-full overflow-hidden [contain:layout_paint]"
+          style={{ minWidth: layoutSpec.navigation.minSize }}
+        >
+          <Navigation onCollapse={navigation.toggle} showToggle={!navigation.collapsed} />
         </div>
       </Allotment.Pane>
       <Allotment.Pane
@@ -66,17 +50,17 @@ export function LayoutPanels(): React.JSX.Element {
           <Titlebar
             navigationCollapsed={navigation.collapsed}
             workbenchCollapsed={workbench.collapsed}
-            onToggleNavigation={() => toggle(navigation.toggle)}
-            onToggleWorkbench={() => toggle(workbench.toggle)}
+            onToggleNavigation={navigation.toggle}
+            onToggleWorkbench={workbench.toggle}
           >
             {heading && <ConversationHeader cwd={heading.cwd} title={heading.title} />}
           </Titlebar>
           <Allotment
-            className="larify-allotment larify-workbench-allotment min-h-0 flex-1"
+            className={`larify-allotment larify-workbench-allotment min-h-0 flex-1${
+              workbench.animating ? ' larify-allotment-animated' : ''
+            }`}
             id="content"
             proportionalLayout={false}
-            onDragStart={notifyLayoutResizeStart}
-            onDragEnd={notifyLayoutChange}
           >
             <Allotment.Pane minSize={layoutSpec.interaction.minSize}>
               <div className="h-full w-full overflow-hidden [contain:layout_paint]">
@@ -88,7 +72,10 @@ export function LayoutPanels(): React.JSX.Element {
               preferredSize={layoutSpec.workbench.defaultSize}
               visible={!workbench.collapsed}
             >
-              <div className="h-full w-full overflow-hidden [contain:layout_paint]">
+              <div
+                className="h-full w-full overflow-hidden [contain:layout_paint]"
+                style={{ minWidth: layoutSpec.workbench.minSize }}
+              >
                 <Workbench />
               </div>
             </Allotment.Pane>

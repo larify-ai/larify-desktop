@@ -1,11 +1,23 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+
+const animationDuration = 180
 
 export function useAllotmentToggle(initiallyCollapsed = false): {
+  animating: boolean
   collapsed: boolean
   toggle(): void
 } {
+  const animationTimer = useRef<number | undefined>(undefined)
+  const [animating, setAnimating] = useState(false)
   const [collapsed, setCollapsed] = useState(initiallyCollapsed)
-  const toggle = (): void => setCollapsed((current) => !current)
+  const toggle = (): void => {
+    window.clearTimeout(animationTimer.current)
+    setAnimating(true)
+    setCollapsed((current) => !current)
+    animationTimer.current = window.setTimeout(() => setAnimating(false), animationDuration)
+  }
 
-  return { collapsed, toggle }
+  useEffect(() => () => window.clearTimeout(animationTimer.current), [])
+
+  return { animating, collapsed, toggle }
 }

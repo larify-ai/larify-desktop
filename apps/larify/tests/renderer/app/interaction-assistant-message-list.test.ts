@@ -188,16 +188,6 @@ describe('interaction assistant message list', () => {
     expect(captured.scrollTo).toHaveBeenCalledWith({ top: Number.MAX_SAFE_INTEGER })
   })
 
-  it('does not force the conversation to its absolute bottom after layout changes', async () => {
-    await render({ messages: [message('latest')], initialMessageCount: 1, recentStart: 0 })
-    captured.scrollTo.mockClear()
-
-    act(() => window.dispatchEvent(new Event('larify:layout-toggle')))
-    await act(async () => new Promise((resolve) => requestAnimationFrame(resolve)))
-
-    expect(captured.scrollTo).not.toHaveBeenCalled()
-  })
-
   it('keeps unloaded items at the configured estimated height', async () => {
     await render({
       messages: [message('latest')],

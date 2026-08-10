@@ -6,9 +6,56 @@
 }
 
 .larify-allotment > .split-view-container > .split-view-view:not(.split-view-view-visible) {
+  content-visibility: hidden;
   visibility: hidden;
 }
 
+.larify-allotment-animated > .split-view-container > .split-view-view {
+  transition:
+    left 180ms ease-out,
+    width 180ms ease-out;
+  will-change: left, width;
+}
+
+.larify-allotment-animated
+  > .split-view-container
+  > .split-view-view:not(.split-view-view-visible) {
+  content-visibility: visible;
+  transition:
+    left 180ms ease-out,
+    width 180ms ease-out,
+    visibility 0s 180ms;
+}
+
+.larify-allotment-animated > .sash-container > .sash {
+  transition: left 180ms ease-out;
+}
+
+.larify-allotment-animated:has(> .sash-container > .sash-active)
+  > .split-view-container
+  > .split-view-view,
+.larify-allotment-animated:has(> .sash-container > .sash-active) > .sash-container > .sash {
+  transition: none;
+}
+
 .larify-workbench-allotment {
+  --separator-border: var(--border-strong);
   --focus-border: color-mix(in srgb, var(--foreground) 20%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .larify-allotment-animated > .split-view-container > .split-view-view,
+  .larify-allotment-animated > .sash-container > .sash {
+    transition: none;
+  }
+
+  .larify-allotment-animated > .split-view-container > .split-view-view {
+    will-change: auto;
+  }
+
+  .larify-allotment-animated
+    > .split-view-container
+    > .split-view-view:not(.split-view-view-visible) {
+    content-visibility: hidden;
+  }
 }

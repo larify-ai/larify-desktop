@@ -55,9 +55,6 @@ describe('workbench layout specification', () => {
     expect(layoutSpec.workbench).not.toHaveProperty('maxSize')
     expect(expandedContentMinSize).toBe(616)
     expect(panels).toContain('minSize={layoutSpec.interaction.minSize}')
-    expect(panels).not.toContain('onResize={notifyLayoutChange}')
-    expect(panels.match(/onDragStart=\{notifyLayoutResizeStart\}/g)).toHaveLength(2)
-    expect(panels.match(/onDragEnd=\{notifyLayoutChange\}/g)).toHaveLength(2)
     expect(panels).toContain('preferredSize={layoutSpec.workbench.defaultSize}')
     expect(panels).not.toContain('panelRef=')
     expect(panels.match(/proportionalLayout=\{false\}/g)).toHaveLength(2)
@@ -133,12 +130,12 @@ describe('workbench layout specification', () => {
     expect(markup.indexOf('border-b-[0.5px]')).toBeLessThan(
       markup.indexOf('aria-label="Interaction"')
     )
-    expect(markup.match(/larify-allotment/g)).toHaveLength(2)
+    expect(markup).not.toContain('larify-allotment-animated')
     expect(markup.match(/h-\(--titlebar-h\)/g)).toHaveLength(2)
   })
 
   it('uses one divider style for every region boundary', () => {
-    expect(panels).toContain('className="larify-allotment"')
+    expect(panels).toContain("navigation.animating ? ' larify-allotment-animated' : ''")
     expect(panels).toContain('larify-workbench-allotment')
     expect(header).toContain('border-b-[0.5px] border-border-strong')
     expect(panels).toContain('rounded-l-[12px]')
@@ -182,13 +179,21 @@ describe('workbench layout specification', () => {
 
   it('does not paint panes before Allotment marks them visible', () => {
     expect(panelsCss).toContain(
-      '.split-view-view:not(.split-view-view-visible) {\n  visibility: hidden;'
+      '.split-view-view:not(.split-view-view-visible) {\n  content-visibility: hidden;\n  visibility: hidden;'
     )
+    expect(panelsCss).toContain('content-visibility: visible')
   })
 
-  it('uses the resizable component without custom panel animation', () => {
-    expect(panels).not.toContain('panel-animated')
-    expect(groupToggle).not.toContain('useRef')
+  it('animates programmatic layout changes without delaying pointer dragging', () => {
+    expect(panels).toContain("workbench.animating ? ' larify-allotment-animated' : ''")
+    expect(groupToggle).toContain('const animationDuration = 180')
+    expect(groupToggle).toContain('window.clearTimeout(animationTimer.current)')
+    expect(panelsCss).toContain('left 180ms ease-out')
+    expect(panelsCss).toContain('width 180ms ease-out')
+    expect(panelsCss).toContain('visibility 0s 180ms')
+    expect(panelsCss).toContain(':has(> .sash-container > .sash-active)')
+    expect(panelsCss).toContain('@media (prefers-reduced-motion: reduce)')
+    expect(panelsCss.match(/content-visibility: hidden/g)).toHaveLength(2)
     expect(groupToggle).not.toContain('requestAnimationFrame')
     expect(groupToggle).not.toContain('flushSync')
     expect(css).not.toContain('.panel-animated')
@@ -205,9 +210,11 @@ describe('workbench layout specification', () => {
     expect(panels).toContain('visible={!workbench.collapsed}')
     expect(panels).not.toContain('onExpand=')
     expect(panels).not.toContain('disabled=')
-    expect(panels.match(/className="h-full w-full overflow-hidden/g)).toHaveLength(3)
+    expect(panels.match(/overflow-hidden \[contain:layout_paint\]/g)).toHaveLength(3)
     expect(panels).toContain('minSize={layoutSpec.navigation.minSize}')
     expect(panels).toContain('minSize={layoutSpec.workbench.minSize}')
+    expect(panels).toContain('style={{ minWidth: layoutSpec.navigation.minSize }}')
+    expect(panels).toContain('style={{ minWidth: layoutSpec.workbench.minSize }}')
     expect(interaction).toContain('min-w-0 overflow-hidden')
     expect(workbench).toContain('min-w-0 overflow-hidden')
     expect(interaction).not.toContain('min-w-[352px]')

@@ -30,6 +30,7 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
 interface VirtuosoProps {
   className: string
+  scrollerRef(ref: HTMLElement | Window | null): void
   totalCount: number
   defaultItemHeight: number
   initialItemCount: number
@@ -74,6 +75,7 @@ describe('interaction assistant message list', () => {
     expect(props.initialTopMostItemIndex).toBe(4999)
     expect(props.computeItemKey(4999)).toBe('latest')
     expect(props.className).toContain('[scrollbar-gutter:stable_both-edges]')
+    expect(props.scrollerRef).toEqual(expect.any(Function))
   })
 
   it('does not render initial placeholders for an empty conversation', async () => {
@@ -186,39 +188,14 @@ describe('interaction assistant message list', () => {
     expect(captured.scrollTo).toHaveBeenCalledWith({ top: Number.MAX_SAFE_INTEGER })
   })
 
-  it('keeps the latest message visible when a panel is toggled at the bottom', async () => {
+  it('does not force the conversation to its absolute bottom after layout changes', async () => {
     await render({ messages: [message('latest')], initialMessageCount: 1, recentStart: 0 })
-    act(() => (captured.props as VirtuosoProps).atBottomStateChange(true))
-    captured.scrollTo.mockClear()
-
-    act(() => window.dispatchEvent(new Event('larify:layout-toggle')))
-    await act(async () => new Promise((resolve) => requestAnimationFrame(resolve)))
-
-    expect(captured.scrollTo).toHaveBeenCalledWith({ top: Number.MAX_SAFE_INTEGER })
-  })
-
-  it('preserves the history position when a panel is toggled away from the bottom', async () => {
-    await render({ messages: [message('latest')], initialMessageCount: 1, recentStart: 0 })
-    act(() => (captured.props as VirtuosoProps).atBottomStateChange(false))
     captured.scrollTo.mockClear()
 
     act(() => window.dispatchEvent(new Event('larify:layout-toggle')))
     await act(async () => new Promise((resolve) => requestAnimationFrame(resolve)))
 
     expect(captured.scrollTo).not.toHaveBeenCalled()
-  })
-
-  it('stays at the bottom when resizing makes Virtuoso temporarily leave it', async () => {
-    await render({ messages: [message('latest')], initialMessageCount: 1, recentStart: 0 })
-    act(() => (captured.props as VirtuosoProps).atBottomStateChange(true))
-    captured.scrollTo.mockClear()
-
-    act(() => window.dispatchEvent(new Event('larify:layout-resize-start')))
-    act(() => (captured.props as VirtuosoProps).atBottomStateChange(false))
-    act(() => window.dispatchEvent(new Event('larify:layout-toggle')))
-    await act(async () => new Promise((resolve) => requestAnimationFrame(resolve)))
-
-    expect(captured.scrollTo).toHaveBeenCalledWith({ top: Number.MAX_SAFE_INTEGER })
   })
 
   it('keeps unloaded items at the configured estimated height', async () => {
@@ -232,6 +209,14 @@ describe('interaction assistant message list', () => {
     expect(container.querySelector<HTMLElement>('[data-scroll-placeholder]')?.style.height).toBe(
       '80px'
     )
+    expect(container.firstElementChild?.getAttribute('data-message-index')).toBe('100')
+  })
+
+  it('marks rendered messages as viewport anchor candidates', async () => {
+    await render({ messages: [message('latest')], initialMessageCount: 1, recentStart: 0 })
+
+    await act(async () => root.render((captured.props as VirtuosoProps).itemContent(0)))
+    expect(container.firstElementChild?.getAttribute('data-message-index')).toBe('0')
   })
 
   it('reserves the rounded composer overlap below the final message', async () => {

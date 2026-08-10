@@ -5,18 +5,24 @@ import { Virtuoso, type ListRange, type VirtuosoHandle } from 'react-virtuoso'
 import { Button } from '@renderer/components/ui/button'
 import { MessageView } from './message-view'
 import { messagePageSize } from './session-messages'
+import { useViewportBottomAnchor } from './use-viewport-bottom-anchor'
 
 const Message = memo(MessageView)
 const pageBuffer = 1
 const estimatedMessageHeight = 80
-const layoutToggleEvent = 'larify:layout-toggle'
-const layoutResizeStartEvent = 'larify:layout-resize-start'
 
-function ScrollPlaceholder({ height }: { height: number }): React.JSX.Element {
+function ScrollPlaceholder({
+  height,
+  index
+}: {
+  height: number
+  index: number
+}): React.JSX.Element {
   return (
     <div
       className="mx-auto flex w-full max-w-4xl flex-col justify-center gap-3 px-6 py-3"
       style={{ height }}
+      data-message-index={index}
       data-scroll-placeholder
       aria-hidden="true"
     >
@@ -46,26 +52,8 @@ export function AssistantMessageList({
   onLoadRange: (firstPage: number, lastPage: number) => void
 }): React.JSX.Element {
   const list = useRef<VirtuosoHandle>(null)
-  const atBottomRef = useRef(true)
-  const resizeStartedAtBottom = useRef(false)
   const [atBottom, setAtBottom] = useState(true)
-
-  useEffect(() => {
-    const rememberBottom = (): void => {
-      resizeStartedAtBottom.current = atBottomRef.current
-    }
-    const keepBottom = (): void => {
-      if (!atBottomRef.current && !resizeStartedAtBottom.current) return
-      resizeStartedAtBottom.current = false
-      requestAnimationFrame(() => list.current?.scrollTo({ top: Number.MAX_SAFE_INTEGER }))
-    }
-    window.addEventListener(layoutResizeStartEvent, rememberBottom)
-    window.addEventListener(layoutToggleEvent, keepBottom)
-    return () => {
-      window.removeEventListener(layoutResizeStartEvent, rememberBottom)
-      window.removeEventListener(layoutToggleEvent, keepBottom)
-    }
-  }, [])
+  const { captureAnchor, scrollerRef } = useViewportBottomAnchor()
 
   useEffect(() => {
     if (live && atBottom) list.current?.autoscrollToBottom()
@@ -78,6 +66,7 @@ export function AssistantMessageList({
   const item = (index: number): UIMessage | undefined =>
     index < recentStart ? olderMessages.get(index) : messages[index - recentStart]
   const rangeChanged = ({ startIndex, endIndex }: ListRange): void => {
+    captureAnchor({ startIndex, endIndex })
     if (recentStart <= 0) return
     const firstPage = Math.max(0, Math.floor(startIndex / messagePageSize) - pageBuffer)
     const lastPage = Math.min(
@@ -91,6 +80,7 @@ export function AssistantMessageList({
     <div className="relative min-h-0 min-w-0 flex-1">
       <Virtuoso
         ref={list}
+        scrollerRef={scrollerRef}
         role="log"
         className="size-full [scrollbar-gutter:stable_both-edges]"
         totalCount={totalCount}
@@ -101,19 +91,16 @@ export function AssistantMessageList({
         components={{ Footer: MessageListFooter }}
         followOutput="auto"
         rangeChanged={rangeChanged}
-        atBottomStateChange={(value) => {
-          atBottomRef.current = value
-          setAtBottom(value)
-        }}
+        atBottomStateChange={setAtBottom}
         computeItemKey={(index) => item(index)?.id ?? index}
         itemContent={(index) => {
           const message = item(index)
           return message ? (
-            <div className="mx-auto w-full max-w-4xl min-w-0 px-6 py-3">
+            <div className="mx-auto w-full max-w-4xl min-w-0 px-6 py-3" data-message-index={index}>
               <Message message={message} streaming={live && message.id === messages.at(-1)?.id} />
             </div>
           ) : (
-            <ScrollPlaceholder height={estimatedMessageHeight} />
+            <ScrollPlaceholder height={estimatedMessageHeight} index={index} />
           )
         }}
       />

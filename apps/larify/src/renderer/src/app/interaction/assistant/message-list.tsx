@@ -51,9 +51,7 @@ export function AssistantMessageList({
   useEffect(() => {
     const keepBottom = (): void => {
       if (!atBottomRef.current) return
-      requestAnimationFrame(() =>
-        list.current?.scrollToIndex({ index: 'LAST', align: 'end' })
-      )
+      requestAnimationFrame(() => list.current?.scrollToIndex({ index: 'LAST', align: 'end' }))
     }
     window.addEventListener(layoutToggleEvent, keepBottom)
     return () => window.removeEventListener(layoutToggleEvent, keepBottom)
@@ -65,7 +63,7 @@ export function AssistantMessageList({
 
   const totalCount = recentStart + messages.length
   const scrollToBottom = (): void => {
-    list.current?.scrollToIndex({ index: 'LAST', align: 'end' })
+    list.current?.scrollTo({ top: Number.MAX_SAFE_INTEGER })
   }
   const item = (index: number): UIMessage | undefined =>
     index < recentStart ? olderMessages.get(index) : messages[index - recentStart]
@@ -87,6 +85,7 @@ export function AssistantMessageList({
         className="size-full [scrollbar-gutter:stable_both-edges]"
         totalCount={totalCount}
         defaultItemHeight={estimatedMessageHeight}
+        initialItemCount={12}
         initialTopMostItemIndex={Math.max(initialMessageCount - 1, 0)}
         increaseViewportBy={{ top: 600, bottom: 600 }}
         components={{ ScrollSeekPlaceholder: ScrollPlaceholder, Footer: MessageListFooter }}

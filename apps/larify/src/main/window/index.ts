@@ -1,3 +1,4 @@
 export { titleBarHeight } from './create'
-export { openMainWindow, registerWindow, windowToken } from './service'
+export { openMainWindow, registerWindow } from './service'
+export { windowToken } from './token'
 export type { MainWindow } from './types'

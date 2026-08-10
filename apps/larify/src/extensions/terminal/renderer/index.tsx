@@ -20,7 +20,7 @@ const loadTerminalView = (): NonNullable<typeof terminalViewPromise> => {
 const TerminalView = lazy(loadTerminalView)
 
 const extension: Extension = {
-  activate(app, context) {
+  activate(app) {
     app.register('view', 'terminal', {
       sidebar: {
         icon: SquareTerminalIcon,

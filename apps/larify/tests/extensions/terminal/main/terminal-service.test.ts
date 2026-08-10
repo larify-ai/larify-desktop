@@ -3,6 +3,7 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest"
 import type { SessionTerminalsState, TerminalCreateOptions } from "../../../../src/extensions/terminal/shared/types"
+import { ResourceManager } from "../../../../src/main/core/resource"
 
 const workspace = join(tmpdir(), "larify-terminal-service-workspace")
 const existingCwd = join(tmpdir(), "larify-terminal-service-existing")
@@ -101,7 +102,7 @@ class FakeManager {
     shell: string
     exitCode: number | null
   } | null {
-    const options = this.create.mock.calls.at(-1)?.[0]
+    const options = this.create.mock.calls.at(-1)?.[1]
     if (!options) return null
     return {
       id: terminalId,
@@ -154,6 +155,42 @@ afterAll(() => {
 })
 
 describe("TerminalService", () => {
+  it("uses the globally assigned resource id as the terminal id", async () => {
+    whichSync.mockReturnValue("powershell.exe")
+    const resources = new ResourceManager()
+    resources.register("browser", () => ({ dispose: vi.fn() }))
+    resources.create("browser", "session-1")
+    const { TerminalService } = await importService()
+    const service = new TerminalService(resources)
+
+    expect(service.create("session-1")).toBe(2)
+    expect(managers[0].create).toHaveBeenCalledWith(2, expect.any(Object))
+    expect(resources.list().filter(({ type }) => type === "terminal")).toEqual([
+      { id: 2, type: "terminal", sessionId: "session-1" },
+    ])
+
+    await service.close("session-1", 2)
+    expect(managers[0].close).toHaveBeenCalledWith(2)
+    expect(resources.list().filter(({ type }) => type === "terminal")).toEqual([])
+  })
+
+  it("does not close a resource owned by another type or session", async () => {
+    const resources = new ResourceManager()
+    const browserDispose = vi.fn()
+    resources.register("browser", () => ({ dispose: browserDispose }))
+    const browserId = resources.create("browser", "session-1")
+    const { TerminalService } = await importService()
+    const service = new TerminalService(resources)
+    const otherTerminalId = service.create("session-2")
+
+    await service.close("session-1", browserId)
+    await service.close("session-1", otherTerminalId)
+
+    expect(browserDispose).not.toHaveBeenCalled()
+    expect(managers[0].close).not.toHaveBeenCalled()
+    expect(resources.list()).toHaveLength(2)
+  })
+
   it("resolves default cwd and shell before creating a terminal", async () => {
     whichSync.mockImplementation((candidate: string) =>
       candidate === "powershell.exe" ? "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" : null,
@@ -163,7 +200,7 @@ describe("TerminalService", () => {
 
     expect(service.create("session-1")).toBe(1)
 
-    expect(managers[0].create).toHaveBeenCalledWith(expect.objectContaining({
+    expect(managers[0].create).toHaveBeenCalledWith(1, expect.objectContaining({
       cwd: workspace,
       shell: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
       title: undefined,
@@ -229,7 +266,7 @@ describe("TerminalService", () => {
     service.create("session-1", opts)
 
     expect(whichSync).not.toHaveBeenCalled()
-    expect(managers[0].create).toHaveBeenCalledWith({
+    expect(managers[0].create).toHaveBeenCalledWith(1, {
       shell: "custom-shell",
       cwd: existingCwd,
       title: "Custom",
@@ -247,7 +284,7 @@ describe("TerminalService", () => {
 
     const expected =
       process.platform === "win32" ? "powershell.exe" : process.platform === "darwin" ? "/bin/zsh" : "/bin/bash"
-    expect(managers[0].create).toHaveBeenCalledWith(expect.objectContaining({ shell: expected }))
+    expect(managers[0].create).toHaveBeenCalledWith(1, expect.objectContaining({ shell: expected }))
   })
 
   it("merges caller shellArgs and shellEnv with the integration options instead of overriding them", async () => {
@@ -262,6 +299,7 @@ describe("TerminalService", () => {
     })
 
     expect(managers[0].create).toHaveBeenCalledWith(
+      1,
       expect.objectContaining({
         shellArgs: expect.arrayContaining(["--caller-arg", "-NoLogo"]),
         shellEnv: expect.objectContaining({ CALLER_VAR: "1", VSCODE_STABLE: "1" }),
@@ -278,7 +316,7 @@ describe("TerminalService", () => {
     service.create("session-1")
 
     expect(whichSync).not.toHaveBeenCalledWith("/bin/fish", expect.anything())
-    expect(managers[0].create).toHaveBeenCalledWith(expect.objectContaining({
+    expect(managers[0].create).toHaveBeenCalledWith(1, expect.objectContaining({
       shell: "pwsh.exe",
     }))
   })
@@ -289,7 +327,7 @@ describe("TerminalService", () => {
 
     service.create("session-1", { shell: "/bin/bash", cwd: existingCwd })
 
-    expect(managers[0].create).toHaveBeenCalledWith(expect.objectContaining({
+    expect(managers[0].create).toHaveBeenCalledWith(1, expect.objectContaining({
       shell: "/bin/bash",
       shellArgs: [
         "--init-file",
@@ -310,8 +348,8 @@ describe("TerminalService", () => {
     service.create("session-1", { shell: "/bin/bash", cwd: existingCwd })
     service.create("session-1", { shell: "/bin/bash", cwd: existingCwd })
 
-    const firstPath = managers[0].create.mock.calls[0][0].shellArgs?.[1]
-    const secondPath = managers[0].create.mock.calls[1][0].shellArgs?.[1]
+    const firstPath = managers[0].create.mock.calls[0][1].shellArgs?.[1]
+    const secondPath = managers[0].create.mock.calls[1][1].shellArgs?.[1]
     expect(firstPath).toBe(secondPath)
     expect(firstPath && existsSync(firstPath)).toBe(true)
 
@@ -325,11 +363,46 @@ describe("TerminalService", () => {
     const service = new TerminalService()
 
     service.create("session-1", { shell: "/bin/bash", cwd: existingCwd })
-    const scriptPath = managers[0].create.mock.calls[0][0].shellArgs?.[1]
+    const scriptPath = managers[0].create.mock.calls[0][1].shellArgs?.[1]
     managers[0].destroy.mockRejectedValue(new Error("destroy failed"))
 
     await expect(service.destroy()).rejects.toThrow("destroy failed")
     expect(scriptPath && existsSync(dirname(scriptPath))).toBe(false)
+  })
+
+  it("unregisters its resource factory even when manager destruction fails", async () => {
+    const resources = new ResourceManager()
+    const { TerminalService } = await importService()
+    const service = new TerminalService(resources)
+    service.create("session-1", { shell: "sh", cwd: existingCwd })
+    managers[0].destroy.mockRejectedValue(new Error("destroy failed"))
+
+    await expect(service.destroy()).rejects.toThrow("destroy failed")
+    expect(() => resources.create("terminal", "session-2")).toThrow(
+      'Resource type "terminal" is not registered.',
+    )
+  })
+
+  it("unregisters its resource factory before destruction finishes", async () => {
+    const resources = new ResourceManager()
+    const { TerminalService } = await importService()
+    const service = new TerminalService(resources)
+    service.create("session-1", { shell: "sh", cwd: existingCwd })
+    let finishDestroy!: () => void
+    managers[0].destroy.mockImplementation(
+      () => new Promise<void>((resolve) => {
+        finishDestroy = resolve
+      }),
+    )
+
+    const destroying = service.destroy()
+    await vi.waitFor(() => expect(finishDestroy).toBeTypeOf("function"))
+    expect(() => resources.create("terminal", "session-2")).toThrow(
+      'Resource type "terminal" is not registered.',
+    )
+
+    finishDestroy()
+    await destroying
   })
 
   it("closes a newly created terminal when readiness is aborted", async () => {
@@ -395,7 +468,7 @@ describe("TerminalService", () => {
 
     service.create("session-1", { shell: "/bin/zsh", cwd: existingCwd })
 
-    expect(managers[0].create).toHaveBeenCalledWith(expect.objectContaining({
+    expect(managers[0].create).toHaveBeenCalledWith(1, expect.objectContaining({
       shell: "/bin/zsh",
       shellArgs: ["-i"],
       shellEnv: expect.objectContaining({
@@ -433,7 +506,8 @@ describe("TerminalService", () => {
 
   it("forwards manager events with session ids", async () => {
     const { TerminalService } = await importService()
-    const service = new TerminalService()
+    const resources = new ResourceManager()
+    const service = new TerminalService(resources)
     const onChange = vi.fn()
     const onData = vi.fn()
     const onExit = vi.fn()
@@ -449,6 +523,7 @@ describe("TerminalService", () => {
     expect(onChange).toHaveBeenCalledWith({ sessionId: "session-1", terminals: [], activeId: null })
     expect(onData).toHaveBeenCalledWith("session-1", 1, "output", 0, 6)
     expect(onExit).toHaveBeenCalledWith("session-1", 1, 2)
+    await expect.poll(() => resources.get(1)).toBeUndefined()
   })
 
   it("supports multiple data listeners and unbinding", async () => {
@@ -482,4 +557,27 @@ describe("TerminalService", () => {
     await service.destroy()
     expect(managers[1].destroy).toHaveBeenCalled()
   })
+
+  it("waits for every terminal to close before destroying its session", async () => {
+    const resources = new ResourceManager()
+    const { TerminalService } = await importService()
+    const service = new TerminalService(resources)
+    service.create("session-1", { shell: "sh", cwd: existingCwd })
+    service.create("session-1", { shell: "sh", cwd: existingCwd })
+    let finish!: () => void
+    managers[0].close.mockImplementation((id: number) =>
+      id === 1
+        ? Promise.reject(new Error("close failed"))
+        : new Promise<void>((resolve) => { finish = resolve }),
+    )
+
+    const destroying = service.destroySession("session-1")
+    await vi.waitFor(() => expect(finish).toBeTypeOf("function"))
+    expect(managers[0].destroy).not.toHaveBeenCalled()
+
+    finish()
+    await expect(destroying).rejects.toThrow("close failed")
+    expect(managers[0].destroy).toHaveBeenCalledOnce()
+  })
+
 })

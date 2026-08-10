@@ -1,6 +1,6 @@
 import { appendFile } from 'node:fs/promises'
 import { basename } from 'node:path'
-import { larifyPath } from '../../../main/utils/app-paths'
+import { larifyTempPath } from '../../../main/utils/app-paths'
 import { createUniqueFile, shortToken } from '../../../main/utils/unique-path'
 
 export interface TerminalRunLog {
@@ -10,17 +10,14 @@ export interface TerminalRunLog {
 }
 
 export function createTerminalRunLog(sessionId: string): TerminalRunLog {
-  return {
-    runId: shortToken(),
-    sessionId
-  }
+  return { runId: shortToken(), sessionId }
 }
 
 export async function appendRunLog(log: TerminalRunLog, output: string): Promise<void> {
   if (!output) return
   if (!log.path) {
     log.path = createUniqueFile(
-      larifyPath('sessions', log.sessionId, 'terminals'),
+      larifyTempPath('terminals', log.sessionId),
       'log',
       log.runId
     )

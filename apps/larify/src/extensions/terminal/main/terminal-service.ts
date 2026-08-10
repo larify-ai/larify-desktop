@@ -3,10 +3,12 @@ import { homedir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import which from 'which'
+import { ResourceManager } from '../../../main/core/resource'
 import { larifyTempPath, larifyWorkspacePath, resourcePath } from '../../../main/utils/app-paths'
-import { addListener, type Listener } from '../../../main/utils/listener'
+import { addListener, notify, type Listener } from '../../../main/utils/listener'
 import { SessionScopedManagers } from '../../../main/utils/session-scoped-managers'
 import { createUniqueDir } from '../../../main/utils/unique-path'
+import type { Disposable } from '../../../shared/infra/disposable'
 import { TerminalManager } from './terminal-manager'
 import type { ShellCommandFinishedEvent } from './terminal'
 import type { TerminalRunLog } from './terminal-run-log'
@@ -114,6 +116,13 @@ export class TerminalService {
   private commandStartedListeners = new Set<Listener<[string, number]>>()
   private bashIntegrationPath: string | undefined
   private zshIntegrationPath: string | undefined
+  private readonly resourceRegistration: Disposable
+
+  constructor(private readonly resources = new ResourceManager()) {
+    this.resourceRegistration = resources.register('terminal', (id, sessionId, options) =>
+      this.openResource(id, sessionId, options as TerminalCreateOptions | undefined)
+    )
+  }
 
   bindChange(callback: (state: SessionTerminalsState) => void): () => void {
     return addListener(this.changeListeners, callback)
@@ -142,9 +151,17 @@ export class TerminalService {
   }
 
   create(sessionId: string, opts?: TerminalCreateOptions): number {
+    return this.resources.create('terminal', sessionId, opts)
+  }
+
+  private openResource(
+    id: number,
+    sessionId: string,
+    opts?: TerminalCreateOptions
+  ): Disposable {
     const shell = resolveShell(opts?.shell)
     const integration = this.shellIntegrationOptions(shell)
-    return this.managers.get(sessionId).create({
+    const options = {
       ...opts,
       shell,
       cwd: resolveCwd(opts?.cwd),
@@ -155,7 +172,9 @@ export class TerminalService {
         ...integration.shellEnv,
         LARIFY_ELECTRON_PATH: process.execPath
       }
-    })
+    }
+    this.managers.get(sessionId).create(id, options)
+    return { dispose: () => this.manager(sessionId)?.close(id) ?? Promise.resolve() }
   }
 
   async createReady(
@@ -212,7 +231,11 @@ export class TerminalService {
   }
 
   close(sessionId: string, terminalId: number): Promise<void> {
-    return this.manager(sessionId)?.close(terminalId) ?? Promise.resolve()
+    const resource = this.resources.get(terminalId)
+    if (!resource || resource.type !== 'terminal' || resource.sessionId !== sessionId) {
+      return Promise.resolve()
+    }
+    return this.resources.close(terminalId)
   }
 
   setActive(sessionId: string, terminalId: number): void {
@@ -240,12 +263,23 @@ export class TerminalService {
   }
 
   async destroySession(sessionId: string): Promise<void> {
-    await this.managers.destroySession(sessionId)
+    const ids = this.resources.list({ type: 'terminal', sessionId }).map(({ id }) => id)
+    try {
+      await this.closeResources(ids)
+    } finally {
+      await this.managers.destroySession(sessionId)
+    }
   }
 
   async destroy(): Promise<void> {
+    this.resourceRegistration.dispose()
     try {
-      await this.managers.destroyAll()
+      const ids = this.resources.list({ type: 'terminal' }).map(({ id }) => id)
+      try {
+        await this.closeResources(ids)
+      } finally {
+        await this.managers.destroyAll()
+      }
     } finally {
       this.cleanupShellIntegration()
     }
@@ -344,20 +378,27 @@ export class TerminalService {
   private createManager(sessionId: string): TerminalManager {
     const manager = new TerminalManager(sessionId)
     manager.bindChange((state) => {
-      for (const listener of this.changeListeners) listener(state)
+      notify(this.changeListeners, state)
     })
     manager.bindData((terminalId, data, start, end) => {
-      for (const listener of this.dataListeners) listener(sessionId, terminalId, data, start, end)
+      notify(this.dataListeners, sessionId, terminalId, data, start, end)
     })
     manager.bindExit((terminalId, exitCode) => {
-      for (const listener of this.exitListeners) listener(sessionId, terminalId, exitCode)
+      void this.resources.close(terminalId).catch(() => {})
+      notify(this.exitListeners, sessionId, terminalId, exitCode)
     })
     manager.bindCommandFinished((terminalId, event) => {
-      for (const listener of this.commandFinishedListeners) listener(sessionId, terminalId, event)
+      notify(this.commandFinishedListeners, sessionId, terminalId, event)
     })
     manager.bindCommandStarted((terminalId) => {
-      for (const listener of this.commandStartedListeners) listener(sessionId, terminalId)
+      notify(this.commandStartedListeners, sessionId, terminalId)
     })
     return manager
+  }
+
+  private async closeResources(ids: number[]): Promise<void> {
+    const results = await Promise.allSettled(ids.map((id) => this.resources.close(id)))
+    const failure = results.find((result) => result.status === 'rejected')
+    if (failure?.status === 'rejected') throw failure.reason
   }
 }

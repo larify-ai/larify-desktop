@@ -3,8 +3,7 @@ import {
   normalizeTerminalInputLineBreaks,
   trimTrailingLineBreak
 } from '../../../main/utils/text'
-import { defineTool } from '../../../shared/extension/tool'
-import type { Toolkit } from '../../../shared/toolkit'
+import { defineTool, type Tool } from '../../../main/core/plugin/protocol'
 import type { TerminalService } from './terminal-service'
 import type { TerminalAgentSnapshot } from '../shared/types'
 
@@ -228,12 +227,8 @@ const terminalResult = (
   }
 }
 
-export function createTerminalToolkit(service: TerminalService): Toolkit {
+export function createTerminalToolkit(service: TerminalService): Record<string, Tool> {
   return {
-    name: 'terminal',
-    description:
-      'Create terminals, run commands, operate interactive TUIs, and read terminal snapshots. The terminal includes Electron\'s Node as builtin-node, e.g. builtin-node script.js.',
-    tools: {
       list: defineTool({
         description: 'List all terminals',
         metadata: { icon: 'terminal', eager: true },
@@ -271,7 +266,8 @@ export function createTerminalToolkit(service: TerminalService): Toolkit {
         }
       }),
       write: defineTool({
-        description: 'Write raw node-pty input to a terminal',
+        description:
+          "Write raw node-pty input to a terminal. Electron's Node is available as builtin-node, e.g. builtin-node script.js.",
         metadata: { icon: 'terminal', eager: true },
         inputSchema: writeSchema,
         execute: async (args, ctx) => {
@@ -344,5 +340,4 @@ export function createTerminalToolkit(service: TerminalService): Toolkit {
         }
       })
     }
-  }
 }

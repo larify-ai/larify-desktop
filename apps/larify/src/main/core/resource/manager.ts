@@ -1,19 +1,38 @@
 import type { Disposable } from '@shared/infra/disposable'
 import type { Resource, ResourceQuery } from '@shared/resource'
-import { addListener, type Listener } from '../../utils/listener'
+import { addListener, notify, type Listener } from '../../utils/listener'
+
+export type ResourceFactory = (
+  id: number,
+  sessionId: string,
+  options: unknown
+) => Disposable
 
 export class ResourceManager implements Disposable {
   private readonly resources = new Map<number, Resource & Disposable>()
   private readonly changeListeners = new Set<Listener<[Resource[]]>>()
+  private readonly factories = new Map<string, ResourceFactory>()
   private nextId = 1
 
   bindChange(listener: (resources: Resource[]) => void): () => void {
     return addListener(this.changeListeners, listener)
   }
 
-  create(type: string, sessionId: string, open: (id: number) => Disposable): number {
+  register(type: string, factory: ResourceFactory): Disposable {
+    if (this.factories.has(type)) throw new Error(`Resource type "${type}" is already registered.`)
+    this.factories.set(type, factory)
+    return {
+      dispose: () => {
+        if (this.factories.get(type) === factory) this.factories.delete(type)
+      }
+    }
+  }
+
+  create(type: string, sessionId: string, options?: unknown): number {
+    const factory = this.factories.get(type)
+    if (!factory) throw new Error(`Resource type "${type}" is not registered.`)
     const id = this.nextId++
-    const disposable = open(id)
+    const disposable = factory(id, sessionId, options)
     this.resources.set(id, { id, type, sessionId, dispose: () => disposable.dispose() })
     this.emit()
     return id
@@ -54,13 +73,6 @@ export class ResourceManager implements Disposable {
   }
 
   private emit(): void {
-    const resources = this.list()
-    for (const listener of this.changeListeners) {
-      try {
-        listener(resources)
-      } catch {
-        continue
-      }
-    }
+    notify(this.changeListeners, this.list())
   }
 }

@@ -21,7 +21,7 @@ beforeEach(() => {
 })
 
 describe('registerResourceIpc', () => {
-  it('exposes list and close and publishes resource changes', async () => {
+  it('exposes create, list, and close and publishes resource changes', async () => {
     const manager = new ResourceManager()
     const send = vi.fn()
     const window = {
@@ -33,8 +33,11 @@ describe('registerResourceIpc', () => {
       mocks.handle.mock.calls.map(([channel, handler]) => [channel, handler])
     )
     const close = vi.fn()
+    const factory = vi.fn(() => ({ dispose: close }))
+    manager.register('terminal', factory)
 
-    const id = manager.create('terminal', 'session-a', () => ({ dispose: close }))
+    const id = handlers.get('resource:create')?.({}, 'terminal', 'session-a', { cwd: '/tmp' })
+    expect(factory).toHaveBeenCalledWith(id, 'session-a', { cwd: '/tmp' })
     expect(send).toHaveBeenLastCalledWith('resource:change', [
       { id, type: 'terminal', sessionId: 'session-a' }
     ])
@@ -48,6 +51,7 @@ describe('registerResourceIpc', () => {
 
     dispose()
     expect(mocks.removeHandler.mock.calls.map(([channel]) => channel)).toEqual([
+      'resource:create',
       'resource:list',
       'resource:close'
     ])
@@ -60,8 +64,9 @@ describe('registerResourceIpc', () => {
       isDestroyed: () => true,
       webContents: { isDestroyed: () => false, send }
     } as never)
+    manager.register('terminal', () => ({ dispose: vi.fn() }))
 
-    manager.create('terminal', 'session-a', () => ({ dispose: vi.fn() }))
+    manager.create('terminal', 'session-a')
 
     expect(send).not.toHaveBeenCalled()
   })

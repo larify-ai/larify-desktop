@@ -30,7 +30,8 @@ async function burstingTerminal() {
   })
   const { TerminalManager } = await import("../../../../src/extensions/terminal/main/terminal-manager")
   const manager = new TerminalManager("flush-pressure")
-  const id = manager.create({ shell: "pwsh.exe", cwd: logRoot, shellArgs: ["-x"] })
+  const id = 1
+  manager.create(id, { shell: "pwsh.exe", cwd: logRoot, shellArgs: ["-x"] })
   await manager.startRun(id)
   const chunk = Array.from({ length: 40 }, (_, i) => `x${i}`).join("\r\n") + "\r\n"
   return { manager, id, burst: (count: number) => { for (let i = 0; i < count; i++) onData?.(chunk) } }

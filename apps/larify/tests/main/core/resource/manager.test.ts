@@ -1,9 +1,48 @@
 import { describe, expect, it, vi } from 'vitest'
 import { ResourceManager } from '../../../../src/main/core/resource/manager'
 
+const testManager = (): ResourceManager => {
+  const manager = new ResourceManager()
+  const open = (_id: number, _sessionId: string, options: unknown): { dispose(): void | Promise<void> } =>
+    (options as () => { dispose(): void | Promise<void> })()
+  manager.register('terminal', open)
+  manager.register('browser', open)
+  return manager
+}
+
 describe('ResourceManager', () => {
-  it('assigns one global id space across resource types and sessions', () => {
+  it('creates resources through a registered type factory', () => {
     const manager = new ResourceManager()
+    const dispose = vi.fn()
+    const factory = vi.fn(() => ({ dispose }))
+    manager.register('terminal', factory)
+
+    expect(manager.create('terminal', 'session-a', { cwd: '/tmp' })).toBe(1)
+    expect(factory).toHaveBeenCalledWith(1, 'session-a', { cwd: '/tmp' })
+  })
+
+  it('rejects duplicate and unknown resource types without consuming an id', () => {
+    const manager = new ResourceManager()
+    const factory = vi.fn(() => ({ dispose: vi.fn() }))
+    manager.register('terminal', factory)
+
+    expect(() => manager.register('terminal', factory)).toThrow('already registered')
+    expect(() => manager.create('browser', 'session-a')).toThrow('not registered')
+    expect(manager.create('terminal', 'session-a')).toBe(1)
+  })
+
+  it('does not let an old registration dispose a replacement', () => {
+    const manager = new ResourceManager()
+    const first = manager.register('terminal', () => ({ dispose: vi.fn() }))
+    first.dispose()
+    manager.register('terminal', () => ({ dispose: vi.fn() }))
+
+    first.dispose()
+    expect(manager.create('terminal', 'session-a')).toBe(1)
+  })
+
+  it('assigns one global id space across resource types and sessions', () => {
+    const manager = testManager()
 
     const terminal = manager.create('terminal', 'session-a', () => ({ dispose: vi.fn() }))
     const browser = manager.create('browser', 'session-b', () => ({ dispose: vi.fn() }))
@@ -16,7 +55,7 @@ describe('ResourceManager', () => {
   })
 
   it('does not expose lifecycle methods', () => {
-    const manager = new ResourceManager()
+    const manager = testManager()
     manager.create('terminal', 'session-a', () => ({ dispose: vi.fn() }))
     manager.create('browser', 'session-a', () => ({ dispose: vi.fn() }))
     manager.create('terminal', 'session-b', () => ({ dispose: vi.fn() }))
@@ -26,7 +65,7 @@ describe('ResourceManager', () => {
   })
 
   it('gets one resource and filters resource lists', () => {
-    const manager = new ResourceManager()
+    const manager = testManager()
     manager.create('terminal', 'session-a', () => ({ dispose: vi.fn() }))
     manager.create('browser', 'session-a', () => ({ dispose: vi.fn() }))
     manager.create('terminal', 'session-b', () => ({ dispose: vi.fn() }))
@@ -41,7 +80,7 @@ describe('ResourceManager', () => {
   })
 
   it('removes a resource before closing it and emits each state', async () => {
-    const manager = new ResourceManager()
+    const manager = testManager()
     const states: number[][] = []
     manager.bindChange((resources) => states.push(resources.map(({ id }) => id)))
     const dispose = vi.fn(() => {
@@ -56,7 +95,7 @@ describe('ResourceManager', () => {
   })
 
   it('isolates listener failures from resource lifecycle and other listeners', async () => {
-    const manager = new ResourceManager()
+    const manager = testManager()
     const states: number[][] = []
     const dispose = vi.fn()
     manager.bindChange(() => {
@@ -72,7 +111,7 @@ describe('ResourceManager', () => {
   })
 
   it('disposes all resources', async () => {
-    const manager = new ResourceManager()
+    const manager = testManager()
     const first = vi.fn()
     const second = vi.fn()
     const third = vi.fn()
@@ -89,7 +128,7 @@ describe('ResourceManager', () => {
   })
 
   it('closes only resources owned by one session', async () => {
-    const manager = new ResourceManager()
+    const manager = testManager()
     const first = vi.fn()
     const second = vi.fn()
     const other = vi.fn()
@@ -106,7 +145,7 @@ describe('ResourceManager', () => {
   })
 
   it('continues closing a session when one resource fails', async () => {
-    const manager = new ResourceManager()
+    const manager = testManager()
     const second = vi.fn()
     manager.create('terminal', 'session-a', () => ({
       dispose: () => Promise.reject(new Error('close failed'))
@@ -120,7 +159,7 @@ describe('ResourceManager', () => {
   })
 
   it('does not retain a resource when opening fails', () => {
-    const manager = new ResourceManager()
+    const manager = testManager()
 
     expect(() =>
       manager.create('terminal', 'session-a', () => {

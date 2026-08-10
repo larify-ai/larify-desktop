@@ -35,7 +35,8 @@ describe.skipIf(!process.env.LIVE_TERMINAL)("TerminalManager live", () => {
       })
     })
 
-    const id = manager.create({ shell: shell(), cwd, title: "Live Shell" })
+    const id = 1
+    manager.create(id, { shell: shell(), cwd, title: "Live Shell" })
     manager.write(id, markerCommand())
 
     expect(await data).toContain(marker)

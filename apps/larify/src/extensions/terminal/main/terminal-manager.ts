@@ -1,4 +1,4 @@
-import { addListener, type Listener } from '../../../main/utils/listener'
+import { addListener, notify, type Listener } from '../../../main/utils/listener'
 import { createKeyedLock } from '../../../main/utils/lock'
 import { Terminal, type SavableFront, type ShellCommandFinishedEvent } from './terminal'
 import {
@@ -27,7 +27,6 @@ export class TerminalManager {
   private flushQueued = new Set<number>()
   private writerLock = createKeyedLock()
   private activeId: number | null = null
-  private nextId = 1
   private changeListeners = new Set<Listener<[SessionTerminalsState]>>()
   private dataListeners = new Set<Listener<[number, string, number, number]>>()
   private exitListeners = new Set<Listener<[number, number]>>()
@@ -58,36 +57,27 @@ export class TerminalManager {
     return addListener(this.commandStartedListeners, callback)
   }
 
-  create(opts?: TerminalCreateOptions): number {
-    const terminal = new Terminal(this.nextId++, opts)
+  create(id: number, opts?: TerminalCreateOptions): void {
+    if (this.terminals.has(id)) throw new Error(`Terminal "${id}" already exists.`)
+    const terminal = new Terminal(id, opts)
     terminal.bindData((data, start, end) => {
       this.queueFlush(terminal.id)
-      for (const listener of this.dataListeners) listener(terminal.id, data, start, end)
+      notify(this.dataListeners, terminal.id, data, start, end)
     })
     terminal.bindExit((exitCode) => {
-      for (const listener of this.exitListeners) listener(terminal.id, exitCode)
-      void this.writerLock(String(terminal.id), async () => {
-        try {
-          await this.finalizeRun(terminal.id)
-        } finally {
-          this.forget(terminal.id)
-          this.emit()
-        }
-      })
-        .catch(() => {})
-        .finally(() => terminal.dispose())
+      notify(this.exitListeners, terminal.id, exitCode)
+      void this.close(terminal.id).catch(() => {})
     })
     terminal.bindCommandFinished((event) => {
       void this.drainRun(terminal.id, false).catch(() => {})
-      for (const listener of this.commandFinishedListeners) listener(terminal.id, event)
+      notify(this.commandFinishedListeners, terminal.id, event)
     })
     terminal.bindCommandStarted(() => {
-      for (const listener of this.commandStartedListeners) listener(terminal.id)
+      notify(this.commandStartedListeners, terminal.id)
     })
     this.terminals.set(terminal.id, terminal)
     this.activeId = terminal.id
     this.emit()
-    return terminal.id
   }
 
   write(id: number, data: string): void {
@@ -218,19 +208,11 @@ export class TerminalManager {
 
   async close(id: number): Promise<void> {
     if (!this.terminals.has(id)) return
-    await this.writerLock(String(id), async () => {
-      const terminal = this.terminals.get(id)
-      if (!terminal) return
-
-      try {
-        await this.finalizeRun(id)
-      } finally {
-        terminal.close()
-        terminal.dispose()
-        this.forget(id)
-        this.emit()
-      }
-    })
+    try {
+      await this.remove(id, (terminal) => terminal.close())
+    } finally {
+      this.emit()
+    }
   }
 
   state(): SessionTerminalsState {
@@ -243,27 +225,40 @@ export class TerminalManager {
 
   async destroy(): Promise<void> {
     const results = await Promise.allSettled(
-      [...this.terminals.keys()].map((id) => this.finalizeRun(id))
+      [...this.terminals.keys()].map((id) => this.remove(id, (terminal) => terminal.kill()))
     )
-    for (const terminal of this.terminals.values()) {
-      terminal.kill()
-      terminal.dispose()
-    }
-    this.terminals.clear()
-    this.activeRuns.clear()
-    this.activeId = null
-    this.emit()
-
     const failures = results
       .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
       .map((result) => result.reason)
+    this.activeId = null
+    this.emit()
+
     if (failures.length === 1) throw failures[0]
-    if (failures.length > 1) throw new AggregateError(failures, 'Failed to finalize terminal runs.')
+    if (failures.length > 1) throw new AggregateError(failures, 'Failed to destroy terminals.')
+  }
+
+  private remove(id: number, terminate: (terminal: Terminal) => void): Promise<void> {
+    return this.writerLock(String(id), async () => {
+      const terminal = this.terminals.get(id)
+      if (!terminal) return
+      try {
+        await this.finalizeRun(id)
+      } finally {
+        try {
+          terminate(terminal)
+        } finally {
+          try {
+            terminal.dispose()
+          } finally {
+            this.forget(id)
+          }
+        }
+      }
+    })
   }
 
   private emit(): void {
-    const state = this.state()
-    for (const listener of this.changeListeners) listener(state)
+    notify(this.changeListeners, this.state())
   }
 
 }

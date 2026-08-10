@@ -7,3 +7,13 @@ export const addListener = <T extends unknown[]>(
   listeners.add(listener)
   return () => listeners.delete(listener)
 }
+
+export function notify<T extends unknown[]>(listeners: Set<Listener<T>>, ...args: T): void {
+  for (const listener of listeners) {
+    try {
+      listener(...args)
+    } catch {
+      continue
+    }
+  }
+}

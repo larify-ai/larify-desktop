@@ -2,8 +2,19 @@ import { rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import type { TerminalCreateOptions } from "../../../../src/extensions/terminal/shared/types"
 
 const terminals: FakeTerminal[] = []
+let nextResourceId = 1
+
+function createTerminal(
+  manager: import('../../../../src/extensions/terminal/main/terminal-manager').TerminalManager,
+  options?: TerminalCreateOptions
+): number {
+  const id = nextResourceId++
+  manager.create(id, options)
+  return id
+}
 const logRoot = join(tmpdir(), "larify-terminal-manager-runs")
 
 class FakeTerminal {
@@ -145,7 +156,7 @@ vi.mock("../../../../src/extensions/terminal/main/terminal", () => ({
 }))
 
 vi.mock("../../../../src/main/utils/app-paths", () => ({
-  larifyPath: (...segments: string[]) => join(logRoot, ...segments),
+  larifyTempPath: (...segments: string[]) => join(logRoot, ...segments),
 }))
 
 async function importManager(): Promise<
@@ -156,6 +167,7 @@ async function importManager(): Promise<
 
 beforeEach(() => {
   terminals.length = 0
+  nextResourceId = 1
   rmSync(logRoot, { force: true, recursive: true })
 })
 
@@ -166,8 +178,8 @@ describe("TerminalManager", () => {
     const onChange = vi.fn()
     manager.bindChange(onChange)
 
-    const first = manager.create({ shell: "sh", cwd: "/tmp", title: "Shell" })
-    const second = manager.create({ shell: "bash", cwd: "/tmp", title: "Bash" })
+    const first = createTerminal(manager, { shell: "sh", cwd: "/tmp", title: "Shell" })
+    const second = createTerminal(manager, { shell: "bash", cwd: "/tmp", title: "Bash" })
 
     expect(first).toBe(1)
     expect(second).toBe(2)
@@ -182,10 +194,29 @@ describe("TerminalManager", () => {
     expect(onChange).toHaveBeenCalledTimes(2)
   })
 
+  it("uses only externally assigned resource ids", async () => {
+    const { TerminalManager } = await importManager()
+    const manager = new TerminalManager("session-1")
+
+    manager.create(42)
+    manager.create(7)
+    expect(manager.state().terminals.map(({ id }) => id)).toEqual([42, 7])
+    expect(terminals.map(({ id }) => id)).toEqual([42, 7])
+  })
+
+  it("rejects a duplicate resource id before creating a terminal", async () => {
+    const { TerminalManager } = await importManager()
+    const manager = new TerminalManager("session-1")
+    manager.create(42)
+
+    expect(() => manager.create(42)).toThrow('Terminal "42" already exists.')
+    expect(terminals).toHaveLength(1)
+  })
+
   it("forwards write and resize to the target terminal", async () => {
     const { TerminalManager } = await importManager()
     const manager = new TerminalManager("session-1")
-    const id = manager.create()
+    const id = createTerminal(manager)
 
     manager.write(id, "echo hello\n")
     manager.resize(id, 120, 30)
@@ -197,7 +228,7 @@ describe("TerminalManager", () => {
   it("queues writers per terminal", async () => {
     const { TerminalManager } = await importManager()
     const manager = new TerminalManager("session-1")
-    const id = manager.create()
+    const id = createTerminal(manager)
     let release!: () => void
     const calls: string[] = []
     const first = manager.withWriterLock(
@@ -224,7 +255,7 @@ describe("TerminalManager", () => {
   it("queues close behind terminal writers", async () => {
     const { TerminalManager } = await importManager()
     const manager = new TerminalManager("session-1")
-    const id = manager.create()
+    const id = createTerminal(manager)
     let release!: () => void
     const run = manager.withWriterLock(
       id,
@@ -245,6 +276,30 @@ describe("TerminalManager", () => {
     expect(terminals[0].close).toHaveBeenCalled()
   })
 
+  it("queues destroy behind terminal writers", async () => {
+    const { TerminalManager } = await importManager()
+    const manager = new TerminalManager("session-1")
+    const id = createTerminal(manager)
+    let release!: () => void
+    const writing = manager.withWriterLock(
+      id,
+      () => new Promise<void>((resolve) => {
+        release = resolve
+      }),
+    )
+
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"))
+    const destroying = manager.destroy()
+    await Promise.resolve()
+    expect(terminals[0].kill).not.toHaveBeenCalled()
+
+    release()
+    await writing
+    await destroying
+    expect(terminals[0].kill).toHaveBeenCalledOnce()
+    expect(terminals[0].dispose).toHaveBeenCalledOnce()
+  })
+
   it("emits data and exit events with terminal ids", async () => {
     const { TerminalManager } = await importManager()
     const manager = new TerminalManager("session-1")
@@ -252,13 +307,30 @@ describe("TerminalManager", () => {
     const onExit = vi.fn()
     manager.bindData(onData)
     manager.bindExit(onExit)
-    manager.create()
+    createTerminal(manager)
 
     terminals[0].emitData("output")
     terminals[0].emitExit(3)
 
     expect(onData).toHaveBeenCalledWith(1, "output", 0, 6)
     expect(onExit).toHaveBeenCalledWith(1, 3)
+  })
+
+  it("still notifies and closes when a listener throws", async () => {
+    const { TerminalManager } = await importManager()
+    const manager = new TerminalManager("session-1")
+    const onExit = vi.fn()
+    manager.bindExit(() => {
+      throw new Error("listener failed")
+    })
+    manager.bindExit(onExit)
+    const id = createTerminal(manager)
+
+    terminals[0].emitExit(3)
+
+    expect(onExit).toHaveBeenCalledWith(id, 3)
+    await expect.poll(() => manager.state().terminals).toEqual([])
+    expect(terminals[0].dispose).toHaveBeenCalledOnce()
   })
 
   it("supports multiple listeners and unbinding", async () => {
@@ -268,7 +340,7 @@ describe("TerminalManager", () => {
     const second = vi.fn()
     manager.bindData(first)
     const unbindSecond = manager.bindData(second)
-    manager.create()
+    createTerminal(manager)
 
     terminals[0].emitData("before")
     unbindSecond()
@@ -284,8 +356,8 @@ describe("TerminalManager", () => {
     const manager = new TerminalManager("session-1")
     const onChange = vi.fn()
     manager.bindChange(onChange)
-    const first = manager.create()
-    manager.create()
+    const first = createTerminal(manager)
+    createTerminal(manager)
     onChange.mockClear()
 
     manager.setActive(first)
@@ -300,9 +372,9 @@ describe("TerminalManager", () => {
     const manager = new TerminalManager("session-1")
     const onChange = vi.fn()
     manager.bindChange(onChange)
-    const first = manager.create()
-    const second = manager.create()
-    const third = manager.create()
+    const first = createTerminal(manager)
+    const second = createTerminal(manager)
+    const third = createTerminal(manager)
     onChange.mockClear()
 
     manager.reorder(third, 0)
@@ -317,9 +389,9 @@ describe("TerminalManager", () => {
   it("returns snapshots and closes terminals while selecting the next active terminal", async () => {
     const { TerminalManager } = await importManager()
     const manager = new TerminalManager("session-1")
-    const first = manager.create()
-    const second = manager.create()
-    const third = manager.create()
+    const first = createTerminal(manager)
+    const second = createTerminal(manager)
+    const third = createTerminal(manager)
     manager.setActive(second)
 
     expect(manager.snapshot(second)).toBe("snapshot:2")
@@ -335,7 +407,7 @@ describe("TerminalManager", () => {
   it("keeps a small run inline without writing a log file", async () => {
     const { TerminalManager } = await importManager()
     const manager = new TerminalManager("session-1")
-    const id = manager.create()
+    const id = createTerminal(manager)
 
     const log = await manager.startRun(id)
     terminals[0].setRunOutput(makeLines(10))
@@ -349,13 +421,13 @@ describe("TerminalManager", () => {
     const { readFile } = await import("node:fs/promises")
     const { TerminalManager } = await importManager()
     const manager = new TerminalManager("session-1")
-    const id = manager.create()
+    const id = createTerminal(manager)
 
     const log = await manager.startRun(id)
     terminals[0].setRunOutput(makeLines(2500))
     await manager.flushRunHistory(id)
 
-    expect(log?.path).toContain("sessions")
+    expect(log?.path).toContain(join("terminals", "session-1"))
     const contents = await readFile(log!.path, "utf8")
     expect(contents).toContain("line 1\n")
     expect(contents).toContain("line 500\n")
@@ -365,7 +437,7 @@ describe("TerminalManager", () => {
   it("caps the agent snapshot to the last 1000 lines of the run", async () => {
     const { TerminalManager } = await importManager()
     const manager = new TerminalManager("session-1")
-    const id = manager.create()
+    const id = createTerminal(manager)
     await manager.startRun(id)
 
     terminals[0].setRunOutput(["prompt", "a", "b"])
@@ -381,7 +453,7 @@ describe("TerminalManager", () => {
   it("falls back to the viewport snapshot when no run is active", async () => {
     const { TerminalManager } = await importManager()
     const manager = new TerminalManager("session-1")
-    const id = manager.create()
+    const id = createTerminal(manager)
     terminals[0].setViewport(["visible screen"])
 
     await expect(manager.agentSnapshot(id)).resolves.toEqual({ screen: "visible screen" })
@@ -391,7 +463,7 @@ describe("TerminalManager", () => {
     const { readFile } = await import("node:fs/promises")
     const { TerminalManager } = await importManager()
     const manager = new TerminalManager("session-1")
-    const id = manager.create()
+    const id = createTerminal(manager)
 
     const log = await manager.startRun(id)
     terminals[0].setRunOutput(makeLines(2500))
@@ -415,7 +487,7 @@ describe("TerminalManager", () => {
     const { readFile } = await import("node:fs/promises")
     const { TerminalManager } = await importManager()
     const manager = new TerminalManager("session-1")
-    const id = manager.create()
+    const id = createTerminal(manager)
 
     const log = await manager.startRun(id)
     terminals[0].setRunOutput(makeLines(2500))
@@ -436,7 +508,7 @@ describe("TerminalManager", () => {
   it("removes an exited terminal even when finalizing its run fails", async () => {
     const { TerminalManager } = await importManager()
     const manager = new TerminalManager("session-1")
-    const id = manager.create()
+    const id = createTerminal(manager)
 
     await manager.startRun(id)
     terminals[0].setRunOutput(makeLines(2500))
@@ -451,7 +523,7 @@ describe("TerminalManager", () => {
   it("treats close as successful when an exit removes the terminal first", async () => {
     const { TerminalManager } = await importManager()
     const manager = new TerminalManager("session-1")
-    const id = manager.create()
+    const id = createTerminal(manager)
 
     const log = await manager.startRun(id)
     terminals[0].setRunOutput(makeLines(2500))
@@ -471,13 +543,16 @@ describe("TerminalManager", () => {
 
     await expect(closing).resolves.toBeUndefined()
     expect(manager.state().terminals).toEqual([])
+    expect(terminals[0].takeAllRemaining).toHaveBeenCalledTimes(1)
+    expect(terminals[0].close).toHaveBeenCalledTimes(1)
+    expect(terminals[0].dispose).toHaveBeenCalledTimes(1)
   })
 
   it("finalizes the run to the full log before closing a terminal", async () => {
     const { readFile } = await import("node:fs/promises")
     const { TerminalManager } = await importManager()
     const manager = new TerminalManager("session-1")
-    const id = manager.create()
+    const id = createTerminal(manager)
 
     const log = await manager.startRun(id)
     terminals[0].setRunOutput(makeLines(2500))
@@ -492,7 +567,7 @@ describe("TerminalManager", () => {
   it("removes a terminal even when finalizing its run fails during close", async () => {
     const { TerminalManager } = await importManager()
     const manager = new TerminalManager("session-1")
-    const id = manager.create()
+    const id = createTerminal(manager)
 
     await manager.startRun(id)
     terminals[0].setRunOutput(makeLines(2500))
@@ -505,11 +580,23 @@ describe("TerminalManager", () => {
     expect(terminals[0].dispose).toHaveBeenCalled()
   })
 
+  it("removes a terminal even when disposing it fails during close", async () => {
+    const { TerminalManager } = await importManager()
+    const manager = new TerminalManager("session-1")
+    const id = createTerminal(manager)
+    terminals[0].dispose.mockImplementation(() => {
+      throw new Error("dispose failed")
+    })
+
+    await expect(manager.close(id)).rejects.toThrow("dispose failed")
+    expect(manager.state().terminals).toEqual([])
+  })
+
   it("finalizes the run to the full log before destroying terminals", async () => {
     const { readFile } = await import("node:fs/promises")
     const { TerminalManager } = await importManager()
     const manager = new TerminalManager("session-1")
-    const id = manager.create()
+    const id = createTerminal(manager)
 
     const log = await manager.startRun(id)
     terminals[0].setRunOutput(makeLines(2500))
@@ -524,7 +611,7 @@ describe("TerminalManager", () => {
   it("destroys terminals even when finalizing a run fails", async () => {
     const { TerminalManager } = await importManager()
     const manager = new TerminalManager("session-1")
-    const id = manager.create()
+    const id = createTerminal(manager)
 
     await manager.startRun(id)
     terminals[0].setRunOutput(makeLines(2500))
@@ -537,11 +624,26 @@ describe("TerminalManager", () => {
     expect(terminals[0].dispose).toHaveBeenCalled()
   })
 
-  it("waits for every run to finish finalizing before destroying terminals", async () => {
+  it("continues destroying terminals when one disposal fails", async () => {
     const { TerminalManager } = await importManager()
     const manager = new TerminalManager("session-1")
-    const first = manager.create()
-    const second = manager.create()
+    createTerminal(manager)
+    createTerminal(manager)
+    terminals[0].dispose.mockImplementation(() => {
+      throw new Error("dispose failed")
+    })
+
+    await expect(manager.destroy()).rejects.toThrow("dispose failed")
+    expect(terminals[1].kill).toHaveBeenCalledOnce()
+    expect(terminals[1].dispose).toHaveBeenCalledOnce()
+    expect(manager.state().terminals).toEqual([])
+  })
+
+  it("waits for each run before destroying its terminal", async () => {
+    const { TerminalManager } = await importManager()
+    const manager = new TerminalManager("session-1")
+    const first = createTerminal(manager)
+    const second = createTerminal(manager)
 
     await manager.startRun(first)
     terminals[0].setRunOutput(makeLines(2500))
@@ -560,7 +662,7 @@ describe("TerminalManager", () => {
 
     const destroying = manager.destroy()
     await vi.waitFor(() => expect(finishSecond).toBeTypeOf("function"))
-    expect(terminals[0].kill).not.toHaveBeenCalled()
+    expect(terminals[0].kill).toHaveBeenCalled()
     expect(terminals[1].kill).not.toHaveBeenCalled()
 
     finishSecond()
@@ -573,7 +675,7 @@ describe("TerminalManager", () => {
     const { readFile } = await import("node:fs/promises")
     const { TerminalManager } = await importManager()
     const manager = new TerminalManager("session-1")
-    const id = manager.create()
+    const id = createTerminal(manager)
 
     const log = await manager.startRun(id)
     terminals[0].setRunOutput(makeLines(2500))
@@ -587,7 +689,7 @@ describe("TerminalManager", () => {
   it("does not create a log file for a small run even after completion", async () => {
     const { TerminalManager } = await importManager()
     const manager = new TerminalManager("session-1")
-    const id = manager.create()
+    const id = createTerminal(manager)
 
     const log = await manager.startRun(id)
     terminals[0].setRunOutput(makeLines(10))
@@ -599,8 +701,8 @@ describe("TerminalManager", () => {
   it("destroys every terminal", async () => {
     const { TerminalManager } = await importManager()
     const manager = new TerminalManager("session-1")
-    manager.create()
-    manager.create()
+    createTerminal(manager)
+    createTerminal(manager)
 
     await manager.destroy()
 

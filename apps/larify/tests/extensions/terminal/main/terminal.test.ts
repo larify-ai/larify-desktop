@@ -498,6 +498,22 @@ describe("Terminal", () => {
     vi.useRealTimers()
   })
 
+  it("does not kill a terminal that has already exited", async () => {
+    vi.useFakeTimers()
+    const fakePty = createFakePty()
+    spawnMock.mockReturnValue(fakePty)
+    const { Terminal } = await importTerminal()
+    const terminal = new Terminal(1, { shell: "sh", cwd })
+
+    fakePty.emitExit(0)
+    terminal.close()
+    vi.advanceTimersByTime(250)
+    terminal.close()
+
+    expect(fakePty.kill).not.toHaveBeenCalled()
+    vi.useRealTimers()
+  })
+
   it("reschedules the exit flush for late data and fires exit exactly once", async () => {
     vi.useFakeTimers()
     const fakePty = createFakePty()

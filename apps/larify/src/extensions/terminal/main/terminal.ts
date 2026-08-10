@@ -257,6 +257,7 @@ export class Terminal {
   }
 
   close(): void {
+    if (this.disposed || this.exited || this.pendingExit !== null) return
     if (process.platform === 'win32') {
       this.kill()
       return

@@ -1,10 +1,8 @@
 import type { App } from 'electron'
-import { defineService } from '@shared/infra/registry'
 import type { Application } from '../app/application'
 import { createWindow } from './create'
+import { windowToken } from './token'
 import type { MainWindow } from './types'
-
-export const windowToken = defineService()
 
 export function registerWindow(application: Application): void {
   application.registry.register(windowToken, application.window)

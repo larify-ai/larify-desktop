@@ -7,8 +7,8 @@ export const titleBarHeight = 46
 
 export function createWindow(): BrowserWindow {
   const { workArea } = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
-  const width = Math.min(1280, workArea.width - 80)
-  const height = Math.min(800, workArea.height - 80)
+  const width = Math.max(800, Math.min(1280, Math.round(workArea.width * 0.85)))
+  const height = Math.max(600, Math.min(820, Math.round(workArea.height * 0.8)))
   const window = new BrowserWindow({
     width,
     height,

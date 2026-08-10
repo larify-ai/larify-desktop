@@ -1,0 +1,14 @@
+.larify-allotment {
+  --focus-border: transparent;
+  --separator-border: transparent;
+  --sash-hover-size: 1px;
+  --sash-size: 8px;
+}
+
+.larify-allotment > .split-view-container > .split-view-view:not(.split-view-view-visible) {
+  visibility: hidden;
+}
+
+.larify-workbench-allotment {
+  --focus-border: color-mix(in srgb, var(--foreground) 20%, transparent);
+}

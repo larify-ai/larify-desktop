@@ -1,87 +1,100 @@
+import { Allotment } from 'allotment'
+import 'allotment/dist/style.css'
 import { Interaction } from '../interaction/interaction'
 import { ConversationHeader } from '../interaction/assistant/conversation-header'
 import { Navigation } from '../navigation/navigation'
 import { useAssistantSessions } from '../interaction/assistant/sessions-context'
 import { Workbench } from '../workbench/workbench'
-import { ResizablePanel, ResizablePanelGroup } from '../../components/ui/resizable'
-import { ResizeHandle } from './resize-handle'
-import { expandedContentMinSize, layoutSpec } from './layout-spec'
+import { expandedContentMinSize, layoutSpec, mainLayoutDefaultSizes } from './layout-spec'
 import { Titlebar } from './titlebar'
-import { useGroupToggle } from './use-group-toggle'
+import { useAllotmentToggle } from './use-allotment-toggle'
+import './layout-panels.css'
 
-const navigationCollapsed = { navigation: 0, content: 100 }
-const workbenchCollapsed = { interaction: 100, workbench: 0 }
 const layoutToggleEvent = 'larify:layout-toggle'
+const layoutResizeStartEvent = 'larify:layout-resize-start'
 
 export function LayoutPanels(): React.JSX.Element {
   const { heading } = useAssistantSessions().activeSession
-  const navigation = useGroupToggle('navigation', navigationCollapsed)
-  const workbench = useGroupToggle('workbench', workbenchCollapsed, true)
+  const navigation = useAllotmentToggle()
+  const workbench = useAllotmentToggle(true)
+  const mainDefaultSizes = mainLayoutDefaultSizes(
+    typeof window === 'undefined'
+      ? layoutSpec.navigation.defaultSize + layoutSpec.interaction.minSize
+      : window.innerWidth
+  )
+  const notifyLayoutChange = (): void => {
+    window.dispatchEvent(new Event(layoutToggleEvent))
+  }
+  const notifyLayoutResizeStart = (): void => {
+    window.dispatchEvent(new Event(layoutResizeStartEvent))
+  }
   const toggle = (action: () => void): void => {
     action()
-    window.dispatchEvent(new Event(layoutToggleEvent))
+    notifyLayoutChange()
   }
 
   return (
-    <ResizablePanelGroup id="main" direction="horizontal" groupRef={navigation.groupRef}>
-      <ResizablePanel
-        id="navigation"
-        className="!overflow-hidden"
-        collapsible={navigation.collapsed}
-        collapsedSize={0}
-        defaultSize={layoutSpec.navigation.defaultSize}
-        minSize={layoutSpec.navigation.minSize}
+    <Allotment
+      className="larify-allotment"
+      defaultSizes={mainDefaultSizes}
+      id="main"
+      proportionalLayout={false}
+      onDragStart={notifyLayoutResizeStart}
+      onDragEnd={notifyLayoutChange}
+    >
+      <Allotment.Pane
         maxSize={layoutSpec.navigation.maxSize}
-        groupResizeBehavior="preserve-pixel-size"
+        minSize={layoutSpec.navigation.minSize}
+        preferredSize={layoutSpec.navigation.defaultSize}
+        visible={!navigation.collapsed}
       >
-        <div className="h-full w-full overflow-hidden">
+        <div className="h-full w-full overflow-hidden [contain:layout_paint]">
           <Navigation
             onCollapse={() => toggle(navigation.toggle)}
             showToggle={!navigation.collapsed}
           />
         </div>
-      </ResizablePanel>
-      <ResizeHandle label="Resize navigation" hidden={navigation.collapsed} />
-      <ResizablePanel
-        id="content"
+      </Allotment.Pane>
+      <Allotment.Pane
         minSize={workbench.collapsed ? layoutSpec.interaction.minSize : expandedContentMinSize}
-        className={`flex h-full min-w-0 flex-col overflow-hidden border-[0.5px] border-border-strong bg-background ${
-          navigation.collapsed ? 'rounded-none border-l-0' : 'rounded-l-[12px]'
-        }`}
       >
-        <Titlebar
-          navigationCollapsed={navigation.collapsed}
-          workbenchCollapsed={workbench.collapsed}
-          onToggleNavigation={() => toggle(navigation.toggle)}
-          onToggleWorkbench={() => toggle(workbench.toggle)}
+        <div
+          className={`flex h-full min-w-0 flex-col overflow-hidden border-[0.5px] border-border-strong bg-background ${
+            navigation.collapsed ? 'rounded-none border-l-0' : 'rounded-l-[12px]'
+          }`}
         >
-          {heading && <ConversationHeader cwd={heading.cwd} title={heading.title} />}
-        </Titlebar>
-        <ResizablePanelGroup
-          id="content"
-          groupRef={workbench.groupRef}
-          className="min-h-0 flex-1"
-          direction="horizontal"
-        >
-          <ResizablePanel id="interaction" minSize={layoutSpec.interaction.minSize}>
-            <Interaction />
-          </ResizablePanel>
-          <ResizeHandle label="Resize workbench" hidden={workbench.collapsed} feedback />
-          <ResizablePanel
-            id="workbench"
-            className="!overflow-hidden"
-            collapsible={workbench.collapsed}
-            collapsedSize={0}
-            defaultSize={layoutSpec.workbench.defaultSize}
-            minSize={layoutSpec.workbench.minSize}
-            groupResizeBehavior="preserve-pixel-size"
+          <Titlebar
+            navigationCollapsed={navigation.collapsed}
+            workbenchCollapsed={workbench.collapsed}
+            onToggleNavigation={() => toggle(navigation.toggle)}
+            onToggleWorkbench={() => toggle(workbench.toggle)}
           >
-            <div className="h-full w-full overflow-hidden">
-              <Workbench />
-            </div>
-          </ResizablePanel>
-        </ResizablePanelGroup>
-      </ResizablePanel>
-    </ResizablePanelGroup>
+            {heading && <ConversationHeader cwd={heading.cwd} title={heading.title} />}
+          </Titlebar>
+          <Allotment
+            className="larify-allotment larify-workbench-allotment min-h-0 flex-1"
+            id="content"
+            proportionalLayout={false}
+            onDragStart={notifyLayoutResizeStart}
+            onDragEnd={notifyLayoutChange}
+          >
+            <Allotment.Pane minSize={layoutSpec.interaction.minSize}>
+              <div className="h-full w-full overflow-hidden [contain:layout_paint]">
+                <Interaction />
+              </div>
+            </Allotment.Pane>
+            <Allotment.Pane
+              minSize={layoutSpec.workbench.minSize}
+              preferredSize={layoutSpec.workbench.defaultSize}
+              visible={!workbench.collapsed}
+            >
+              <div className="h-full w-full overflow-hidden [contain:layout_paint]">
+                <Workbench />
+              </div>
+            </Allotment.Pane>
+          </Allotment>
+        </div>
+      </Allotment.Pane>
+    </Allotment>
   )
 }

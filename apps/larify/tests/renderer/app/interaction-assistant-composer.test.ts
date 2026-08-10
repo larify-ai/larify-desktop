@@ -58,6 +58,7 @@ describe('AssistantComposer', () => {
     container?.remove()
     Reflect.deleteProperty(window, 'bridge')
     Reflect.deleteProperty(window, 'fs')
+    vi.unstubAllGlobals()
     reactEnvironment.IS_REACT_ACT_ENVIRONMENT = false
   })
 
@@ -146,6 +147,73 @@ describe('AssistantComposer', () => {
 
     expect(invoke).toHaveBeenCalledWith('dialog:pick-directories')
     expect(document.querySelector('[role="menu"]')).not.toBeNull()
+  })
+
+  it('measures the attachment menu only while it is open', async () => {
+    reactEnvironment.IS_REACT_ACT_ENVIRONMENT = true
+    container = document.createElement('div')
+    document.body.append(container)
+    root = createRoot(container)
+    const observers: Array<{
+      disconnect: ReturnType<typeof vi.fn>
+      observe: ReturnType<typeof vi.fn>
+    }> = []
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe = vi.fn()
+        disconnect = vi.fn()
+
+        constructor() {
+          observers.push(this)
+        }
+      }
+    )
+
+    await act(async () => render())
+    expect(observers.every(({ observe }) => !observe.mock.calls.length)).toBe(true)
+
+    const trigger = container.querySelector<SVGElement>('.lucide-plus')!.closest('button')!
+    const input = container.querySelector<HTMLElement>('.relative.z-10')!
+    input.getBoundingClientRect = () => ({
+      bottom: 500,
+      height: 160,
+      left: 100,
+      right: 740,
+      top: 340,
+      width: 640,
+      x: 100,
+      y: 340,
+      toJSON: () => ({})
+    })
+    trigger.parentElement!.getBoundingClientRect = () => ({
+      bottom: 480,
+      height: 32,
+      left: 112,
+      right: 144,
+      top: 448,
+      width: 32,
+      x: 112,
+      y: 448,
+      toJSON: () => ({})
+    })
+
+    await act(async () => {
+      trigger.dispatchEvent(
+        new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' })
+      )
+    })
+
+    const inputObserver = observers.find(({ observe }) =>
+      observe.mock.calls.some(([element]) => element === input)
+    )
+    expect(inputObserver).toBeDefined()
+    expect(document.querySelector<HTMLElement>('[role="menu"]')?.style.width).toBe('640px')
+
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Escape' }))
+    })
+    expect(inputObserver?.disconnect).toHaveBeenCalledOnce()
   })
 
   it('hides the workspace selector after the conversation starts', async () => {

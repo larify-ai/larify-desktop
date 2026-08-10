@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type RefObject } from 'react'
+import { useLayoutEffect, useRef, useState, type RefObject } from 'react'
 import { FolderIcon, PlusIcon } from 'lucide-react'
 import {
   PromptInputActionAddAttachments,
@@ -21,11 +21,13 @@ interface MenuMetrics {
 
 function useMenuMetrics(
   inputRef: RefObject<HTMLDivElement | null>,
-  triggerRef: RefObject<HTMLDivElement | null>
+  triggerRef: RefObject<HTMLDivElement | null>,
+  enabled: boolean
 ): MenuMetrics {
   const [metrics, setMetrics] = useState<MenuMetrics>({ alignOffset: 0, sideOffset: 0, width: 0 })
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    if (!enabled) return
     const measure = (): void => {
       const input = inputRef.current?.getBoundingClientRect()
       const trigger = triggerRef.current?.getBoundingClientRect()
@@ -49,7 +51,7 @@ function useMenuMetrics(
     const observer = new ResizeObserver(measure)
     if (inputRef.current) observer.observe(inputRef.current)
     return () => observer.disconnect()
-  }, [inputRef, triggerRef])
+  }, [enabled, inputRef, triggerRef])
 
   return metrics
 }
@@ -89,10 +91,11 @@ function DirectoryAttachment(): React.JSX.Element {
 
 export function ComposerMenu({ inputRef }: ComposerMenuProps): React.JSX.Element {
   const triggerRef = useRef<HTMLDivElement>(null)
-  const metrics = useMenuMetrics(inputRef, triggerRef)
+  const [open, setOpen] = useState(false)
+  const metrics = useMenuMetrics(inputRef, triggerRef, open)
 
   return (
-    <PromptInputActionMenu>
+    <PromptInputActionMenu open={open} onOpenChange={setOpen}>
       <div ref={triggerRef}>
         <PromptInputActionMenuTrigger
           aria-label="添加附件"

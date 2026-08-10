@@ -125,7 +125,7 @@ export function AskUserPart({
       <Textarea
         value={note}
         onChange={(event) => setNote(event.currentTarget.value)}
-        placeholder={options?.length ? '其它或补充说明（可选）' : '请输入回答'}
+        placeholder={options?.length ? '其他或补充说明（可选）' : '请输入回答'}
         className="min-h-16 resize-none text-sm"
       />
       <div className="flex justify-end">

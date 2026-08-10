@@ -10,6 +10,7 @@ const Message = memo(MessageView)
 const pageBuffer = 1
 const estimatedMessageHeight = 80
 const layoutToggleEvent = 'larify:layout-toggle'
+const layoutResizeStartEvent = 'larify:layout-resize-start'
 
 function ScrollPlaceholder({ height }: { height: number }): React.JSX.Element {
   return (
@@ -46,15 +47,24 @@ export function AssistantMessageList({
 }): React.JSX.Element {
   const list = useRef<VirtuosoHandle>(null)
   const atBottomRef = useRef(true)
+  const resizeStartedAtBottom = useRef(false)
   const [atBottom, setAtBottom] = useState(true)
 
   useEffect(() => {
-    const keepBottom = (): void => {
-      if (!atBottomRef.current) return
-      requestAnimationFrame(() => list.current?.scrollToIndex({ index: 'LAST', align: 'end' }))
+    const rememberBottom = (): void => {
+      resizeStartedAtBottom.current = atBottomRef.current
     }
+    const keepBottom = (): void => {
+      if (!atBottomRef.current && !resizeStartedAtBottom.current) return
+      resizeStartedAtBottom.current = false
+      requestAnimationFrame(() => list.current?.scrollTo({ top: Number.MAX_SAFE_INTEGER }))
+    }
+    window.addEventListener(layoutResizeStartEvent, rememberBottom)
     window.addEventListener(layoutToggleEvent, keepBottom)
-    return () => window.removeEventListener(layoutToggleEvent, keepBottom)
+    return () => {
+      window.removeEventListener(layoutResizeStartEvent, rememberBottom)
+      window.removeEventListener(layoutToggleEvent, keepBottom)
+    }
   }, [])
 
   useEffect(() => {
@@ -85,14 +95,10 @@ export function AssistantMessageList({
         className="size-full [scrollbar-gutter:stable_both-edges]"
         totalCount={totalCount}
         defaultItemHeight={estimatedMessageHeight}
-        initialItemCount={12}
+        initialItemCount={Math.min(12, totalCount)}
         initialTopMostItemIndex={Math.max(initialMessageCount - 1, 0)}
         increaseViewportBy={{ top: 600, bottom: 600 }}
-        components={{ ScrollSeekPlaceholder: ScrollPlaceholder, Footer: MessageListFooter }}
-        scrollSeekConfiguration={{
-          enter: (velocity) => Math.abs(velocity) > 1000,
-          exit: (velocity) => Math.abs(velocity) < 100
-        }}
+        components={{ Footer: MessageListFooter }}
         followOutput="auto"
         rangeChanged={rangeChanged}
         atBottomStateChange={(value) => {

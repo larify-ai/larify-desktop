@@ -7,7 +7,8 @@ import { Layout } from '../../../src/renderer/src/app/layout/layout'
 import { TooltipProvider } from '../../../src/renderer/src/components/ui/tooltip'
 import {
   expandedContentMinSize,
-  layoutSpec
+  layoutSpec,
+  mainLayoutDefaultSizes
 } from '../../../src/renderer/src/app/layout/layout-spec'
 
 const css = readFileSync(resolve('src/renderer/src/assets/main.css'), 'utf8')
@@ -15,9 +16,11 @@ const window = readFileSync(resolve('src/main/window/create.ts'), 'utf8')
 const panels = readFileSync(resolve('src/renderer/src/app/layout/layout-panels.tsx'), 'utf8')
 const header = readFileSync(resolve('src/renderer/src/app/layout/titlebar.tsx'), 'utf8')
 const toggle = readFileSync(resolve('src/renderer/src/app/layout/panel-toggle.tsx'), 'utf8')
-const groupToggle = readFileSync(resolve('src/renderer/src/app/layout/use-group-toggle.ts'), 'utf8')
-const resizeHandle = readFileSync(resolve('src/renderer/src/app/layout/resize-handle.tsx'), 'utf8')
-const resizable = readFileSync(resolve('src/renderer/src/components/ui/resizable.tsx'), 'utf8')
+const groupToggle = readFileSync(
+  resolve('src/renderer/src/app/layout/use-allotment-toggle.ts'),
+  'utf8'
+)
+const panelsCss = readFileSync(resolve('src/renderer/src/app/layout/layout-panels.css'), 'utf8')
 const navigation = ['navigation-content.tsx', 'navigation-action.tsx', 'workspace.tsx']
   .map((file) => readFileSync(resolve('src/renderer/src/app/navigation', file), 'utf8'))
   .join('\n')
@@ -32,29 +35,43 @@ function renderLayout(): string {
 
 describe('workbench layout specification', () => {
   it('uses the specified navigation width range', () => {
-    expect(layoutSpec.navigation).toEqual({ defaultSize: 240, minSize: 240, maxSize: 520 })
-    expect(panels).toContain('defaultSize={layoutSpec.navigation.defaultSize}')
-    expect(panels).toContain('groupResizeBehavior="preserve-pixel-size"')
+    expect(layoutSpec.navigation).toEqual({ defaultSize: 240, minSize: 180, maxSize: 520 })
+    expect(mainLayoutDefaultSizes(1200)).toEqual([240, 960])
+    expect(mainLayoutDefaultSizes(800)).toEqual([240, 560])
+    expect(mainLayoutDefaultSizes(500)).toEqual([240, 260])
+    expect(panels).toContain('defaultSizes={mainDefaultSizes}')
+    expect(panels).toContain('preferredSize={layoutSpec.navigation.defaultSize}')
     expect(panels).toContain('minSize={layoutSpec.navigation.minSize}')
     expect(panels).toContain('maxSize={layoutSpec.navigation.maxSize}')
-    expect(groupToggle).toContain('useGroupRef')
-    expect(groupToggle).toContain('getLayout()')
-    expect(groupToggle).toContain('setLayout(')
-    expect(panels.match(/groupRef=/g)).toHaveLength(2)
+    expect(groupToggle).toContain('setCollapsed((current) => !current)')
+    expect(panels).not.toContain('navigation.ref')
+    expect(panels).not.toContain('workbench.ref')
   })
 
   it('uses the Codex panel widths and preserves the dialogue minimum', () => {
     expect(panels).not.toContain('defaultSize="64%"')
-    expect(layoutSpec.interaction.minSize).toBe(352)
-    expect(layoutSpec.workbench).toEqual({ defaultSize: 500, minSize: 320 })
+    expect(layoutSpec.interaction.minSize).toBe(336)
+    expect(layoutSpec.workbench).toEqual({ defaultSize: 500, minSize: 280 })
     expect(layoutSpec.workbench).not.toHaveProperty('maxSize')
-    expect(expandedContentMinSize).toBe(672)
+    expect(expandedContentMinSize).toBe(616)
     expect(panels).toContain('minSize={layoutSpec.interaction.minSize}')
-    expect(panels).toContain('defaultSize={layoutSpec.workbench.defaultSize}')
+    expect(panels).not.toContain('onResize={notifyLayoutChange}')
+    expect(panels.match(/onDragStart=\{notifyLayoutResizeStart\}/g)).toHaveLength(2)
+    expect(panels.match(/onDragEnd=\{notifyLayoutChange\}/g)).toHaveLength(2)
+    expect(panels).toContain('preferredSize={layoutSpec.workbench.defaultSize}')
     expect(panels).not.toContain('panelRef=')
-    expect(panels.match(/groupResizeBehavior="preserve-pixel-size"/g)).toHaveLength(2)
+    expect(panels.match(/proportionalLayout=\{false\}/g)).toHaveLength(2)
     expect(panels).toContain('id="content"')
     expect(panels).toContain('expandedContentMinSize')
+  })
+
+  it('fits all three panes within the minimum window width', () => {
+    const minimumThreePaneWidth =
+      layoutSpec.navigation.minSize + layoutSpec.interaction.minSize + layoutSpec.workbench.minSize
+
+    expect(minimumThreePaneWidth).toBe(796)
+    expect(minimumThreePaneWidth).toBeLessThanOrEqual(800)
+    expect(window).toContain('minWidth: 800')
   })
 
   it('uses the specified top bar height and main content radius', () => {
@@ -68,7 +85,7 @@ describe('workbench layout specification', () => {
   })
 
   it('starts with the workbench collapsed while preserving its expanded size', () => {
-    expect(panels).toContain("useGroupToggle('workbench', workbenchCollapsed, true)")
+    expect(panels).toContain('useAllotmentToggle(true)')
     expect(panels).toContain('layoutSpec.workbench.defaultSize')
   })
 
@@ -116,13 +133,13 @@ describe('workbench layout specification', () => {
     expect(markup.indexOf('border-b-[0.5px]')).toBeLessThan(
       markup.indexOf('aria-label="Interaction"')
     )
-    expect(markup.match(/role="separator"/g)).toHaveLength(2)
+    expect(markup.match(/larify-allotment/g)).toHaveLength(2)
     expect(markup.match(/h-\(--titlebar-h\)/g)).toHaveLength(2)
   })
 
   it('uses one divider style for every region boundary', () => {
-    expect(panels).toContain('label="Resize navigation"')
-    expect(panels).toContain('label="Resize workbench"')
+    expect(panels).toContain('className="larify-allotment"')
+    expect(panels).toContain('larify-workbench-allotment')
     expect(header).toContain('border-b-[0.5px] border-border-strong')
     expect(panels).toContain('rounded-l-[12px]')
     expect(panels).toContain('border-[0.5px] border-border-strong')
@@ -147,8 +164,8 @@ describe('workbench layout specification', () => {
     expect(toggle).toContain('title={label}')
     expect(toggle).toContain('size-8')
     expect(toggle).toContain('pointer-events-none')
-    expect(panels).toContain('hidden={navigation.collapsed}')
-    expect(panels).toContain('hidden={workbench.collapsed}')
+    expect(panels).toContain('visible={!navigation.collapsed}')
+    expect(panels).toContain('visible={!workbench.collapsed}')
   })
 
   it('keeps every region in a vertical flex layout', () => {
@@ -157,21 +174,23 @@ describe('workbench layout specification', () => {
   })
 
   it('provides resize feedback without changing divider thickness', () => {
-    expect(resizable).not.toContain('hover:bg-border-strong')
-    expect(resizable).not.toContain('data-[resize-handle-state=drag]:bg-border-strong')
-    expect(resizable).toContain('after:w-2')
-    expect(resizeHandle).toContain('w-[0.5px]')
-    expect(panels).toContain('label="Resize navigation" hidden={navigation.collapsed} />')
-    expect(panels).toContain('label="Resize workbench" hidden={workbench.collapsed} feedback')
-    expect(resizeHandle).toContain('feedback &&')
-    expect(resizeHandle).toContain('group-data-[separator=active]:bg-foreground/20')
-    expect(resizeHandle).toContain('group-data-[separator=active]')
+    expect(panelsCss).toContain('--sash-size: 8px')
+    expect(panelsCss).toContain('--sash-hover-size: 1px')
+    expect(panelsCss).toContain('--focus-border: transparent')
+    expect(panelsCss).toContain('.larify-workbench-allotment')
+  })
+
+  it('does not paint panes before Allotment marks them visible', () => {
+    expect(panelsCss).toContain(
+      '.split-view-view:not(.split-view-view-visible) {\n  visibility: hidden;'
+    )
   })
 
   it('uses the resizable component without custom panel animation', () => {
     expect(panels).not.toContain('panel-animated')
-    expect(groupToggle).toContain('useGroupRef')
-    expect(groupToggle).toContain('requestAnimationFrame')
+    expect(groupToggle).not.toContain('useRef')
+    expect(groupToggle).not.toContain('requestAnimationFrame')
+    expect(groupToggle).not.toContain('flushSync')
     expect(css).not.toContain('.panel-animated')
   })
 
@@ -182,11 +201,11 @@ describe('workbench layout specification', () => {
     )
     const workbench = readFileSync(resolve('src/renderer/src/app/workbench/workbench.tsx'), 'utf8')
 
-    expect(panels).toContain('collapsible={navigation.collapsed}')
-    expect(panels).toContain('collapsible={workbench.collapsed}')
+    expect(panels).toContain('visible={!navigation.collapsed}')
+    expect(panels).toContain('visible={!workbench.collapsed}')
     expect(panels).not.toContain('onExpand=')
     expect(panels).not.toContain('disabled=')
-    expect(panels.match(/className="!overflow-hidden"/g)).toHaveLength(2)
+    expect(panels.match(/className="h-full w-full overflow-hidden/g)).toHaveLength(3)
     expect(panels).toContain('minSize={layoutSpec.navigation.minSize}')
     expect(panels).toContain('minSize={layoutSpec.workbench.minSize}')
     expect(interaction).toContain('min-w-0 overflow-hidden')
@@ -199,7 +218,7 @@ describe('workbench layout specification', () => {
     const markup = renderLayout()
 
     expect(markup).toContain('bg-sidebar')
-    expect(markup).not.toContain('bg-workbench-chrome')
+    expect(markup).toContain('bg-workbench-chrome')
     expect(markup).toContain('flex h-full min-w-0 flex-col')
     expect(markup).toContain('bg-background')
   })

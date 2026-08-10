@@ -32,15 +32,11 @@ interface VirtuosoProps {
   className: string
   totalCount: number
   defaultItemHeight: number
+  initialItemCount: number
   initialTopMostItemIndex: number
   increaseViewportBy: { top: number; bottom: number }
   components: {
-    ScrollSeekPlaceholder: React.ComponentType<{ height: number }>
     Footer: React.ComponentType
-  }
-  scrollSeekConfiguration: {
-    enter(velocity: number): boolean
-    exit(velocity: number): boolean
   }
   rangeChanged(range: { startIndex: number; endIndex: number }): void
   atBottomStateChange(atBottom: boolean): void
@@ -74,9 +70,18 @@ describe('interaction assistant message list', () => {
     const props = captured.props as VirtuosoProps
     expect(props.totalCount).toBe(5000)
     expect(props.defaultItemHeight).toBe(80)
+    expect(props.initialItemCount).toBe(12)
     expect(props.initialTopMostItemIndex).toBe(4999)
     expect(props.computeItemKey(4999)).toBe('latest')
     expect(props.className).toContain('[scrollbar-gutter:stable_both-edges]')
+  })
+
+  it('does not render initial placeholders for an empty conversation', async () => {
+    await render({ messages: [], initialMessageCount: 0, recentStart: 0 })
+
+    const props = captured.props as VirtuosoProps
+    expect(props.totalCount).toBe(0)
+    expect(props.initialItemCount).toBe(0)
   })
 
   it('prefetches pages around the visible range without changing the total count', async () => {
@@ -97,7 +102,7 @@ describe('interaction assistant message list', () => {
     expect(props.increaseViewportBy).toEqual({ top: 600, bottom: 600 })
   })
 
-  it('uses placeholders only during high-speed scrolling', async () => {
+  it('does not replace loaded messages with placeholders while scrolling', async () => {
     await render({
       messages: [message('latest')],
       initialMessageCount: 5000,
@@ -105,17 +110,8 @@ describe('interaction assistant message list', () => {
     })
 
     const props = captured.props as VirtuosoProps
-    expect(props.scrollSeekConfiguration.enter(1000)).toBe(false)
-    expect(props.scrollSeekConfiguration.enter(1001)).toBe(true)
-    expect(props.scrollSeekConfiguration.exit(99)).toBe(true)
-    expect(props.scrollSeekConfiguration.exit(100)).toBe(false)
-    await act(async () =>
-      root.render(createElement(props.components.ScrollSeekPlaceholder, { height: 96 }))
-    )
-    expect(container.querySelector('[data-scroll-placeholder]')).not.toBeNull()
-    expect(container.querySelector<HTMLElement>('[data-scroll-placeholder]')?.style.height).toBe(
-      '96px'
-    )
+    expect(props).not.toHaveProperty('scrollSeekConfiguration')
+    expect(props.components).not.toHaveProperty('ScrollSeekPlaceholder')
   })
 
   it('reports one buffered page range even when part of it is cached', async () => {
@@ -178,7 +174,7 @@ describe('interaction assistant message list', () => {
     expect(captured.autoscrollToBottom).toHaveBeenCalled()
   })
 
-  it('returns to the latest absolute item', async () => {
+  it('returns to the true bottom including the footer', async () => {
     await render({
       messages: [message('latest')],
       initialMessageCount: 5000,
@@ -187,32 +183,42 @@ describe('interaction assistant message list', () => {
     act(() => (captured.props as VirtuosoProps).atBottomStateChange(false))
     act(() => container.querySelector<HTMLButtonElement>('button')?.click())
 
-    expect(captured.scrollToIndex).toHaveBeenCalledWith({
-      index: 'LAST',
-      align: 'end'
-    })
+    expect(captured.scrollTo).toHaveBeenCalledWith({ top: Number.MAX_SAFE_INTEGER })
   })
 
   it('keeps the latest message visible when a panel is toggled at the bottom', async () => {
     await render({ messages: [message('latest')], initialMessageCount: 1, recentStart: 0 })
     act(() => (captured.props as VirtuosoProps).atBottomStateChange(true))
-    captured.scrollToIndex.mockClear()
+    captured.scrollTo.mockClear()
 
     act(() => window.dispatchEvent(new Event('larify:layout-toggle')))
     await act(async () => new Promise((resolve) => requestAnimationFrame(resolve)))
 
-    expect(captured.scrollToIndex).toHaveBeenCalledWith({ index: 'LAST', align: 'end' })
+    expect(captured.scrollTo).toHaveBeenCalledWith({ top: Number.MAX_SAFE_INTEGER })
   })
 
   it('preserves the history position when a panel is toggled away from the bottom', async () => {
     await render({ messages: [message('latest')], initialMessageCount: 1, recentStart: 0 })
     act(() => (captured.props as VirtuosoProps).atBottomStateChange(false))
-    captured.scrollToIndex.mockClear()
+    captured.scrollTo.mockClear()
 
     act(() => window.dispatchEvent(new Event('larify:layout-toggle')))
     await act(async () => new Promise((resolve) => requestAnimationFrame(resolve)))
 
-    expect(captured.scrollToIndex).not.toHaveBeenCalled()
+    expect(captured.scrollTo).not.toHaveBeenCalled()
+  })
+
+  it('stays at the bottom when resizing makes Virtuoso temporarily leave it', async () => {
+    await render({ messages: [message('latest')], initialMessageCount: 1, recentStart: 0 })
+    act(() => (captured.props as VirtuosoProps).atBottomStateChange(true))
+    captured.scrollTo.mockClear()
+
+    act(() => window.dispatchEvent(new Event('larify:layout-resize-start')))
+    act(() => (captured.props as VirtuosoProps).atBottomStateChange(false))
+    act(() => window.dispatchEvent(new Event('larify:layout-toggle')))
+    await act(async () => new Promise((resolve) => requestAnimationFrame(resolve)))
+
+    expect(captured.scrollTo).toHaveBeenCalledWith({ top: Number.MAX_SAFE_INTEGER })
   })
 
   it('keeps unloaded items at the configured estimated height', async () => {

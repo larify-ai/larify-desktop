@@ -9,16 +9,8 @@ vi.mock('../../../src/renderer/src/app/interaction/interaction', () => ({
 }))
 
 vi.mock('../../../src/renderer/src/app/navigation/navigation', () => ({
-  Navigation: ({
-    onCollapse,
-    showToggle
-  }: {
-    onCollapse: () => void
-    showToggle?: boolean
-  }) =>
-    showToggle
-      ? createElement('button', { 'aria-label': '隐藏侧边栏', onClick: onCollapse })
-      : null
+  Navigation: ({ onCollapse, showToggle }: { onCollapse: () => void; showToggle?: boolean }) =>
+    showToggle ? createElement('button', { 'aria-label': '隐藏侧边栏', onClick: onCollapse }) : null
 }))
 
 vi.mock('../../../src/renderer/src/app/workbench/workbench', () => ({
@@ -102,17 +94,13 @@ describe('layout with the real resizable component', () => {
     }
   })
 
-  it('keeps the navigation separator invisible and workbench feedback visible', () => {
-    const separators = [...container.querySelectorAll('[role="separator"]')]
-    expect(separators).toHaveLength(2)
-    expect(separators[0].children).toHaveLength(0)
-    expect(separators[1].querySelector('.w-\\[0\\.5px\\]')).not.toBeNull()
+  it('uses nested Allotment split views with workbench feedback styling', () => {
+    expect(container.querySelectorAll('.larify-allotment')).toHaveLength(2)
+    expect(container.querySelector('.larify-workbench-allotment')).not.toBeNull()
   })
 
   it('clips navigation content when its panel collapses', () => {
-    expect(
-      container.querySelectorAll('[data-slot="resizable-panel"] > .overflow-hidden')
-    ).not.toHaveLength(0)
+    expect(container.querySelectorAll('.overflow-hidden')).not.toHaveLength(0)
   })
 
   function buttons(label: string): HTMLButtonElement[] {

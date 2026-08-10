@@ -4,14 +4,11 @@ import { act, createElement, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-type Layout = Record<string, number>
-
-const layouts = new Map<string, Layout>()
-const expandedWorkbenchLayout = { interaction: 70, workbench: 30 }
 const sessionIds: string[] = []
 const unmountedSessionIds: string[] = []
 const headingChanges = new Map<string, (heading: { cwd: string; title: string } | null) => void>()
 const savedCallbacks = new Map<string, () => void>()
+const allotmentCallbacks = new Map<string, { onDragEnd?: () => void; onDragStart?: () => void }>()
 let storedSession: { id: string; title: string; cwd: string } | undefined
 
 vi.mock('../../../src/renderer/src/app/interaction/assistant/session', async () => {
@@ -41,33 +38,34 @@ vi.mock('../../../src/renderer/src/app/interaction/assistant/session', async () 
   }
 })
 
-vi.mock('../../../src/renderer/src/components/ui/resizable', () => ({
-  ResizablePanelGroup: ({
-    children,
-    id,
-    groupRef
-  }: {
-    children?: ReactNode
-    id: string
-    groupRef?: { current: unknown }
-  }) => {
-    const initial = id === 'main' ? { navigation: 15, content: 85 } : expandedWorkbenchLayout
-    layouts.set(id, layouts.get(id) ?? initial)
-    if (groupRef) {
-      groupRef.current = {
-        getLayout: () => layouts.get(id) ?? {},
-        setLayout: (layout: Layout) => layouts.set(id, layout)
-      }
-    }
-    return createElement('div', {}, children)
-  },
-  ResizablePanel: ({ children }: { children?: ReactNode }) => createElement('div', {}, children),
-  ResizableHandle: () => createElement('div')
-}))
-
-vi.mock('react-resizable-panels', async () => {
-  const { useRef } = await vi.importActual<typeof import('react')>('react')
-  return { useGroupRef: () => useRef(null) }
+vi.mock('allotment', async () => {
+  const React = await vi.importActual<typeof import('react')>('react')
+  const MockAllotment = React.forwardRef(function MockAllotment(
+    {
+      children,
+      id,
+      onDragEnd,
+      onDragStart
+    }: {
+      children?: ReactNode
+      id?: string
+      onDragEnd?: () => void
+      onDragStart?: () => void
+    },
+    ref
+  ) {
+    React.useImperativeHandle(ref, () => ({ reset: vi.fn(), resize: vi.fn() }))
+    if (id) allotmentCallbacks.set(id, { onDragEnd, onDragStart })
+    return createElement('div', { 'data-allotment': id }, children)
+  }) as React.ForwardRefExoticComponent<
+    { children?: ReactNode; id?: string } & React.RefAttributes<unknown>
+  > & { Pane: (props: { children?: ReactNode; visible?: boolean }) => ReactNode }
+  // Props are TypeScript-validated; this rule only understands runtime PropTypes.
+  // eslint-disable-next-line react/prop-types
+  MockAllotment.Pane = function MockPane({ children, visible = true }) {
+    return visible ? createElement('div', {}, children) : null
+  }
+  return { Allotment: MockAllotment }
 })
 
 import { Layout } from '../../../src/renderer/src/app/layout/layout'
@@ -83,11 +81,11 @@ describe('layout panel behavior', () => {
       return 0
     })
     vi.stubGlobal('cancelAnimationFrame', vi.fn())
-    layouts.clear()
     sessionIds.length = 0
     unmountedSessionIds.length = 0
     headingChanges.clear()
     savedCallbacks.clear()
+    allotmentCallbacks.clear()
     storedSession = undefined
     globalThis.IS_REACT_ACT_ENVIRONMENT = true
     Object.defineProperty(window, 'bridge', {
@@ -115,23 +113,45 @@ describe('layout panel behavior', () => {
   })
 
   it('restores the workbench layout after toggling twice', async () => {
-    expect(layouts.get('content')).toEqual({ interaction: 100, workbench: 0 })
+    expect(container.querySelector('[aria-label="Workbench"]')).toBeNull()
 
     await click('显示工作台')
-    expect(layouts.get('content')).toEqual(expandedWorkbenchLayout)
+    expect(container.querySelector('[aria-label="Workbench"]')).not.toBeNull()
 
     await click('隐藏工作台')
-    expect(layouts.get('content')).toEqual({ interaction: 100, workbench: 0 })
+    expect(container.querySelector('[aria-label="Workbench"]')).toBeNull()
   })
 
-  it('preserves a resized navigation layout across collapse and expand', async () => {
-    layouts.set('main', { navigation: 20, content: 80 })
+  it('collapses and restores navigation', async () => {
+    expect(container.querySelector('[aria-label="Navigation"]')).not.toBeNull()
 
     await click('隐藏侧边栏')
-    expect(layouts.get('main')).toEqual({ navigation: 0, content: 100 })
+    expect(container.querySelector('[aria-label="Navigation"]')).toBeNull()
 
     await click('显示侧边栏')
-    expect(layouts.get('main')).toEqual({ navigation: 20, content: 80 })
+    expect(container.querySelector('[aria-label="Navigation"]')).not.toBeNull()
+  })
+
+  it('notifies consumers when either splitter starts and finishes dragging', () => {
+    const resizeStarted = vi.fn()
+    const layoutChanged = vi.fn()
+    window.addEventListener('larify:layout-resize-start', resizeStarted)
+    window.addEventListener('larify:layout-toggle', layoutChanged)
+
+    try {
+      act(() => {
+        allotmentCallbacks.get('main')?.onDragStart?.()
+        allotmentCallbacks.get('main')?.onDragEnd?.()
+        allotmentCallbacks.get('content')?.onDragStart?.()
+        allotmentCallbacks.get('content')?.onDragEnd?.()
+      })
+
+      expect(resizeStarted).toHaveBeenCalledTimes(2)
+      expect(layoutChanged).toHaveBeenCalledTimes(2)
+    } finally {
+      window.removeEventListener('larify:layout-resize-start', resizeStarted)
+      window.removeEventListener('larify:layout-toggle', layoutChanged)
+    }
   })
 
   it('creates a task record only after the draft is sent', async () => {

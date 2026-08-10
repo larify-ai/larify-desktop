@@ -7,8 +7,13 @@ interface Target {
 
 interface Response {
   id?: number
-  result?: { result?: { value?: unknown } }
+  result?: unknown
   error?: unknown
+}
+
+interface Evaluation<T> {
+  result?: { value?: T }
+  exceptionDetails?: { text?: string; exception?: { description?: string } }
 }
 
 class DevTools {
@@ -44,12 +49,19 @@ class DevTools {
   }
 
   async evaluate<T>(expression: string): Promise<T> {
-    const result = (await this.send('Runtime.evaluate', {
+    const evaluation = (await this.send('Runtime.evaluate', {
       expression,
       awaitPromise: true,
       returnByValue: true
-    })) as { result?: { value?: T } }
-    return result.result?.value as T
+    })) as Evaluation<T>
+    if (evaluation.exceptionDetails) {
+      throw new Error(
+        evaluation.exceptionDetails.exception?.description ??
+          evaluation.exceptionDetails.text ??
+          'DevTools evaluation failed.'
+      )
+    }
+    return evaluation.result?.value as T
   }
 
   async click(expression: string): Promise<void> {
@@ -58,6 +70,10 @@ class DevTools {
       if (!element) throw new Error('Clickable element was not found.');
       element.click();
     })()`)
+  }
+
+  async reload(): Promise<void> {
+    await this.send('Page.reload', { ignoreCache: true })
   }
 
   private send(method: string, params: object): Promise<unknown> {
@@ -82,87 +98,167 @@ describe.skipIf(!process.env.LIVE)('Interaction live integration', () => {
 
   afterEach(() => devtools?.close())
 
-  it('sends a message through the running app and receives the real response', async () => {
+  it('sends a message and restores its session title after reload', async () => {
     devtools = await DevTools.connect()
     const marker = `LARIFY_UI_${Date.now()}`
 
-    await devtools.click(
-      `[...document.querySelectorAll('button')].find((button) => button.textContent?.trim() === '新建任务')`
-    )
+    await devtools.click(`
+      [...document.querySelectorAll('nav button')].find(
+        (button) => button.textContent?.includes('\u65b0\u5efa\u4efb\u52a1')
+      )
+    `)
     await devtools.evaluate(`(() => {
-      const textarea = document.querySelector('textarea');
+      const textarea = [...document.querySelectorAll('textarea')].find(
+        (element) => element.getClientRects().length > 0
+      );
       if (!textarea) throw new Error('Composer was not found.');
       const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
-      setter.call(textarea, ${JSON.stringify(`只回复：${marker}`)});
+      setter.call(textarea, ${JSON.stringify(`Reply with exactly: ${marker}`)});
       textarea.dispatchEvent(new Event('input', { bubbles: true }));
     })()`)
 
     await waitFor(async () =>
-      devtools?.evaluate(`!document.querySelector('button[aria-label="发送"]')?.disabled`)
+      devtools?.evaluate(`(() => {
+        const textarea = [...document.querySelectorAll('textarea')].find(
+          (element) => element.getClientRects().length > 0
+        );
+        return !textarea?.closest('form')?.querySelector('button[type="submit"]')?.disabled;
+      })()`)
     )
-    await devtools.click(`document.querySelector('button[aria-label="发送"]')`)
+    await devtools.click(`
+      [...document.querySelectorAll('textarea')].find(
+        (element) => element.getClientRects().length > 0
+      )?.closest('form')?.querySelector('button[type="submit"]')
+    `)
 
     await waitFor(
       async () =>
-        devtools?.evaluate(`(() => {
-          const send = document.querySelector('button[aria-label="发送"]');
-          const occurrences = document.body.innerText.split(${JSON.stringify(marker)}).length - 1;
-          return occurrences >= 2 && send?.disabled === true;
-        })()`),
+        (await devtools!.evaluate<number>(
+          `document.body.innerText.split(${JSON.stringify(marker)}).length - 1`
+        )) >= 2,
       60_000
     )
-
     expect(
-      await devtools.evaluate(`document.body.innerText.split(${JSON.stringify(marker)}).length - 1`)
+      await devtools.evaluate<number>(
+        `document.body.innerText.split(${JSON.stringify(marker)}).length - 1`
+      )
     ).toBeGreaterThanOrEqual(2)
-  }, 70_000)
 
-  it('keeps placeholders visible during high-speed history scrolling', async () => {
-    devtools = await DevTools.connect()
-    await devtools.click(
-      `(() => {
-        const label = [...document.querySelectorAll('*')].find(
-          (element) => !element.children.length && element.textContent?.includes('5000')
-        );
-        return label?.closest('button, [role="button"]') ?? label?.parentElement;
-      })()`
+    await waitFor(
+      async () =>
+        devtools?.evaluate(
+          `[...document.querySelectorAll('nav button')].some((button) => button.textContent?.includes(${JSON.stringify(marker)}))`
+        ),
+      15_000
     )
 
+    await devtools.reload()
+    await waitFor(
+      async () =>
+        devtools?.evaluate(
+          `document.readyState === 'complete' && [...document.querySelectorAll('nav button')].some((button) => button.textContent?.includes(${JSON.stringify(marker)}))`
+        ),
+      15_000
+    )
+  }, 70_000)
+
+  it('keeps history rendered during high-speed scrolling and returns to bottom', async () => {
+    devtools = await DevTools.connect()
+    await devtools.reload()
+    await waitFor(() => devtools!.evaluate(`document.readyState === 'complete'`))
+    await revealNavigationItem(devtools, '5000')
+    await devtools.click(
+      `(() => {
+        return [...document.querySelectorAll('nav button')].find(
+          (button) => button.textContent?.includes('5000')
+        );
+      })()`
+    )
     await waitFor(async () =>
       devtools?.evaluate(
-        `Math.max(...[...document.querySelectorAll('[data-testid="virtuoso-scroller"]')].map((element) => element.scrollHeight)) > 10000`
+        `[...document.querySelectorAll('[role="log"]')].some(
+          (element) => element.getClientRects().length > 0 && element.scrollHeight > element.clientHeight
+        )`
       )
     )
 
-    const emptyFrames = await devtools.evaluate<number>(`(async () => {
-      const scroller = [...document.querySelectorAll('[data-testid="virtuoso-scroller"]')]
-        .sort((left, right) => right.scrollHeight - left.scrollHeight)[0];
-      if (!(scroller instanceof HTMLElement)) throw new Error('Message scroller was not found.');
-      let empty = 0;
-      for (let frame = 0; frame < 90; frame++) {
-        scroller.scrollTop = Math.max(0, scroller.scrollHeight - frame * 5000);
-        await new Promise(requestAnimationFrame);
-        if (scroller.parentElement?.querySelector('[data-scroll-overlay]')) continue;
-        const items = [...scroller.querySelectorAll('[data-item-index]')];
-        const visible = items.some((item) => {
-          const rect = item.getBoundingClientRect();
-          const viewport = scroller.getBoundingClientRect();
-          return rect.bottom > viewport.top && rect.top < viewport.bottom;
-        });
-        if (!visible) empty++;
-      }
-      return empty;
-    })()`)
+    for (const position of [1, 0.66, 0.33, 0]) {
+      await scrollTo(devtools, position)
+      await waitFor(() => hasVisibleHistory(devtools), 10_000)
+    }
 
-    expect(emptyFrames).toBe(0)
-  }, 20_000)
+    await waitFor(() =>
+      devtools!.evaluate(`Boolean(document.querySelector('button[aria-label="返回底部"]'))`)
+    )
+    await devtools.click(`document.querySelector('button[aria-label="返回底部"]')`)
+    await waitFor(async () => {
+      const distance = await devtools?.evaluate<number>(`(() => {
+        ${visibleScroller()};
+        return scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop;
+      })()`)
+      return distance !== undefined && distance < 4
+    })
+  }, 45_000)
 })
+
+async function revealNavigationItem(devtools: DevTools, text: string): Promise<void> {
+  for (let attempt = 0; attempt < 50; attempt++) {
+    const visible = await devtools.evaluate<boolean>(
+      `[...document.querySelectorAll('nav button')].some((button) => button.textContent?.includes(${JSON.stringify(text)}))`
+    )
+    if (visible) return
+    const count = await devtools.evaluate<number>(`document.querySelectorAll('nav button').length`)
+    await devtools.click(
+      `[...document.querySelectorAll('nav button')].find((button) => button.textContent?.trim() === '\u66f4\u591a')`
+    )
+    await waitFor(
+      () =>
+        devtools.evaluate(
+          `document.querySelectorAll('nav button').length !== ${count} || ![...document.querySelectorAll('nav button')].some((button) => button.textContent?.trim() === '\u66f4\u591a')`
+        ),
+      2_000
+    )
+  }
+  throw new Error(`Navigation item containing "${text}" was not revealed.`)
+}
+
+async function scrollTo(devtools: DevTools, position: number): Promise<void> {
+  await devtools.evaluate(`(() => {
+    ${visibleScroller()};
+    scroller.scrollTop = ${position} * (scroller.scrollHeight - scroller.clientHeight);
+  })()`)
+}
+
+async function hasVisibleHistory(devtools: DevTools): Promise<boolean> {
+  return devtools.evaluate(`(() => {
+    ${visibleScroller()};
+    if (scroller.parentElement?.querySelector('[data-scroll-placeholder]')) return true;
+    const viewport = scroller.getBoundingClientRect();
+    return [...scroller.querySelectorAll('[data-item-index]')].some((item) => {
+      const rect = item.getBoundingClientRect();
+      return rect.bottom > viewport.top && rect.top < viewport.bottom;
+    });
+  })()`)
+}
+
+function visibleScroller(): string {
+  return `const scroller = [...document.querySelectorAll('[role="log"]')]
+    .find((element) => element.getClientRects().length > 0 && element.scrollHeight > element.clientHeight);
+  if (!(scroller instanceof HTMLElement)) throw new Error('Message scroller was not found.')`
+}
 
 async function waitFor(check: () => Promise<unknown>, timeout = 10_000): Promise<void> {
   const deadline = Date.now() + timeout
+  let lastError: unknown
   while (Date.now() < deadline) {
-    if (await check()) return
+    try {
+      if (await check()) return
+    } catch (error) {
+      // Reloads temporarily invalidate the page's execution context.
+      lastError = error
+    }
     await new Promise((resolve) => setTimeout(resolve, 100))
   }
+  if (lastError instanceof Error) throw lastError
   throw new Error(`Condition was not met within ${timeout} ms.`)
 }

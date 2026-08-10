@@ -1,5 +1,5 @@
 import type { UIMessage } from 'ai'
-import type { Disposable } from '../../infra/disposable'
+import type { Disposable } from '@shared/infra/disposable'
 import { larifyWorkspacePath } from '../../utils/app-paths'
 import type { AgentModelConfig } from '../model/config'
 import type { PluginHost } from '../plugin/host'

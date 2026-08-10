@@ -2,7 +2,7 @@ import { asSchema, tool } from 'ai'
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import agentPlugin from '../../../../src/extensions/agent/main'
-import { Registry } from '../../../../src/main/infra/registry'
+import { Registry } from '../../../../src/shared/infra/registry'
 import { PluginHost, pluginHostToken } from '../../../../src/main/core/plugin'
 import type { Tool } from '../../../../src/main/core/plugin/protocol'
 

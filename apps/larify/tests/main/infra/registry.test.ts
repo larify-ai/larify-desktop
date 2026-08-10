@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { defineService, Registry } from '../../../src/main/infra/registry'
+import { defineService, Registry } from '../../../src/shared/infra/registry'
 
 function service(dispose: () => void | Promise<void>): { dispose: () => void | Promise<void> } {
   return { dispose }

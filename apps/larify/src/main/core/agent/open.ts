@@ -1,4 +1,4 @@
-import { defineService } from '../../infra/registry'
+import { defineService } from '@shared/infra/registry'
 import type { Application } from '../../app/application'
 import { sessionToken, type SessionStore } from '../session'
 import { pluginHostToken } from '../plugin/service'

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { Registry } from '../../../../src/main/infra/registry'
+import { Registry } from '../../../../src/shared/infra/registry'
 
 const electron = vi.hoisted(() => ({
   handle: vi.fn(),

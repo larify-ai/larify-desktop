@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import fsPlugin from '../../../../src/extensions/fs/main'
 import { PluginHost } from '../../../../src/main/core/plugin'
-import { Registry } from '../../../../src/main/infra/registry'
+import { Registry } from '../../../../src/shared/infra/registry'
 
 describe('FS extension', () => {
   it('registers its tools', async () => {

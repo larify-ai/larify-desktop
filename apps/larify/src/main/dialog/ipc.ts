@@ -1,6 +1,6 @@
 import { BrowserWindow, dialog, ipcMain } from 'electron'
 import type { Application } from '../app/application'
-import type { Disposable } from '../infra/disposable'
+import type { Disposable } from '@shared/infra/disposable'
 
 const channel = 'dialog:pick-directories'
 

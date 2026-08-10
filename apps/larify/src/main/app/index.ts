@@ -1,6 +1,6 @@
 import type { App } from 'electron'
 import { electronApp } from '@electron-toolkit/utils'
-import { Registry } from '../infra/registry'
+import { Registry } from '@shared/infra/registry'
 import { installShutdown } from './shutdown'
 import { registerSession } from '../core/session/open'
 import { registerAgent } from '../core/agent'

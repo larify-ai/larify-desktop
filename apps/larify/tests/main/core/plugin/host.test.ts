@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
-import { defineService, Registry } from '../../../../src/main/infra/registry'
+import { defineService, Registry } from '../../../../src/shared/infra/registry'
 import { defineTool, PluginHost, type Plugin, type Tool } from '../../../../src/main/core/plugin'
 
 const tool = (description: string): Tool =>

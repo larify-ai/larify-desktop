@@ -1,3 +1,3 @@
-import { defineService } from '../../infra/registry'
+import { defineService } from '@shared/infra/registry'
 
 export const pluginHostToken = defineService()

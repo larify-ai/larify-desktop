@@ -1,5 +1,5 @@
-import type { Disposable } from '../../../infra/disposable'
-import type { Registry } from '../../../infra/registry'
+import type { Disposable } from '@shared/infra/disposable'
+import type { Registry } from '@shared/infra/registry'
 import type { Manifest } from './manifest'
 import type { Skill } from './skill'
 import type { Tool } from './tool'

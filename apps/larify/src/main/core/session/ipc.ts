@@ -1,5 +1,5 @@
 import { ipcMain } from 'electron'
-import type { Disposable } from '../../infra/disposable'
+import type { Disposable } from '@shared/infra/disposable'
 import { createSessionQueries } from './queries'
 import type { SessionStore } from './store'
 

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { PluginHost, type Plugin } from '../../../../src/main/core/plugin'
 import { loadPlugins } from '../../../../src/main/core/plugin/loader'
-import { Registry } from '../../../../src/main/infra/registry'
+import { Registry } from '../../../../src/shared/infra/registry'
 
 describe('loadPlugins', () => {
   it('loads plugins sequentially in the given order', async () => {

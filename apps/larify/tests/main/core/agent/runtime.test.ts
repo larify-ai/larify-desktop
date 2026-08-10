@@ -3,7 +3,7 @@ import { z } from 'zod'
 import type { AgentOptions } from '../../../../src/main/core/agent/engine'
 import { createAgentRuntime } from '../../../../src/main/core/agent/runtime'
 import { PluginHost, defineTool } from '../../../../src/main/core/plugin'
-import { Registry } from '../../../../src/main/infra/registry'
+import { Registry } from '../../../../src/shared/infra/registry'
 
 describe('createAgentRuntime', () => {
   it('assembles plugin tools and their session context', async () => {

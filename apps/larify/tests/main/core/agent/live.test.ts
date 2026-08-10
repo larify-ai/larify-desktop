@@ -5,7 +5,7 @@ import type { UIMessage } from 'ai'
 import { describe, expect, it } from 'vitest'
 import { Agent } from '../../../../src/main/core/agent/agent'
 import { PluginHost } from '../../../../src/main/core/plugin'
-import { Registry } from '../../../../src/main/infra/registry'
+import { Registry } from '../../../../src/shared/infra/registry'
 import { SessionStore } from '../../../../src/main/core/session'
 
 describe.skipIf(!process.env.LIVE)('Agent live integration', () => {

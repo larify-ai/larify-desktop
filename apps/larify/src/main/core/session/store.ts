@@ -1,7 +1,7 @@
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite'
 import type { UIMessage } from 'ai'
 import { openDatabase, transaction } from '../sqlite'
-import type { Disposable } from '../../infra/disposable'
+import type { Disposable } from '@shared/infra/disposable'
 
 export interface Session {
   id: string

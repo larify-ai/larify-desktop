@@ -1,5 +1,5 @@
 import { ipcMain } from 'electron'
-import type { Disposable } from '../../infra/disposable'
+import type { Disposable } from '@shared/infra/disposable'
 import { errorMessage } from '../../utils/error'
 import { Agent, type AgentInput } from './agent'
 

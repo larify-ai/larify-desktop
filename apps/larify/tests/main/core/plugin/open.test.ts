@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { Registry } from '../../../../src/main/infra/registry'
+import { Registry } from '../../../../src/shared/infra/registry'
 import {
   PluginHost,
   pluginHostToken,

@@ -1,7 +1,7 @@
 import { ipcMain } from 'electron'
 import type { UIMessage } from 'ai'
 import type { Application } from '../../app/application'
-import { defineService } from '../../infra/registry'
+import { defineService } from '@shared/infra/registry'
 import { loadAttachments, saveAttachments } from './files'
 
 const attachmentToken = defineService()

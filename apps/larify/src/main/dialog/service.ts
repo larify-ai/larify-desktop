@@ -1,5 +1,5 @@
 import type { Application } from '../app/application'
-import { defineService } from '../infra/registry'
+import { defineService } from '@shared/infra/registry'
 import { registerDialogIpc } from './ipc'
 
 const dialogToken = defineService()

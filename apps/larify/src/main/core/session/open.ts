@@ -1,7 +1,7 @@
 import { backgroundSessionDatabasePath, sessionDatabasePath } from '../../utils/app-paths'
 import { SessionStore } from './store'
 import { registerSessionHandlers } from './ipc'
-import { defineService } from '../../infra/registry'
+import { defineService } from '@shared/infra/registry'
 import type { Application } from '../../app/application'
 
 export const sessionToken = defineService()

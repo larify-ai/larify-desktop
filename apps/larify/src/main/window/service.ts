@@ -1,5 +1,5 @@
 import type { App } from 'electron'
-import { defineService } from '../infra/registry'
+import { defineService } from '@shared/infra/registry'
 import type { Application } from '../app/application'
 import { createWindow } from './create'
 import type { MainWindow } from './types'

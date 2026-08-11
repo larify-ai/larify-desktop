@@ -28,7 +28,15 @@ export function Titlebar({
       {navigationCollapsed && (
         <PanelToggle label="显示侧边栏" icon={PanelLeftOpenIcon} onClick={onToggleNavigation} />
       )}
-      <div className="ml-1 min-w-0 flex-1 pr-12">{children}</div>
+      <div
+        className="ml-1 min-w-0 flex-1"
+        style={{
+          paddingRight:
+            'calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw) + 3rem)'
+        }}
+      >
+        {children}
+      </div>
       <div
         className="absolute top-1/2 -translate-y-1/2"
         style={{

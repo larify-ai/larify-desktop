@@ -2,77 +2,78 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 
 interface BrowserViewportProps {
   children?: ReactNode
+  resourceId: number
   sessionId: string
   visible: boolean
 }
 
 export function BrowserViewport({
   children,
+  resourceId,
   sessionId,
   visible
 }: BrowserViewportProps): React.JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
-  const [workbenchVisible, setWorkbenchVisible] = useState(false)
-  const [workbenchKnown, setWorkbenchKnown] = useState(false)
   const [viewportHasSize, setViewportHasSize] = useState(false)
 
   useEffect(() => {
     const element = ref.current
     if (!element) return
-    let frame: number | null = null
-    void window.bridge.invoke('browser:setVisible', sessionId, false)
-
-    const reportNow = (): void => {
-      frame = null
-      const rect = element.getBoundingClientRect()
-      setViewportHasSize(rect.width > 0 && rect.height > 0)
-      void window.bridge.invoke('browser:setBounds', sessionId, {
-        x: Math.round(rect.x),
-        y: Math.round(rect.y),
-        width: Math.round(rect.width),
-        height: Math.round(rect.height)
-      })
-    }
+    const pane = element.closest<HTMLElement>('.split-view-view')
+    void window.bridge.invoke('browser:setVisible', sessionId, resourceId, false)
 
     const report = (): void => {
-      if (frame === null) frame = requestAnimationFrame(reportNow)
+      const rect = element.getBoundingClientRect()
+      const paneRect = pane?.getBoundingClientRect()
+      const left = Math.round(Math.max(rect.left, paneRect?.left ?? rect.left))
+      const top = Math.round(Math.max(rect.top, paneRect?.top ?? rect.top))
+      const right = Math.round(Math.max(left, Math.min(rect.right, paneRect?.right ?? rect.right)))
+      const bottom = Math.round(
+        Math.max(top, Math.min(rect.bottom, paneRect?.bottom ?? rect.bottom))
+      )
+      const bounds = {
+        x: left,
+        y: top,
+        width: right - left,
+        height: bottom - top
+      }
+      setViewportHasSize(bounds.width > 0 && bounds.height > 0)
+      window.bridge.sendSync('browser:setBoundsSync', sessionId, resourceId, bounds)
     }
 
-    reportNow()
+    const reportDrag = (event: PointerEvent): void => {
+      if (event.buttons === 1) queueMicrotask(report)
+    }
+
+    report()
     const observer = new ResizeObserver(report)
     observer.observe(element)
+    if (pane) observer.observe(pane)
+    window.addEventListener('pointermove', reportDrag)
     window.addEventListener('resize', report)
     return () => {
-      if (frame !== null) cancelAnimationFrame(frame)
       observer.disconnect()
+      window.removeEventListener('pointermove', reportDrag)
       window.removeEventListener('resize', report)
-      void window.bridge.invoke('browser:setVisible', sessionId, false)
+      void window.bridge.invoke('browser:setVisible', sessionId, resourceId, false)
     }
-  }, [sessionId])
-
-  useEffect(() => {
-    const onActive = (event: Event): void => {
-      setWorkbenchKnown(true)
-      setWorkbenchVisible((event as CustomEvent<string | null>).detail === 'browser')
-    }
-    window.addEventListener('larify:workbench-active', onActive)
-    window.dispatchEvent(new Event('larify:workbench-active-request'))
-    return () => {
-      window.removeEventListener('larify:workbench-active', onActive)
-      void window.bridge.invoke('browser:setVisible', sessionId, false)
-    }
-  }, [sessionId])
+  }, [resourceId, sessionId])
 
   useEffect(() => {
     void window.bridge.invoke(
       'browser:setVisible',
       sessionId,
-      visible && workbenchKnown && workbenchVisible && viewportHasSize
+      resourceId,
+      visible && viewportHasSize
     )
-  }, [sessionId, visible, viewportHasSize, workbenchKnown, workbenchVisible])
+  }, [resourceId, sessionId, visible, viewportHasSize])
 
   return (
-    <div ref={ref} className="relative min-h-0 flex-1 overflow-hidden bg-(--workbench-content)">
+    <div
+      ref={ref}
+      className="relative min-h-0 flex-1 overflow-hidden bg-background"
+      data-testid="browser-viewport"
+    >
       {children}
     </div>
   )

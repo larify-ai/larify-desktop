@@ -1,156 +1,159 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const h = vi.hoisted(() => ({
   handlers: new Map<string, (...args: unknown[]) => unknown>(),
-  sent: [] as Array<{ sender: string; channel: string; payload: unknown }>,
+  listeners: new Map<string, (...args: unknown[]) => unknown>(),
+  sent: [] as Array<{ channel: string; payload: unknown }>
 }))
 
-vi.mock("electron", () => ({
+vi.mock('electron', () => ({
   ipcMain: {
-    handle: (channel: string, handler: (...args: unknown[]) => unknown) => {
-      if (h.handlers.has(channel)) throw new Error(`duplicate handler: ${channel}`)
-      h.handlers.set(channel, handler)
+    handle: (channel: string, handler: (...args: unknown[]) => unknown) =>
+      h.handlers.set(channel, handler),
+    on: (channel: string, listener: (...args: unknown[]) => unknown) =>
+      h.listeners.set(channel, listener),
+    removeListener: (channel: string, listener: (...args: unknown[]) => unknown) => {
+      if (h.listeners.get(channel) === listener) h.listeners.delete(channel)
     },
-    removeHandler: (channel: string) => h.handlers.delete(channel),
-  },
+    removeHandler: (channel: string) => h.handlers.delete(channel)
+  }
 }))
 
-import { registerBrowserIpc } from "../../../../src/extensions/browser/main/ipc"
-import type { BrowserService } from "../../../../src/extensions/browser/main/browser-service"
+import { registerBrowserIpc } from '../../../../src/extensions/browser/main/ipc'
+import type { BrowserService } from '../../../../src/extensions/browser/main/browser-service'
 
-function sender(name: string, destroyed = false): {
+const sender = (
+  destroyed = false
+): {
   isDestroyed(): boolean
   send(channel: string, payload: unknown): void
-  once(event: string, listener: () => void): void
-  off(event: string, listener: () => void): void
-  emitDestroyed(): void
-} {
-  let onDestroyed: (() => void) | undefined
-  return {
-    isDestroyed: () => destroyed,
-    send: (channel, payload) => h.sent.push({ sender: name, channel, payload }),
-    once: (event, listener) => {
-      if (event === "destroyed") onDestroyed = listener
-    },
-    off: (event, listener) => {
-      if (event === "destroyed" && onDestroyed === listener) onDestroyed = undefined
-    },
-    emitDestroyed: () => onDestroyed?.(),
+  once: ReturnType<typeof vi.fn>
+  off: ReturnType<typeof vi.fn>
+  destroy(): void
+} => ({
+  isDestroyed: () => destroyed,
+  send: (channel: string, payload: unknown) => h.sent.push({ channel, payload }),
+  once: vi.fn(),
+  off: vi.fn(),
+  destroy() {
+    const listener = this.once.mock.calls.find(([event]) => event === 'destroyed')?.[1]
+    listener?.()
   }
-}
+})
 
-const event = (name: string, destroyed = false): unknown => ({ sender: sender(name, destroyed) })
-
-function fakeService(): BrowserService & { bindChange: ReturnType<typeof vi.fn> } {
-  const unbindChange = vi.fn()
+function fakeService(): BrowserService {
   return {
-    bindChange: vi.fn(() => unbindChange),
-    state: vi.fn(() => ({ tabs: [], activeId: null })),
-    createTab: vi.fn(() => 7),
-    ensureTab: vi.fn(() => 8),
-    setActive: vi.fn(),
-    reorder: vi.fn(),
-    close: vi.fn(),
+    bindChange: vi.fn(() => vi.fn()),
+    tab: vi.fn(() => ({ state: () => ({ id: 7, title: 'Page' }) })),
     navigate: vi.fn(),
     goBack: vi.fn(),
     goForward: vi.fn(),
     reload: vi.fn(),
     setBounds: vi.fn(),
-    setVisible: vi.fn(),
-    unbindChange,
-  } as unknown as BrowserService & { bindChange: ReturnType<typeof vi.fn> }
+    setVisible: vi.fn()
+  } as unknown as BrowserService
 }
 
-describe("registerBrowserIpc", () => {
+describe('registerBrowserIpc', () => {
   beforeEach(() => {
     h.handlers.clear()
+    h.listeners.clear()
     h.sent.length = 0
   })
 
-  it("registers every browser channel without creating the manager immediately", () => {
-    const getService = vi.fn(fakeService)
-    registerBrowserIpc(getService)
-    expect(getService).not.toHaveBeenCalled()
-    for (const name of [
-      "getState",
-      "create",
-      "ensureTab",
-      "setActive",
-      "reorder",
-      "close",
-      "navigate",
-      "back",
-      "forward",
-      "reload",
-      "setBounds",
-      "setVisible",
-    ]) {
-      expect(h.handlers.has(`browser:${name}`)).toBe(true)
-    }
+  it('registers only resource operations and browser-specific commands', () => {
+    registerBrowserIpc(fakeService())
+    expect([...h.handlers.keys()].sort()).toEqual([
+      'browser:back',
+      'browser:forward',
+      'browser:getState',
+      'browser:navigate',
+      'browser:reload',
+      'browser:setVisible'
+    ])
+    expect(h.handlers.has('browser:create')).toBe(false)
+    expect(h.handlers.has('browser:close')).toBe(false)
   })
 
-  it("routes commands to the manager", () => {
+  it('routes commands by resource id', () => {
     const service = fakeService()
-    registerBrowserIpc(() => service)
-    h.handlers.get("browser:navigate")!(event("main"), "session-a", 3, "openai.com")
-    expect(service.navigate).toHaveBeenCalledWith("session-a", 3, "openai.com")
-    expect(h.handlers.get("browser:create")!(event("main"), "session-a", undefined)).toBe(7)
-    expect(h.handlers.get("browser:ensureTab")!(event("main"), "session-a")).toBe(8)
+    registerBrowserIpc(service)
+    h.handlers.get('browser:navigate')!({ sender: sender() }, 'session-a', 7, 'openai.com')
+    h.handlers.get('browser:setVisible')!({ sender: sender() }, 'session-a', 7, true)
+    const event = { returnValue: null }
+    h.listeners.get('browser:setBoundsSync')!(event, 'session-a', 7, {
+      x: 1,
+      y: 2,
+      width: 300,
+      height: 200
+    })
+    expect(service.navigate).toHaveBeenCalledWith('session-a', 7, 'openai.com')
+    expect(service.setVisible).toHaveBeenCalledWith('session-a', 7, true)
+    expect(service.setBounds).toHaveBeenCalledWith('session-a', 7, {
+      x: 1,
+      y: 2,
+      width: 300,
+      height: 200
+    })
+    expect(event.returnValue).toBe(true)
   })
 
-  it("pushes state changes only to renderer webContents that subscribed through IPC", () => {
+  it('returns one resource state and subscribes for changes', () => {
     const service = fakeService()
-    registerBrowserIpc(() => service)
-    h.handlers.get("browser:getState")!(event("renderer"), "session-a")
-    const onChange = service.bindChange.mock.calls[0][0] as (
-      sessionId: string,
-      state: unknown,
-    ) => void
-    onChange("session-a", { tabs: [], activeId: null })
-    expect(h.sent).toEqual([{
-      sender: "renderer",
-      channel: "browser:state",
-      payload: { sessionId: "session-a", state: { tabs: [], activeId: null } },
-    }])
+    const webContents = sender()
+    registerBrowserIpc(service)
+    expect(
+      h.handlers.get('browser:getState')!({ sender: webContents }, 'session-a', 7)
+    ).toMatchObject({
+      id: 7,
+      title: 'Page'
+    })
+    const listener = vi.mocked(service.bindChange).mock.calls[0][0]
+    listener('session-a', { tabs: [], activeId: null })
+    expect(h.sent).toEqual([
+      {
+        channel: 'browser:state',
+        payload: { sessionId: 'session-a', state: { tabs: [], activeId: null } }
+      }
+    ])
   })
 
-  it("drops destroyed subscribers without sending to them", () => {
+  it('subscribes once and stops sending after the renderer is destroyed', () => {
     const service = fakeService()
-    registerBrowserIpc(() => service)
-    h.handlers.get("browser:getState")!(event("destroyed", true), "session-a")
-    const onChange = service.bindChange.mock.calls[0][0] as (
-      sessionId: string,
-      state: unknown,
-    ) => void
+    const webContents = sender()
+    registerBrowserIpc(service)
+    const getState = h.handlers.get('browser:getState')!
+    getState({ sender: webContents }, 'session-a', 7)
+    getState({ sender: webContents }, 'session-a', 7)
+    expect(webContents.once).toHaveBeenCalledTimes(1)
 
-    onChange("session-a", { tabs: [], activeId: null })
-
+    webContents.destroy()
+    const listener = vi.mocked(service.bindChange).mock.calls[0][0]
+    listener('session-a', { tabs: [], activeId: null })
     expect(h.sent).toEqual([])
   })
 
-  it("drops a subscriber as soon as its webContents is destroyed", () => {
+  it('removes the destroyed listener when broadcasting finds a dead renderer', () => {
     const service = fakeService()
-    registerBrowserIpc(() => service)
-    const renderer = sender("renderer")
-    h.handlers.get("browser:getState")!({ sender: renderer }, "session-a")
-    renderer.emitDestroyed()
-    const onChange = service.bindChange.mock.calls[0][0] as (
-      sessionId: string,
-      state: unknown,
-    ) => void
+    const webContents = sender(true)
+    registerBrowserIpc(service)
+    h.handlers.get('browser:getState')!({ sender: webContents }, 'session-a', 7)
 
-    onChange("session-a", { tabs: [], activeId: null })
+    const listener = vi.mocked(service.bindChange).mock.calls[0][0]
+    listener('session-a', { tabs: [], activeId: null })
 
+    expect(webContents.off).toHaveBeenCalledWith('destroyed', expect.any(Function))
     expect(h.sent).toEqual([])
   })
 
-  it("cleanup removes all handlers", () => {
+  it('removes handlers on disposal', () => {
     const service = fakeService()
-    const dispose = registerBrowserIpc(() => service)
-    h.handlers.get("browser:getState")!(event("main"), "session-a")
+    const unbind = vi.fn()
+    vi.mocked(service.bindChange).mockReturnValue(unbind)
+    const dispose = registerBrowserIpc(service)
     dispose()
-    expect((service as unknown as { unbindChange: ReturnType<typeof vi.fn> }).unbindChange)
-      .toHaveBeenCalled()
+    expect(unbind).toHaveBeenCalledOnce()
     expect(h.handlers.size).toBe(0)
+    expect(h.listeners.size).toBe(0)
   })
 })

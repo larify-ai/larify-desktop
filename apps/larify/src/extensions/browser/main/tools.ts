@@ -3,8 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises"
 import { dirname, join, resolve } from "node:path"
 import { randomUUID } from "node:crypto"
 import { z } from "zod"
-import { defineTool } from "../../../shared/extension/tool"
-import type { Toolkit } from "../../../shared/toolkit"
+import { defineTool, type Tool } from "../../../main/core/plugin/protocol"
 import { larifyTempPath } from "../../../main/utils/app-paths"
 import { prepareToolOutput } from "../../../main/utils/tool-output"
 import type { BrowserService } from "./browser-service"
@@ -20,11 +19,6 @@ const elementTargetSchema = z
   .describe('Element target. Prefer a snapshot ref exactly as shown, such as "[ref=e2]"; otherwise use CSS or xpath=...')
 const cssSelectorSchema = z.string().min(1).describe("CSS selector only")
 const timeoutSchema = z.number().min(1).max(600).optional().describe("Timeout in seconds, 1-600")
-
-type BrowserServiceProvider = BrowserService | (() => BrowserService)
-
-const resolveService = (provider: BrowserServiceProvider): BrowserService =>
-  typeof provider === "function" ? provider() : provider
 
 const secondsToMs = (seconds: number | undefined): number | undefined =>
   seconds === undefined ? undefined : seconds * 1000
@@ -142,15 +136,14 @@ const stripFavIcon = (state: ReturnType<BrowserTab["state"]>): PublicTabState =>
 
 const tabState = (tab: BrowserTab): PublicTabState => stripFavIcon(tab.state())
 
-const getTab = (provider: BrowserServiceProvider, sessionId: string, id: number): BrowserTab => {
-  const service = resolveService(provider)
+const getTab = (service: BrowserService, sessionId: string, id: number): BrowserTab => {
   const tab = service.tab(sessionId, id)
   if (!tab) throw new Error(`Browser tab "${id}" not found.`)
   return tab
 }
 
 async function withTab<T>(
-  service: BrowserServiceProvider,
+  service: BrowserService,
   sessionId: string,
   id: number,
   action: (tab: BrowserTab) => Promise<T> | T,
@@ -182,12 +175,8 @@ async function writeDataUrl(
   return writeBytes(path, Buffer.from(data, mimeType.startsWith("text/") ? "utf8" : "base64"))
 }
 
-export function createBrowserToolkit(service: BrowserServiceProvider): Toolkit {
+export function createBrowserTools(service: BrowserService): Record<string, Tool> {
   return {
-    name: "browser",
-    description:
-      "Search and fetch web content in temporary tabs; create, list, close, and navigate persistent tabs; inspect pages and elements; run JavaScript and debug with CDP, console messages, and page errors; interact with pages and forms; upload and download files; control keyboard and mouse input; capture screenshots, save pages as PDFs, and record tab videos.",
-    tools: {
       create_tab: defineTool({
         description:
           "Open a new browser tab, optionally navigating to a URL or local file path.",
@@ -195,8 +184,7 @@ export function createBrowserToolkit(service: BrowserServiceProvider): Toolkit {
         inputSchema: z.object({ url: z.string().optional().describe("URL or local file path") }).strict(),
         execute: async (args, ctx) => {
           const { url } = args
-          const resolved = resolveService(service)
-          const id = resolved.createTab(ctx.sessionId)
+          const id = service.createTab(ctx.sessionId)
           const tab = getTab(service, ctx.sessionId, id)
           try {
             if (url) {
@@ -207,7 +195,7 @@ export function createBrowserToolkit(service: BrowserServiceProvider): Toolkit {
               )
             }
           } catch (error) {
-            await resolved.close(ctx.sessionId, id)
+            await service.close(ctx.sessionId, id)
             throw error
           }
           return tabState(tab)
@@ -220,7 +208,7 @@ export function createBrowserToolkit(service: BrowserServiceProvider): Toolkit {
         execute: async (args, ctx) => {
           const { id } = args
           return withTab(service, ctx.sessionId, id, async () => {
-            await resolveService(service).close(ctx.sessionId, id)
+            await service.close(ctx.sessionId, id)
             return `Closed browser tab ${id}.`
           })
         },
@@ -230,7 +218,7 @@ export function createBrowserToolkit(service: BrowserServiceProvider): Toolkit {
         metadata: { icon: "browser", eager: true },
         inputSchema: z.object({}).strict(),
         execute: async (_args, ctx) =>
-          resolveService(service).state(ctx.sessionId).tabs.map(stripFavIcon),
+          service.state(ctx.sessionId).tabs.map(stripFavIcon),
       }),
       navigate: defineTool({
         description: "Navigate a browser tab: goto a URL, go back/forward, or reload.",
@@ -339,18 +327,17 @@ export function createBrowserToolkit(service: BrowserServiceProvider): Toolkit {
           })
         },
       }),
-      ...webFetchTools(() => resolveService(service)),
-      ...webSearchTools(() => resolveService(service)),
+      ...webFetchTools(service),
+      ...webSearchTools(service),
       ...queryTools(service),
       ...interactionTools(service),
       ...waitTools(service),
       ...captureTools(service),
       ...inputTools(service),
-    },
   }
 }
 
-function queryTools(service: BrowserServiceProvider): Toolkit["tools"] {
+function queryTools(service: BrowserService): Record<string, Tool> {
   const queryElementSchema = z
     .object({
       id: idSchema,
@@ -492,7 +479,7 @@ const scrollSchema = z
   })
   .strict()
 
-function interactionTools(service: BrowserServiceProvider): Toolkit["tools"] {
+function interactionTools(service: BrowserService): Record<string, Tool> {
   return {
     click: defineTool({
       description: "Click one element.",
@@ -508,8 +495,7 @@ function interactionTools(service: BrowserServiceProvider): Toolkit["tools"] {
               "browser link lookup",
             )
             if (!href) throw new Error(`element '${selector}' has no link target`)
-            const resolved = resolveService(service)
-            const newTabId = resolved.createTab(ctx.sessionId)
+            const newTabId = service.createTab(ctx.sessionId)
             const created = getTab(service, ctx.sessionId, newTabId)
             try {
               await runUntilAbort(
@@ -518,7 +504,7 @@ function interactionTools(service: BrowserServiceProvider): Toolkit["tools"] {
                 "browser navigation",
               )
             } catch (error) {
-              await resolved.close(ctx.sessionId, newTabId)
+              await service.close(ctx.sessionId, newTabId)
               throw error
             }
             return {
@@ -654,7 +640,7 @@ function interactionTools(service: BrowserServiceProvider): Toolkit["tools"] {
   }
 }
 
-function waitTools(service: BrowserServiceProvider): Toolkit["tools"] {
+function waitTools(service: BrowserService): Record<string, Tool> {
   const waitForSchema = z
     .object({
       id: idSchema,
@@ -723,7 +709,7 @@ const recordStartSchema = recordSchema.extend({
     .describe("Seconds to record before auto-stopping, 1-600. Omit to record until record_stop."),
 })
 
-function captureTools(service: BrowserServiceProvider): Toolkit["tools"] {
+function captureTools(service: BrowserService): Record<string, Tool> {
   return {
     screenshot: defineTool({
       description: "Capture a screenshot of the page or an element.",
@@ -761,12 +747,12 @@ function captureTools(service: BrowserServiceProvider): Toolkit["tools"] {
         return withTab(service, ctx.sessionId, id, async (tab) => {
           const target = resolveToolPath(ctx.cwd, path)
           if (ctx.signal?.aborted) throw new Error("recording was cancelled")
-          const generation = await resolveService(service).recordStart(ctx.sessionId, tab, target)
+          const generation = await service.recordStart(ctx.sessionId, tab, target)
           if (duration === undefined) return { recording: true, path: target }
           await waitMs(duration * 1000, ctx.signal)
           try {
             const result =
-              (await resolveService(service).recordStopIfCurrent(ctx.sessionId, generation)) ?? {
+              (await service.recordStopIfCurrent(ctx.sessionId, generation)) ?? {
                 recording: false,
                 path: target,
               }
@@ -786,7 +772,7 @@ function captureTools(service: BrowserServiceProvider): Toolkit["tools"] {
       description: "Stop the current recording and save the video.",
       metadata: { icon: "browser" },
       inputSchema: z.object({}).strict(),
-      execute: async (_args, ctx) => resolveService(service).recordStop(ctx.sessionId),
+      execute: async (_args, ctx) => service.recordStop(ctx.sessionId),
     }),
     record_restart: defineTool({
       description: "Stop any current recording and start a fresh one for the tab.",
@@ -796,7 +782,7 @@ function captureTools(service: BrowserServiceProvider): Toolkit["tools"] {
         const { id, path } = args
         return withTab(service, ctx.sessionId, id, async (tab) => {
           const target = resolveToolPath(ctx.cwd, path)
-          await resolveService(service).recordRestart(ctx.sessionId, tab, target)
+          await service.recordRestart(ctx.sessionId, tab, target)
           return { recording: true, path: target }
         })
       },
@@ -843,7 +829,7 @@ const mouseWheelSchema = z
   })
   .strict()
 
-function inputTools(service: BrowserServiceProvider): Toolkit["tools"] {
+function inputTools(service: BrowserService): Record<string, Tool> {
   return {
     keyboard_key: defineTool({
       description: "Press or release a key.",

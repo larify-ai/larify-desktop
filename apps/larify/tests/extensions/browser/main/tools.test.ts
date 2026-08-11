@@ -1,9 +1,10 @@
+/* eslint-disable @typescript-eslint/explicit-function-return-type */
 import { describe, expect, it, vi } from "vitest"
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { z } from "zod"
-import { createBrowserToolkit } from "../../../../src/extensions/browser/main/tools"
+import { createBrowserTools } from "../../../../src/extensions/browser/main/tools"
 import type { BrowserService } from "../../../../src/extensions/browser/main/browser-service"
 
 const ctx = { context: { sessionId: "session-1", cwd: "D:\\Workspace" } }
@@ -37,7 +38,7 @@ function createService(): BrowserService {
 }
 
 function tool(name: string, service = createService()) {
-  const found = createBrowserToolkit(service).tools[name]
+  const found = createBrowserTools(service)[name]
   if (!found) throw new Error(`Tool ${name} not found`)
   const inputSchema = found.inputSchema as unknown as z.ZodTypeAny
   const rawExecute = found.execute as unknown as (input: unknown, options: unknown) => Promise<unknown>
@@ -54,7 +55,7 @@ function parseToolInput(name: string, input: unknown, service = createService())
 
 describe("browser toolkit", () => {
   it("exposes the migrated browser tool surface without browser_ prefixes", () => {
-    expect(Object.keys(createBrowserToolkit(createService()).tools).sort()).toEqual(
+    expect(Object.keys(createBrowserTools(createService())).sort()).toEqual(
       [
         "cdp_call",
         "cdp_events",
@@ -97,7 +98,7 @@ describe("browser toolkit", () => {
   })
 
   it("exposes only the core browser tools eagerly", () => {
-    const tools = createBrowserToolkit(createService()).tools
+    const tools = createBrowserTools(createService())
     expect(
       Object.entries(tools)
         .filter(([, tool]) => tool.metadata?.eager)

@@ -11,7 +11,12 @@ export function Workbench({
   sessionId: string
   cwd: string
 }): React.JSX.Element {
-  const [store] = useState(createWorkbenchStore)
+  const [stores] = useState(() => new Map<string, ReturnType<typeof createWorkbenchStore>>())
+  let store = stores.get(sessionId)
+  if (!store) {
+    store = createWorkbenchStore()
+    stores.set(sessionId, store)
+  }
   const sessionIdRef = useRef(sessionId)
   useLayoutEffect(() => {
     sessionIdRef.current = sessionId
@@ -20,7 +25,6 @@ export function Workbench({
   useLayoutEffect(() => {
     let active = true
     let hasResourceChange = false
-    store.getState().syncResources([])
     const sync = (resources: Resource[]): void =>
       store
         .getState()

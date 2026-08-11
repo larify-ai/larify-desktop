@@ -29,15 +29,17 @@ describe('BrowserViewport', () => {
   let container: HTMLDivElement
   let root: Root
   let invoke: ReturnType<typeof vi.fn>
+  let sendSync: ReturnType<typeof vi.fn>
 
   beforeEach(() => {
     container = document.createElement('div')
     document.body.appendChild(container)
     root = createRoot(container)
     invoke = vi.fn().mockResolvedValue(undefined)
+    sendSync = vi.fn()
     Object.defineProperty(window, 'bridge', {
       configurable: true,
-      value: { invoke }
+      value: { invoke, sendSync }
     })
     Object.defineProperty(window, 'ResizeObserver', {
       configurable: true,
@@ -63,48 +65,241 @@ describe('BrowserViewport', () => {
     FakeResizeObserver.instance = null
   })
 
-  it('keeps the native browser view hidden until active workbench and bounds are known', async () => {
+  it('shows the native browser view after its bounds are known', async () => {
     await act(async () =>
-      root.render(createElement(BrowserViewport, { sessionId: 'session-a', visible: true }))
+      root.render(
+        createElement(BrowserViewport, { resourceId: 42, sessionId: 'session-a', visible: true })
+      )
     )
 
-    expect(invoke).toHaveBeenCalledWith('browser:setVisible', 'session-a', false)
-    expect(invoke).not.toHaveBeenCalledWith('browser:setVisible', 'session-a', true)
-
-    await act(async () => {
-      window.dispatchEvent(new CustomEvent('larify:workbench-active', { detail: 'terminal' }))
-    })
-    expect(invoke).not.toHaveBeenCalledWith('browser:setVisible', 'session-a', true)
-
-    await act(async () => {
-      window.dispatchEvent(new CustomEvent('larify:workbench-active', { detail: 'browser' }))
-    })
-    expect(invoke).toHaveBeenCalledWith('browser:setBounds', 'session-a', {
+    expect(invoke).toHaveBeenCalledWith('browser:setVisible', 'session-a', 42, false)
+    expect(sendSync).toHaveBeenCalledWith('browser:setBoundsSync', 'session-a', 42, {
       height: 200,
       width: 300,
       x: 10,
       y: 40
     })
-    expect(invoke).toHaveBeenCalledWith('browser:setVisible', 'session-a', true)
+    expect(invoke).toHaveBeenCalledWith('browser:setVisible', 'session-a', 42, true)
   })
 
-  it('coalesces resize reports even when requestAnimationFrame returns zero', async () => {
-    const callbacks: FrameRequestCallback[] = []
-    const requestFrame = vi
-      .spyOn(window, 'requestAnimationFrame')
-      .mockImplementation((callback) => {
-        callbacks.push(callback)
-        return 0
-      })
-
+  it('synchronously reports every observed layout without another frame of delay', async () => {
     await act(async () =>
-      root.render(createElement(BrowserViewport, { sessionId: 'session-a', visible: true }))
+      root.render(
+        createElement(BrowserViewport, { resourceId: 42, sessionId: 'session-a', visible: true })
+      )
     )
     const viewport = container.firstElementChild!
-    FakeResizeObserver.instance!.notify(viewport)
-    FakeResizeObserver.instance!.notify(viewport)
+    sendSync.mockClear()
+    await act(async () => {
+      FakeResizeObserver.instance!.notify(viewport)
+      FakeResizeObserver.instance!.notify(viewport)
+    })
 
-    expect(requestFrame).toHaveBeenCalledOnce()
-    expect(callbacks).toHaveLength(1)
+    expect(sendSync).toHaveBeenCalledTimes(2)
+    expect(sendSync).toHaveBeenNthCalledWith(1, 'browser:setBoundsSync', 'session-a', 42, {
+      height: 200,
+      width: 300,
+      x: 10,
+      y: 40
+    })
+  })
+
+  it('keeps an empty viewport hidden', async () => {
+    vi.mocked(HTMLElement.prototype.getBoundingClientRect).mockReturnValue({
+      bottom: 0,
+      height: 0,
+      left: 0,
+      right: 0,
+      top: 0,
+      width: 0,
+      x: 0,
+      y: 0,
+      toJSON: () => ({})
+    } as DOMRect)
+
+    await act(async () =>
+      root.render(
+        createElement(BrowserViewport, { resourceId: 42, sessionId: 'session-a', visible: true })
+      )
+    )
+
+    expect(invoke).not.toHaveBeenCalledWith('browser:setVisible', 'session-a', 42, true)
+  })
+
+  it('clips native bounds to the collapsing Allotment pane', async () => {
+    vi.mocked(HTMLElement.prototype.getBoundingClientRect).mockImplementation(function () {
+      if (this.classList.contains('split-view-view')) {
+        return {
+          bottom: 240,
+          height: 200,
+          left: 280,
+          right: 310,
+          top: 40,
+          width: 30,
+          x: 280,
+          y: 40,
+          toJSON: () => ({})
+        } as DOMRect
+      }
+      return {
+        bottom: 240,
+        height: 200,
+        left: 10,
+        right: 310,
+        top: 40,
+        width: 300,
+        x: 10,
+        y: 40,
+        toJSON: () => ({})
+      } as DOMRect
+    })
+
+    await act(async () =>
+      root.render(
+        createElement(
+          'div',
+          { className: 'split-view-view' },
+          createElement(BrowserViewport, {
+            resourceId: 42,
+            sessionId: 'session-a',
+            visible: true
+          })
+        )
+      )
+    )
+
+    expect(sendSync).toHaveBeenCalledWith('browser:setBoundsSync', 'session-a', 42, {
+      height: 200,
+      width: 30,
+      x: 280,
+      y: 40
+    })
+  })
+
+  it('hides the previous resource when the viewport switches resources', async () => {
+    await act(async () =>
+      root.render(
+        createElement(BrowserViewport, { resourceId: 42, sessionId: 'session-a', visible: true })
+      )
+    )
+    invoke.mockClear()
+
+    await act(async () =>
+      root.render(
+        createElement(BrowserViewport, { resourceId: 43, sessionId: 'session-a', visible: true })
+      )
+    )
+
+    expect(invoke).toHaveBeenCalledWith('browser:setVisible', 'session-a', 42, false)
+    expect(invoke).toHaveBeenCalledWith('browser:setVisible', 'session-a', 43, true)
+  })
+
+  it('hides the native view when the viewport becomes invisible', async () => {
+    await act(async () =>
+      root.render(
+        createElement(BrowserViewport, { resourceId: 42, sessionId: 'session-a', visible: true })
+      )
+    )
+    invoke.mockClear()
+
+    await act(async () =>
+      root.render(
+        createElement(BrowserViewport, { resourceId: 42, sessionId: 'session-a', visible: false })
+      )
+    )
+
+    expect(invoke).toHaveBeenCalledWith('browser:setVisible', 'session-a', 42, false)
+  })
+
+  it('reports bounds when a window resize changes only the viewport position', async () => {
+    await act(async () =>
+      root.render(
+        createElement(BrowserViewport, { resourceId: 42, sessionId: 'session-a', visible: true })
+      )
+    )
+    sendSync.mockClear()
+    vi.mocked(HTMLElement.prototype.getBoundingClientRect).mockReturnValue({
+      bottom: 240,
+      height: 200,
+      left: 20,
+      right: 320,
+      top: 40,
+      width: 300,
+      x: 20,
+      y: 40,
+      toJSON: () => ({})
+    } as DOMRect)
+
+    await act(async () => window.dispatchEvent(new Event('resize')))
+
+    expect(sendSync).toHaveBeenCalledWith('browser:setBoundsSync', 'session-a', 42, {
+      height: 200,
+      width: 300,
+      x: 20,
+      y: 40
+    })
+  })
+
+  it('reports bounds in the same pointer event while a panel is dragged', async () => {
+    await act(async () =>
+      root.render(
+        createElement(BrowserViewport, { resourceId: 42, sessionId: 'session-a', visible: true })
+      )
+    )
+    sendSync.mockClear()
+    const updateLayout = (): void => {
+      vi.mocked(HTMLElement.prototype.getBoundingClientRect).mockReturnValue({
+        bottom: 240,
+        height: 200,
+        left: 20,
+        right: 320,
+        top: 40,
+        width: 300,
+        x: 20,
+        y: 40,
+        toJSON: () => ({})
+      } as DOMRect)
+    }
+    window.addEventListener('pointermove', updateLayout, { once: true })
+
+    await act(async () => window.dispatchEvent(new PointerEvent('pointermove', { buttons: 1 })))
+
+    expect(sendSync).toHaveBeenCalledWith('browser:setBoundsSync', 'session-a', 42, {
+      height: 200,
+      width: 300,
+      x: 20,
+      y: 40
+    })
+  })
+
+  it('derives size from rounded edges so the right edge stays fixed', async () => {
+    vi.mocked(HTMLElement.prototype.getBoundingClientRect).mockReturnValue({
+      bottom: 240.4,
+      height: 200,
+      left: 10.6,
+      right: 310.4,
+      top: 40.4,
+      width: 299.8,
+      x: 10.6,
+      y: 40.4,
+      toJSON: () => ({})
+    } as DOMRect)
+
+    await act(async () =>
+      root.render(
+        createElement(BrowserViewport, {
+          resourceId: 42,
+          sessionId: 'session-a',
+          visible: true
+        })
+      )
+    )
+
+    expect(sendSync).toHaveBeenCalledWith('browser:setBoundsSync', 'session-a', 42, {
+      height: 200,
+      width: 299,
+      x: 11,
+      y: 40
+    })
   })
 })

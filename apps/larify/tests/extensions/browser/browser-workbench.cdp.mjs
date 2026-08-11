@@ -1,0 +1,479 @@
+/* eslint-disable @typescript-eslint/explicit-function-return-type */
+import assert from 'node:assert/strict'
+import { resolve } from 'node:path'
+import WebSocket from 'ws'
+
+const port = process.env.LARIFY_CDP_PORT ?? '9222'
+const targets = await fetch(`http://127.0.0.1:${port}/json/list`).then((response) =>
+  response.json()
+)
+const target = targets.find(
+  ({ type, url }) => type === 'page' && url.startsWith('http://localhost:')
+)
+if (!target?.webSocketDebuggerUrl) throw new Error(`Larify page not found on port ${port}`)
+
+const socket = new WebSocket(target.webSocketDebuggerUrl)
+await new Promise((resolve, reject) => {
+  socket.once('open', resolve)
+  socket.once('error', reject)
+})
+let id = 0
+const pending = new Map()
+socket.on('message', (raw) => {
+  const message = JSON.parse(String(raw))
+  const command = pending.get(message.id)
+  if (!command) return
+  pending.delete(message.id)
+  if (message.error) command.reject(new Error(message.error.message))
+  else command.resolve(message.result)
+})
+const send = (method, params = {}) =>
+  new Promise((resolve, reject) => {
+    const commandId = ++id
+    pending.set(commandId, { resolve, reject })
+    socket.send(JSON.stringify({ id: commandId, method, params }))
+  })
+const evaluate = async (expression) => {
+  const result = await send('Runtime.evaluate', {
+    expression,
+    awaitPromise: true,
+    returnByValue: true
+  })
+  if (result.exceptionDetails) throw new Error(result.exceptionDetails.exception?.description)
+  return result.result.value
+}
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+const waitFor = async (expression, label, timeout = 8_000) => {
+  const started = Date.now()
+  while (Date.now() - started < timeout) {
+    const value = await evaluate(expression)
+    if (value) return value
+    await wait(50)
+  }
+  throw new Error(`Timed out: ${label}`)
+}
+const connectPage = async (urlPart) => {
+  const started = Date.now()
+  let target
+  while (Date.now() - started < 8_000) {
+    const list = await fetch(`http://127.0.0.1:${port}/json/list`).then((response) =>
+      response.json()
+    )
+    target = list.find(({ type, url }) => type === 'page' && url.includes(urlPart))
+    if (target) break
+    await wait(50)
+  }
+  if (!target?.webSocketDebuggerUrl) throw new Error(`Browser page not found: ${urlPart}`)
+  const pageSocket = new WebSocket(target.webSocketDebuggerUrl)
+  await new Promise((resolveOpen, reject) => {
+    pageSocket.once('open', resolveOpen)
+    pageSocket.once('error', reject)
+  })
+  let pageId = 0
+  const pagePending = new Map()
+  pageSocket.on('message', (raw) => {
+    const message = JSON.parse(String(raw))
+    const command = pagePending.get(message.id)
+    if (!command) return
+    pagePending.delete(message.id)
+    command.resolve(message.result)
+  })
+  const pageSend = (method, params = {}) =>
+    new Promise((resolveCommand) => {
+      const commandId = ++pageId
+      pagePending.set(commandId, { resolve: resolveCommand })
+      pageSocket.send(JSON.stringify({ id: commandId, method, params }))
+    })
+  const pageEvaluate = async (expression) => {
+    const result = await pageSend('Runtime.evaluate', { expression, returnByValue: true })
+    return result.result.value
+  }
+  const pageWaitFor = async (expression, label) => {
+    const waitStarted = Date.now()
+    while (Date.now() - waitStarted < 8_000) {
+      try {
+        const value = await pageEvaluate(expression)
+        if (value) return value
+      } catch {}
+      await wait(50)
+    }
+    throw new Error(`Timed out: ${label}`)
+  }
+  return { socket: pageSocket, send: pageSend, evaluate: pageEvaluate, waitFor: pageWaitFor }
+}
+const openLauncher = async () => {
+  if (await evaluate(`Boolean(document.querySelector('[data-testid="workbench-empty"]'))`)) return
+  await evaluate(`document.querySelector('.larify-workbench-home')?.click()`)
+  await waitFor(`Boolean(document.querySelector('[data-testid="workbench-empty"]'))`, 'launcher')
+}
+const createBrowser = async () => {
+  await openLauncher()
+  const before = await evaluate(`window.bridge.invoke('resource:list')`)
+  const clicked = await evaluate(`(() => {
+    const button = [...document.querySelectorAll('[data-testid="workbench-empty"] button')]
+      .find((element) => element.textContent.trim() === '浏览器')
+    button?.click()
+    return Boolean(button)
+  })()`)
+  assert.equal(clicked, true)
+  const resources = await waitFor(
+    `(async () => {
+      const resources = await window.bridge.invoke('resource:list')
+      return resources.length > ${before.length} ? resources : null
+    })()`,
+    'browser resource'
+  )
+  return resources.find(({ id }) => !before.some((resource) => resource.id === id))
+}
+const selectTab = async (title) => {
+  const position = await evaluate(`(() => {
+    const trigger = [...document.querySelectorAll('.larify-workbench-tab-trigger')]
+      .find((element) => element.querySelector('.larify-workbench-tab-title')?.textContent === ${JSON.stringify(title)})
+    if (!trigger) return null
+    const rect = trigger.getBoundingClientRect()
+    return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }
+  })()`)
+  assert.ok(position, `tab not found: ${title}`)
+  await send('Input.dispatchMouseEvent', {
+    type: 'mousePressed',
+    x: position.x,
+    y: position.y,
+    button: 'left',
+    buttons: 1,
+    clickCount: 1
+  })
+  await send('Input.dispatchMouseEvent', {
+    type: 'mouseReleased',
+    x: position.x,
+    y: position.y,
+    button: 'left',
+    buttons: 0,
+    clickCount: 1
+  })
+  await waitFor(
+    `document.querySelector('.larify-workbench-tab-trigger[data-state="active"] .larify-workbench-tab-title')?.textContent === ${JSON.stringify(title)}`,
+    `active tab ${title}`
+  )
+}
+const clickElement = async (expression) => {
+  const position = await evaluate(`(() => {
+    const element = ${expression}
+    if (!element) return null
+    const rect = element.getBoundingClientRect()
+    return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }
+  })()`)
+  assert.ok(position, `element not found: ${expression}`)
+  await send('Input.dispatchMouseEvent', {
+    type: 'mousePressed',
+    x: position.x,
+    y: position.y,
+    button: 'left',
+    buttons: 1,
+    clickCount: 1
+  })
+  await send('Input.dispatchMouseEvent', {
+    type: 'mouseReleased',
+    x: position.x,
+    y: position.y,
+    button: 'left',
+    buttons: 0,
+    clickCount: 1
+  })
+}
+const navigateFromAddressBar = async (url) => {
+  await waitFor(
+    `document.querySelector('[data-testid="browser-address"]') instanceof HTMLButtonElement && !document.querySelector('[data-testid="browser-address"]').disabled`,
+    'enabled address'
+  )
+  await clickElement(`document.querySelector('[data-testid="browser-address"]')`)
+  await waitFor(
+    `document.querySelector('[data-testid="browser-address"]') instanceof HTMLInputElement`,
+    'editable address'
+  )
+  await send('Input.dispatchKeyEvent', {
+    type: 'rawKeyDown',
+    key: 'a',
+    code: 'KeyA',
+    modifiers: 2,
+    windowsVirtualKeyCode: 65,
+    nativeVirtualKeyCode: 65
+  })
+  await send('Input.dispatchKeyEvent', {
+    type: 'keyUp',
+    key: 'a',
+    code: 'KeyA',
+    modifiers: 2,
+    windowsVirtualKeyCode: 65,
+    nativeVirtualKeyCode: 65
+  })
+  await send('Input.insertText', { text: url })
+  await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter' })
+  await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter' })
+}
+const toolbarButton = (index) =>
+  `document.querySelector('[data-testid="browser-address"]')?.closest('.flex.h-11')?.querySelectorAll('button')[${index}]`
+
+const created = []
+try {
+  const first = await createBrowser()
+  created.push(first.id)
+  assert.equal(first.type, 'browser')
+  await waitFor(
+    `document.querySelector('.larify-workbench-tab-trigger[data-state="active"] .larify-workbench-tab-title')?.textContent === '新标签页'`,
+    'blank browser title'
+  )
+  const title = 'Example Domain'
+  const url = 'https://example.com/'
+  await navigateFromAddressBar('not a valid url')
+  await waitFor(
+    `(async () => (await window.bridge.invoke('browser:getState', ${JSON.stringify(first.sessionId)}, ${first.id}))?.url === 'https://www.bing.com/search?q=not+a+valid+url')()`,
+    'address search'
+  )
+  await navigateFromAddressBar(url)
+  await waitFor(
+    `(async () => (await window.bridge.invoke('browser:getState', ${JSON.stringify(first.sessionId)}, ${first.id}))?.title === ${JSON.stringify(title)})()`,
+    'browser title'
+  )
+  await waitFor(
+    `document.querySelector('.larify-workbench-tab-trigger[data-state="active"] .larify-workbench-tab-title')?.textContent === ${JSON.stringify(title)}`,
+    'workbench title'
+  )
+  assert.equal(
+    await evaluate(
+      `(async () => (await window.bridge.invoke('browser:getState', ${JSON.stringify(first.sessionId)}, ${first.id}))?.url)()`
+    ),
+    url
+  )
+
+  const secondUrl = 'https://example.com/?history=second'
+  await navigateFromAddressBar(secondUrl)
+  await waitFor(
+    `(async () => (await window.bridge.invoke('browser:getState', ${JSON.stringify(first.sessionId)}, ${first.id}))?.url === ${JSON.stringify(secondUrl)})()`,
+    'second address navigation'
+  )
+  await clickElement(toolbarButton(0))
+  await waitFor(
+    `(async () => (await window.bridge.invoke('browser:getState', ${JSON.stringify(first.sessionId)}, ${first.id}))?.url === ${JSON.stringify(url)})()`,
+    'browser back'
+  )
+  await clickElement(toolbarButton(1))
+  await waitFor(
+    `(async () => (await window.bridge.invoke('browser:getState', ${JSON.stringify(first.sessionId)}, ${first.id}))?.url === ${JSON.stringify(secondUrl)})()`,
+    'browser forward'
+  )
+  await clickElement(toolbarButton(2))
+  await waitFor(
+    `(async () => !(await window.bridge.invoke('browser:getState', ${JSON.stringify(first.sessionId)}, ${first.id}))?.loading)()`,
+    'browser reload'
+  )
+
+  const fixturePath = resolve('tests/extensions/browser/fixtures/interaction.html')
+  await navigateFromAddressBar(fixturePath)
+  await waitFor(
+    `(async () => (await window.bridge.invoke('browser:getState', ${JSON.stringify(first.sessionId)}, ${first.id}))?.title === 'Browser Interaction Test')()`,
+    'interaction fixture'
+  )
+  const page = await connectPage('interaction.html')
+  const pageClick = async (selector) => {
+    const position = await page.evaluate(`(() => {
+      const rect = document.querySelector(${JSON.stringify(selector)})?.getBoundingClientRect()
+      return rect && { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }
+    })()`)
+    assert.ok(position, `page element not found: ${selector}`)
+    await page.send('Input.dispatchMouseEvent', {
+      type: 'mousePressed',
+      x: position.x,
+      y: position.y,
+      button: 'left',
+      buttons: 1,
+      clickCount: 1
+    })
+    await page.send('Input.dispatchMouseEvent', {
+      type: 'mouseReleased',
+      x: position.x,
+      y: position.y,
+      button: 'left',
+      buttons: 0,
+      clickCount: 1
+    })
+  }
+  await pageClick('#text')
+  await page.send('Input.insertText', { text: 'Larify browser input' })
+  assert.equal(await page.evaluate(`document.querySelector('#text').value`), 'Larify browser input')
+  await pageClick('#increment')
+  assert.equal(await page.evaluate(`document.querySelector('#count').value`), '1')
+  await pageClick('#dialog')
+  assert.equal(await page.evaluate(`document.querySelector('#dialog-result').value`), 'continued')
+
+  const beforePopup = await evaluate(`window.bridge.invoke('resource:list', { type: 'browser' })`)
+  await pageClick('#popup')
+  const popupResources = await waitFor(
+    `(async () => {
+      const resources = await window.bridge.invoke('resource:list', { type: 'browser' })
+      return resources.length > ${beforePopup.length} ? resources : null
+    })()`,
+    'popup browser resource'
+  )
+  const popup = popupResources.find(({ id }) => !beforePopup.some((resource) => resource.id === id))
+  assert.ok(popup)
+  created.push(popup.id)
+  await waitFor(
+    `(async () => (await window.bridge.invoke('browser:getState', ${JSON.stringify(popup.sessionId)}, ${popup.id}))?.title === 'Browser Interaction Next')()`,
+    'popup browser title'
+  )
+  await evaluate(`window.bridge.invoke('resource:close', ${popup.id})`)
+  await waitFor(
+    `(async () => !(await window.bridge.invoke('resource:list')).some(({ id }) => id === ${popup.id}))()`,
+    'popup browser close'
+  )
+  created.splice(created.indexOf(popup.id), 1)
+
+  await page.send('Input.dispatchMouseEvent', {
+    type: 'mouseWheel',
+    x: 200,
+    y: 200,
+    deltaX: 0,
+    deltaY: 600
+  })
+  await page.waitFor('scrollY > 0', 'page scroll')
+  await page.evaluate('scrollTo(0, 0)')
+  await pageClick('#next')
+  await page.waitFor(`document.title === 'Browser Interaction Next'`, 'page link navigation')
+  await waitFor(
+    `document.querySelector('.larify-workbench-tab-trigger[data-state="active"] .larify-workbench-tab-title')?.textContent === 'Browser Interaction Next'`,
+    'linked page tab title'
+  )
+  page.socket.close()
+  await clickElement(toolbarButton(0))
+  await waitFor(
+    `(async () => (await window.bridge.invoke('browser:getState', ${JSON.stringify(first.sessionId)}, ${first.id}))?.title === 'Browser Interaction Test')()`,
+    'back to interaction fixture'
+  )
+  await clickElement(toolbarButton(0))
+  await waitFor(
+    `(async () => (await window.bridge.invoke('browser:getState', ${JSON.stringify(first.sessionId)}, ${first.id}))?.url === ${JSON.stringify(secondUrl)})()`,
+    'back to remote page'
+  )
+
+  await navigateFromAddressBar('http://127.0.0.1:1/')
+  await waitFor(
+    `(async () => Boolean((await window.bridge.invoke('browser:getState', ${JSON.stringify(first.sessionId)}, ${first.id}))?.error))()`,
+    'failed navigation state'
+  )
+  assert.equal(
+    await evaluate(
+      `(async () => (await window.bridge.invoke('browser:getState', ${JSON.stringify(first.sessionId)}, ${first.id}))?.loading)()`
+    ),
+    false
+  )
+  await navigateFromAddressBar(secondUrl)
+  await waitFor(
+    `(async () => {
+      const state = await window.bridge.invoke('browser:getState', ${JSON.stringify(first.sessionId)}, ${first.id})
+      return state?.url === ${JSON.stringify(secondUrl)} && state.error === null
+    })()`,
+    'navigation recovery'
+  )
+
+  const second = await createBrowser()
+  created.push(second.id)
+  await waitFor(
+    `document.querySelector('.larify-workbench-tab-trigger[data-state="active"] .larify-workbench-tab-title')?.textContent === '新标签页'`,
+    'second blank browser title'
+  )
+  const secondTitle = await evaluate(
+    `document.querySelector('.larify-workbench-tab-trigger[data-state="active"] .larify-workbench-tab-title')?.textContent`
+  )
+  assert.equal(
+    await evaluate(
+      `(async () => (await window.bridge.invoke('browser:getState', ${JSON.stringify(second.sessionId)}, ${second.id}))?.id)()`
+    ),
+    second.id
+  )
+  const browserResources = await evaluate(
+    `window.bridge.invoke('resource:list', { type: 'browser' })`
+  )
+  assert.ok(browserResources.some(({ id }) => id === first.id))
+  assert.ok(browserResources.some(({ id }) => id === second.id))
+  assert.equal(await evaluate(`document.querySelectorAll('.larify-workbench-tabs').length`), 1)
+
+  await selectTab(title)
+  await waitFor(
+    `(async () => (await window.bridge.invoke('browser:getState', ${JSON.stringify(first.sessionId)}, ${first.id}))?.id === ${first.id})()`,
+    'first browser active'
+  )
+
+  await evaluate(`document.querySelector('.larify-workbench-home')?.click()`)
+  await waitFor(`Boolean(document.querySelector('[data-testid="workbench-empty"]'))`, 'launcher')
+  await selectTab(title)
+
+  const sash = await evaluate(`(() => {
+    const rect = document.querySelector('#content > .sash-container > .sash')?.getBoundingClientRect()
+    return rect ? { x: rect.x, y: rect.y + rect.height / 2 } : null
+  })()`)
+  assert.ok(sash)
+  await send('Input.dispatchMouseEvent', {
+    type: 'mousePressed',
+    x: sash.x,
+    y: sash.y,
+    button: 'left',
+    buttons: 1,
+    clickCount: 1
+  })
+  await send('Input.dispatchMouseEvent', {
+    type: 'mouseMoved',
+    x: sash.x - 80,
+    y: sash.y,
+    button: 'left',
+    buttons: 1
+  })
+  await send('Input.dispatchMouseEvent', {
+    type: 'mouseReleased',
+    x: sash.x - 80,
+    y: sash.y,
+    button: 'left',
+    buttons: 0
+  })
+  assert.equal(
+    await evaluate(
+      `document.querySelector('[data-testid="browser-viewport"]')?.getBoundingClientRect().width > 0`
+    ),
+    true
+  )
+
+  const secondTab = `[...document.querySelectorAll('.larify-workbench-tab')]
+    .filter((tab) => tab.querySelector('.larify-workbench-tab-title')?.textContent === ${JSON.stringify(secondTitle)})
+    .at(-1)`
+  const secondViewId = await evaluate(`${secondTab}?.dataset.tabId`)
+  await clickElement(`${secondTab}?.querySelector('.larify-workbench-tab-trigger')`)
+  await waitFor(
+    `document.querySelector('.larify-workbench-tab-trigger[data-state="active"]')?.parentElement?.dataset.tabId === ${JSON.stringify(secondViewId)}`,
+    'second browser tab active'
+  )
+  await wait(50)
+  await clickElement(
+    `document.querySelector('.larify-workbench-tab-trigger[data-state="active"]')
+      ?.parentElement?.querySelector('.larify-workbench-tab-close')`
+  )
+  await waitFor(
+    `(async () => !(await window.bridge.invoke('resource:list')).some(({ id }) => id === ${second.id}))()`,
+    'browser close'
+  )
+  created.splice(created.indexOf(second.id), 1)
+  console.log(
+    JSON.stringify({
+      dialogs: 'passed',
+      failures: 'passed',
+      interactions: 'passed',
+      popups: 'passed',
+      resourcesCreated: 2,
+      resized: true,
+      switching: 'passed',
+      title
+    })
+  )
+} finally {
+  for (const resourceId of created)
+    await evaluate(`window.bridge.invoke('resource:close', ${resourceId})`)
+  socket.close()
+}

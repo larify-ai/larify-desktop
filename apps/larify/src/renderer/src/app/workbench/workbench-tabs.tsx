@@ -192,7 +192,12 @@ function SortableTab({
         ref={setNodeRef}
         style={{ transform: CSS.Transform.toString(transform), transition }}
         onClickCapture={(event) => {
-          if (suppressClickRef.current) event.stopPropagation()
+          if (
+            suppressClickRef.current &&
+            !(event.target as Element).closest('.larify-workbench-tab-close')
+          ) {
+            event.stopPropagation()
+          }
         }}
         onContextMenuCapture={(event) => {
           event.preventDefault()

@@ -8,10 +8,14 @@ export type ResourceFactory = (
   options: unknown
 ) => Disposable
 
+type SessionCleanup = (sessionId: string) => void | Promise<void>
+
 export class ResourceManager implements Disposable {
   private readonly resources = new Map<number, Resource & Disposable>()
   private readonly changeListeners = new Set<Listener<[Resource[]]>>()
   private readonly factories = new Map<string, ResourceFactory>()
+  private readonly sessionCleanups = new Set<SessionCleanup>()
+  private readonly sessionDestructions = new Map<string, Promise<void>>()
   private nextId = 1
 
   bindChange(listener: (resources: Resource[]) => void): () => void {
@@ -28,7 +32,19 @@ export class ResourceManager implements Disposable {
     }
   }
 
+  registerSessionCleanup(cleanup: SessionCleanup): Disposable {
+    this.sessionCleanups.add(cleanup)
+    return {
+      dispose: () => {
+        this.sessionCleanups.delete(cleanup)
+      }
+    }
+  }
+
   create(type: string, sessionId: string, options?: unknown): number {
+    if (this.sessionDestructions.has(sessionId)) {
+      throw new Error(`Resource session "${sessionId}" is being destroyed.`)
+    }
     const factory = this.factories.get(type)
     if (!factory) throw new Error(`Resource type "${type}" is not registered.`)
     const id = this.nextId++
@@ -63,9 +79,22 @@ export class ResourceManager implements Disposable {
     await resource.dispose()
   }
 
-  async destroy(sessionId: string): Promise<void> {
+  destroy(sessionId: string): Promise<void> {
+    const existing = this.sessionDestructions.get(sessionId)
+    if (existing) return existing
+    const destroying = this.destroySession(sessionId).finally(() => {
+      if (this.sessionDestructions.get(sessionId) === destroying) {
+        this.sessionDestructions.delete(sessionId)
+      }
+    })
+    this.sessionDestructions.set(sessionId, destroying)
+    return destroying
+  }
+
+  private async destroySession(sessionId: string): Promise<void> {
     const ids = this.list({ sessionId }).map(({ id }) => id)
     await Promise.allSettled(ids.map((id) => this.close(id)))
+    await Promise.allSettled([...this.sessionCleanups].map((cleanup) => cleanup(sessionId)))
   }
 
   async dispose(): Promise<void> {

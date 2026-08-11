@@ -5,6 +5,7 @@ const animationDuration = 180
 export function useAllotmentToggle(initiallyCollapsed = false): {
   animating: boolean
   collapsed: boolean
+  setCollapsed(collapsed: boolean): void
   toggle(): void
 } {
   const animationTimer = useRef<number | undefined>(undefined)
@@ -19,5 +20,5 @@ export function useAllotmentToggle(initiallyCollapsed = false): {
 
   useEffect(() => () => window.clearTimeout(animationTimer.current), [])
 
-  return { animating, collapsed, toggle }
+  return { animating, collapsed, setCollapsed, toggle }
 }

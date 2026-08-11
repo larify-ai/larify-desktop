@@ -1,9 +1,14 @@
-import { ipcMain, type IpcMainInvokeEvent, type Rectangle, type WebContents } from "electron"
+import {
+  ipcMain,
+  type IpcMainEvent,
+  type IpcMainInvokeEvent,
+  type Rectangle,
+  type WebContents
+} from "electron"
 import type { BrowserService } from "./browser-service"
+import type { BrowserState } from "../shared/types"
 
-export function registerBrowserIpc(getService: () => BrowserService): () => void {
-  let bound = false
-  let unbindChange: (() => void) | null = null
+export function registerBrowserIpc(browser: BrowserService): () => void {
   const subscribers = new Map<WebContents, () => void>()
   const subscribe = (event: IpcMainInvokeEvent): void => {
     const sender = event.sender
@@ -14,19 +19,11 @@ export function registerBrowserIpc(getService: () => BrowserService): () => void
     subscribers.set(sender, onDestroyed)
     sender.once("destroyed", onDestroyed)
   }
-  const service = (): BrowserService => {
-    const browser = getService()
-    if (!bound) {
-      unbindChange = browser.bindChange(sendState)
-      bound = true
-    }
-    return browser
-  }
-
-  const sendState = (sessionId: string, state: unknown): void => {
+  const sendState = (sessionId: string, state: BrowserState): void => {
     for (const [sender, onDestroyed] of subscribers) {
       if (sender.isDestroyed()) {
         subscribers.delete(sender)
+        sender.off("destroyed", onDestroyed)
         continue
       }
       try {
@@ -37,36 +34,27 @@ export function registerBrowserIpc(getService: () => BrowserService): () => void
       }
     }
   }
+  const unbindChange = browser.bindChange(sendState)
 
   const handlers = {
-    "browser:getState": (event: IpcMainInvokeEvent, sessionId: string) => {
+    "browser:getState": (event: IpcMainInvokeEvent, sessionId: string, id: number) => {
       subscribe(event)
-      return service().state(sessionId)
+      return browser.tab(sessionId, id)?.state() ?? null
     },
-    "browser:create": (event: IpcMainInvokeEvent, sessionId: string, url?: string) => {
-      subscribe(event)
-      return service().createTab(sessionId, url)
-    },
-    "browser:ensureTab": (_event: IpcMainInvokeEvent, sessionId: string) =>
-      service().ensureTab(sessionId),
-    "browser:setActive": (_event: IpcMainInvokeEvent, sessionId: string, id: number) =>
-      service().setActive(sessionId, id),
-    "browser:reorder": (_event: IpcMainInvokeEvent, sessionId: string, id: number, toIndex: number) =>
-      service().reorder(sessionId, id, toIndex),
-    "browser:close": (_event: IpcMainInvokeEvent, sessionId: string, id: number) =>
-      service().close(sessionId, id),
     "browser:navigate": (_event: IpcMainInvokeEvent, sessionId: string, id: number, url: string) =>
-      service().navigate(sessionId, id, url),
+      browser.navigate(sessionId, id, url),
     "browser:back": (_event: IpcMainInvokeEvent, sessionId: string, id: number) =>
-      service().goBack(sessionId, id),
+      browser.goBack(sessionId, id),
     "browser:forward": (_event: IpcMainInvokeEvent, sessionId: string, id: number) =>
-      service().goForward(sessionId, id),
+      browser.goForward(sessionId, id),
     "browser:reload": (_event: IpcMainInvokeEvent, sessionId: string, id: number) =>
-      service().reload(sessionId, id),
-    "browser:setBounds": (_event: IpcMainInvokeEvent, sessionId: string, bounds: Rectangle) =>
-      service().setBounds(sessionId, bounds),
-    "browser:setVisible": (_event: IpcMainInvokeEvent, sessionId: string, visible: boolean) =>
-      service().setVisible(sessionId, visible),
+      browser.reload(sessionId, id),
+    "browser:setVisible": (
+      _event: IpcMainInvokeEvent,
+      sessionId: string,
+      id: number,
+      visible: boolean
+    ) => browser.setVisible(sessionId, id, visible)
   }
 
   for (const [channel, handler] of Object.entries(handlers)) {
@@ -74,11 +62,22 @@ export function registerBrowserIpc(getService: () => BrowserService): () => void
     ipcMain.handle(channel, handler)
   }
 
+  const setBoundsSync = (
+    event: IpcMainEvent,
+    sessionId: string,
+    id: number,
+    bounds: Rectangle
+  ): void => {
+    browser.setBounds(sessionId, id, bounds)
+    event.returnValue = true
+  }
+  ipcMain.on("browser:setBoundsSync", setBoundsSync)
+
   return () => {
-    unbindChange?.()
-    unbindChange = null
+    unbindChange()
     for (const [sender, onDestroyed] of subscribers) sender.off("destroyed", onDestroyed)
     subscribers.clear()
+    ipcMain.removeListener("browser:setBoundsSync", setBoundsSync)
     for (const channel of Object.keys(handlers)) ipcMain.removeHandler(channel)
   }
 }

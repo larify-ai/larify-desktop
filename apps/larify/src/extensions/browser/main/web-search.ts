@@ -1,6 +1,5 @@
 import { z } from 'zod'
-import { defineTool, type ToolRunContext } from '../../../shared/extension/tool'
-import type { Toolkit } from '../../../shared/toolkit'
+import { defineTool, type Tool, type ToolRunContext } from '../../../main/core/plugin/protocol'
 import type { BrowserService } from './browser-service'
 import { waitForOperationOrAbort } from './waits'
 
@@ -123,14 +122,14 @@ export async function executeWebSearch(
   })
 }
 
-export function webSearchTools(getService: () => BrowserService): Toolkit['tools'] {
+export function webSearchTools(service: BrowserService): Record<string, Tool> {
   return {
     web_search: defineTool({
       description:
         'Search the web. Returns titles, URLs, snippets, and an optional nextPageUrl. Pass nextPageUrl as pageUrl to continue; use web_fetch to read a result.',
       metadata: { icon: 'browser', eager: true },
       inputSchema: webSearchInputSchema,
-      execute: (args, ctx) => executeWebSearch(getService(), args, ctx)
+      execute: (args, ctx) => executeWebSearch(service, args, ctx)
     })
   }
 }

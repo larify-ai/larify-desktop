@@ -103,6 +103,33 @@ describe('Workbench', () => {
     await act(async () => nextList.promise)
   })
 
+  it('restores the selected view when returning to a session', async () => {
+    const firstSessionId = sessionId
+    const secondSessionId = `session-${crypto.randomUUID()}`
+    invoke.mockImplementation((_channel: string, query: { sessionId: string }) =>
+      Promise.resolve(
+        query.sessionId === firstSessionId
+          ? [{ id: 7, sessionId: firstSessionId, type: 'terminal' }]
+          : []
+      )
+    )
+    registerTerminal(registry)
+    await renderWorkbench(root, registry, firstSessionId)
+
+    await act(async () => {
+      container
+        .querySelector<HTMLElement>('[data-tab-id] .larify-workbench-tab-trigger')
+        ?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, cancelable: true }))
+    })
+    expect(container.querySelector('[data-state="active"]')).not.toBeNull()
+
+    await renderWorkbench(root, registry, secondSessionId)
+    expect(container.querySelector('[data-tab-id]')).toBeNull()
+
+    await renderWorkbench(root, registry, firstSessionId)
+    expect(container.querySelector('[data-state="active"]')).not.toBeNull()
+  })
+
   it('does not open a resource created for a previous session', async () => {
     const created = deferred<unknown>()
     invoke.mockImplementation((channel: string) => {

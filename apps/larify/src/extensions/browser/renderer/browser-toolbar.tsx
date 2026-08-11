@@ -38,28 +38,32 @@ const simplifyForDisplay = (url: string): string => {
   }
 }
 
-export function BrowserToolbar({
+export function BrowserToolbar({ tab, ...props }: BrowserToolbarProps): React.JSX.Element {
+  return <BrowserToolbarForTab key={tab?.id ?? 'empty'} tab={tab} {...props} />
+}
+
+function BrowserToolbarForTab({
   tab,
   onBack,
   onForward,
   onNavigate,
   onReload
 }: BrowserToolbarProps): React.JSX.Element {
-  const [editing, setEditing] = useState<{ key: string; value: string } | null>(null)
+  const [editing, setEditing] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const navigationRevisionRef = useRef(0)
-  const fullUrl = tab ? decodeForDisplay(tab.url) : ''
-  const displayUrl = simplifyForDisplay(fullUrl)
-  const editUrl = fullUrl.startsWith('file://') ? displayUrl : fullUrl
-  const tabKey = tab ? `${tab.id}:${tab.url}` : ''
-  const tabKeyRef = useRef(tabKey)
-  const isEditing = editing?.key === tabKey
-  const value = isEditing ? editing.value : displayUrl
+  const url = tab?.url ?? ''
+  const displayUrl = simplifyForDisplay(decodeForDisplay(url))
+  const editUrl = url.startsWith('file://') ? displayUrl : url
+  const isEditing = editing !== null
+  const value = editing ?? displayUrl
 
   useLayoutEffect(() => {
-    tabKeyRef.current = tabKey
     navigationRevisionRef.current += 1
-  }, [tabKey])
+    return () => {
+      navigationRevisionRef.current += 1
+    }
+  }, [])
 
   useEffect(() => {
     if (!isEditing) return
@@ -68,7 +72,7 @@ export function BrowserToolbar({
   }, [isEditing])
 
   return (
-    <div className="flex h-11 shrink-0 items-center gap-1 bg-card px-2">
+    <div className="flex h-11 shrink-0 items-center gap-1 bg-background px-2">
       <Button
         aria-label="后退"
         disabled={!tab?.canGoBack}
@@ -94,16 +98,17 @@ export function BrowserToolbar({
         {!isEditing ? (
           <button
             className={cn(
-              'flex h-8 w-full min-w-0 items-center rounded-md bg-muted/40 px-3 text-left text-sm shadow-none',
+              'flex h-8 w-full min-w-0 items-center rounded-md bg-muted px-3 text-left text-sm shadow-none',
               'focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] focus-visible:outline-none',
               !tab && 'cursor-not-allowed opacity-50',
               !value && 'text-muted-foreground'
             )}
+            data-testid="browser-address"
             disabled={!tab}
             type="button"
             onClick={() => {
               navigationRevisionRef.current += 1
-              setEditing({ key: tabKey, value: editUrl })
+              setEditing(editUrl)
             }}
           >
             <span className="truncate">{value || '输入 URL'}</span>
@@ -114,7 +119,8 @@ export function BrowserToolbar({
             autoCapitalize="off"
             autoComplete="off"
             autoCorrect="off"
-            className="h-8 select-text bg-muted/40 shadow-none focus-visible:ring-0"
+            className="h-8 select-text bg-muted shadow-none selection:!bg-primary selection:!text-primary-foreground focus-visible:ring-0"
+            data-testid="browser-address"
             disabled={!tab}
             placeholder="输入 URL"
             spellCheck={false}
@@ -125,24 +131,19 @@ export function BrowserToolbar({
             }}
             onChange={(event) => {
               navigationRevisionRef.current += 1
-              setEditing({ key: tabKey, value: event.target.value })
+              setEditing(event.target.value)
             }}
             onKeyDown={(event) => {
-              if (event.key !== 'Enter') return
+              if (event.key !== 'Enter' || event.nativeEvent.isComposing) return
               const input = event.currentTarget
               const next = input.value
               const revision = ++navigationRevisionRef.current
-              const isCurrent = (): boolean =>
-                revision === navigationRevisionRef.current && tabKeyRef.current === tabKey
+              const isCurrent = (): boolean => revision === navigationRevisionRef.current
               void onNavigate(next)
                 .then((navigated) => {
-                  if (!isCurrent()) return
-                  if (navigated) input.blur()
-                  else setEditing({ key: tabKey, value: next })
+                  if (navigated && isCurrent()) input.blur()
                 })
-                .catch(() => {
-                  if (isCurrent()) setEditing({ key: tabKey, value: next })
-                })
+                .catch(() => undefined)
             }}
           />
         )}

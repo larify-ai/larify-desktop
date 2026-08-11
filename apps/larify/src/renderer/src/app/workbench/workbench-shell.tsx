@@ -78,15 +78,16 @@ function WorkbenchTabBinding({
   view: WorkbenchView
 }): null {
   const bindTab = renderers?.get(view.rendererId)?.bindTab
-  useEffect(
-    () =>
-      bindTab?.({
-        resourceId: view.resourceId,
-        sessionId,
-        updateTab: (tab) => updateTab(view.id, tab)
-      }).dispose,
-    [bindTab, sessionId, updateTab, view.id, view.resourceId]
-  )
+  useEffect(() => {
+    const binding = bindTab?.({
+      resourceId: view.resourceId,
+      sessionId,
+      updateTab: (tab) => updateTab(view.id, tab)
+    })
+    return () => {
+      void binding?.dispose()
+    }
+  }, [bindTab, sessionId, updateTab, view.id, view.resourceId])
   return null
 }
 

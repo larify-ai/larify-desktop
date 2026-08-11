@@ -20,6 +20,7 @@ async function main() {
       platform: 'node',
       format: 'cjs',
       target: 'node22',
+      alias: { '@shared': join(currentDir, '../../../../src/shared') },
       external: ['electron'],
       logLevel: 'silent'
     })

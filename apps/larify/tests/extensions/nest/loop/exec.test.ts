@@ -147,15 +147,4 @@ describe('nest loop exec', () => {
     expect(mocks.saveSession).toHaveBeenCalledTimes(2)
   })
 
-  it('destroys resources owned by the background session', async () => {
-    const taskFile = task(join(root, 'cleanup', 'task.md'), 'completed')
-    const destroySession = vi.fn()
-    app.getAll.mockImplementation((type) =>
-      type === 'session-resource' ? [{ destroySession }] : []
-    )
-
-    await exec(input(taskFile))
-
-    expect(destroySession).toHaveBeenCalledWith(expect.any(String))
-  })
 })

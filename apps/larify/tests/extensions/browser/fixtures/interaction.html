@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Browser Interaction Test</title>
+    <style>
+      body { font: 16px sans-serif; margin: 24px; min-height: 2000px; }
+      main { display: grid; gap: 16px; max-width: 480px; }
+      input, button, a { font: inherit; padding: 8px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <label>Text <input id="text" /></label>
+      <button id="increment" type="button">Increment</button>
+      <output id="count">0</output>
+      <button id="dialog" type="button">Open dialog</button>
+      <output id="dialog-result"></output>
+      <button id="popup" type="button">Open popup</button>
+      <a id="next" href="interaction-next.html">Next page</a>
+    </main>
+    <script>
+      let count = 0
+      document.querySelector('#increment').addEventListener('click', () => {
+        document.querySelector('#count').value = String(++count)
+      })
+      document.querySelector('#dialog').addEventListener('click', () => {
+        alert('This dialog must not block Larify')
+        document.querySelector('#dialog-result').value = 'continued'
+      })
+      document.querySelector('#popup').addEventListener('click', () => {
+        window.open('interaction-next.html', '_blank')
+      })
+    </script>
+  </body>
+</html>

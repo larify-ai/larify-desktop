@@ -1,60 +1,36 @@
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it, vi } from 'vitest'
+import { Registry } from '../../../../src/shared/infra/registry'
+import { ResourceManager, resourceManagerToken } from '../../../../src/main/core/resource'
+import { windowToken } from '../../../../src/main/window/token'
 
-const h = vi.hoisted(() => {
-  let finishDestroy!: () => void
-  const destroyDone = new Promise<void>((resolve) => {
-    finishDestroy = resolve
-  })
-  return {
-    finishDestroy,
-    destroyDone,
-    destroy: vi.fn(() => destroyDone),
-    unregisterIpc: vi.fn(),
-  }
-})
-
-vi.mock("../../../../src/extensions/browser/main/browser-service", () => ({
-  BrowserService: class {
-    destroy = h.destroy
-  },
+const h = vi.hoisted(() => ({
+  destroy: vi.fn(),
+  unregisterIpc: vi.fn(),
+  tools: { browse: { inputSchema: {} } }
 }))
 
-vi.mock("../../../../src/extensions/browser/main/ipc", () => ({
-  registerBrowserIpc: (getService: () => unknown) => {
-    getService()
-    return h.unregisterIpc
-  },
+vi.mock('../../../../src/extensions/browser/main/browser-service', () => ({
+  BrowserService: class { destroy = h.destroy }
+}))
+vi.mock('../../../../src/extensions/browser/main/ipc', () => ({
+  registerBrowserIpc: () => h.unregisterIpc
+}))
+vi.mock('../../../../src/extensions/browser/main/tools', () => ({
+  createBrowserTools: () => h.tools
 }))
 
-vi.mock("../../../../src/extensions/browser/main/tools", () => ({
-  createBrowserToolkit: () => ({}),
-}))
+import plugin from '../../../../src/extensions/browser/main'
 
-import extension from "../../../../src/extensions/browser/main"
-
-describe("browser extension disposal", () => {
-  it("waits for browser resources and recording output to finish destroying", async () => {
+describe('browser plugin', () => {
+  it('registers resources, IPC, tools and their cleanup', async () => {
+    const registry = new Registry()
+    registry.register(resourceManagerToken, new ResourceManager())
+    registry.register(windowToken, { get: () => ({}) })
     const subscriptions: Array<{ dispose(): void | Promise<void> }> = []
-    const app = {
-      get: vi.fn(() => ({ get: () => ({}) })),
-      register: vi.fn(() => ({ dispose: vi.fn() })),
-    }
-
-    await extension.activate(app as never, { subscriptions } as never)
-    const cleanup = subscriptions.at(-1)
-    if (!cleanup) throw new Error("browser cleanup subscription was not registered")
-
-    const disposal = cleanup.dispose()
-    expect(disposal).toBeInstanceOf(Promise)
-    let settled = false
-    void Promise.resolve(disposal).then(() => {
-      settled = true
-    })
-    await Promise.resolve()
-    expect(settled).toBe(false)
-
-    h.finishDestroy()
-    await disposal
+    const registerTool = vi.fn()
+    await plugin.activate({ registry, subscriptions, registerTool } as never)
+    expect(registerTool).toHaveBeenCalledWith('browse', h.tools.browse)
+    for (const subscription of subscriptions) await subscription.dispose()
     expect(h.unregisterIpc).toHaveBeenCalledOnce()
     expect(h.destroy).toHaveBeenCalledOnce()
   })

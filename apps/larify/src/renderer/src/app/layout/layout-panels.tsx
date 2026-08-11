@@ -61,6 +61,9 @@ export function LayoutPanels(): React.JSX.Element {
               workbench.animating ? ' larify-allotment-animated' : ''
             }`}
             id="content"
+            onVisibleChange={(index, visible) => {
+              if (index === 1) workbench.setCollapsed(!visible)
+            }}
             proportionalLayout={false}
           >
             <Allotment.Pane minSize={layoutSpec.interaction.minSize}>
@@ -71,6 +74,7 @@ export function LayoutPanels(): React.JSX.Element {
             <Allotment.Pane
               minSize={layoutSpec.workbench.minSize}
               preferredSize={layoutSpec.workbench.defaultSize}
+              snap
               visible={!workbench.collapsed}
             >
               <div

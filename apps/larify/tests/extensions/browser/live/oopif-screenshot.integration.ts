@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { BrowserService } from '../../../../src/extensions/browser/main/browser-service'
 import { Recorder } from '../../../../src/extensions/browser/main/recorder'
 import { BrowserTab } from '../../../../src/extensions/browser/main/tab'
+import { ResourceManager } from '../../../../src/main/core/resource'
 
 app.commandLine.appendSwitch('site-per-process')
 
@@ -175,11 +176,12 @@ async function main(): Promise<void> {
     app.on('window-all-closed', keepAlive)
     window = new BrowserWindow({ show: true, x: -2000, y: -2000, width: 900, height: 700 })
 
-    const service = new BrowserService(window)
+    const resources = new ResourceManager()
+    const service = new BrowserService(window, resources)
     const initialWindowCount = BrowserWindow.getAllWindows().length
     const initialClosedListeners = window.listenerCount('closed')
     service.state('unused')
-    service.setBounds('unused', { x: 0, y: 0, width: 800, height: 600 })
+    service.setBounds('unused', 1, { x: 0, y: 0, width: 800, height: 600 })
     service.close('unused', 1)
     if (
       BrowserWindow.getAllWindows().length !== initialWindowCount ||
@@ -191,7 +193,7 @@ async function main(): Promise<void> {
     if (window.listenerCount('closed') !== initialClosedListeners + 1) {
       throw new Error('browser session did not register its host cleanup listener')
     }
-    await service.destroySession('used')
+    await resources.destroy('used')
     if (window.listenerCount('closed') !== initialClosedListeners) {
       throw new Error('destroyed browser session retained its host cleanup listener')
     }

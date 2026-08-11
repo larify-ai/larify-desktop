@@ -5,7 +5,10 @@ export function LoadingBar({ loading }: { loading: boolean }): React.JSX.Element
 
   return (
     <div
+      aria-hidden={isFinished}
+      aria-label="正在加载"
       className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-0.5"
+      role="progressbar"
       style={{ opacity: isFinished ? 0 : 1, transition: `opacity ${animationDuration}ms linear` }}
     >
       <div

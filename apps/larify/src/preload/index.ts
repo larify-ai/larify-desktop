@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
 const bridge = {
   invoke: (channel: string, ...args: unknown[]) => ipcRenderer.invoke(channel, ...args),
+  sendSync: (channel: string, ...args: unknown[]) => ipcRenderer.sendSync(channel, ...args),
   on: (channel: string, listener: (...args: unknown[]) => void) => {
     const handler = (_event: unknown, ...args: unknown[]): void => listener(...args)
     ipcRenderer.on(channel, handler)

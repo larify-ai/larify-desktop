@@ -1,43 +1,74 @@
-import { lazy, Suspense } from 'react'
+import { lazy, Suspense, type ReactNode } from 'react'
 import { GlobeIcon } from 'lucide-react'
-import type { Extension } from '@shared/extension'
-import type { View } from '@renderer/types/view'
+import type { RendererPlugin } from '@renderer/app/registry/renderer-plugins'
+import {
+  type WorkbenchRendererRegistry,
+  workbenchRendererRegistryToken
+} from '@renderer/app/registry/workbench-renderers'
+import type { BrowserState, BrowserTabState } from '../shared/types'
+import { BrowserTabIcon } from './browser-tab-icon'
 
-let browserViewPromise: Promise<{ default: typeof import('./browser-view').BrowserView }> | null =
-  null
+const BrowserView = lazy(() =>
+  import('./browser-view').then(({ BrowserView }) => ({ default: BrowserView }))
+)
 
-const loadBrowserView = (): NonNullable<typeof browserViewPromise> => {
-  browserViewPromise ??= import('./browser-view')
-    .then(({ BrowserView }) => ({ default: BrowserView }))
-    .catch((error) => {
-      browserViewPromise = null
-      throw error
-    })
-  return browserViewPromise
-}
+const tabIcon = (tab: BrowserTabState): ReactNode => (
+  <BrowserTabIcon key={tab.favIconUrl || 'fallback'} favicon={tab.favIconUrl} />
+)
 
-const BrowserView = lazy(loadBrowserView)
+const tabTitle = (tab: BrowserTabState): string =>
+  tab.title || (tab.url && tab.url !== 'about:blank' ? tab.url : '新标签页')
 
-const extension: Extension = {
-  activate(app, context) {
-    app.register('view', 'browser', {
-      sidebar: { icon: GlobeIcon, id: 'browser', label: '浏览', order: 8, placement: 'content' },
-      render: () => (
-        <Suspense fallback={null}>
-          <BrowserView />
-        </Suspense>
-      )
-    } satisfies View)
-    const unsubscribe = window.bridge.on('browser:open-url', (value) => {
-      if (typeof value !== 'string') return
-      window.dispatchEvent(new CustomEvent('larify:browser-open-url', { detail: value }))
-    })
-    context.subscriptions.push({
-      dispose: () => {
-        unsubscribe()
-      }
-    })
+const plugin: RendererPlugin = {
+  id: 'browser',
+  activate({ registry, subscriptions }) {
+    const renderers = registry.get<WorkbenchRendererRegistry>(workbenchRendererRegistryToken)
+    if (!renderers) throw new Error('Workbench renderer registry is unavailable.')
+    subscriptions.push(
+      renderers.register('browser', {
+        bindTab: ({ resourceId, sessionId, updateTab }) => {
+          updateTab({ icon: <GlobeIcon aria-hidden />, title: '新标签页' })
+          const apply = (tab: BrowserTabState | null | undefined): void => {
+            if (!tab) return
+            updateTab({
+              icon: tabIcon(tab),
+              title: tabTitle(tab)
+            })
+          }
+          let active = true
+          let receivedEvent = false
+          const unsubscribe = window.bridge.on('browser:state', (value) => {
+            const event = value as { sessionId?: string; state?: BrowserState }
+            if (event.sessionId !== sessionId || !event.state) return
+            const tab = event.state.tabs.find(({ id }) => id === resourceId)
+            if (!tab) return
+            receivedEvent = true
+            apply(tab)
+          })
+          void window.bridge
+            .invoke('browser:getState', sessionId, resourceId)
+            .then((value) => {
+              if (active && !receivedEvent) apply(value as BrowserTabState | null)
+            })
+            .catch(() => undefined)
+          return {
+            dispose: () => {
+              active = false
+              unsubscribe()
+            }
+          }
+        },
+        component: (props) => (
+          <Suspense fallback={null}>
+            <BrowserView {...props} />
+          </Suspense>
+        ),
+        icon: <GlobeIcon aria-hidden />,
+        order: 20,
+        title: '浏览器'
+      })
+    )
   }
 }
 
-export default extension
+export default plugin

@@ -144,6 +144,34 @@ describe('ResourceManager', () => {
     expect(manager.list()).toEqual([{ id: 3, type: 'terminal', sessionId: 'session-b' }])
   })
 
+  it('runs session cleanup after closing its resources', async () => {
+    const manager = testManager()
+    manager.create('browser', 'session-a', () => ({ dispose: vi.fn() }))
+    const cleanup = vi.fn(() => expect(manager.list({ sessionId: 'session-a' })).toEqual([]))
+    manager.registerSessionCleanup(cleanup)
+
+    await manager.destroy('session-a')
+
+    expect(cleanup).toHaveBeenCalledWith('session-a')
+  })
+
+  it('does not create resources while their session is being destroyed', async () => {
+    const manager = testManager()
+    let finish!: () => void
+    manager.registerSessionCleanup(
+      () => new Promise<void>((resolve) => { finish = resolve })
+    )
+
+    const destroying = manager.destroy('session-a')
+    expect(() => manager.create('browser', 'session-a', () => ({ dispose: vi.fn() }))).toThrow(
+      'being destroyed'
+    )
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
+    finish()
+    await destroying
+    expect(manager.create('browser', 'session-a', () => ({ dispose: vi.fn() }))).toBe(1)
+  })
+
   it('continues closing a session when one resource fails', async () => {
     const manager = testManager()
     const second = vi.fn()

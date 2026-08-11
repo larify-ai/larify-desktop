@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-empty-function */
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const h = vi.hoisted(() => ({
@@ -118,8 +119,8 @@ describe("BrowserTabManager", () => {
 
   it("creates tabs in order and keeps them off-screen until visible bounds exist", () => {
     const manager = new BrowserTabManager(fakeWindow())
-    expect(manager.createTab()).toBe(1)
-    expect(manager.createTab()).toBe(2)
+    expect(manager.createTab(1)).toBe(1)
+    expect(manager.createTab(2)).toBe(2)
     expect(manager.state().activeId).toBe(2)
     expect(manager.state().tabs.map((tab) => tab.id)).toEqual([1, 2])
     for (const view of h.views) expect(view.parent).toBe(h.hostWin)
@@ -127,7 +128,7 @@ describe("BrowserTabManager", () => {
 
   it("exposes a requested URL immediately when creating a tab with a URL", () => {
     const manager = new BrowserTabManager(fakeWindow())
-    expect(manager.createTab("example.com")).toBe(1)
+    expect(manager.createTab(1, "example.com")).toBe(1)
 
     expect(manager.state().tabs[0]).toMatchObject({
       id: 1,
@@ -141,7 +142,7 @@ describe("BrowserTabManager", () => {
     const changes: unknown[] = []
     manager.bindChange((state) => changes.push(state))
 
-    manager.createTab("example.com")
+    manager.createTab(1, "example.com")
 
     expect(changes.at(-1)).toMatchObject({
       activeId: 1,
@@ -149,10 +150,42 @@ describe("BrowserTabManager", () => {
     })
   })
 
+  it("delegates popup tabs to the external resource owner", () => {
+    const openTab = vi.fn()
+    const manager = new BrowserTabManager(fakeWindow(), openTab)
+    manager.createTab(1)
+
+    const handler = (
+      h.views[0] as unknown as {
+        webContents: { windowOpenHandler: (details: { url: string }) => { action: string } }
+      }
+    ).webContents.windowOpenHandler
+
+    expect(handler({ url: "https://example.com/popup" })).toEqual({ action: "deny" })
+    expect(openTab).toHaveBeenCalledWith("https://example.com/popup")
+    expect(manager.state().tabs.map((tab) => tab.id)).toEqual([1])
+  })
+
+  it("still denies a popup when its resource cannot be created", () => {
+    const manager = new BrowserTabManager(fakeWindow(), () => {
+      throw new Error("session is being destroyed")
+    })
+    manager.createTab(1)
+
+    const handler = (
+      h.views[0] as unknown as {
+        webContents: { windowOpenHandler: (details: { url: string }) => { action: string } }
+      }
+    ).webContents.windowOpenHandler
+
+    expect(handler({ url: "https://example.com/popup" })).toEqual({ action: "deny" })
+    expect(manager.state().tabs.map((tab) => tab.id)).toEqual([1])
+  })
+
   it("places only the active tab in the main window when visible", () => {
     const manager = new BrowserTabManager(fakeWindow())
-    const first = manager.createTab()
-    manager.createTab()
+    const first = manager.createTab(1)
+    manager.createTab(2)
     manager.setVisible(true)
     manager.setBounds({ x: 10, y: 20, width: 300, height: 200 })
 
@@ -171,7 +204,7 @@ describe("BrowserTabManager", () => {
 
   it("moves the active tab off-screen when the viewport collapses", () => {
     const manager = new BrowserTabManager(fakeWindow())
-    manager.createTab()
+    manager.createTab(1)
     manager.setVisible(true)
     manager.setBounds({ x: 0, y: 0, width: 100, height: 100 })
     expect(h.views[0].parent).toBe(h.mainWin)
@@ -181,22 +214,22 @@ describe("BrowserTabManager", () => {
     expect(h.views[0].visibleCalls.at(-1)).toBe(true)
   })
 
-  it("reorders tabs and clamps the target index", () => {
+  it("moves the active tab off-screen when the browser renderer is hidden", () => {
     const manager = new BrowserTabManager(fakeWindow())
-    const a = manager.createTab()
-    const b = manager.createTab()
-    const c = manager.createTab()
-    manager.reorder(a, 20)
-    expect(manager.state().tabs.map((tab) => tab.id)).toEqual([b, c, a])
-    manager.reorder(a, -1)
-    expect(manager.state().tabs.map((tab) => tab.id)).toEqual([a, b, c])
+    manager.createTab(1)
+    manager.setBounds({ x: 0, y: 0, width: 100, height: 100 })
+    manager.setVisible(true)
+    expect(h.views[0].parent).toBe(h.mainWin)
+
+    manager.setVisible(false)
+    expect(h.views[0].parent).toBe(h.hostWin)
   })
 
   it("activates the neighbor when closing the active tab", async () => {
     const manager = new BrowserTabManager(fakeWindow())
-    const a = manager.createTab()
-    const b = manager.createTab()
-    const c = manager.createTab()
+    const a = manager.createTab(1)
+    const b = manager.createTab(2)
+    const c = manager.createTab(3)
     manager.setActive(b)
     await manager.close(b)
     expect(manager.state().tabs.map((tab) => tab.id)).toEqual([a, c])
@@ -221,7 +254,7 @@ describe("BrowserTabManager", () => {
     expect(changes).toEqual([])
     expect(temporaryTab?.view.webContents.close).toBeDefined()
     expect((temporaryTab?.view.webContents as unknown as { closed: boolean }).closed).toBe(true)
-    expect(manager.createTab()).toBe(1)
+    expect(manager.createTab(1)).toBe(1)
   })
 
   it("rejects an invalid temporary-tab URL and still destroys the tab", async () => {
@@ -262,7 +295,7 @@ describe("BrowserTabManager", () => {
 
   it("stops a recording before destroying its tab", async () => {
     const manager = new BrowserTabManager(fakeWindow())
-    const id = manager.createTab()
+    const id = manager.createTab(1)
     const stopIfRecordingTab = vi.fn(async () => undefined)
     ;(
       manager as unknown as {
@@ -278,7 +311,7 @@ describe("BrowserTabManager", () => {
 
   it("still closes a tab when stopping its recording fails", async () => {
     const manager = new BrowserTabManager(fakeWindow())
-    const id = manager.createTab()
+    const id = manager.createTab(1)
     const tab = manager.get(id)!
     const destroy = vi.spyOn(tab, "destroy")
     ;(
@@ -297,7 +330,7 @@ describe("BrowserTabManager", () => {
 
   it("coalesces concurrent closes of the same tab", async () => {
     const manager = new BrowserTabManager(fakeWindow())
-    const id = manager.createTab()
+    const id = manager.createTab(1)
     const tab = manager.get(id)!
     const destroy = vi.spyOn(tab, "destroy")
     let finishStop!: () => void
@@ -324,7 +357,7 @@ describe("BrowserTabManager", () => {
 
   it("waits for an in-progress close before destroying the manager", async () => {
     const manager = new BrowserTabManager(fakeWindow())
-    const id = manager.createTab()
+    const id = manager.createTab(1)
     const tab = manager.get(id)!
     const destroyTab = vi.spyOn(tab, "destroy")
     let finishStop!: () => void
@@ -349,7 +382,7 @@ describe("BrowserTabManager", () => {
 
   it("makes destroy idempotent and rejects new tabs after teardown starts", async () => {
     const manager = new BrowserTabManager(fakeWindow())
-    const id = manager.createTab()
+    const id = manager.createTab(1)
     const tab = manager.get(id)!
     const destroyTab = vi.spyOn(tab, "destroy")
     let finishRecorderDestroy!: () => void
@@ -365,7 +398,7 @@ describe("BrowserTabManager", () => {
     const first = manager.destroy()
     const second = manager.destroy()
     expect(second).toBe(first)
-    expect(() => manager.createTab()).toThrow("browser tab manager is destroyed")
+    expect(() => manager.createTab(2)).toThrow("browser tab manager is destroyed")
     expect(manager.close(id)).toBe(first)
 
     const windowOpen = (
@@ -397,7 +430,7 @@ describe("BrowserTabManager", () => {
 
   it("destroys tabs when recorder cleanup fails", async () => {
     const manager = new BrowserTabManager(fakeWindow())
-    const tab = manager.get(manager.createTab())!
+    const tab = manager.get(manager.createTab(1))!
     const destroyTab = vi.spyOn(tab, "destroy")
     ;(manager as unknown as { recorder: { destroy: () => Promise<void> } }).recorder.destroy = () =>
       Promise.reject(new Error("recorder cleanup failed"))

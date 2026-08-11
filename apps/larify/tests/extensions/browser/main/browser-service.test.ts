@@ -1,238 +1,195 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
-import type { BrowserState } from "../../../../src/extensions/browser/shared/types"
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { ResourceManager } from '../../../../src/main/core/resource'
+import type { BrowserState } from '../../../../src/extensions/browser/shared/types'
 
-const h = vi.hoisted(() => {
-  const managers: unknown[] = []
-  return {
-    managers,
-    BrowserTabManager: class {
-      readonly window: unknown
-      bindChange = vi.fn((callback: (state: BrowserState) => void) => {
-        this.onChange = callback
-      })
-      state = vi.fn(() => ({ tabs: [], activeId: null }))
-      createTab = vi.fn(() => 1)
-      setActive = vi.fn()
-      reorder = vi.fn()
-      close = vi.fn()
-      navigate = vi.fn(() => true)
-      goBack = vi.fn()
-      goForward = vi.fn()
-      reload = vi.fn()
-      recordStart = vi.fn(async () => 1)
-      recordStop = vi.fn(async () => ({ path: "out.webm", bytes: 1 }))
-      recordStopIfCurrent = vi.fn(async () => null)
-      recordRestart = vi.fn(async () => 2)
-      setBounds = vi.fn()
-      setVisible = vi.fn()
-      destroy = vi.fn()
-      private onChange?: (state: BrowserState) => void
+const h = vi.hoisted(() => ({ managers: [] as Array<{
+  tabs: Map<number, unknown>
+  createTab: ReturnType<typeof vi.fn>
+  close: ReturnType<typeof vi.fn>
+  setActive: ReturnType<typeof vi.fn>
+  setBounds: ReturnType<typeof vi.fn>
+  setVisible: ReturnType<typeof vi.fn>
+  navigate: ReturnType<typeof vi.fn>
+  destroy: ReturnType<typeof vi.fn>
+  emit(state: BrowserState): void
+}> }))
 
-      constructor(window: unknown) {
-        this.window = window
-        managers.push(this)
-      }
-
-      emit(state: BrowserState): void {
-        this.onChange?.(state)
-      }
-    },
+vi.mock('../../../../src/extensions/browser/main/tab-manager', () => ({
+  BROWSER_PARTITION: 'persist:test',
+  BrowserTabManager: class {
+    tabs = new Map<number, unknown>()
+    activeId: number | null = null
+    createTab = vi.fn((id: number, url?: string) => {
+      if (url === 'fail:') throw new Error('open failed')
+      const tab = { id, state: () => ({ id, title: `Page ${id}` }) }
+      this.tabs.set(id, tab)
+      this.activeId = id
+      return tab
+    })
+    get = (id: number): unknown => this.tabs.get(id)
+    close = vi.fn(async (id: number) => { this.tabs.delete(id) })
+    state = (): { tabs: unknown[]; activeId: number | null } => ({
+      tabs: [...this.tabs.values()].map((tab) => (tab as { state(): unknown }).state()),
+      activeId: this.activeId
+    })
+    onChange?: (state: BrowserState) => void
+    bindChange = vi.fn((callback: (state: BrowserState) => void) => { this.onChange = callback })
+    setActive = vi.fn((id: number) => { if (this.tabs.has(id)) this.activeId = id })
+    setBounds = vi.fn()
+    setVisible = vi.fn()
+    navigate = vi.fn(() => true)
+    goBack = vi.fn()
+    goForward = vi.fn()
+    reload = vi.fn()
+    destroy = vi.fn()
+    emit = (state: BrowserState): void => { this.onChange?.(state) }
+    constructor() { h.managers.push(this) }
   }
-})
-
-type FakeBrowserTabManager = InstanceType<typeof h.BrowserTabManager>
-
-vi.mock("../../../../src/extensions/browser/main/tab-manager", () => ({
-  BrowserTabManager: h.BrowserTabManager,
 }))
 
-import { BrowserService } from "../../../../src/extensions/browser/main/browser-service"
+import { BrowserService } from '../../../../src/extensions/browser/main/browser-service'
 
-describe("BrowserService", () => {
-  beforeEach(() => {
-    h.managers.length = 0
+describe('BrowserService resources', () => {
+  beforeEach(() => h.managers.splice(0))
+
+  it('uses globally allocated resource ids across sessions', () => {
+    const resources = new ResourceManager()
+    const service = new BrowserService({} as never, resources)
+    expect(service.createTab('session-a')).toBe(1)
+    expect(service.createTab('session-b', 'https://example.com')).toBe(2)
+    expect(resources.list()).toEqual([
+      { id: 1, type: 'browser', sessionId: 'session-a' },
+      { id: 2, type: 'browser', sessionId: 'session-b' }
+    ])
+    expect(h.managers[0].createTab).toHaveBeenCalledWith(1, undefined)
+    expect(h.managers[1].createTab).toHaveBeenCalledWith(2, 'https://example.com')
   })
 
-  it("does not allocate a browser manager when reading an empty session", () => {
-    const service = new BrowserService({} as never)
+  it('does not retain a resource or manager when opening fails', () => {
+    const resources = new ResourceManager()
+    const service = new BrowserService({} as never, resources)
 
-    expect(service.state("unused-session")).toEqual({ tabs: [], activeId: null })
-    expect(h.managers).toHaveLength(0)
+    expect(() => service.createTab('session-a', 'fail:')).toThrow('open failed')
+
+    expect(resources.list()).toEqual([])
+    expect(h.managers[0].destroy).toHaveBeenCalledOnce()
+    expect(service.state('session-a')).toEqual({ tabs: [], activeId: null })
   })
 
-  it("does not allocate a manager for layout or stale tab operations", () => {
-    const service = new BrowserService({} as never)
-    service.setBounds("unused-session", { x: 1, y: 2, width: 3, height: 4 })
-    service.setActive("unused-session", 1)
-    service.close("unused-session", 1)
+  it('closes the native tab through ResourceManager', async () => {
+    const resources = new ResourceManager()
+    const service = new BrowserService({} as never, resources)
+    const id = service.createTab('session-a')
+    await service.close('session-a', id)
+    expect(resources.get(id)).toBeUndefined()
+    expect(h.managers[0].close).toHaveBeenCalledWith(id)
+    expect(h.managers[0].destroy).not.toHaveBeenCalled()
+  })
 
-    expect(service.tab("unused-session", 1)).toBeUndefined()
-    expect(service.navigate("unused-session", 1, "https://example.com")).toBe(false)
-    expect(h.managers).toHaveLength(0)
-
-    service.createTab("unused-session")
-    expect((h.managers[0] as FakeBrowserTabManager).setBounds).toHaveBeenCalledWith({
-      x: 1,
-      y: 2,
-      width: 3,
-      height: 4,
+  it('updates the state after closing a tab', async () => {
+    const service = new BrowserService({} as never, new ResourceManager())
+    const first = service.createTab('session-a')
+    const second = service.createTab('session-a')
+    await service.close('session-a', first)
+    expect(service.state('session-a')).toEqual({
+      tabs: [{ id: second, title: `Page ${second}` }],
+      activeId: second
     })
   })
 
-  it("does not allocate a manager for stale recording operations", async () => {
-    const service = new BrowserService({} as never)
-
-    await expect(service.recordStop("unused-session")).rejects.toThrow("no recording in progress")
-    await expect(service.recordStopIfCurrent("unused-session", 1)).resolves.toBeNull()
-    await expect(service.recordStart("unused-session", {} as never, "out.webm")).rejects.toThrow(
-      "browser session is not active",
-    )
-    await expect(service.recordRestart("unused-session", {} as never, "out.webm")).rejects.toThrow(
-      "browser session is not active",
-    )
-    expect(h.managers).toHaveLength(0)
+  it('selects a resource before showing its native view', () => {
+    const service = new BrowserService({} as never, new ResourceManager())
+    const id = service.createTab('session-a')
+    service.setBounds('session-a', id, { x: 1, y: 2, width: 3, height: 4 })
+    service.setVisible('session-a', id, true)
+    expect(h.managers[0].setActive).toHaveBeenCalledWith(id)
+    expect(h.managers[0].setBounds).toHaveBeenCalledWith({ x: 1, y: 2, width: 3, height: 4 })
+    expect(h.managers[0].setVisible).toHaveBeenCalledWith(true)
   })
 
-  it("keeps tabs isolated by session", () => {
-    const service = new BrowserService({} as never)
+  it('does not change the active tab when receiving stale bounds', () => {
+    const service = new BrowserService({} as never, new ResourceManager())
+    const stale = service.createTab('session-a')
+    const active = service.createTab('session-a')
+    h.managers[0].setActive.mockClear()
 
-    expect(service.createTab("session-a")).toBe(1)
-    expect(service.createTab("session-b", "https://example.com")).toBe(1)
+    service.setBounds('session-a', stale, { x: 1, y: 2, width: 3, height: 4 })
 
-    expect(h.managers).toHaveLength(2)
-    const managers = h.managers as FakeBrowserTabManager[]
-    expect(managers[0].createTab).toHaveBeenCalledWith(undefined)
-    expect(managers[1].createTab).toHaveBeenCalledWith("https://example.com")
+    expect(h.managers[0].setActive).not.toHaveBeenCalled()
+    expect(h.managers[0].setBounds).not.toHaveBeenCalled()
+    expect(h.managers[0].activeId).toBe(active)
   })
 
-  it("returns the final session state after closing a tab", async () => {
-    const service = new BrowserService({} as never)
-    service.createTab("session-a")
-    const manager = h.managers[0] as FakeBrowserTabManager
-    const finalState = { tabs: [{ id: 2 }], activeId: 2 } as BrowserState
-    manager.state.mockReturnValue(finalState)
-
-    await expect(service.close("session-a", 1)).resolves.toEqual(finalState)
-    expect(manager.close).toHaveBeenCalledWith(1)
+  it('shows only the requested session and hides only the requested session', () => {
+    const service = new BrowserService({} as never, new ResourceManager())
+    const first = service.createTab('session-a')
+    const second = service.createTab('session-b')
+    service.setVisible('session-b', second, true)
+    expect(h.managers[0].setVisible).toHaveBeenCalledWith(false)
+    expect(h.managers[1].setVisible).toHaveBeenCalledWith(true)
+    h.managers[1].setVisible.mockClear()
+    service.setVisible('session-a', first, false)
+    expect(h.managers[0].setVisible).toHaveBeenLastCalledWith(false)
+    expect(h.managers[1].setVisible).not.toHaveBeenCalled()
   })
 
-  it("emits state changes with the owning session id", () => {
-    const service = new BrowserService({} as never)
-    const onChange = vi.fn()
-    service.bindChange(onChange)
-    service.createTab("session-a")
+  it('does not let a stale tab hide the active tab', () => {
+    const service = new BrowserService({} as never, new ResourceManager())
+    const stale = service.createTab('session-a')
+    service.createTab('session-a')
+    h.managers[0].setVisible.mockClear()
 
+    service.setVisible('session-a', stale, false)
+
+    expect(h.managers[0].setVisible).not.toHaveBeenCalled()
+  })
+
+  it('emits state changes with the owning session id', () => {
+    const service = new BrowserService({} as never, new ResourceManager())
+    const listener = vi.fn()
+    service.bindChange(listener)
+    service.createTab('session-a')
     const state = { tabs: [{ id: 1 }], activeId: 1 } as BrowserState
-    const managers = h.managers as FakeBrowserTabManager[]
-    managers[0].emit(state)
-
-    expect(onChange).toHaveBeenCalledWith("session-a", state)
+    h.managers[0].emit(state)
+    expect(listener).toHaveBeenCalledWith('session-a', state)
   })
 
-  it("shows only the requested session", () => {
-    const service = new BrowserService({} as never)
-    service.createTab("session-a")
-    service.createTab("session-b")
-
-    service.setVisible("session-b", true)
-
-    const managers = h.managers as FakeBrowserTabManager[]
-    expect(managers[0].setVisible).toHaveBeenCalledWith(false)
-    expect(managers[1].setVisible).toHaveBeenLastCalledWith(true)
-  })
-
-  it("hides only the requested session", () => {
-    const service = new BrowserService({} as never)
-    service.createTab("session-a")
-    service.createTab("session-b")
-    const managers = h.managers as FakeBrowserTabManager[]
-
-    service.setVisible("session-a", false)
-
-    expect(managers[0].setVisible).toHaveBeenCalledWith(false)
-    expect(managers[1].setVisible).not.toHaveBeenCalled()
-  })
-
-  it("destroys session managers", async () => {
-    const service = new BrowserService({} as never)
-    service.createTab("session-a")
-    service.createTab("session-b")
-
-    await service.destroySession("session-a")
-    const managers = h.managers as FakeBrowserTabManager[]
-    expect(managers[0].destroy).toHaveBeenCalled()
-    expect(managers[1].destroy).not.toHaveBeenCalled()
-
-    await service.destroy()
-    expect(managers[1].destroy).toHaveBeenCalled()
-  })
-
-  it("does not recreate a session while that session is being destroyed", async () => {
-    const service = new BrowserService({} as never)
-    service.createTab("session-a")
-    const manager = h.managers[0] as FakeBrowserTabManager
-    let finishDestroy!: () => void
-    manager.destroy.mockImplementation(
-      () =>
-        new Promise<void>((resolve) => {
-          finishDestroy = resolve
-        }),
+  it('turns address-bar text into a search before navigating', () => {
+    const service = new BrowserService({} as never, new ResourceManager())
+    const id = service.createTab('session-a')
+    expect(service.navigate('session-a', id, '小红书')).toBe(true)
+    expect(h.managers[0].navigate).toHaveBeenCalledWith(
+      id,
+      'https://www.bing.com/search?q=%E5%B0%8F%E7%BA%A2%E4%B9%A6'
     )
-
-    const destroying = service.destroySession("session-a")
-    expect(() => service.createTab("session-a")).toThrow("browser session is being destroyed")
-    expect(h.managers).toHaveLength(1)
-
-    finishDestroy()
-    await destroying
-    expect(service.createTab("session-a")).toBe(1)
-    expect(h.managers).toHaveLength(2)
   })
 
-  it("does not create managers after service destruction starts", async () => {
-    const service = new BrowserService({} as never)
-    service.createTab("session-a")
-    const manager = h.managers[0] as FakeBrowserTabManager
-    let finishDestroy!: () => void
-    manager.destroy.mockImplementation(
-      () =>
-        new Promise<void>((resolve) => {
-          finishDestroy = resolve
-        }),
-    )
+  it('removes every resource owned by a destroyed session', async () => {
+    const resources = new ResourceManager()
+    const service = new BrowserService({} as never, resources)
+    service.createTab('session-a')
+    const other = service.createTab('session-b')
+    await resources.destroy('session-a')
+    expect(resources.list()).toEqual([{ id: other, type: 'browser', sessionId: 'session-b' }])
+    expect(h.managers[0].destroy).toHaveBeenCalledOnce()
+    expect(h.managers[1].destroy).not.toHaveBeenCalled()
+  })
 
+  it('rejects resources after global destruction starts', async () => {
+    const service = new BrowserService({} as never, new ResourceManager())
+    service.createTab('session-a')
     const destroying = service.destroy()
-    expect(() => service.createTab("session-b")).toThrow("browser service is destroyed")
-    expect(h.managers).toHaveLength(1)
-
-    await vi.waitFor(() => expect(finishDestroy).toBeTypeOf("function"))
-    finishDestroy()
+    expect(() => service.createTab('session-b')).toThrow()
     await destroying
-    expect(() => service.createTab("session-b")).toThrow("browser service is destroyed")
+    expect(() => service.createTab('session-b')).toThrow()
   })
 
-  it("waits for a manager when global and session destruction start in the same tick", async () => {
-    const service = new BrowserService({} as never)
-    service.createTab("session-a")
-    const manager = h.managers[0] as FakeBrowserTabManager
-    let finishDestroy!: () => void
-    manager.destroy.mockImplementation(
-      () =>
-        new Promise<void>((resolve) => {
-          finishDestroy = resolve
-        }),
-    )
-
-    const destroyingAll = service.destroy()
-    const destroyingSession = service.destroySession("session-a")
-    const beforeManagerFinishes = await Promise.race([
-      destroyingAll.then(() => "done"),
-      new Promise<string>((resolve) => setTimeout(() => resolve("pending"), 10)),
-    ])
-
-    expect(beforeManagerFinishes).toBe("pending")
-    expect(destroyingSession).toBe(destroyingAll)
-    finishDestroy()
-    await Promise.all([destroyingAll, destroyingSession])
+  it('does not allocate resources when reading an unused session', () => {
+    const resources = new ResourceManager()
+    const service = new BrowserService({} as never, resources)
+    expect(resources.list()).toEqual([])
+    expect(service.state('unused')).toEqual({ tabs: [], activeId: null })
+    service.setVisible('unused', 1, true)
+    expect(h.managers).toEqual([])
   })
 })

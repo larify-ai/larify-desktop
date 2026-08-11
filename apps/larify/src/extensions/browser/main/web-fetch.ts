@@ -2,8 +2,7 @@ import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { z } from 'zod'
 import { prepareToolOutput, type ToolPayload } from '../../../main/utils/tool-output'
-import { defineTool, type ToolRunContext } from '../../../shared/extension/tool'
-import type { Toolkit } from '../../../shared/toolkit'
+import { defineTool, type Tool, type ToolRunContext } from '../../../main/core/plugin/protocol'
 import type { BrowserService } from './browser-service'
 import type { BrowserTab } from './tab'
 import { normalizeUrl } from './url'
@@ -92,14 +91,14 @@ export async function executeWebFetch(
   })
 }
 
-export function webFetchTools(getService: () => BrowserService): Toolkit['tools'] {
+export function webFetchTools(service: BrowserService): Record<string, Tool> {
   return {
     web_fetch: defineTool({
       description:
         'Read a URL returned by web_search in a temporary browser tab and return its title and clean Markdown content.',
       metadata: { icon: 'browser', eager: true },
       inputSchema: webFetchInputSchema,
-      execute: (args, ctx) => executeWebFetch(getService(), args, ctx)
+      execute: (args, ctx) => executeWebFetch(service, args, ctx)
     })
   }
 }

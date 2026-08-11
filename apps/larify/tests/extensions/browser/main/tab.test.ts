@@ -1,9 +1,10 @@
+/* eslint-disable @typescript-eslint/no-empty-function */
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const h = vi.hoisted(() => ({
   fetchMock: vi.fn(),
   clickMock: vi.fn(),
-  sendCommandMock: vi.fn(),
+  sendCommandMock: vi.fn()
 }))
 
 vi.mock("electron", () => {
@@ -46,7 +47,7 @@ vi.mock("electron", () => {
       attach: vi.fn(),
       detach: vi.fn(),
       on: vi.fn(),
-      sendCommand: (...args: unknown[]) => h.sendCommandMock(...args),
+      sendCommand: (...args: unknown[]) => h.sendCommandMock(...args)
     }
 
     on(event: string, cb: (...args: unknown[]) => void): void {
@@ -115,7 +116,7 @@ vi.mock("electron", () => {
       canGoBack: () => false,
       canGoForward: () => false,
       goBack(): void {},
-      goForward(): void {},
+      goForward(): void {}
     }
   }
 
@@ -128,13 +129,13 @@ vi.mock("electron", () => {
   return {
     WebContentsView,
     net: {
-      fetch: (...args: unknown[]) => h.fetchMock(...args),
-    },
+      fetch: (...args: unknown[]) => h.fetchMock(...args)
+    }
   }
 })
 
 vi.mock("../../../../src/extensions/browser/main/interactions", () => ({
-  click: (...args: unknown[]) => h.clickMock(...args),
+  click: (...args: unknown[]) => h.clickMock(...args)
 }))
 
 import { BrowserTab } from "../../../../src/extensions/browser/main/tab"
@@ -176,7 +177,10 @@ function webContents(tab: BrowserTab): {
   }
 }
 
-function downloadItem(path = "D:\\Downloads\\file.txt", finishOnCancel = true): {
+function downloadItem(
+  path = "D:\\Downloads\\file.txt",
+  finishOnCancel = true
+): {
   cancel: ReturnType<typeof vi.fn>
   setSavePath: (nextPath: string) => void
   once: (event: string, cb: (...args: unknown[]) => void) => void
@@ -196,7 +200,7 @@ function downloadItem(path = "D:\\Downloads\\file.txt", finishOnCancel = true): 
       if (event === "done") doneCb = cb as (event: unknown, state: string) => void
     }),
     getSavePath: vi.fn(() => savePath),
-    triggerDone: (state: string) => doneCb?.({}, state),
+    triggerDone: (state: string) => doneCb?.({}, state)
   }
 }
 
@@ -226,7 +230,9 @@ describe("BrowserTab", () => {
     expect(tab.state().loading).toBe(true)
 
     await waitFor(() => expect(webContents(tab).pendingLoads.length).toBeGreaterThan(0))
-    webContents(tab).pendingLoads.splice(0).forEach((resolve) => resolve())
+    webContents(tab)
+      .pendingLoads.splice(0)
+      .forEach((resolve) => resolve())
     webContents(tab).emit("did-navigate")
 
     expect(tab.state().url).toBe("https://example.com")
@@ -251,7 +257,7 @@ describe("BrowserTab", () => {
       -105,
       "ERR_NAME_NOT_RESOLVED",
       "https://old.example",
-      true,
+      true
     )
 
     expect(tab.state().url).toBe(pendingState.url)
@@ -275,7 +281,7 @@ describe("BrowserTab", () => {
     h.fetchMock.mockResolvedValue({
       ok: true,
       arrayBuffer: () => Promise.resolve(Uint8Array.from([1, 2, 3]).buffer),
-      headers: { get: () => "image/png; charset=utf-8" },
+      headers: { get: () => "image/png; charset=utf-8" }
     })
     const tab = new BrowserTab(1, "p")
     tab.navigate("https://x.com")
@@ -294,14 +300,14 @@ describe("BrowserTab", () => {
     webContents(tab).emit("did-start-navigation", {
       isMainFrame: true,
       isSameDocument: false,
-      url: "https://a.com/page",
+      url: "https://a.com/page"
     })
     expect(tab.state().favIconUrl).toBe("")
 
     webContents(tab).emit("did-start-navigation", {
       isMainFrame: true,
       isSameDocument: false,
-      url: "https://b.com/",
+      url: "https://b.com/"
     })
     expect(tab.state().favIconUrl).toBe("")
   })
@@ -317,7 +323,7 @@ describe("BrowserTab", () => {
     webContents(tab).emit("did-start-navigation", {
       isMainFrame: true,
       isSameDocument: false,
-      url: "https://www.xiaohongshu.com/explore",
+      url: "https://www.xiaohongshu.com/explore"
     })
     expect(tab.state().favIconUrl).toBe("")
   })
@@ -327,7 +333,7 @@ describe("BrowserTab", () => {
     h.fetchMock.mockReturnValueOnce(
       new Promise((resolve) => {
         resolveFetch = resolve
-      }),
+      })
     )
     const tab = new BrowserTab(1, "p")
     tab.navigate("https://a.example")
@@ -338,12 +344,12 @@ describe("BrowserTab", () => {
     webContents(tab).emit("did-start-navigation", {
       isMainFrame: true,
       isSameDocument: false,
-      url: "https://b.example/",
+      url: "https://b.example/"
     })
     resolveFetch({
       ok: true,
       arrayBuffer: () => Promise.resolve(Uint8Array.from([1, 2, 3]).buffer),
-      headers: { get: () => "image/png" },
+      headers: { get: () => "image/png" }
     })
     await Promise.resolve()
     await Promise.resolve()
@@ -358,7 +364,7 @@ describe("BrowserTab", () => {
       () =>
         new Promise((resolve) => {
           finishFetch = resolve
-        }),
+        })
     )
     const tab = new BrowserTab(1, "p")
     webContents(tab).url = "https://example.com"
@@ -373,7 +379,7 @@ describe("BrowserTab", () => {
     finishFetch({
       ok: true,
       arrayBuffer: async () => new Uint8Array([1]).buffer,
-      headers: { get: () => "image/png" },
+      headers: { get: () => "image/png" }
     })
 
     await expect(pending).resolves.toBeUndefined()
@@ -387,7 +393,7 @@ describe("BrowserTab", () => {
     webContents(tab).emit("did-start-navigation", {
       isMainFrame: true,
       isSameDocument: false,
-      url: "https://example.com",
+      url: "https://example.com"
     })
     expect(tab.state().loading).toBe(true)
 
@@ -467,7 +473,7 @@ describe("BrowserTab", () => {
     const first = tab.download("a", "D:\\Downloads\\first.txt", 3000)
 
     await expect(tab.download("b", "D:\\Downloads\\second.txt", 3000)).rejects.toThrow(
-      "a download is already in progress",
+      "a download is already in progress"
     )
 
     const item = downloadItem()
@@ -506,16 +512,22 @@ describe("BrowserTab", () => {
     const tab = new BrowserTab(1, "p")
     h.clickMock.mockRejectedValueOnce(new Error("selector not found"))
 
-    await expect(tab.download("a", "D:\\Downloads\\file.txt", 3000)).rejects.toThrow("selector not found")
+    await expect(tab.download("a", "D:\\Downloads\\file.txt", 3000)).rejects.toThrow(
+      "selector not found"
+    )
 
-    const session = tab.view.webContents.session as unknown as { handlers: Record<string, unknown[]> }
+    const session = tab.view.webContents.session as unknown as {
+      handlers: Record<string, unknown[]>
+    }
     expect(session.handlers["will-download"] ?? []).toHaveLength(0)
   })
 
   it("rejects and cleans up a pending download when destroyed", async () => {
     const tab = new BrowserTab(1, "p")
     const promise = tab.download("a", "D:\\Downloads\\file.txt", 3000)
-    const session = tab.view.webContents.session as unknown as { handlers: Record<string, unknown[]> }
+    const session = tab.view.webContents.session as unknown as {
+      handlers: Record<string, unknown[]>
+    }
     ;(tab.view.webContents.debugger as unknown as { detach: () => void }).detach = vi.fn()
 
     tab.destroy()
@@ -573,7 +585,7 @@ describe("BrowserTab", () => {
 
     await expect(promise).rejects.toThrow("download was cancelled")
     await expect(tab.download("b", "D:\\Downloads\\second.txt", 3000)).rejects.toThrow(
-      "a download is already in progress",
+      "a download is already in progress"
     )
     await vi.advanceTimersByTimeAsync(5000)
     const third = tab.download("c", "D:\\Downloads\\third.txt", 3000)
@@ -597,7 +609,9 @@ describe("BrowserTab", () => {
     webContents(tab).session.emit("will-download", {}, item, tab.view.webContents)
 
     await expect(promise).rejects.toThrow("download was cancelled")
-    const session = tab.view.webContents.session as unknown as { handlers: Record<string, unknown[]> }
+    const session = tab.view.webContents.session as unknown as {
+      handlers: Record<string, unknown[]>
+    }
     expect(session.handlers["will-download"] ?? []).toHaveLength(0)
   })
 
@@ -612,9 +626,9 @@ describe("BrowserTab", () => {
     const beforeDone = await Promise.race([
       promise.then(
         () => "resolved",
-        () => "rejected",
+        () => "rejected"
       ),
-      new Promise<string>((resolve) => setTimeout(() => resolve("pending"), 10)),
+      new Promise<string>((resolve) => setTimeout(() => resolve("pending"), 10))
     ])
     expect(beforeDone).toBe("pending")
 
@@ -633,7 +647,7 @@ describe("BrowserTab", () => {
 
     expect(() => tab.destroy()).not.toThrow()
     await expect(promise).rejects.toThrow(
-      "tab was closed during download; failed to cancel download: cancel exploded",
+      "tab was closed during download; failed to cancel download: cancel exploded"
     )
   })
 
@@ -647,7 +661,7 @@ describe("BrowserTab", () => {
 
     controller.abort()
     const assertion = expect(promise).rejects.toThrow(
-      "download was cancelled; download cancellation was not confirmed within 5s",
+      "download was cancelled; download cancellation was not confirmed within 5s"
     )
     await vi.advanceTimersByTimeAsync(5000)
 
@@ -762,7 +776,7 @@ describe("BrowserTab", () => {
     webContents(tab).emit("did-start-navigation", {
       isMainFrame: true,
       isSameDocument: false,
-      url: "https://example.com/new",
+      url: "https://example.com/new"
     })
     const pending = tab.waitForLoad("networkidle", 3000)
     await vi.advanceTimersByTimeAsync(500)
@@ -799,7 +813,7 @@ describe("BrowserTab", () => {
       tab.destroy()
 
       await expect(pending).rejects.toThrow("tab was closed while waiting for load")
-    },
+    }
   )
 
   it("rejects a navigation whose loadURL promise never settles", async () => {
@@ -823,7 +837,7 @@ describe("BrowserTab", () => {
       expect(
         (webContents(tab) as unknown as { handlers: Record<string, unknown[]> }).handlers[
           "did-fail-load"
-        ],
+        ]
       ).toHaveLength(2)
     })
 
@@ -841,7 +855,7 @@ describe("BrowserTab", () => {
     const assertion = expect(pending).rejects.toThrow("ERR_NAME_NOT_RESOLVED")
     await vi.waitFor(() => {
       expect(
-        (wc as unknown as { handlers: Record<string, unknown[]> }).handlers["did-fail-load"],
+        (wc as unknown as { handlers: Record<string, unknown[]> }).handlers["did-fail-load"]
       ).toHaveLength(2)
     })
     wc.loading = false
@@ -860,13 +874,13 @@ describe("BrowserTab", () => {
     const assertion = expect(pending).rejects.toThrow("ERR_NAME_NOT_RESOLVED")
     await vi.waitFor(() => {
       expect(
-        (wc as unknown as { handlers: Record<string, unknown[]> }).handlers["did-fail-load"],
+        (wc as unknown as { handlers: Record<string, unknown[]> }).handlers["did-fail-load"]
       ).toHaveLength(2)
     })
     wc.emit("did-start-navigation", {
       url: "https://final.example",
       isMainFrame: true,
-      isSameDocument: false,
+      isSameDocument: false
     })
     wc.loading = false
     wc.emit("did-fail-load", {}, -105, "ERR_NAME_NOT_RESOLVED", "https://final.example", true)
@@ -888,7 +902,7 @@ describe("BrowserTab", () => {
       wc.emit("did-start-navigation", {
         url: "https://previous.example",
         isMainFrame: true,
-        isSameDocument: false,
+        isSameDocument: false
       })
     }
 
@@ -929,7 +943,7 @@ describe("BrowserTab", () => {
             : tab.reloadAndWait()
       await expect(operation).rejects.toThrow("navigation failed")
       expect(wc.handlers["did-finish-load"] ?? []).toHaveLength(0)
-    },
+    }
   )
 
   it("does not report an older navigation as successful after a newer navigation wins", async () => {
@@ -983,7 +997,7 @@ describe("BrowserTab", () => {
     expect(tab.state()).toMatchObject({
       url: "https://same.example",
       loading: true,
-      error: null,
+      error: null
     })
     vi.useRealTimers()
   })
@@ -1022,7 +1036,7 @@ describe("BrowserTab", () => {
 
       await expect(newer).resolves.toBeUndefined()
       await olderAssertion
-    },
+    }
   )
 
   it.each(["back", "forward", "reload"] as const)(
@@ -1056,7 +1070,7 @@ describe("BrowserTab", () => {
       wc.pendingLoads[0]()
 
       await olderAssertion
-    },
+    }
   )
 
   it("records a timeout instead of leaking an unhandled rejection from navigate", async () => {
@@ -1073,10 +1087,12 @@ describe("BrowserTab", () => {
   })
 
   it("evaluates JavaScript functions and expressions", async () => {
-    h.sendCommandMock.mockImplementation(async (method: string, params: { expression?: string }) => {
-      if (method !== "Runtime.evaluate") return {}
-      return { result: { value: await Function(`return ${params.expression}`)() } }
-    })
+    h.sendCommandMock.mockImplementation(
+      async (method: string, params: { expression?: string }) => {
+        if (method !== "Runtime.evaluate") return {}
+        return { result: { value: await Function(`return ${params.expression}`)() } }
+      }
+    )
     const tab = new BrowserTab(1, "p")
 
     await expect(tab.evalJs("() => 1 + 1")).resolves.toBe(2)
@@ -1092,8 +1108,8 @@ describe("BrowserTab", () => {
       return {
         exceptionDetails: {
           text: "Uncaught",
-          exception: { description: "Error: execution context was destroyed" },
-        },
+          exception: { description: "Error: execution context was destroyed" }
+        }
       }
     })
     const tab = new BrowserTab(1, "p")
@@ -1115,7 +1131,7 @@ describe("BrowserTab", () => {
           return { result: { value: true } }
         }
         return {}
-      },
+      }
     )
     const tab = new BrowserTab(1, "p")
 
@@ -1135,7 +1151,7 @@ describe("BrowserTab", () => {
           return { result: { value: false } }
         }
         return {}
-      },
+      }
     )
     const tab = new BrowserTab(1, "p")
     const pending = tab.read()
@@ -1147,25 +1163,18 @@ describe("BrowserTab", () => {
   })
 
   it("cancels a pending raw CDP call when the operation is aborted", async () => {
-    h.sendCommandMock.mockImplementation(
-      async (method: string) =>
-        method === "Runtime.neverCompletes" ? new Promise<never>(() => {}) : {},
+    h.sendCommandMock.mockImplementation(async (method: string) =>
+      method === "Runtime.neverCompletes" ? new Promise<never>(() => {}) : {}
     )
     const tab = new BrowserTab(1, "p")
     const controller = new AbortController()
-    const pending = tab.sendCdp(
-      "Runtime.neverCompletes",
-      {},
-      undefined,
-      600_000,
-      controller.signal,
-    )
+    const pending = tab.sendCdp("Runtime.neverCompletes", {}, undefined, 600_000, controller.signal)
 
     controller.abort()
 
     await expect(pending).rejects.toThrow("CDP command was cancelled: Runtime.neverCompletes")
     expect(
-      h.sendCommandMock.mock.calls.some(([method]) => method === "Runtime.neverCompletes"),
+      h.sendCommandMock.mock.calls.some(([method]) => method === "Runtime.neverCompletes")
     ).toBe(false)
   })
 
@@ -1175,11 +1184,11 @@ describe("BrowserTab", () => {
     controller.abort()
 
     await expect(
-      tab.sendCdp("Runtime.evaluate", {}, undefined, 600_000, controller.signal),
+      tab.sendCdp("Runtime.evaluate", {}, undefined, 600_000, controller.signal)
     ).rejects.toThrow("CDP command was cancelled: Runtime.evaluate")
-    expect(
-      h.sendCommandMock.mock.calls.some(([method]) => method === "Runtime.evaluate"),
-    ).toBe(false)
+    expect(h.sendCommandMock.mock.calls.some(([method]) => method === "Runtime.evaluate")).toBe(
+      false
+    )
   })
 
   it("tracks a held modifier across raw keyboard down and up calls", async () => {
@@ -1199,7 +1208,7 @@ describe("BrowserTab", () => {
       { type: "keyDown", key: "Control", modifiers: 2 },
       { type: "keyDown", key: "c", modifiers: 2 },
       { type: "keyUp", key: "c", modifiers: 2 },
-      { type: "keyUp", key: "Control", modifiers: 0 },
+      { type: "keyUp", key: "Control", modifiers: 0 }
     ])
   })
 
@@ -1223,7 +1232,7 @@ describe("BrowserTab", () => {
       ([method, params]) =>
         method === "Input.dispatchKeyEvent" &&
         (params as { type?: string; key?: string }).type === "keyDown" &&
-        (params as { key?: string }).key === "c",
+        (params as { key?: string }).key === "c"
     )
     expect(cDown?.[1]).toMatchObject({ modifiers: 0 })
   })
@@ -1242,13 +1251,11 @@ describe("BrowserTab", () => {
 
     const keyDownCall = h.sendCommandMock.mock.calls.find(
       ([method, params]) =>
-        method === "Input.dispatchKeyEvent" &&
-        (params as { type?: string }).type === "keyDown",
+        method === "Input.dispatchKeyEvent" && (params as { type?: string }).type === "keyDown"
     )
     const mouseMoveCall = h.sendCommandMock.mock.calls.find(
       ([method, params]) =>
-        method === "Input.dispatchMouseEvent" &&
-        (params as { type?: string }).type === "mouseMoved",
+        method === "Input.dispatchMouseEvent" && (params as { type?: string }).type === "mouseMoved"
     )
     expect(keyDownCall?.[1]).toMatchObject({ modifiers: 0 })
     expect(mouseMoveCall?.[1]).toMatchObject({ buttons: 0 })

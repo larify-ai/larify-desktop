@@ -10,7 +10,6 @@ const HOST_POSITION = { x: -3000, y: -3000 }
 export class BrowserTabManager {
   private tabs = new Map<number, BrowserTab>()
   private activeId: number | null = null
-  private nextId = 1
   private nextTemporaryId = -1
   private bounds: Rectangle = { x: 0, y: 0, width: 0, height: 0 }
   private visible = false
@@ -28,7 +27,10 @@ export class BrowserTabManager {
     if (!this.host.isDestroyed()) this.host.destroy()
   }
 
-  constructor(private readonly window: BrowserWindow) {
+  constructor(
+    private readonly window: BrowserWindow,
+    private readonly openTab: (url?: string) => void = () => {}
+  ) {
     this.host = new BrowserWindow({
       show: true,
       x: HOST_POSITION.x,
@@ -51,17 +53,18 @@ export class BrowserTabManager {
     return this.tabs.get(id)
   }
 
-  ensureTab(): void {
-    if (this.tabs.size > 0) return
-    this.createTab()
-  }
-
-  createTab(url?: string): number {
+  createTab(id: number, url?: string): number {
     if (this.destroying) throw new Error("browser tab manager is destroyed")
-    const tab = new BrowserTab(this.nextId++, BROWSER_PARTITION)
+    const tab = new BrowserTab(id, BROWSER_PARTITION)
     tab.bindChange(() => this.emit())
     tab.view.webContents.setWindowOpenHandler((details) => {
-      if (!this.destroying) this.createTab(details.url || undefined)
+      if (!this.destroying) {
+        try {
+          this.openTab(details.url || undefined)
+        } catch {
+          return { action: "deny" }
+        }
+      }
       return { action: "deny" }
     })
     this.tabs.set(tab.id, tab)
@@ -69,7 +72,7 @@ export class BrowserTabManager {
     if (url) tab.navigate(url)
     this.applyLayout()
     this.emit()
-    return tab.id
+    return id
   }
 
   async withTemporaryTab<T>(url: string, callback: (tab: BrowserTab) => Promise<T>): Promise<T> {
@@ -140,20 +143,6 @@ export class BrowserTabManager {
       this.activeId = remaining[index] ?? remaining[index - 1] ?? null
     }
     this.applyLayout()
-    this.emit()
-  }
-
-  reorder(id: number, toIndex: number): void {
-    if (!this.tabs.has(id)) return
-    const ids = [...this.tabs.keys()]
-    const from = ids.indexOf(id)
-    const to = Math.max(0, Math.min(toIndex, ids.length - 1))
-    if (from === to) return
-    ids.splice(from, 1)
-    ids.splice(to, 0, id)
-    const next = new Map<number, BrowserTab>()
-    for (const tabId of ids) next.set(tabId, this.tabs.get(tabId)!)
-    this.tabs = next
     this.emit()
   }
 

@@ -5,7 +5,6 @@ import { runStoredAgentSession } from '../../../main/core/agent'
 import { createAgentRuntime } from '../../../main/core/agent/runtime'
 import type { SessionStore } from '../../../main/core/session'
 import type { AgentModelConfig } from '../../../main/core/model/config'
-import type { SessionResource } from '../../../main/utils/session-resource'
 import { appendToList, get } from '../utils/frontmatter'
 
 function userMessage(text: string): UIMessage {
@@ -13,17 +12,6 @@ function userMessage(text: string): UIMessage {
     id: randomUUID(),
     role: 'user',
     parts: [{ type: 'text', text }]
-  }
-}
-
-async function destroySessionResources(app: App, sessionId: string): Promise<void> {
-  const results = await Promise.allSettled(
-    app
-      .getAll<SessionResource>('session-resource')
-      .map((resource) => resource.destroySession(sessionId))
-  )
-  for (const result of results) {
-    if (result.status === 'rejected') console.error('[nest cleanup]', result.reason)
   }
 }
 
@@ -51,16 +39,12 @@ export async function exec(input: ExecInput): Promise<void> {
     modelConfig: input.modelConfig
   })
 
-  try {
-    await runStoredAgentSession(sessions, {
-      sessionId,
-      title,
-      cwd: input.cwd,
-      message: messages[0],
-      options: { ...runtime, abortSignal: input.signal },
-      onChunk: input.onChunk
-    })
-  } finally {
-    await destroySessionResources(input.app, sessionId)
-  }
+  await runStoredAgentSession(sessions, {
+    sessionId,
+    title,
+    cwd: input.cwd,
+    message: messages[0],
+    options: { ...runtime, abortSignal: input.signal },
+    onChunk: input.onChunk
+  })
 }

@@ -1,6 +1,6 @@
-import { ipcMain, type BrowserWindow } from "electron"
-import type { TerminalService } from "./terminal-service"
-import type { TerminalCreateOptions, TerminalSnapshot } from "../shared/types"
+import { ipcMain, type BrowserWindow } from 'electron'
+import type { TerminalService } from './terminal-service'
+import type { TerminalSnapshot } from '../shared/types'
 
 const BATCH_MS = 10
 
@@ -8,7 +8,9 @@ class DataBatcher {
   private chunks: Array<{ data: string; start: number; end: number }> = []
   private timer: NodeJS.Timeout | null = null
 
-  constructor(private readonly send: (event: { data: string; start: number; end: number }) => void) {}
+  constructor(
+    private readonly send: (event: { data: string; start: number; end: number }) => void
+  ) {}
 
   push(data: string, start: number, end: number): void {
     this.chunks.push({ data, start, end })
@@ -23,7 +25,7 @@ class DataBatcher {
     if (this.chunks.length === 0) return
     const start = this.chunks[0].start
     const end = this.chunks[this.chunks.length - 1].end
-    const data = this.chunks.map((chunk) => chunk.data).join("")
+    const data = this.chunks.map((chunk) => chunk.data).join('')
     this.chunks = []
     this.send({ data, start, end })
   }
@@ -31,17 +33,7 @@ class DataBatcher {
 
 const batchKey = (sessionId: string, terminalId: number): string => `${sessionId}:${terminalId}`
 
-const rendererCreateOptions = (opts: TerminalCreateOptions): TerminalCreateOptions => ({
-  cwd: opts.cwd,
-  title: opts.title,
-  cols: opts.cols,
-  rows: opts.rows,
-})
-
-export function registerTerminalIpc(
-  service: TerminalService,
-  window: BrowserWindow,
-): () => void {
+export function registerTerminalIpc(service: TerminalService, window: BrowserWindow): () => void {
   const batchers = new Map<string, DataBatcher>()
 
   const send = (channel: string, payload: unknown): void => {
@@ -55,75 +47,51 @@ export function registerTerminalIpc(
     let batcher = batchers.get(key)
     if (!batcher) {
       batcher = new DataBatcher((event) =>
-        send("terminal:data", { sessionId, terminalId, ...event }),
+        send('terminal:data', { sessionId, terminalId, ...event })
       )
       batchers.set(key, batcher)
     }
     return batcher
   }
 
-  const unbindChange = service.bindChange((state) => send("terminal:state", state))
+  const unbindChange = service.bindChange((state) => {
+    const alive = new Set(state.terminals.map(({ id }) => batchKey(state.sessionId, id)))
+    const prefix = `${state.sessionId}:`
+    for (const [key, pending] of batchers) {
+      if (!key.startsWith(prefix) || alive.has(key)) continue
+      pending.flush()
+      batchers.delete(key)
+    }
+    send('terminal:state', state)
+  })
   const unbindData = service.bindData((sessionId, terminalId, data, start, end) =>
-    batcher(sessionId, terminalId).push(data, start, end),
+    batcher(sessionId, terminalId).push(data, start, end)
   )
   const unbindExit = service.bindExit((sessionId, terminalId, exitCode) => {
     const key = batchKey(sessionId, terminalId)
     batchers.get(key)?.flush()
     batchers.delete(key)
-    send("terminal:exit", { sessionId, terminalId, exitCode })
+    send('terminal:exit', { sessionId, terminalId, exitCode })
   })
 
-  ipcMain.handle("terminal:getState", (_event, sessionId: string) => service.state(sessionId))
-  ipcMain.handle("terminal:create", (_event, sessionId: string, opts?: TerminalCreateOptions) =>
-    service.create(sessionId, opts && rendererCreateOptions(opts)),
-  )
-  ipcMain.handle("terminal:write", (_event, sessionId: string, terminalId: number, data: string) =>
-    service.write(sessionId, terminalId, data),
+  ipcMain.handle('terminal:getState', (_event, sessionId: string) => service.state(sessionId))
+  ipcMain.handle('terminal:write', (_event, sessionId: string, terminalId: number, data: string) =>
+    service.write(sessionId, terminalId, data)
   )
   ipcMain.handle(
-    "terminal:resize",
+    'terminal:resize',
     (_event, sessionId: string, terminalId: number, cols: number, rows: number) =>
-      service.resize(sessionId, terminalId, cols, rows),
-  )
-  ipcMain.handle("terminal:close", async (_event, sessionId: string, terminalId: number) => {
-    const key = batchKey(sessionId, terminalId)
-    batchers.get(key)?.flush()
-    batchers.delete(key)
-    await service.close(sessionId, terminalId)
-  })
-  ipcMain.handle("terminal:setActive", (_event, sessionId: string, terminalId: number) =>
-    service.setActive(sessionId, terminalId),
+      service.resize(sessionId, terminalId, cols, rows)
   )
   ipcMain.handle(
-    "terminal:reorder",
-    (_event, sessionId: string, terminalId: number, toIndex: number) =>
-      service.reorder(sessionId, terminalId, toIndex),
-  )
-  ipcMain.handle("terminal:snapshot", (_event, sessionId: string, terminalId: number): Promise<TerminalSnapshot | null> => {
-    batchers.get(batchKey(sessionId, terminalId))?.flush()
-    return service.snapshot(sessionId, terminalId)
-  })
-  ipcMain.handle("terminal:destroySession", (_event, sessionId: string) => {
-    const prefix = `${sessionId}:`
-    for (const [key, pending] of batchers) {
-      if (!key.startsWith(prefix)) continue
-      pending.flush()
-      batchers.delete(key)
+    'terminal:snapshot',
+    (_event, sessionId: string, terminalId: number): Promise<TerminalSnapshot | null> => {
+      batchers.get(batchKey(sessionId, terminalId))?.flush()
+      return service.snapshot(sessionId, terminalId)
     }
-    return service.destroySession(sessionId)
-  })
+  )
 
-  const channels = [
-    "terminal:getState",
-    "terminal:create",
-    "terminal:write",
-    "terminal:resize",
-    "terminal:close",
-    "terminal:setActive",
-    "terminal:reorder",
-    "terminal:snapshot",
-    "terminal:destroySession",
-  ]
+  const channels = ['terminal:getState', 'terminal:write', 'terminal:resize', 'terminal:snapshot']
 
   return () => {
     unbindChange()

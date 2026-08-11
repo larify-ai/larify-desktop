@@ -173,8 +173,8 @@ const writeSchema = z.object({
     .describe('Raw input passed to node-pty write(). Use JSON unicode escapes for control characters.'),
   submit: z
     .boolean()
-    .default(false)
-    .describe('Append \\r if input has no newline'),
+    .default(true)
+    .describe('Append \\r to execute the input'),
   timeout: z
     .number()
     .min(1)

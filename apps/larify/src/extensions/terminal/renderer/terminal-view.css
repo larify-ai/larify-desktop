@@ -1,12 +1,12 @@
 .larify-terminal-surface .xterm,
 .larify-terminal-surface .xterm-screen,
 .larify-terminal-surface .xterm-viewport {
-  background: var(--workbench-content, var(--background)) !important;
+  background: var(--background) !important;
 }
 
 .larify-terminal-surface .xterm {
   height: 100%;
-  padding: 0 !important;
+  padding: 8px !important;
 }
 
 .larify-terminal-surface .xterm-viewport {
@@ -29,8 +29,4 @@
 .larify-terminal-surface .xterm-scrollable-element > .scrollbar.horizontal {
   display: none !important;
   height: 0 !important;
-}
-
-.larify-terminal-surface .xterm-screen {
-  padding-left: 8px;
 }

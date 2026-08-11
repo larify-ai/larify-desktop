@@ -1,9 +1,9 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react"
-import { ArrowLeftIcon, ArrowRightIcon, RotateCwIcon } from "lucide-react"
-import { Button } from "@renderer/components/ui/button"
-import { Input } from "@renderer/components/ui/input"
-import { cn } from "@renderer/lib/utils"
-import type { BrowserTabState } from "../shared/types"
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { ArrowLeftIcon, ArrowRightIcon, RotateCwIcon } from 'lucide-react'
+import { Button } from '@renderer/components/ui/button'
+import { Input } from '@renderer/components/ui/input'
+import { cn } from '@renderer/lib/utils'
+import type { BrowserTabState } from '../shared/types'
 
 interface BrowserToolbarProps {
   tab: BrowserTabState | null
@@ -23,14 +23,14 @@ const decodeForDisplay = (url: string): string => {
 
 const displayFileUrl = (url: URL): string => {
   const path = decodeURIComponent(url.pathname)
-  return path.length >= 3 && path[0] === "/" && path[2] === ":" ? path.slice(1) : path
+  return path.length >= 3 && path[0] === '/' && path[2] === ':' ? path.slice(1) : path
 }
 
 const simplifyForDisplay = (url: string): string => {
-  if (!url) return ""
+  if (!url) return ''
   try {
     const parsed = new URL(url)
-    if (parsed.protocol === "file:") return displayFileUrl(parsed)
+    if (parsed.protocol === 'file:') return displayFileUrl(parsed)
     const prefix = `${parsed.protocol}//`
     return url.startsWith(prefix) ? url.slice(prefix.length) : url
   } catch {
@@ -43,15 +43,15 @@ export function BrowserToolbar({
   onBack,
   onForward,
   onNavigate,
-  onReload,
+  onReload
 }: BrowserToolbarProps): React.JSX.Element {
   const [editing, setEditing] = useState<{ key: string; value: string } | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const navigationRevisionRef = useRef(0)
-  const fullUrl = tab ? decodeForDisplay(tab.url) : ""
+  const fullUrl = tab ? decodeForDisplay(tab.url) : ''
   const displayUrl = simplifyForDisplay(fullUrl)
-  const editUrl = fullUrl.startsWith("file://") ? displayUrl : fullUrl
-  const tabKey = tab ? `${tab.id}:${tab.url}` : ""
+  const editUrl = fullUrl.startsWith('file://') ? displayUrl : fullUrl
+  const tabKey = tab ? `${tab.id}:${tab.url}` : ''
   const tabKeyRef = useRef(tabKey)
   const isEditing = editing?.key === tabKey
   const value = isEditing ? editing.value : displayUrl
@@ -69,23 +69,35 @@ export function BrowserToolbar({
 
   return (
     <div className="flex h-11 shrink-0 items-center gap-1 bg-card px-2">
-      <Button aria-label="后退" disabled={!tab?.canGoBack} onClick={onBack} size="icon-sm" variant="ghost">
+      <Button
+        aria-label="后退"
+        disabled={!tab?.canGoBack}
+        onClick={onBack}
+        size="icon-sm"
+        variant="ghost"
+      >
         <ArrowLeftIcon />
       </Button>
-      <Button aria-label="前进" disabled={!tab?.canGoForward} onClick={onForward} size="icon-sm" variant="ghost">
+      <Button
+        aria-label="前进"
+        disabled={!tab?.canGoForward}
+        onClick={onForward}
+        size="icon-sm"
+        variant="ghost"
+      >
         <ArrowRightIcon />
       </Button>
       <Button aria-label="刷新" disabled={!tab} onClick={onReload} size="icon-sm" variant="ghost">
-        <RotateCwIcon className={cn(tab?.loading && "animate-spin")} />
+        <RotateCwIcon className={cn(tab?.loading && 'animate-spin')} />
       </Button>
       <div className="relative min-w-0 flex-1">
         {!isEditing ? (
           <button
             className={cn(
-              "flex h-8 w-full min-w-0 items-center rounded-md bg-muted/40 px-3 text-left text-sm shadow-none",
-              "focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] focus-visible:outline-none",
-              !tab && "cursor-not-allowed opacity-50",
-              !value && "text-muted-foreground",
+              'flex h-8 w-full min-w-0 items-center rounded-md bg-muted/40 px-3 text-left text-sm shadow-none',
+              'focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] focus-visible:outline-none',
+              !tab && 'cursor-not-allowed opacity-50',
+              !value && 'text-muted-foreground'
             )}
             disabled={!tab}
             type="button"
@@ -94,7 +106,7 @@ export function BrowserToolbar({
               setEditing({ key: tabKey, value: editUrl })
             }}
           >
-            <span className="truncate">{value || "输入 URL"}</span>
+            <span className="truncate">{value || '输入 URL'}</span>
           </button>
         ) : (
           <Input
@@ -116,7 +128,7 @@ export function BrowserToolbar({
               setEditing({ key: tabKey, value: event.target.value })
             }}
             onKeyDown={(event) => {
-              if (event.key !== "Enter") return
+              if (event.key !== 'Enter') return
               const input = event.currentTarget
               const next = input.value
               const revision = ++navigationRevisionRef.current

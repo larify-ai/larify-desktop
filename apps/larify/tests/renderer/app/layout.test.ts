@@ -3,7 +3,10 @@ import { resolve } from 'node:path'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
+import { Registry } from '../../../src/shared/infra/registry'
 import { Layout } from '../../../src/renderer/src/app/layout/layout'
+import { registerBuiltinRenderers } from '../../../src/renderer/src/app/registry/register-builtins'
+import { RendererRegistryProvider } from '../../../src/renderer/src/app/registry/renderer-registry-provider'
 import { TooltipProvider } from '../../../src/renderer/src/components/ui/tooltip'
 import {
   expandedContentMinSize,
@@ -28,9 +31,17 @@ const navigationRegion = readFileSync(
   resolve('src/renderer/src/app/navigation/navigation.tsx'),
   'utf8'
 )
+const registry = new Registry()
+registerBuiltinRenderers(registry)
 
 function renderLayout(): string {
-  return renderToStaticMarkup(createElement(TooltipProvider, null, createElement(Layout)))
+  return renderToStaticMarkup(
+    createElement(
+      RendererRegistryProvider,
+      { registry },
+      createElement(TooltipProvider, null, createElement(Layout))
+    )
+  )
 }
 
 describe('workbench layout specification', () => {
@@ -221,11 +232,11 @@ describe('workbench layout specification', () => {
     expect(workbench).not.toContain('min-w-[320px]')
   })
 
-  it('uses the sidebar color outside the rounded main content', () => {
+  it('uses the sidebar color outside the rounded content and one workbench background', () => {
     const markup = renderLayout()
 
     expect(markup).toContain('bg-sidebar')
-    expect(markup).toContain('bg-workbench-chrome')
+    expect(markup).not.toContain('bg-workbench-chrome')
     expect(markup).toContain('flex h-full min-w-0 flex-col')
     expect(markup).toContain('bg-background')
   })

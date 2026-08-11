@@ -11,12 +11,13 @@ import { WorkspaceEditorViewport } from './workspace-editor-viewport'
 import { WorkspaceTree } from './workspace-tree'
 import { useGitDecorations } from './use-git-decorations'
 import { useWorkspaceExplorer } from './use-workspace-explorer'
+import { useAssistantSessions } from '@renderer/app/interaction/assistant/sessions-context'
 import { createGitChangeTree, createPathChangeTree } from './git-change-tree'
 import {
   REVIEW_ROUND_EVENT,
   resolveReviewPath,
   takeReviewRound,
-  type ReviewRoundRequest,
+  type ReviewRoundRequest
 } from './review-changes'
 
 export function WorkspaceView(): React.JSX.Element {
@@ -28,7 +29,8 @@ export function WorkspaceView(): React.JSX.Element {
   const [workbenchVisible, setWorkbenchVisible] = useState(false)
   const [revealPath, setRevealPath] = useState<string | null>(null)
   const editorRootRef = useRef<string | null>(null)
-  const { entries, loadDirectory, revealFile, root } = useWorkspaceExplorer()
+  const cwd = useAssistantSessions().activeSession.heading?.cwd ?? ''
+  const { entries, loadDirectory, revealFile, root } = useWorkspaceExplorer(cwd)
   const {
     available: gitAvailable,
     decorations: gitDecorations,

@@ -11,7 +11,8 @@ import { useAllotmentToggle } from './use-allotment-toggle'
 import './layout-panels.css'
 
 export function LayoutPanels(): React.JSX.Element {
-  const { heading } = useAssistantSessions().activeSession
+  const activeSession = useAssistantSessions().activeSession
+  const { heading } = activeSession
   const navigation = useAllotmentToggle()
   const workbench = useAllotmentToggle(true)
   const mainDefaultSizes = mainLayoutDefaultSizes(
@@ -76,7 +77,7 @@ export function LayoutPanels(): React.JSX.Element {
                 className="h-full w-full overflow-hidden [contain:layout_paint]"
                 style={{ minWidth: layoutSpec.workbench.minSize }}
               >
-                <Workbench />
+                <Workbench sessionId={activeSession.id} cwd={heading?.cwd ?? ''} />
               </div>
             </Allotment.Pane>
           </Allotment>

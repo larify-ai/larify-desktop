@@ -22,7 +22,7 @@ Each plugin groups related tools and skills. Some available plugins are listed b
 
 # Tools
 
-Only some tools are available by default. To see more, first list tools from a plugin with `agent_list_tools`, then read schemas with `agent_get_tool_schemas`.
+Only some tools are available by default. To see more, first list tools from a plugin with `agent_list_tools`, then read schemas with `agent_get_tool_schemas`. Each tool call must include an `_title` field.
 
 # Skills
 

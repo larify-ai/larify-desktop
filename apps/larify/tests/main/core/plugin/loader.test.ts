@@ -2,8 +2,13 @@ import { describe, expect, it, vi } from 'vitest'
 import { PluginHost, type Plugin } from '../../../../src/main/core/plugin'
 import { loadPlugins } from '../../../../src/main/core/plugin/loader'
 import { Registry } from '../../../../src/shared/infra/registry'
+import { discoverBuiltinPlugins } from '../../../../src/main/core/plugin/loader/builtin'
 
 describe('loadPlugins', () => {
+  it('includes the terminal builtin', () => {
+    expect(discoverBuiltinPlugins().map(({ manifest }) => manifest.id)).toContain('terminal')
+  })
+
   it('loads plugins sequentially in the given order', async () => {
     const calls: string[] = []
     const plugin = (id: string): Plugin => ({
@@ -33,7 +38,7 @@ describe('loadPlugins', () => {
           throw new Error('broken')
         }
       },
-      { manifest: { id: 'working' }, activate() {} }
+      { manifest: { id: 'working' }, activate: () => undefined }
     ])
 
     expect(host.has('broken')).toBe(false)

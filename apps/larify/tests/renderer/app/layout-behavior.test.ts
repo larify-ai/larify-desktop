@@ -58,6 +58,12 @@ vi.mock('allotment', async () => {
 
 import { Layout } from '../../../src/renderer/src/app/layout/layout'
 import { TooltipProvider } from '../../../src/renderer/src/components/ui/tooltip'
+import { Registry } from '../../../src/shared/infra/registry'
+import { RendererRegistryProvider } from '../../../src/renderer/src/app/registry/renderer-registry-provider'
+import {
+  WorkbenchRendererRegistry,
+  workbenchRendererRegistryToken
+} from '../../../src/renderer/src/app/registry/workbench-renderers'
 
 describe('layout panel behavior', () => {
   let container: HTMLDivElement
@@ -78,6 +84,7 @@ describe('layout panel behavior', () => {
     Object.defineProperty(window, 'bridge', {
       configurable: true,
       value: {
+        on: vi.fn(() => vi.fn()),
         invoke: vi.fn((channel: string) => {
           if (!storedSession) return Promise.resolve([])
           if (channel === 'session:cwds') return Promise.resolve([storedSession.cwd])
@@ -89,7 +96,17 @@ describe('layout panel behavior', () => {
     container = document.createElement('div')
     document.body.appendChild(container)
     root = createRoot(container)
-    await act(async () => root.render(createElement(TooltipProvider, null, createElement(Layout))))
+    const registry = new Registry()
+    registry.register(workbenchRendererRegistryToken, new WorkbenchRendererRegistry(registry))
+    await act(async () =>
+      root.render(
+        createElement(
+          RendererRegistryProvider,
+          { registry },
+          createElement(TooltipProvider, null, createElement(Layout))
+        )
+      )
+    )
   })
 
   afterEach(() => {

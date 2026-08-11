@@ -1,29 +1,19 @@
-import { useCallback, useEffect, useRef, useState } from "react"
-import { useTheme } from "@renderer/app/theme/theme"
-import { FitAddon } from "@xterm/addon-fit"
-import { Unicode11Addon } from "@xterm/addon-unicode11"
-import { Terminal as XTerm, type ITheme } from "@xterm/xterm"
-import { SquareTerminalIcon } from "lucide-react"
-import { WorkbenchTabsLayout, type WorkbenchTab } from "@renderer/components/workbench"
-import { useAgentSessionCwd, useAgentSessionId } from "@renderer/lib/agent-session"
+import { useCallback, useEffect, useRef } from 'react'
+import { FitAddon } from '@xterm/addon-fit'
+import { Unicode11Addon } from '@xterm/addon-unicode11'
+import { Terminal as XTerm, type ITheme } from '@xterm/xterm'
+import { useTheme } from 'next-themes'
+import type { WorkbenchRendererProps } from '@renderer/app/registry/workbench-renderers'
 import type {
   SessionTerminalsState,
   TerminalDataEvent,
   TerminalExitEvent,
-  TerminalSnapshot,
-} from "../shared/types"
-import "@xterm/xterm/css/xterm.css"
-import "./terminal-view.css"
-
-const TERMINAL_ICON = <SquareTerminalIcon aria-hidden="true" />
+  TerminalSnapshot
+} from '../shared/types'
+import '@xterm/xterm/css/xterm.css'
+import './terminal-view.css'
 
 const RESIZE_DEBOUNCE_MS = 100
-
-const EMPTY_STATE = (sessionId: string): SessionTerminalsState => ({
-  sessionId,
-  terminals: [],
-  activeId: null,
-})
 
 const readCssVar = (name: string): string =>
   getComputedStyle(document.documentElement).getPropertyValue(name).trim()
@@ -32,548 +22,250 @@ const readCssVarOr = (name: string, fallback: string): string =>
   readCssVar(name) || readCssVar(fallback)
 
 const terminalTheme = (): ITheme => ({
-  background: readCssVarOr("--workbench-content", "--background"),
-  brightYellow: readCssVar("--foreground"),
-  foreground: readCssVar("--foreground"),
-  cursor: readCssVar("--foreground"),
-  selectionBackground: readCssVar("--primary"),
-  selectionForeground: readCssVar("--primary-foreground"),
-  selectionInactiveBackground: readCssVar("--muted-foreground"),
-  scrollbarSliderBackground: readCssVar("--larify-scrollbar-thumb"),
-  scrollbarSliderHoverBackground: readCssVar("--larify-scrollbar-thumb-hover"),
+  background: readCssVar('--background'),
+  foreground: readCssVar('--foreground'),
+  cursor: readCssVar('--foreground'),
+  brightYellow: readCssVar('--foreground'),
+  yellow: readCssVar('--foreground'),
+  selectionBackground: readCssVar('--primary'),
+  selectionForeground: readCssVar('--primary-foreground'),
+  selectionInactiveBackground: readCssVar('--muted-foreground'),
+  scrollbarSliderBackground: readCssVar('--larify-scrollbar-thumb'),
+  scrollbarSliderHoverBackground: readCssVar('--larify-scrollbar-thumb-hover'),
   scrollbarSliderActiveBackground: readCssVarOr(
-    "--larify-scrollbar-thumb-active",
-    "--larify-scrollbar-thumb-hover",
-  ),
-  yellow: readCssVar("--foreground"),
+    '--larify-scrollbar-thumb-active',
+    '--larify-scrollbar-thumb-hover'
+  )
 })
 
-const terminalFontFamily = (): string => readCssVar("--font-mono")
-
-interface TerminalEntry {
-  term: XTerm
-  fit: FitAddon
-  host: HTMLDivElement
-  exited: boolean
-  restoring: boolean
-  lastSeq: number
-  pendingData: TerminalDataEvent[]
-  pendingResize: { cols: number; rows: number } | null
-  resizeTimer: ReturnType<typeof setTimeout> | null
-  lastSentCols: number | null
-  lastSentRows: number | null
-  suppressResize: boolean
-}
-
-const asState = (value: unknown, sessionId: string): SessionTerminalsState => {
-  if (!value || typeof value !== "object") return EMPTY_STATE(sessionId)
-  return value as SessionTerminalsState
-}
-
-const copySelection = (term: XTerm): boolean => {
-  const selection = term.getSelection()
+const copySelection = (terminal: XTerm): boolean => {
+  const selection = terminal.getSelection()
   if (!selection) return false
-  void navigator.clipboard
-    ?.writeText(selection)
-    .catch((error) => console.error("[terminal:copy]", error))
-  term.clearSelection()
+  void navigator.clipboard?.writeText(selection).catch(() => undefined)
+  terminal.clearSelection()
   return true
 }
 
-const pasteClipboard = (term: XTerm): void => {
+const pasteClipboard = (terminal: XTerm): void => {
   void navigator.clipboard
     ?.readText()
     .then((text) => {
-      if (text) term.paste(text)
+      if (text) terminal.paste(text)
     })
-    .catch((error) => console.error("[terminal:paste]", error))
+    .catch(() => undefined)
 }
 
-const applyData = (entry: TerminalEntry, event: TerminalDataEvent): void => {
-  if (event.end <= entry.lastSeq) return
-  const data =
-    event.start < entry.lastSeq
-      ? event.data.slice(entry.lastSeq - event.start)
-      : event.data
-  entry.term.write(data)
-  entry.lastSeq = event.end
-}
-
-const disposeEntries = (entries: Map<number, TerminalEntry>): void => {
-  for (const entry of entries.values()) {
-    if (entry.resizeTimer) clearTimeout(entry.resizeTimer)
-    entry.term.dispose()
-    entry.host.remove()
-  }
-  entries.clear()
-}
-
-const disposeMissingEntries = (
-  entries: Map<number, TerminalEntry> | undefined,
-  terminals: SessionTerminalsState["terminals"],
-): void => {
-  if (!entries) return
-  const alive = new Set(terminals.map((terminal) => terminal.id))
-  for (const [id, entry] of entries) {
-    if (alive.has(id)) continue
-    if (entry.resizeTimer) clearTimeout(entry.resizeTimer)
-    entry.term.dispose()
-    entry.host.remove()
-    entries.delete(id)
-  }
-}
-
-export function TerminalView(): React.JSX.Element {
-  const sessionId = useAgentSessionId()
-  const cwd = useAgentSessionCwd()
-  const { resolvedTheme } = useTheme()
-  const [state, setState] = useState<SessionTerminalsState>(() => EMPTY_STATE(sessionId))
-  const [loadedSessionId, setLoadedSessionId] = useState<string | null>(null)
+export function TerminalView({
+  resourceId: terminalId,
+  sessionId
+}: WorkbenchRendererProps): React.JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null)
-  const activeIdRef = useRef<number | null>(null)
+  const terminalRef = useRef<XTerm | null>(null)
+  const fitRef = useRef<FitAddon | null>(null)
+  const lastSeqRef = useRef(0)
+  const restoringRef = useRef(true)
+  const pendingDataRef = useRef<TerminalDataEvent[]>([])
+  const resizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const fitFrameRef = useRef<number | null>(null)
-  const entriesBySessionRef = useRef(new Map<string, Map<number, TerminalEntry>>())
-  const loadingSessionRef = useRef<string | null>(null)
-  const suppressAutoCreateRef = useRef(false)
-  const [theme, setTheme] = useState<ITheme>(() => terminalTheme())
-  const [workbenchVisible, setWorkbenchVisible] = useState(false)
-  const stateIsCurrent = state.sessionId === sessionId
-
-  const entriesForSession = useCallback((id: string): Map<number, TerminalEntry> => {
-    let entries = entriesBySessionRef.current.get(id)
-    if (!entries) {
-      entries = new Map<number, TerminalEntry>()
-      entriesBySessionRef.current.set(id, entries)
-    }
-    return entries
-  }, [])
-
-  const currentEntries = useCallback(
-    (): Map<number, TerminalEntry> => entriesForSession(sessionId),
-    [entriesForSession, sessionId],
-  )
-
-  const peekEntries = useCallback(
-    (id: string): Map<number, TerminalEntry> | undefined => entriesBySessionRef.current.get(id),
-    [],
-  )
+  const exitedRef = useRef(false)
+  const pendingExitRef = useRef<TerminalExitEvent | null>(null)
+  const suppressResizeRef = useRef(false)
+  const { resolvedTheme } = useTheme()
 
   useEffect(() => {
-    activeIdRef.current = stateIsCurrent ? state.activeId : null
-  }, [state.activeId, stateIsCurrent])
-
-  const createTerminal = useCallback(async (): Promise<number> => {
-    if (!cwd) throw new Error("Session working directory is not ready")
-    return (await window.bridge.invoke("terminal:create", sessionId, { cwd })) as number
-  }, [cwd, sessionId])
-
-  const sendResize = useCallback(
-    (terminalId: number, entry: TerminalEntry, cols: number, rows: number): void => {
-      if (entry.exited) return
-      if (entry.lastSentCols === cols && entry.lastSentRows === rows) return
-      entry.lastSentCols = cols
-      entry.lastSentRows = rows
-      void window.bridge
-        .invoke("terminal:resize", sessionId, terminalId, cols, rows)
-        .catch((error) => {
-          if (entry.lastSentCols === cols && entry.lastSentRows === rows) {
-            entry.lastSentCols = null
-            entry.lastSentRows = null
-          }
-          console.error("[terminal:resize]", error)
-        })
-    },
-    [sessionId],
-  )
-
-  const flushResize = useCallback(
-    (terminalId: number, entry: TerminalEntry): void => {
-      if (entry.resizeTimer) {
-        clearTimeout(entry.resizeTimer)
-        entry.resizeTimer = null
-      }
-      const pending = entry.pendingResize
-      entry.pendingResize = null
-      if (!pending) return
-      sendResize(terminalId, entry, pending.cols, pending.rows)
-    },
-    [sendResize],
-  )
-
-  const scheduleResize = useCallback(
-    (terminalId: number, entry: TerminalEntry, cols: number, rows: number): void => {
-      if (entry.suppressResize) return
-      entry.pendingResize = { cols, rows }
-      if (entry.resizeTimer) clearTimeout(entry.resizeTimer)
-      entry.resizeTimer = setTimeout(() => flushResize(terminalId, entry), RESIZE_DEBOUNCE_MS)
-    },
-    [flushResize],
-  )
-
-  const closeTerminal = useCallback(
-    async (id: number): Promise<void> => {
-      const closingLastTerminal = state.terminals.length <= 1
-      if (closingLastTerminal) suppressAutoCreateRef.current = true
-      try {
-        await window.bridge.invoke("terminal:close", sessionId, id)
-      } catch (error) {
-        if (closingLastTerminal) suppressAutoCreateRef.current = false
-        console.error("[terminal:close]", error)
-        return
-      }
-      const entries = currentEntries()
-      const entry = entries.get(id)
-      if (entry?.resizeTimer) clearTimeout(entry.resizeTimer)
-      entry?.term.dispose()
-      entry?.host.remove()
-      entries.delete(id)
-      if (closingLastTerminal) {
-        window.dispatchEvent(new CustomEvent("larify:workbench-close", { detail: "terminal" }))
-      }
-    },
-    [currentEntries, sessionId, state.terminals.length],
-  )
-
-  const setActive = useCallback(
-    async (id: number): Promise<void> => {
-      await window.bridge.invoke("terminal:setActive", sessionId, id)
-    },
-    [sessionId],
-  )
-
-  const reorderTerminal = useCallback(
-    async (id: number, toIndex: number): Promise<void> => {
-      await window.bridge.invoke("terminal:reorder", sessionId, id, toIndex)
-    },
-    [sessionId],
-  )
-
-  const fitActive = useCallback((): void => {
-    const id = activeIdRef.current
-    if (id == null) return
-    const entry = currentEntries().get(id)
-    if (!entry) return
-    try {
-      entry.fit.fit()
-    } catch (error) {
-      console.error("[terminal:fit]", error)
+    let active = true
+    let hasStateEvent = false
+    const applyState = (payload: unknown): boolean => {
+      if (!active) return false
+      const state = payload as SessionTerminalsState
+      if (state.sessionId !== sessionId) return false
+      const terminal = state.terminals.find(({ id }) => id === terminalId)
+      if (!terminal) return false
+      exitedRef.current ||= terminal.exitCode !== null
+      return true
     }
-  }, [currentEntries])
+    const offState = window.bridge.on('terminal:state', (payload) => {
+      hasStateEvent ||= applyState(payload)
+    })
+    void window.bridge
+      .invoke('terminal:getState', sessionId)
+      .then((payload) => {
+        if (!hasStateEvent) applyState(payload)
+      })
+      .catch(() => undefined)
+    return () => {
+      active = false
+      offState()
+    }
+  }, [sessionId, terminalId])
+
+  const fit = useCallback((): void => {
+    try {
+      fitRef.current?.fit()
+    } catch {
+      // The pane can be measured while it is collapsing.
+    }
+  }, [])
 
   const scheduleFit = useCallback((): void => {
     if (fitFrameRef.current !== null) return
     fitFrameRef.current = requestAnimationFrame(() => {
       fitFrameRef.current = null
-      fitActive()
+      fit()
     })
-  }, [fitActive])
-
-  const ensureEntry = useCallback(
-    (terminalId: number, exitCode: number | null): void => {
-      const container = containerRef.current
-      const entries = currentEntries()
-      if (!container || entries.has(terminalId)) return
-
-      const host = document.createElement("div")
-      host.className = "absolute inset-0"
-      container.appendChild(host)
-
-      const term = new XTerm({
-        allowProposedApi: true,
-        cursorBlink: true,
-        fontFamily: terminalFontFamily(),
-        fontSize: 13,
-        rescaleOverlappingGlyphs: true,
-        scrollback: 5000,
-        theme,
-      })
-      const fit = new FitAddon()
-      term.loadAddon(fit)
-      term.loadAddon(new Unicode11Addon())
-      term.unicode.activeVersion = "11"
-      term.onResize(({ cols, rows }) => {
-        const entry = entries.get(terminalId)
-        if (entry) scheduleResize(terminalId, entry, cols, rows)
-      })
-      term.attachCustomKeyEventHandler((event) => {
-        if (event.type !== "keydown") return true
-        const mod = event.ctrlKey || event.metaKey
-        const key = event.key.toLowerCase()
-        if (mod && (event.shiftKey || event.metaKey) && key === "c") return !copySelection(term)
-        if (mod && (event.shiftKey || event.metaKey) && key === "v") {
-          pasteClipboard(term)
-          return false
-        }
-        return true
-      })
-      try {
-        term.open(host)
-        fit.fit()
-      } catch (error) {
-        term.dispose()
-        host.remove()
-        console.error("[terminal:open]", error)
-        return
-      }
-
-      const entry: TerminalEntry = {
-        term,
-        fit,
-        host,
-        exited: exitCode !== null,
-        restoring: false,
-        lastSeq: 0,
-        pendingData: [],
-        pendingResize: null,
-        resizeTimer: null,
-        lastSentCols: null,
-        lastSentRows: null,
-        suppressResize: false,
-      }
-      entries.set(terminalId, entry)
-
-      entry.restoring = true
-      const finishRestoring = (): void => {
-        entry.restoring = false
-        const pending = entry.pendingData
-        entry.pendingData = []
-        if (entries.get(terminalId) !== entry) return
-        for (const event of pending) applyData(entry, event)
-        requestAnimationFrame(() => {
-          if (entries.get(terminalId) !== entry) return
-          fitActive()
-          sendResize(terminalId, entry, term.cols, term.rows)
-          flushResize(terminalId, entry)
-        })
-      }
-      void window.bridge
-        .invoke("terminal:snapshot", sessionId, terminalId)
-        .then((snapshot) => {
-          if (entries.get(terminalId) !== entry) return
-          const restore = snapshot as TerminalSnapshot | null
-          if (!restore) {
-            finishRestoring()
-            return
-          }
-          entry.suppressResize = true
-          try {
-            entry.term.resize(restore.cols, restore.rows)
-          } finally {
-            entry.suppressResize = false
-          }
-          entry.term.write(restore.data, () => {
-            entry.lastSeq = restore.seq
-            finishRestoring()
-          })
-        })
-        .catch((error) => {
-          finishRestoring()
-          console.error("[terminal:snapshot]", error)
-        })
-
-      term.onData((data) => {
-        if (entry.exited) return
-        void window.bridge
-          .invoke("terminal:write", sessionId, terminalId, data)
-          .catch((error) => console.error("[terminal:write]", error))
-      })
-      term.element?.addEventListener("contextmenu", (event) => {
-        event.preventDefault()
-        if (!copySelection(term)) pasteClipboard(term)
-      })
-    },
-    [currentEntries, fitActive, flushResize, scheduleResize, sendResize, sessionId, theme],
-  )
+  }, [fit])
 
   useEffect(() => {
-    let cancelled = false
-    loadingSessionRef.current = sessionId
-    void window.bridge
-      .invoke("terminal:getState", sessionId)
-      .then((value) => {
-        if (cancelled || loadingSessionRef.current !== sessionId) return
-        loadingSessionRef.current = null
-        setState(asState(value, sessionId))
-        setLoadedSessionId(sessionId)
-      })
-      .catch((error) => {
-        console.error("[terminal:getState]", error)
-        if (cancelled || loadingSessionRef.current !== sessionId) return
-        loadingSessionRef.current = null
-        setState(EMPTY_STATE(sessionId))
-        setLoadedSessionId(sessionId)
-      })
-
-    const offState = window.bridge.on("terminal:state", (payload) => {
-      const next = payload as SessionTerminalsState
-      if (next.sessionId !== sessionId) {
-        const entries = peekEntries(next.sessionId)
-        disposeMissingEntries(entries, next.terminals)
-        if (entries?.size === 0) entriesBySessionRef.current.delete(next.sessionId)
-        return
-      }
-      if (loadingSessionRef.current === sessionId) {
-        loadingSessionRef.current = null
-        setLoadedSessionId(sessionId)
-      }
-      setState(next)
+    const frame = requestAnimationFrame(() => {
+      if (terminalRef.current) terminalRef.current.options.theme = terminalTheme()
     })
-    return () => {
-      cancelled = true
-      if (loadingSessionRef.current === sessionId) loadingSessionRef.current = null
-      offState()
-    }
-  }, [peekEntries, sessionId])
-
-  useEffect(() => {
-    const offData = window.bridge.on("terminal:data", (payload) => {
-      const event = payload as TerminalDataEvent
-      const entry = peekEntries(event.sessionId)?.get(event.terminalId)
-      if (!entry) return
-      if (entry.restoring) {
-        entry.pendingData.push(event)
-        return
-      }
-      applyData(entry, event)
-    })
-    const offExit = window.bridge.on("terminal:exit", (payload) => {
-      const event = payload as TerminalExitEvent
-      const entry = peekEntries(event.sessionId)?.get(event.terminalId)
-      if (!entry) return
-      entry.exited = true
-      entry.term.write(`\r\n[process exited: ${event.exitCode}]\r\n`)
-    })
-    return () => {
-      offData()
-      offExit()
-    }
-  }, [peekEntries])
-
-  useEffect(() => {
-    const onActive = (event: Event): void => {
-      const visible = (event as CustomEvent<string | null>).detail === "terminal"
-      setWorkbenchVisible(visible)
-      if (!visible) suppressAutoCreateRef.current = false
-    }
-    window.addEventListener("larify:workbench-active", onActive)
-    window.dispatchEvent(new Event("larify:workbench-active-request"))
-    return () => window.removeEventListener("larify:workbench-active", onActive)
-  }, [])
-
-  useEffect(() => {
-    if (!workbenchVisible) return
-    if (loadedSessionId !== sessionId) return
-    if (state.sessionId !== sessionId) return
-    if (loadingSessionRef.current === sessionId) return
-    if (state.terminals.length > 0) return
-    if (suppressAutoCreateRef.current) return
-    void createTerminal().catch((error) => console.error("[terminal:create]", error))
-  }, [
-    createTerminal,
-    loadedSessionId,
-    sessionId,
-    state.sessionId,
-    state.terminals.length,
-    workbenchVisible,
-  ])
-
-  useEffect(() => {
-    for (const sessionEntries of entriesBySessionRef.current.values()) {
-      for (const entry of sessionEntries.values()) entry.host.style.visibility = "hidden"
-    }
-    if (!stateIsCurrent) return
-
-    const entries = currentEntries()
-    for (const terminal of state.terminals) {
-      ensureEntry(terminal.id, terminal.exitCode)
-      const entry = entries.get(terminal.id)
-      if (entry) entry.exited = terminal.exitCode !== null
-    }
-
-    const alive = new Set(state.terminals.map((terminal) => terminal.id))
-    const isLoadingEmptyState = loadingSessionRef.current === state.sessionId && alive.size === 0
-    if (!isLoadingEmptyState) disposeMissingEntries(entries, state.terminals)
-
-    for (const [id, entry] of entries) {
-      entry.host.style.visibility = id === state.activeId ? "visible" : "hidden"
-    }
-    scheduleFit()
-  }, [currentEntries, ensureEntry, scheduleFit, state, stateIsCurrent])
-
-  useEffect(() => {
-    const frame = requestAnimationFrame(() => setTheme(terminalTheme()))
     return () => cancelAnimationFrame(frame)
   }, [resolvedTheme])
 
   useEffect(() => {
-    for (const entries of entriesBySessionRef.current.values()) {
-      for (const entry of entries.values()) entry.term.options.theme = theme
-    }
-  }, [theme])
-
-  useEffect(() => {
+    let active = true
     const container = containerRef.current
     if (!container) return
+
+    const terminal = new XTerm({
+      allowProposedApi: true,
+      cursorBlink: true,
+      cursorStyle: 'bar',
+      cursorWidth: 2,
+      fontFamily: readCssVar('--font-mono'),
+      fontSize: 13,
+      rescaleOverlappingGlyphs: true,
+      scrollback: 5000,
+      theme: terminalTheme()
+    })
+    const fitAddon = new FitAddon()
+    terminal.loadAddon(fitAddon)
+    terminal.loadAddon(new Unicode11Addon())
+    terminal.unicode.activeVersion = '11'
+    terminal.open(container)
+    terminalRef.current = terminal
+    fitRef.current = fitAddon
+
+    const applyData = (event: TerminalDataEvent): void => {
+      if (event.end <= lastSeqRef.current) return
+      const data =
+        event.start < lastSeqRef.current
+          ? event.data.slice(lastSeqRef.current - event.start)
+          : event.data
+      terminal.write(data)
+      lastSeqRef.current = event.end
+    }
+    const finishRestore = (): void => {
+      if (!active) return
+      restoringRef.current = false
+      for (const event of pendingDataRef.current) applyData(event)
+      pendingDataRef.current = []
+      if (pendingExitRef.current) {
+        terminal.write(`\r\n[process exited: ${pendingExitRef.current.exitCode}]\r\n`)
+        pendingExitRef.current = null
+      }
+      scheduleFit()
+    }
+
+    const offData = window.bridge.on('terminal:data', (payload) => {
+      const event = payload as TerminalDataEvent
+      if (event.sessionId !== sessionId || event.terminalId !== terminalId) return
+      if (restoringRef.current) pendingDataRef.current.push(event)
+      else applyData(event)
+    })
+    const offExit = window.bridge.on('terminal:exit', (payload) => {
+      const event = payload as TerminalExitEvent
+      if (event.sessionId !== sessionId || event.terminalId !== terminalId) return
+      exitedRef.current = true
+      if (restoringRef.current) pendingExitRef.current = event
+      else terminal.write(`\r\n[process exited: ${event.exitCode}]\r\n`)
+    })
+    const input = terminal.onData((data) => {
+      if (!exitedRef.current) {
+        void window.bridge
+          .invoke('terminal:write', sessionId, terminalId, data)
+          .catch(() => undefined)
+      }
+    })
+    const resize = terminal.onResize(({ cols, rows }) => {
+      if (restoringRef.current || suppressResizeRef.current || exitedRef.current) return
+      if (resizeTimerRef.current) clearTimeout(resizeTimerRef.current)
+      resizeTimerRef.current = setTimeout(() => {
+        resizeTimerRef.current = null
+        if (exitedRef.current) return
+        void window.bridge
+          .invoke('terminal:resize', sessionId, terminalId, cols, rows)
+          .catch(() => undefined)
+      }, RESIZE_DEBOUNCE_MS)
+    })
+
+    terminal.attachCustomKeyEventHandler((event) => {
+      if (event.type !== 'keydown') return true
+      const mod = event.ctrlKey || event.metaKey
+      const key = event.key.toLowerCase()
+      if (mod && (event.shiftKey || event.metaKey) && key === 'c') return !copySelection(terminal)
+      if (mod && (event.shiftKey || event.metaKey) && key === 'v') {
+        pasteClipboard(terminal)
+        return false
+      }
+      return true
+    })
+    const handleContextMenu = (event: MouseEvent): void => {
+      event.preventDefault()
+      if (!copySelection(terminal)) pasteClipboard(terminal)
+    }
+    container.addEventListener('contextmenu', handleContextMenu)
+
+    fitAddon.fit()
+    void window.bridge
+      .invoke('terminal:snapshot', sessionId, terminalId)
+      .then((value) => {
+        if (!active) return
+        const snapshot = value as TerminalSnapshot | null
+        if (!snapshot) return finishRestore()
+        suppressResizeRef.current = true
+        try {
+          terminal.resize(snapshot.cols, snapshot.rows)
+        } finally {
+          suppressResizeRef.current = false
+        }
+        terminal.write(snapshot.data, () => {
+          if (!active) return
+          lastSeqRef.current = snapshot.seq
+          finishRestore()
+        })
+      })
+      .catch(finishRestore)
+
     const observer = new ResizeObserver(scheduleFit)
     observer.observe(container)
     return () => {
+      active = false
       observer.disconnect()
+      container.removeEventListener('contextmenu', handleContextMenu)
+      offData()
+      offExit()
+      input.dispose()
+      resize.dispose()
+      if (resizeTimerRef.current) clearTimeout(resizeTimerRef.current)
       if (fitFrameRef.current !== null) cancelAnimationFrame(fitFrameRef.current)
+      terminal.dispose()
+      terminalRef.current = null
+      fitRef.current = null
+      lastSeqRef.current = 0
+      restoringRef.current = true
+      pendingDataRef.current = []
+      exitedRef.current = false
+      pendingExitRef.current = null
+      resizeTimerRef.current = null
       fitFrameRef.current = null
     }
-  }, [scheduleFit])
-
-  useEffect(() => {
-    const onPointerDown = (event: PointerEvent): void => {
-      const container = containerRef.current
-      const target = event.target
-      if (!container || !(target instanceof Node) || container.contains(target)) return
-      for (const entries of entriesBySessionRef.current.values()) {
-        for (const entry of entries.values()) entry.term.clearSelection()
-      }
-    }
-    document.addEventListener("pointerdown", onPointerDown, true)
-    return () => document.removeEventListener("pointerdown", onPointerDown, true)
-  }, [])
-
-  useEffect(() => {
-    const entriesBySession = entriesBySessionRef.current
-    return () => {
-      for (const entries of entriesBySession.values()) disposeEntries(entries)
-      entriesBySession.clear()
-    }
-  }, [])
-
-  const tabs = (stateIsCurrent ? state.terminals : []).map<WorkbenchTab>((terminal) => ({
-    active: terminal.id === state.activeId,
-    closable: true,
-    icon: TERMINAL_ICON,
-    id: String(terminal.id),
-    title:
-      terminal.exitCode === null
-        ? terminal.title
-        : `${terminal.title} (exited ${terminal.exitCode})`,
-  }))
+  }, [scheduleFit, sessionId, terminalId])
 
   return (
-    <WorkbenchTabsLayout
-      draggable
-      tabs={tabs}
-      onCreate={() => void createTerminal().catch((error) => console.error("[terminal:create]", error))}
-      onClose={(id) => void closeTerminal(Number(id))}
-      onReorder={(id, _fromIndex, toIndex) =>
-        void reorderTerminal(Number(id), toIndex).catch((error) =>
-          console.error("[terminal:reorder]", error),
-        )
-      }
-      onSelect={(id) =>
-        void setActive(Number(id)).catch((error) => console.error("[terminal:setActive]", error))
-      }
-    >
-      <div
-        ref={containerRef}
-        className="larify-terminal-surface absolute inset-0 overflow-hidden bg-workbench-content"
-      />
-    </WorkbenchTabsLayout>
+    <div
+      ref={containerRef}
+      className="larify-terminal-surface h-full overflow-hidden bg-background"
+    />
   )
 }

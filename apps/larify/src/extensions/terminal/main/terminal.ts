@@ -1,5 +1,4 @@
 import { existsSync } from 'node:fs'
-import { basename } from 'node:path'
 import { SerializeAddon } from '@xterm/addon-serialize'
 import { Terminal as HeadlessTerminal, type IBuffer, type IMarker } from '@xterm/headless'
 import { spawn, type IPty } from 'node-pty'
@@ -44,7 +43,11 @@ export class Terminal {
   private headlessWriteSequence = 0
   private completedHeadlessWriteSequence = 0
   private outputSeq = 0
-  private headlessWriteWaiters: Array<{ sequence: number; resolve: () => void; timer: NodeJS.Timeout }> = []
+  private headlessWriteWaiters: Array<{
+    sequence: number
+    resolve: () => void
+    timer: NodeJS.Timeout
+  }> = []
   private commandRunning = false
   private disposed = false
   private finalAgentSnapshot: TerminalAgentSnapshot = { screen: '' }
@@ -68,8 +71,7 @@ export class Terminal {
     this.id = id
     this.shell = opts.shell
     this.cwd = opts.cwd
-    this.title =
-      opts.title ?? basename(this.shell, process.platform === 'win32' ? '.exe' : undefined)
+    this.title = opts.title ?? this.shell
     this.cols = opts.cols ?? 80
     this.rows = opts.rows ?? 24
     this.headless = new HeadlessTerminal({
@@ -157,7 +159,13 @@ export class Terminal {
 
   async snapshot(): Promise<TerminalSnapshot> {
     await this.flushHeadlessWrites()
-    if (this.disposed) return { data: this.finalAgentSnapshot.screen, cols: this.cols, rows: this.rows, seq: this.outputSeq }
+    if (this.disposed)
+      return {
+        data: this.finalAgentSnapshot.screen,
+        cols: this.cols,
+        rows: this.rows,
+        seq: this.outputSeq
+      }
     return {
       data: this.serializeAddon.serialize(),
       cols: this.cols,
@@ -376,7 +384,8 @@ export class Terminal {
     if (command !== 'D') return
     this.commandRunning = false
     const rawExitCode = args[0]
-    const exitCode = rawExitCode === undefined || rawExitCode === '' ? undefined : Number(rawExitCode)
+    const exitCode =
+      rawExitCode === undefined || rawExitCode === '' ? undefined : Number(rawExitCode)
     const event = {
       ...(Number.isFinite(exitCode) && { exitCode })
     }

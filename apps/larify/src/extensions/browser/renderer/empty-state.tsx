@@ -1,4 +1,4 @@
-import { GlobeIcon } from "lucide-react"
+import { GlobeIcon } from 'lucide-react'
 
 export function EmptyState(): React.JSX.Element {
   return (

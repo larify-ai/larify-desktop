@@ -65,8 +65,19 @@ function fallbackShell(): string {
   return '/bin/bash'
 }
 
+function shellTitle(shell: string): string {
+  const name = basename(shell)
+    .replace(/\.exe$/i, '')
+    .toLowerCase()
+  if (name === 'powershell' || name === 'pwsh') return 'PowerShell'
+  if (name === 'cmd') return 'CMD'
+  if (name === 'bash') return 'Bash'
+  if (name === 'zsh') return 'Zsh'
+  return basename(shell, process.platform === 'win32' ? '.exe' : undefined)
+}
+
 function resolveCwd(cwd?: string): string {
-  if (cwd === undefined) return DEFAULT_WORKSPACE
+  if (!cwd) return DEFAULT_WORKSPACE
   let directory = false
   try {
     directory = statSync(cwd).isDirectory()
@@ -79,7 +90,9 @@ function resolveCwd(cwd?: string): string {
 
 function isPowerShell(shell: string): boolean {
   const name = basename(shell).toLowerCase()
-  return name === 'powershell.exe' || name === 'pwsh.exe' || name === 'powershell' || name === 'pwsh'
+  return (
+    name === 'powershell.exe' || name === 'pwsh.exe' || name === 'powershell' || name === 'pwsh'
+  )
 }
 
 function isBash(shell: string): boolean {
@@ -112,8 +125,11 @@ export class TerminalService {
   private changeListeners = new Set<Listener<[SessionTerminalsState]>>()
   private dataListeners = new Set<Listener<[string, number, string, number, number]>>()
   private exitListeners = new Set<Listener<[string, number, number]>>()
-  private commandFinishedListeners = new Set<Listener<[string, number, ShellCommandFinishedEvent]>>()
+  private commandFinishedListeners = new Set<
+    Listener<[string, number, ShellCommandFinishedEvent]>
+  >()
   private commandStartedListeners = new Set<Listener<[string, number]>>()
+  private resourceCounts = new Map<string, number>()
   private bashIntegrationPath: string | undefined
   private zshIntegrationPath: string | undefined
   private readonly resourceRegistration: Disposable
@@ -129,7 +145,13 @@ export class TerminalService {
   }
 
   bindData(
-    callback: (sessionId: string, terminalId: number, data: string, start: number, end: number) => void
+    callback: (
+      sessionId: string,
+      terminalId: number,
+      data: string,
+      start: number,
+      end: number
+    ) => void
   ): () => void {
     return addListener(this.dataListeners, callback)
   }
@@ -154,18 +176,14 @@ export class TerminalService {
     return this.resources.create('terminal', sessionId, opts)
   }
 
-  private openResource(
-    id: number,
-    sessionId: string,
-    opts?: TerminalCreateOptions
-  ): Disposable {
+  private openResource(id: number, sessionId: string, opts?: TerminalCreateOptions): Disposable {
     const shell = resolveShell(opts?.shell)
     const integration = this.shellIntegrationOptions(shell)
     const options = {
       ...opts,
       shell,
       cwd: resolveCwd(opts?.cwd),
-      title: opts?.title,
+      title: opts?.title ?? shellTitle(shell),
       shellArgs: [...(opts?.shellArgs ?? []), ...(integration.shellArgs ?? [])],
       shellEnv: {
         ...opts?.shellEnv,
@@ -173,8 +191,30 @@ export class TerminalService {
         LARIFY_ELECTRON_PATH: process.execPath
       }
     }
-    this.managers.get(sessionId).create(id, options)
-    return { dispose: () => this.manager(sessionId)?.close(id) ?? Promise.resolve() }
+    const existingManager = this.manager(sessionId)
+    const manager = existingManager ?? this.managers.get(sessionId)
+    try {
+      manager.create(id, options)
+    } catch (error) {
+      if (!existingManager) void this.managers.destroySession(sessionId).catch(() => {})
+      throw error
+    }
+    this.resourceCounts.set(sessionId, (this.resourceCounts.get(sessionId) ?? 0) + 1)
+    return {
+      dispose: async () => {
+        try {
+          await manager.close(id)
+        } finally {
+          const remaining = (this.resourceCounts.get(sessionId) ?? 1) - 1
+          if (remaining > 0) {
+            this.resourceCounts.set(sessionId, remaining)
+          } else {
+            this.resourceCounts.delete(sessionId)
+            await this.managers.destroySession(sessionId)
+          }
+        }
+      }
+    }
   }
 
   async createReady(
@@ -198,7 +238,9 @@ export class TerminalService {
     }
     if (signal?.aborted) {
       await this.close(sessionId, terminalId)
-      throw signal.reason instanceof Error ? signal.reason : new Error('Terminal creation was aborted.')
+      throw signal.reason instanceof Error
+        ? signal.reason
+        : new Error('Terminal creation was aborted.')
     }
     const readyState = this.terminalState(sessionId, terminalId)
     if (!readyState || readyState.exitCode !== null) {
@@ -238,14 +280,6 @@ export class TerminalService {
     return this.resources.close(terminalId)
   }
 
-  setActive(sessionId: string, terminalId: number): void {
-    this.manager(sessionId)?.setActive(terminalId)
-  }
-
-  reorder(sessionId: string, terminalId: number, toIndex: number): void {
-    this.manager(sessionId)?.reorder(terminalId, toIndex)
-  }
-
   snapshot(sessionId: string, terminalId: number): Promise<TerminalSnapshot | null> {
     return this.manager(sessionId)?.snapshot(terminalId) ?? Promise.resolve(null)
   }
@@ -259,16 +293,7 @@ export class TerminalService {
   }
 
   state(sessionId: string): SessionTerminalsState {
-    return this.manager(sessionId)?.state() ?? { sessionId, terminals: [], activeId: null }
-  }
-
-  async destroySession(sessionId: string): Promise<void> {
-    const ids = this.resources.list({ type: 'terminal', sessionId }).map(({ id }) => id)
-    try {
-      await this.closeResources(ids)
-    } finally {
-      await this.managers.destroySession(sessionId)
-    }
+    return this.manager(sessionId)?.state() ?? { sessionId, terminals: [] }
   }
 
   async destroy(): Promise<void> {
@@ -281,6 +306,7 @@ export class TerminalService {
         await this.managers.destroyAll()
       }
     } finally {
+      this.resourceCounts.clear()
       this.cleanupShellIntegration()
     }
   }

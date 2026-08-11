@@ -1,40 +1,37 @@
-import type { ReactNode } from "react"
-import type { WorkbenchTab } from "./workbench-tabs"
-import { WorkbenchTabs } from "./workbench-tabs"
+import type { ReactNode } from 'react'
+import type { WorkbenchTab } from './workbench-tabs'
+import { WorkbenchTabs } from './workbench-tabs'
 
 interface WorkbenchTabsLayoutProps {
+  activeId: string | null
   children: ReactNode
-  draggable?: boolean
-  newLabel?: string
   tabs: WorkbenchTab[]
-  onClose?(id: string): void
-  onCreate?(): void
-  onReorder?(id: string, fromIndex: number, toIndex: number): void
+  onClose(id: string): void
+  onHome(): void
+  onReorder(id: string, fromIndex: number, toIndex: number): void
   onSelect(id: string): void
 }
 
 export function WorkbenchTabsLayout({
+  activeId,
   children,
-  draggable,
-  newLabel,
   tabs,
   onClose,
-  onCreate,
+  onHome,
   onReorder,
-  onSelect,
+  onSelect
 }: WorkbenchTabsLayoutProps): React.JSX.Element {
   return (
-    <div className="flex h-full min-h-0 flex-col bg-workbench-chrome">
+    <div className="flex h-full min-h-0 flex-col bg-background">
       <WorkbenchTabs
-        draggable={draggable}
-        newLabel={newLabel}
+        activeId={activeId}
         tabs={tabs}
         onClose={onClose}
-        onCreate={onCreate}
+        onHome={onHome}
         onReorder={onReorder}
         onSelect={onSelect}
       />
-      <div className="relative min-h-0 flex-1 overflow-hidden bg-workbench-content">{children}</div>
+      <div className="relative min-h-0 flex-1 overflow-hidden bg-background">{children}</div>
     </div>
   )
 }

@@ -13,10 +13,6 @@ const workspace = vi.hoisted(() => ({
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
-vi.mock('@renderer/lib/agent-session', () => ({
-  useAgentSessionCwd: () => workspace.cwd
-}))
-
 vi.mock('../../../../src/extensions/workspace/renderer/workspace-client', () => ({
   workspaceClient: {
     onDidChange: (listener: (event: string, path: string) => void) => {
@@ -42,7 +38,7 @@ describe('useWorkspaceExplorer', () => {
   let explorer: ReturnType<typeof useWorkspaceExplorer>
 
   function Harness(): null {
-    explorer = useWorkspaceExplorer()
+    explorer = useWorkspaceExplorer(workspace.cwd)
     return null
   }
 

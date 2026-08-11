@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { useAgentSessionId } from "@renderer/lib/agent-session"
-import type { BrowserState, BrowserTabState } from "../shared/types"
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { BrowserState, BrowserTabState } from '../shared/types'
 
 const EMPTY: BrowserState = { tabs: [], activeId: null }
 
@@ -17,8 +16,7 @@ export interface UseBrowser {
   setActive(id: number): Promise<void>
 }
 
-export function useBrowser(): UseBrowser {
-  const sessionId = useAgentSessionId()
+export function useBrowser(sessionId: string): UseBrowser {
   const [state, setState] = useState<BrowserState>(EMPTY)
   const stateRef = useRef<BrowserState>(EMPTY)
   const suppressAutoCreateRef = useRef(false)
@@ -34,9 +32,10 @@ export function useBrowser(): UseBrowser {
   const appliedStateSequenceRef = useRef(0)
   const stateLoadFailuresRef = useRef(0)
   const stateLoadRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const [stateLoadRetry, setStateLoadRetry] = useState<{ sessionId: string; sequence: number } | null>(
-    null,
-  )
+  const [stateLoadRetry, setStateLoadRetry] = useState<{
+    sessionId: string
+    sequence: number
+  } | null>(null)
   const ensureFailuresRef = useRef(0)
   const [ensureRetry, setEnsureRetry] = useState(0)
 
@@ -52,20 +51,23 @@ export function useBrowser(): UseBrowser {
     if (stateLoadRetryTimerRef.current) return
     const failure = Math.min(stateLoadFailuresRef.current + 1, 8)
     stateLoadFailuresRef.current = failure
-    stateLoadRetryTimerRef.current = setTimeout(() => {
-      stateLoadRetryTimerRef.current = null
-      if (currentSessionIdRef.current !== requestedSessionId) return
-      setStateLoadRetry((current) => ({
-        sessionId: requestedSessionId,
-        sequence: current?.sessionId === requestedSessionId ? current.sequence + 1 : 1,
-      }))
-    }, Math.min(250 * 2 ** (failure - 1), 30_000))
+    stateLoadRetryTimerRef.current = setTimeout(
+      () => {
+        stateLoadRetryTimerRef.current = null
+        if (currentSessionIdRef.current !== requestedSessionId) return
+        setStateLoadRetry((current) => ({
+          sessionId: requestedSessionId,
+          sequence: current?.sessionId === requestedSessionId ? current.sequence + 1 : 1
+        }))
+      },
+      Math.min(250 * 2 ** (failure - 1), 30_000)
+    )
   }, [])
 
   const refreshState = useCallback(async (): Promise<void> => {
     const requestedSessionId = sessionId
     const requestSequence = ++nextStateSequenceRef.current
-    const value = await window.bridge.invoke("browser:getState", sessionId)
+    const value = await window.bridge.invoke('browser:getState', sessionId)
     if (currentSessionIdRef.current !== requestedSessionId) return
     if (requestSequence < appliedStateSequenceRef.current) return
     clearStateLoadRetry()
@@ -91,7 +93,7 @@ export function useBrowser(): UseBrowser {
     closeDispatchedRef.current = false
     const requestSequence = ++nextStateSequenceRef.current
     void window.bridge
-      .invoke("browser:getState", sessionId)
+      .invoke('browser:getState', sessionId)
       .then((value) => {
         if (!alive) return
         if (requestSequence < appliedStateSequenceRef.current) return
@@ -106,7 +108,7 @@ export function useBrowser(): UseBrowser {
       .catch(() => {
         if (alive) scheduleStateLoadRetry(sessionId)
       })
-    const off = window.bridge.on("browser:state", (value) => {
+    const off = window.bridge.on('browser:state', (value) => {
       const event = value as { sessionId?: string; state?: BrowserState }
       if (event.sessionId !== sessionId || !event.state) return
       clearStateLoadRetry()
@@ -139,13 +141,13 @@ export function useBrowser(): UseBrowser {
 
   useEffect(() => {
     const onActive = (event: Event): void => {
-      const visible = (event as CustomEvent<string | null>).detail === "browser"
+      const visible = (event as CustomEvent<string | null>).detail === 'browser'
       setWorkbenchVisible(visible)
       if (!visible) suppressAutoCreateRef.current = false
     }
-    window.addEventListener("larify:workbench-active", onActive)
-    window.dispatchEvent(new Event("larify:workbench-active-request"))
-    return () => window.removeEventListener("larify:workbench-active", onActive)
+    window.addEventListener('larify:workbench-active', onActive)
+    window.dispatchEvent(new Event('larify:workbench-active-request'))
+    return () => window.removeEventListener('larify:workbench-active', onActive)
   }, [])
 
   useEffect(() => {
@@ -156,7 +158,7 @@ export function useBrowser(): UseBrowser {
     let alive = true
     let retry: ReturnType<typeof setTimeout> | undefined
     void window.bridge
-      .invoke("browser:ensureTab", sessionId)
+      .invoke('browser:ensureTab', sessionId)
       .then(() => {
         if (!alive || currentSessionIdRef.current !== sessionId) return
         ensureFailuresRef.current = 0
@@ -165,9 +167,12 @@ export function useBrowser(): UseBrowser {
         if (!alive || currentSessionIdRef.current !== sessionId) return
         const failure = Math.min(ensureFailuresRef.current + 1, 8)
         ensureFailuresRef.current = failure
-        retry = setTimeout(() => {
-          if (alive) setEnsureRetry((value) => value + 1)
-        }, Math.min(250 * 2 ** (failure - 1), 30_000))
+        retry = setTimeout(
+          () => {
+            if (alive) setEnsureRetry((value) => value + 1)
+          },
+          Math.min(250 * 2 ** (failure - 1), 30_000)
+        )
       })
     return () => {
       alive = false
@@ -177,7 +182,7 @@ export function useBrowser(): UseBrowser {
 
   const actions = useMemo(
     () => ({
-      back: (id: number) => window.bridge.invoke("browser:back", sessionId, id) as Promise<void>,
+      back: (id: number) => window.bridge.invoke('browser:back', sessionId, id) as Promise<void>,
       close: async (id: number) => {
         const closeEpoch = closeEpochRef.current
         const closing = closingTabIdsRef.current
@@ -194,9 +199,8 @@ export function useBrowser(): UseBrowser {
         if (allCurrentTabsClosing) suppressAutoCreateRef.current = true
         let next: BrowserState | undefined
         try {
-          next = (await window.bridge.invoke("browser:close", sessionId, id)) as
-            | BrowserState
-            | undefined
+          next = (await window.bridge.invoke('browser:close', sessionId, id)) as
+            BrowserState | undefined
         } catch (error) {
           if (closeEpochRef.current !== closeEpoch) throw error
           closing.delete(id)
@@ -211,38 +215,39 @@ export function useBrowser(): UseBrowser {
         if (closeEpochRef.current !== closeEpoch) return
         const latestHasNewTab = stateRef.current.tabs.some((tab) => !closing.has(tab.id))
         const shouldCloseWorkbench =
-          (!next || next.tabs.length === 0) &&
-          !latestHasNewTab &&
-          !closeDispatchedRef.current
+          (!next || next.tabs.length === 0) && !latestHasNewTab && !closeDispatchedRef.current
         pendingClosing.delete(id)
         if (shouldCloseWorkbench) {
           closeDispatchedRef.current = true
-          window.dispatchEvent(new CustomEvent("larify:workbench-close", { detail: "browser" }))
+          window.dispatchEvent(new CustomEvent('larify:workbench-close', { detail: 'browser' }))
         } else {
           const remainingTabs = next?.tabs ?? stateRef.current.tabs
           const stillClosingAll =
-            remainingTabs.length > 0 &&
-            remainingTabs.every((tab) => closing.has(tab.id))
+            remainingTabs.length > 0 && remainingTabs.every((tab) => closing.has(tab.id))
           if (!stillClosingAll) suppressAutoCreateRef.current = false
         }
         if (pendingClosing.size === 0) closing.clear()
       },
-      create: (url?: string) => window.bridge.invoke("browser:create", sessionId, url) as Promise<number>,
-      forward: (id: number) => window.bridge.invoke("browser:forward", sessionId, id) as Promise<void>,
+      create: (url?: string) =>
+        window.bridge.invoke('browser:create', sessionId, url) as Promise<number>,
+      forward: (id: number) =>
+        window.bridge.invoke('browser:forward', sessionId, id) as Promise<void>,
       navigate: (id: number, url: string) =>
-        window.bridge.invoke("browser:navigate", sessionId, id, url) as Promise<boolean>,
-      reload: (id: number) => window.bridge.invoke("browser:reload", sessionId, id) as Promise<void>,
+        window.bridge.invoke('browser:navigate', sessionId, id, url) as Promise<boolean>,
+      reload: (id: number) =>
+        window.bridge.invoke('browser:reload', sessionId, id) as Promise<void>,
       reorder: (id: number, toIndex: number) =>
-        window.bridge.invoke("browser:reorder", sessionId, id, toIndex) as Promise<void>,
-      setActive: (id: number) => window.bridge.invoke("browser:setActive", sessionId, id) as Promise<void>,
+        window.bridge.invoke('browser:reorder', sessionId, id, toIndex) as Promise<void>,
+      setActive: (id: number) =>
+        window.bridge.invoke('browser:setActive', sessionId, id) as Promise<void>
     }),
-    [sessionId],
+    [sessionId]
   )
 
   const visibleState = loadedSessionId === sessionId ? state : EMPTY
   const active = useMemo(
     () => visibleState.tabs.find((tab) => tab.id === visibleState.activeId) ?? null,
-    [visibleState],
+    [visibleState]
   )
 
   return { state: visibleState, active, ...actions }

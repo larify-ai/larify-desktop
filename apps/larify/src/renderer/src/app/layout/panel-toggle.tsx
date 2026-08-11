@@ -15,7 +15,7 @@ export function PanelToggle({ label, icon: Icon, onClick }: PanelToggleProps): R
       className="inline-flex size-8 items-center justify-center rounded-md [-webkit-app-region:no-drag] hover:bg-sidebar-accent"
       onClick={onClick}
     >
-      <Icon className="pointer-events-none size-5" />
+      <Icon className="pointer-events-none size-[18px]" />
     </button>
   )
 }

@@ -74,7 +74,7 @@ describe('interaction assistant message list', () => {
     expect(props.initialItemCount).toBe(12)
     expect(props.initialTopMostItemIndex).toBe(4999)
     expect(props.computeItemKey(4999)).toBe('latest')
-    expect(props.className).toContain('[scrollbar-gutter:stable_both-edges]')
+    expect(props.className).toContain('[scrollbar-gutter:stable]')
     expect(props.scrollerRef).toEqual(expect.any(Function))
   })
 

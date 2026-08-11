@@ -6,6 +6,83 @@ function service(dispose: () => void | Promise<void>): { dispose: () => void | P
 }
 
 describe('Registry', () => {
+  it('subscribes and emits changes', () => {
+    const registry = new Registry()
+    const token = defineService()
+    const listener = vi.fn()
+    const unsubscribe = registry.subscribe(token, listener)
+
+    registry.emit(token)
+    expect(listener).toHaveBeenCalledOnce()
+
+    unsubscribe()
+    registry.emit(token)
+    expect(listener).toHaveBeenCalledOnce()
+  })
+
+  it('continues emitting when one listener fails', () => {
+    const registry = new Registry()
+    const token = defineService()
+    const listener = vi.fn()
+    registry.subscribe(token, () => {
+      throw new Error('listener failed')
+    })
+    registry.subscribe(token, listener)
+
+    expect(() => registry.emit(token)).not.toThrow()
+    expect(listener).toHaveBeenCalledOnce()
+  })
+
+  it('only emits to listeners for the selected token', () => {
+    const registry = new Registry()
+    const first = defineService()
+    const second = defineService()
+    const firstListener = vi.fn()
+    const secondListener = vi.fn()
+    registry.subscribe(first, firstListener)
+    registry.subscribe(second, secondListener)
+
+    registry.emit(first)
+
+    expect(firstListener).toHaveBeenCalledOnce()
+    expect(secondListener).not.toHaveBeenCalled()
+  })
+
+  it('uses a stable listener snapshot while emitting', () => {
+    const registry = new Registry()
+    const token = defineService()
+    const added = vi.fn()
+    const removed = vi.fn()
+    const unsubscribe = registry.subscribe(token, removed)
+    registry.subscribe(token, () => {
+      unsubscribe()
+      registry.subscribe(token, added)
+    })
+
+    registry.emit(token)
+    expect(removed).toHaveBeenCalledOnce()
+    expect(added).not.toHaveBeenCalled()
+
+    registry.emit(token)
+    expect(removed).toHaveBeenCalledOnce()
+    expect(added).toHaveBeenCalledOnce()
+    expect(() => unsubscribe()).not.toThrow()
+  })
+
+  it('does not let a stale unsubscribe remove newer listeners', () => {
+    const registry = new Registry()
+    const token = defineService()
+    const oldUnsubscribe = registry.subscribe(token, vi.fn())
+    oldUnsubscribe()
+
+    const currentListener = vi.fn()
+    registry.subscribe(token, currentListener)
+    oldUnsubscribe()
+    registry.emit(token)
+
+    expect(currentListener).toHaveBeenCalledOnce()
+  })
+
   it('registers and gets a service by token', () => {
     const registry = new Registry()
     const token = defineService()

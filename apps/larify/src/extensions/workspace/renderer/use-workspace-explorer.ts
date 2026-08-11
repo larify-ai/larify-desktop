@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { EmitArgsWithName } from 'chokidar'
-import { useAgentSessionCwd } from '@renderer/lib/agent-session'
 import { workspaceClient } from './workspace-client'
 import type { TreeEntry } from './workspace-tree'
 
@@ -49,13 +48,12 @@ const replaceDirectoryChildren = (
       : entry
   })
 
-export function useWorkspaceExplorer(): {
+export function useWorkspaceExplorer(cwd: string): {
   entries: TreeEntry[]
   loadDirectory(directory: TreeEntry): Promise<void>
   revealFile(file: string): Promise<void>
   root: string | null
 } {
-  const cwd = useAgentSessionCwd()
   const [workspace, setWorkspace] = useState<{
     cwd: string
     entries: TreeEntry[]

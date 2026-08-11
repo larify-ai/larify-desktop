@@ -44,11 +44,6 @@ import {
   Attachments
 } from '@renderer/components/ai-elements/attachments'
 import { DropdownMenuSeparator } from '@renderer/components/ui/dropdown-menu'
-import {
-  getAgentSessionId,
-  setAgentSessionCwd,
-  setAgentSessionId
-} from '@renderer/lib/agent-session'
 import { MessageView } from './message-view'
 import { conversationToText } from '../lib/conversation-copy'
 import { createIpcTransport } from '../lib/transport'
@@ -109,7 +104,7 @@ const formatRelativeTime = (value: number): string => {
 }
 
 export function AssistantPanel(): React.JSX.Element {
-  const [sessionId, setSessionIdState] = useState<string>(() => getAgentSessionId())
+  const [sessionId, setSessionIdState] = useState<string>(() => crypto.randomUUID())
   const [messagesBySessionId, setMessagesBySessionId] = useState<Record<string, UIMessage[]>>({})
   const messagesBySessionIdRef = useRef(messagesBySessionId)
   const [cwdBySessionId, setCwdBySessionId] = useState<Record<string, string>>({})
@@ -138,8 +133,6 @@ export function AssistantPanel(): React.JSX.Element {
   }
 
   const setSessionId = (id: string): void => {
-    setAgentSessionId(id)
-    setAgentSessionCwd(cwdBySessionIdRef.current[id] ?? '')
     setSessionIdState(id)
   }
 
@@ -158,7 +151,6 @@ export function AssistantPanel(): React.JSX.Element {
   const cacheSessionCwd = (id: string, cwd: string): void => {
     cwdBySessionIdRef.current = { ...cwdBySessionIdRef.current, [id]: cwd }
     setCwdBySessionId(cwdBySessionIdRef.current)
-    if (selectedSessionIdRef.current === id) setAgentSessionCwd(cwd)
   }
 
   const rememberRecentCwd = (cwd: string): void => {

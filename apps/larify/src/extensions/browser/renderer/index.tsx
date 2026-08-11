@@ -2,7 +2,6 @@ import { lazy, Suspense } from 'react'
 import { GlobeIcon } from 'lucide-react'
 import type { Extension } from '@shared/extension'
 import type { View } from '@renderer/types/view'
-import { getAgentSessionId } from '@renderer/lib/agent-session'
 
 let browserViewPromise: Promise<{ default: typeof import('./browser-view').BrowserView }> | null =
   null
@@ -31,12 +30,7 @@ const extension: Extension = {
     } satisfies View)
     const unsubscribe = window.bridge.on('browser:open-url', (value) => {
       if (typeof value !== 'string') return
-      void window.bridge
-        .invoke('browser:create', getAgentSessionId(), value)
-        .then(() => {
-          window.dispatchEvent(new CustomEvent('larify:workbench-open', { detail: 'browser' }))
-        })
-        .catch((error) => console.error('[browser:open-url]', error))
+      window.dispatchEvent(new CustomEvent('larify:browser-open-url', { detail: value }))
     })
     context.subscriptions.push({
       dispose: () => {

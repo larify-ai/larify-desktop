@@ -172,7 +172,7 @@ beforeEach(() => {
 })
 
 describe("TerminalManager", () => {
-  it("creates terminals and marks the newest as active", async () => {
+  it("creates terminals", async () => {
     const { TerminalManager } = await importManager()
     const manager = new TerminalManager("session-1")
     const onChange = vi.fn()
@@ -185,7 +185,6 @@ describe("TerminalManager", () => {
     expect(second).toBe(2)
     expect(manager.state()).toMatchObject({
       sessionId: "session-1",
-      activeId: 2,
       terminals: [
         { id: 1, title: "Shell" },
         { id: 2, title: "Bash" },
@@ -351,56 +350,18 @@ describe("TerminalManager", () => {
     expect(second).toHaveBeenCalledWith(1, "before", 0, 6)
   })
 
-  it("sets active only for known terminals", async () => {
-    const { TerminalManager } = await importManager()
-    const manager = new TerminalManager("session-1")
-    const onChange = vi.fn()
-    manager.bindChange(onChange)
-    const first = createTerminal(manager)
-    createTerminal(manager)
-    onChange.mockClear()
-
-    manager.setActive(first)
-    manager.setActive(999)
-
-    expect(manager.state().activeId).toBe(first)
-    expect(onChange).toHaveBeenCalledTimes(1)
-  })
-
-  it("reorders terminals", async () => {
-    const { TerminalManager } = await importManager()
-    const manager = new TerminalManager("session-1")
-    const onChange = vi.fn()
-    manager.bindChange(onChange)
-    const first = createTerminal(manager)
-    const second = createTerminal(manager)
-    const third = createTerminal(manager)
-    onChange.mockClear()
-
-    manager.reorder(third, 0)
-    manager.reorder(first, 99)
-    manager.reorder(999, 0)
-
-    expect(manager.state().terminals.map((terminal) => terminal.id)).toEqual([third, second, first])
-    expect(manager.state().activeId).toBe(third)
-    expect(onChange).toHaveBeenCalledTimes(2)
-  })
-
-  it("returns snapshots and closes terminals while selecting the next active terminal", async () => {
+  it("returns snapshots and closes terminals", async () => {
     const { TerminalManager } = await importManager()
     const manager = new TerminalManager("session-1")
     const first = createTerminal(manager)
     const second = createTerminal(manager)
     const third = createTerminal(manager)
-    manager.setActive(second)
-
     expect(manager.snapshot(second)).toBe("snapshot:2")
 
     await manager.close(second)
 
     expect(terminals[1].close).toHaveBeenCalled()
     expect(terminals[1].dispose).toHaveBeenCalled()
-    expect(manager.state().activeId).toBe(third)
     expect(manager.state().terminals.map((terminal) => terminal.id)).toEqual([first, third])
   })
 
@@ -710,6 +671,6 @@ describe("TerminalManager", () => {
     expect(terminals[1].kill).toHaveBeenCalled()
     expect(terminals[0].dispose).toHaveBeenCalled()
     expect(terminals[1].dispose).toHaveBeenCalled()
-    expect(manager.state()).toMatchObject({ activeId: null, terminals: [] })
+    expect(manager.state()).toMatchObject({ terminals: [] })
   })
 })

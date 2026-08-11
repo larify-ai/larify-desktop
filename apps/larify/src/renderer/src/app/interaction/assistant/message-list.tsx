@@ -82,7 +82,7 @@ export function AssistantMessageList({
         ref={list}
         scrollerRef={scrollerRef}
         role="log"
-        className="size-full [scrollbar-gutter:stable_both-edges]"
+        className="size-full [scrollbar-gutter:stable]"
         totalCount={totalCount}
         defaultItemHeight={estimatedMessageHeight}
         initialItemCount={Math.min(12, totalCount)}

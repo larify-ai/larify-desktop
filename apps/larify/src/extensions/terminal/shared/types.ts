@@ -34,7 +34,6 @@ export interface TerminalAgentSnapshot {
 export interface SessionTerminalsState {
   sessionId: string
   terminals: TerminalState[]
-  activeId: number | null
 }
 
 export interface TerminalDataEvent {

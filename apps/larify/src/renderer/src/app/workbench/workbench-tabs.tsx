@@ -1,309 +1,268 @@
-import { useMemo, useRef, useState, type ReactNode } from 'react'
-import { PlusIcon, XIcon } from 'lucide-react'
-import { Button } from '../ui/button'
-import { cn } from '../../lib/utils'
+import { useCallback, useEffect, useRef, useState, type ReactNode, type WheelEvent } from 'react'
+import {
+  closestCenter,
+  DndContext,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent
+} from '@dnd-kit/core'
+import { restrictToHorizontalAxis } from '@dnd-kit/modifiers'
+import { horizontalListSortingStrategy, SortableContext, useSortable } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
+import { HouseIcon, XIcon } from 'lucide-react'
+import { DropdownMenu, Tabs } from 'radix-ui'
+import { resolveTabReorder } from './tab-reorder'
+import { resolveTabCloseTargets, type WorkbenchTabCloseAction } from './tab-close-actions'
 import './workbench-tabs.css'
 
 export interface WorkbenchTab {
-  active?: boolean
-  closable?: boolean
-  icon?: ReactNode
   id: string
+  icon: ReactNode
   title: string
 }
 
 interface WorkbenchTabsProps {
-  draggable?: boolean
-  newLabel?: string
+  activeId: string | null
   tabs: WorkbenchTab[]
-  onClose?(id: string): void
-  onCreate?(): void
-  onReorder?(id: string, fromIndex: number, toIndex: number): void
+  onClose(id: string): void
+  onHome(): void
+  onReorder(id: string, fromIndex: number, toIndex: number): void
   onSelect(id: string): void
 }
 
-interface DragMeasure {
-  centerX: number
-  id: string
-  left: number
-  right: number
-  width: number
-}
-
-interface DragState {
-  draggedWidth: number
-  id: string
-  offsetX: number
-  originIndex: number
-  targetIndex: number
-}
-
 export function WorkbenchTabs({
-  draggable = false,
-  newLabel = '新建',
+  activeId,
   tabs,
   onClose,
-  onCreate,
+  onHome,
   onReorder,
   onSelect
 }: WorkbenchTabsProps): React.JSX.Element {
-  const [dragState, setDragState] = useState<DragState | null>(null)
-  const didDragRef = useRef(false)
-  const dragStartPointRef = useRef<{ x: number; y: number } | null>(null)
-  const scrollRef = useRef<HTMLDivElement | null>(null)
-  const dragMeasuresRef = useRef<DragMeasure[]>([])
-  const dragBoundsRef = useRef<{ left: number; right: number } | null>(null)
-  const dragStateRef = useRef<DragState | null>(null)
-  const tabIndexes = useMemo(() => new Map(tabs.map((tab, index) => [tab.id, index])), [tabs])
-  const hasActiveTab = tabs.some((tab) => tab.active)
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }))
+  const scrollerRef = useRef<HTMLDivElement>(null)
+  const tabListRef = useRef<HTMLDivElement>(null)
+  const suppressClickRef = useRef(false)
+  const [scrollEdges, setScrollEdges] = useState('')
 
-  const measureTabs = (): DragMeasure[] => {
-    if (!scrollRef.current) return []
-    return Array.from(scrollRef.current.querySelectorAll<HTMLElement>('.larify-workbench-tab'))
-      .map((element) => {
-        const rect = element.getBoundingClientRect()
-        return {
-          centerX: rect.left + rect.width / 2,
-          id: element.dataset.tabId ?? '',
-          left: rect.left,
-          right: rect.right,
-          width: rect.width
-        }
-      })
-      .filter((measure) => measure.id.length > 0)
-  }
+  const updateScrollEdges = useCallback((): void => {
+    const scroller = scrollerRef.current
+    if (!scroller) return
+    const maxScrollLeft = scroller.scrollWidth - scroller.clientWidth
+    const next = [
+      scroller.scrollLeft > 1 && 'left',
+      scroller.scrollLeft < maxScrollLeft - 1 && 'right'
+    ]
+      .filter(Boolean)
+      .join(' ')
+    setScrollEdges(next)
+  }, [])
 
-  const clampDragOffset = (draggingId: string, offsetX: number): number => {
-    const bounds = dragBoundsRef.current
-    const dragged = dragMeasuresRef.current.find((measure) => measure.id === draggingId)
-    if (!bounds || !dragged) return offsetX
-    if (bounds.right <= bounds.left) return offsetX
-    const minOffset = bounds.left - dragged.left
-    const maxOffset = bounds.right - dragged.right
-    return Math.max(minOffset, Math.min(offsetX, maxOffset))
-  }
+  useEffect(() => {
+    if (!activeId) return
+    const activeTab = Array.from(
+      scrollerRef.current?.querySelectorAll<HTMLElement>('[data-tab-id]') ?? []
+    ).find((tab) => tab.dataset.tabId === activeId)
+    const scroller = scrollerRef.current
+    if (!activeTab || !scroller) return
 
-  const getTargetIndex = (draggingId: string, currentCenterX: number): number => {
-    const measures = dragMeasuresRef.current
-    return measures.filter(
-      (measure) => measure.id !== draggingId && currentCenterX >= measure.centerX
-    ).length
-  }
+    const tabLeft = activeTab.offsetLeft
+    const tabRight = tabLeft + activeTab.offsetWidth
+    if (tabLeft < scroller.scrollLeft) scroller.scrollLeft = tabLeft
+    else if (tabRight > scroller.scrollLeft + scroller.clientWidth)
+      scroller.scrollLeft = tabRight - scroller.clientWidth
+    updateScrollEdges()
+  }, [activeId, tabs, updateScrollEdges])
 
-  const stopDragging = (): void => {
-    dragStateRef.current = null
-    setDragState(null)
-    dragMeasuresRef.current = []
-    dragBoundsRef.current = null
-    dragStartPointRef.current = null
-  }
+  useEffect(() => {
+    updateScrollEdges()
+  }, [tabs, updateScrollEdges])
 
-  const clearDragClickGuard = (): void => {
+  useEffect(() => {
+    const scroller = scrollerRef.current
+    if (!scroller) return
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(updateScrollEdges)
+    observer.observe(scroller)
+    if (tabListRef.current) observer.observe(tabListRef.current)
+    return () => observer.disconnect()
+  }, [updateScrollEdges])
+
+  const finishDrag = (): void => {
     window.setTimeout(() => {
-      didDragRef.current = false
+      suppressClickRef.current = false
     }, 0)
   }
-
-  const getTabTransform = (tabId: string): string | undefined => {
-    const state = dragState
-    if (!state) return undefined
-    if (tabId === state.id) return `translateX(${state.offsetX}px) translateY(-1px)`
-
-    const index = tabIndexes.get(tabId)
-    if (index === undefined || state.originIndex === state.targetIndex) return undefined
-    if (
-      state.targetIndex > state.originIndex &&
-      index > state.originIndex &&
-      index <= state.targetIndex
-    ) {
-      return `translateX(-${state.draggedWidth}px)`
-    }
-    if (
-      state.targetIndex < state.originIndex &&
-      index >= state.targetIndex &&
-      index < state.originIndex
-    ) {
-      return `translateX(${state.draggedWidth}px)`
-    }
-    return undefined
+  const handleDragEnd = ({ active, over }: DragEndEvent): void => {
+    const reorder = resolveTabReorder(tabs, String(active.id), over ? String(over.id) : null)
+    if (reorder) onReorder(reorder.id, reorder.fromIndex, reorder.toIndex)
+    finishDrag()
+  }
+  const handleWheel = (event: WheelEvent<HTMLDivElement>): void => {
+    const scroller = scrollerRef.current
+    if (!scroller || scroller.scrollWidth <= scroller.clientWidth) return
+    const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY
+    if (!delta) return
+    event.preventDefault()
+    scroller.scrollLeft += delta
   }
 
   return (
-    <div className="larify-workbench-tabs" data-theme-source="workbench">
-      {hasActiveTab ? (
-        <span aria-hidden className="larify-workbench-tabs-active-base" />
-      ) : null}
-      <div
-        className="larify-workbench-tabs-scroll larify-scrollbar-hidden"
-        ref={scrollRef}
-        role="tablist"
-      >
-        {tabs.map((tab, index) => {
-          const active = tab.active === true
-          const closable = tab.closable ?? true
-          const dragging = dragState?.id === tab.id
-          const transform = getTabTransform(tab.id)
-
-          return (
-            <div
-              aria-selected={active}
-              className={cn(
-                'larify-workbench-tab',
-                active && 'larify-workbench-tab-active',
-                dragging && 'larify-workbench-tab-dragging',
-                dragState && !dragging && 'larify-workbench-tab-sorting'
-              )}
-              data-tab-id={tab.id}
-              key={tab.id}
-              style={
-                transform
-                  ? {
-                      transform
-                    }
-                  : undefined
-              }
-              onClick={(event) => {
-                if (didDragRef.current) {
-                  event.preventDefault()
-                  didDragRef.current = false
-                  return
-                }
-                onSelect(tab.id)
-              }}
-              onPointerDown={(event) => {
-                if (!draggable || event.button !== 0) return
-                const originIndex = tabIndexes.get(tab.id)
-                if (originIndex === undefined) return
-                const measures = measureTabs()
-                const draggedWidth =
-                  measures.find((measure) => measure.id === tab.id)?.width ?? 0
-                dragMeasuresRef.current = measures
-                dragBoundsRef.current = scrollRef.current?.getBoundingClientRect() ?? null
-                const state = {
-                  draggedWidth,
-                  id: tab.id,
-                  offsetX: 0,
-                  originIndex,
-                  targetIndex: originIndex
-                }
-                dragStateRef.current = state
-                setDragState(state)
-                dragStartPointRef.current = { x: event.clientX, y: event.clientY }
-                didDragRef.current = false
-                event.currentTarget.setPointerCapture(event.pointerId)
-              }}
-              onPointerMove={(event) => {
-                const state = dragStateRef.current
-                if (!state || !dragStartPointRef.current) return
-                const deltaX = event.clientX - dragStartPointRef.current.x
-                const deltaY = Math.abs(event.clientY - dragStartPointRef.current.y)
-                if (Math.abs(deltaX) < 4 && deltaY < 4) return
-                const offsetX = clampDragOffset(state.id, deltaX)
-                didDragRef.current = true
-                const dragged = dragMeasuresRef.current.find((measure) => measure.id === state.id)
-                const targetIndex = dragged
-                  ? getTargetIndex(state.id, dragged.centerX + offsetX)
-                  : state.targetIndex
-                const nextState = { ...state, offsetX, targetIndex }
-                dragStateRef.current = nextState
-                setDragState(nextState)
-              }}
-              onPointerUp={() => {
-                const state = dragStateRef.current
-                if (state && didDragRef.current && state.originIndex !== state.targetIndex) {
-                  onReorder?.(state.id, state.originIndex, state.targetIndex)
-                }
-                stopDragging()
-                if (didDragRef.current) clearDragClickGuard()
-              }}
-              onPointerCancel={() => {
-                stopDragging()
-                didDragRef.current = false
-              }}
-              role="tab"
-              tabIndex={active || (!hasActiveTab && index === 0) ? 0 : -1}
-              title={tab.title}
-              onKeyDown={(event) => {
-                if (event.target !== event.currentTarget) return
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault()
-                  onSelect(tab.id)
-                  return
-                }
-                const offset =
-                  event.key === 'ArrowLeft'
-                    ? -1
-                    : event.key === 'ArrowRight'
-                      ? 1
-                      : event.key === 'Home'
-                        ? -index
-                        : event.key === 'End'
-                          ? tabs.length - 1 - index
-                          : 0
-                if (offset === 0) return
-                event.preventDefault()
-                const nextIndex = (index + offset + tabs.length) % tabs.length
-                const next = tabs[nextIndex]
-                if (!next) return
-                onSelect(next.id)
-                scrollRef.current
-                  ?.querySelectorAll<HTMLElement>('.larify-workbench-tab')
-                  .item(nextIndex)
-                  .focus()
-              }}
-            >
-              {tab.icon ? (
-                <span aria-hidden className="larify-workbench-tab-icon-node">
-                  {tab.icon}
-                </span>
-              ) : null}
-              <span className="larify-workbench-tab-title">{tab.title}</span>
-              {closable ? (
-                <button
-                  aria-label="关闭"
-                  className="larify-workbench-tab-close"
-                  onClick={(event) => {
-                    event.stopPropagation()
-                    event.currentTarget.blur()
-                    onClose?.(tab.id)
-                  }}
-                  onPointerDown={(event) => event.stopPropagation()}
-                  title="关闭"
-                  type="button"
-                >
-                  <XIcon aria-hidden className="larify-workbench-tab-icon-svg" />
-                </button>
-              ) : null}
-              {active ? (
-                <>
-                  <span
-                    aria-hidden
-                    className="larify-workbench-tab-corner larify-workbench-tab-corner-left"
-                  />
-                  <span
-                    aria-hidden
-                    className="larify-workbench-tab-corner larify-workbench-tab-corner-right"
-                  />
-                </>
-              ) : null}
-            </div>
-          )
-        })}
-      </div>
-      {onCreate ? (
-        <div className="larify-workbench-tabs-actions">
-          <Button
-            aria-label={newLabel}
-            className="larify-workbench-tab-create"
-            onClick={onCreate}
-            size="icon-xs"
-            title={newLabel}
-            variant="ghost"
+    <DndContext
+      collisionDetection={closestCenter}
+      modifiers={[restrictToHorizontalAxis]}
+      sensors={sensors}
+      onDragCancel={finishDrag}
+      onDragEnd={handleDragEnd}
+      onDragStart={() => {
+        suppressClickRef.current = true
+      }}
+    >
+      <SortableContext items={tabs.map((tab) => tab.id)} strategy={horizontalListSortingStrategy}>
+        <Tabs.Root
+          activationMode="automatic"
+          className="larify-workbench-tabs"
+          data-theme-source="workbench"
+          value={activeId ?? ''}
+          onValueChange={onSelect}
+        >
+          <button
+            aria-label="工作台首页"
+            className="larify-workbench-home"
+            data-active={activeId === null ? true : undefined}
+            title="工作台首页"
+            type="button"
+            onClick={onHome}
           >
-            <PlusIcon className="larify-workbench-tab-icon-svg" />
-          </Button>
-        </div>
-      ) : null}
-    </div>
+            <HouseIcon aria-hidden />
+          </button>
+          <div
+            className="larify-workbench-tab-scroll"
+            data-scroll-edges={scrollEdges || undefined}
+            ref={scrollerRef}
+            onScroll={updateScrollEdges}
+            onWheel={handleWheel}
+          >
+            <Tabs.List className="larify-workbench-tab-list" loop ref={tabListRef}>
+              {tabs.map((tab, index) => (
+                <SortableTab
+                  canCloseOthers={tabs.length > 1}
+                  canCloseRight={index < tabs.length - 1}
+                  key={tab.id}
+                  suppressClickRef={suppressClickRef}
+                  tab={tab}
+                  onClose={(action) => {
+                    resolveTabCloseTargets(tabs, tab.id, action).forEach((id) => onClose(id))
+                  }}
+                />
+              ))}
+            </Tabs.List>
+          </div>
+        </Tabs.Root>
+      </SortableContext>
+    </DndContext>
+  )
+}
+
+function SortableTab({
+  canCloseOthers,
+  canCloseRight,
+  suppressClickRef,
+  tab,
+  onClose
+}: {
+  canCloseOthers: boolean
+  canCloseRight: boolean
+  suppressClickRef: React.RefObject<boolean>
+  tab: WorkbenchTab
+  onClose(action: WorkbenchTabCloseAction): void
+}): React.JSX.Element {
+  const { isDragging, listeners, setNodeRef, transform, transition } = useSortable({ id: tab.id })
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [menuWidth, setMenuWidth] = useState(0)
+
+  return (
+    <DropdownMenu.Root modal={false} open={menuOpen} onOpenChange={setMenuOpen}>
+      <div
+        {...listeners}
+        className="larify-workbench-tab"
+        data-dragging={isDragging || undefined}
+        data-tab-id={tab.id}
+        ref={setNodeRef}
+        style={{ transform: CSS.Transform.toString(transform), transition }}
+        onClickCapture={(event) => {
+          if (suppressClickRef.current) event.stopPropagation()
+        }}
+        onContextMenuCapture={(event) => {
+          event.preventDefault()
+          const rect = event.currentTarget.getBoundingClientRect()
+          setMenuWidth(rect.width)
+          setMenuOpen(true)
+        }}
+      >
+        <Tabs.Trigger
+          className="larify-workbench-tab-trigger"
+          ref={triggerRef}
+          title={tab.title}
+          value={tab.id}
+        >
+          <span aria-hidden className="larify-workbench-tab-icon">
+            {tab.icon}
+          </span>
+          <span className="larify-workbench-tab-title">{tab.title}</span>
+        </Tabs.Trigger>
+        <button
+          aria-label={`关闭 ${tab.title}`}
+          className="larify-workbench-tab-close"
+          title="关闭标签页"
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation()
+            onClose('current')
+          }}
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <XIcon aria-hidden />
+        </button>
+        <DropdownMenu.Trigger asChild>
+          <button
+            aria-hidden
+            className="larify-workbench-tab-menu-anchor"
+            tabIndex={-1}
+            type="button"
+          />
+        </DropdownMenu.Trigger>
+      </div>
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content
+          align="start"
+          avoidCollisions={false}
+          className="larify-workbench-tab-menu"
+          side="bottom"
+          sideOffset={4}
+          style={{ width: menuWidth }}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault()
+            triggerRef.current?.focus()
+          }}
+        >
+          <DropdownMenu.Item
+            className="larify-workbench-tab-menu-item"
+            disabled={!canCloseOthers}
+            onSelect={() => onClose('others')}
+          >
+            关闭其他标签页
+          </DropdownMenu.Item>
+          <DropdownMenu.Item
+            className="larify-workbench-tab-menu-item"
+            disabled={!canCloseRight}
+            onSelect={() => onClose('right')}
+          >
+            关闭右侧标签页
+          </DropdownMenu.Item>
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
   )
 }

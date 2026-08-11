@@ -165,6 +165,27 @@ describe('close', () => {
 })
 
 describe('write', () => {
+  it('submits input by default', async () => {
+    const service = createService()
+    vi.mocked(service.terminalState).mockReturnValue({
+      id: 1,
+      pid: 100,
+      title: 'powershell',
+      cwd: 'D:\\Workspace',
+      shell: 'powershell.exe',
+      exitCode: null
+    })
+    vi.mocked(service.startRun).mockResolvedValue({ runId: 'run-1', sessionId: 'session-1' })
+    vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: 'done' })
+
+    await tool('write', service).execute(
+      { id: 1, input: 'echo done', timeout: 1, idle: 0 },
+      ctx
+    )
+
+    expect(service.write).toHaveBeenCalledWith('session-1', 1, 'echo done\r')
+  })
+
   it('returns the full terminal snapshot with run metadata', async () => {
     const service = createService()
     vi.mocked(service.terminalState).mockReturnValue({
@@ -303,7 +324,7 @@ describe('write', () => {
     vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: 'done' })
 
     await tool('write', service).execute(
-      { id: 1, input: 'first\nsecond\n\rthird\r\n', timeout: 1, idle: 0 },
+      { id: 1, input: 'first\nsecond\n\rthird\r\n', submit: false, timeout: 1, idle: 0 },
       ctx
     )
 
@@ -323,7 +344,10 @@ describe('write', () => {
     vi.mocked(service.startRun).mockResolvedValue({ runId: 'run-1', sessionId: 'session-1' })
     vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: 'done' })
 
-    await tool('write', service).execute({ id: 1, input: '\u001b[B', timeout: 1, idle: 0 }, ctx)
+    await tool('write', service).execute(
+      { id: 1, input: '\u001b[B', submit: false, timeout: 1, idle: 0 },
+      ctx
+    )
 
     expect(service.write).toHaveBeenCalledWith('session-1', 1, '\u001b[B')
   })
@@ -342,7 +366,10 @@ describe('write', () => {
     vi.mocked(service.startRun).mockResolvedValue({ runId: 'run-1', sessionId: 'session-1' })
     vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: 'menu' })
 
-    await tool('write', service).execute({ id: 1, input: '\u001b[B', timeout: 1, idle: 0 }, ctx)
+    await tool('write', service).execute(
+      { id: 1, input: '\u001b[B', submit: false, timeout: 1, idle: 0 },
+      ctx
+    )
 
     expect(service.write).toHaveBeenCalledWith('session-1', 1, '\u001b[B')
     expect(service.bindCommandFinished).not.toHaveBeenCalled()
@@ -363,7 +390,7 @@ describe('write', () => {
     vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: 'done' })
 
     await tool('write', service).execute(
-      { id: 1, input: 'first\nsecond', timeout: 1, idle: 0 },
+      { id: 1, input: 'first\nsecond', submit: false, timeout: 1, idle: 0 },
       ctx
     )
 
@@ -386,7 +413,10 @@ describe('write', () => {
     vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: 'done' })
 
     await expect(
-      tool('write', service).execute({ id: 1, input: '', timeout: 1, idle: 0 }, ctx)
+      tool('write', service).execute(
+        { id: 1, input: '', submit: false, timeout: 1, idle: 0 },
+        ctx
+      )
     ).resolves.toMatchObject({
       status: 'command may still be running or waiting for input',
       snapshot: { screen: 'done' }

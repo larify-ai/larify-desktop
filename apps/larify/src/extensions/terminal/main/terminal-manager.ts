@@ -26,7 +26,6 @@ export class TerminalManager {
   private flushLock = createKeyedLock()
   private flushQueued = new Set<number>()
   private writerLock = createKeyedLock()
-  private activeId: number | null = null
   private changeListeners = new Set<Listener<[SessionTerminalsState]>>()
   private dataListeners = new Set<Listener<[number, string, number, number]>>()
   private exitListeners = new Set<Listener<[number, number]>>()
@@ -76,7 +75,6 @@ export class TerminalManager {
       notify(this.commandStartedListeners, terminal.id)
     })
     this.terminals.set(terminal.id, terminal)
-    this.activeId = terminal.id
     this.emit()
   }
 
@@ -104,23 +102,6 @@ export class TerminalManager {
 
   resize(id: number, cols: number, rows: number): void {
     this.terminals.get(id)?.resize(cols, rows)
-  }
-
-  setActive(id: number): void {
-    if (!this.terminals.has(id) || this.activeId === id) return
-    this.activeId = id
-    this.emit()
-  }
-
-  reorder(id: number, toIndex: number): void {
-    const terminal = this.terminals.get(id)
-    if (!terminal) return
-
-    const ordered = [...this.terminals.entries()].filter(([terminalId]) => terminalId !== id)
-    const nextIndex = Math.max(0, Math.min(toIndex, ordered.length))
-    ordered.splice(nextIndex, 0, [id, terminal])
-    this.terminals = new Map(ordered)
-    this.emit()
   }
 
   snapshot(id: number): Promise<TerminalSnapshot | null> {
@@ -195,15 +176,10 @@ export class TerminalManager {
   }
 
   private forget(id: number): void {
-    const index = [...this.terminals.keys()].indexOf(id)
-    if (index < 0) return
+    if (!this.terminals.has(id)) return
     this.terminals.delete(id)
     this.activeRuns.delete(id)
     this.flushQueued.delete(id)
-    if (this.activeId === id) {
-      const remaining = [...this.terminals.keys()]
-      this.activeId = remaining[index] ?? remaining[index - 1] ?? null
-    }
   }
 
   async close(id: number): Promise<void> {
@@ -218,8 +194,7 @@ export class TerminalManager {
   state(): SessionTerminalsState {
     return {
       sessionId: this.sessionId,
-      terminals: [...this.terminals.values()].map((terminal) => terminal.state()),
-      activeId: this.activeId
+      terminals: [...this.terminals.values()].map((terminal) => terminal.state())
     }
   }
 
@@ -230,7 +205,6 @@ export class TerminalManager {
     const failures = results
       .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
       .map((result) => result.reason)
-    this.activeId = null
     this.emit()
 
     if (failures.length === 1) throw failures[0]

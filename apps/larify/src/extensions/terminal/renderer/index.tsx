@@ -1,41 +1,51 @@
 import { lazy, Suspense } from 'react'
-import type { Extension } from '@shared/extension'
 import { SquareTerminalIcon } from 'lucide-react'
-import type { View } from '@renderer/types/view'
+import type { RendererPlugin } from '@renderer/app/registry/renderer-plugins'
+import {
+  type WorkbenchRendererRegistry,
+  workbenchRendererRegistryToken
+} from '@renderer/app/registry/workbench-renderers'
+import type { SessionTerminalsState } from '../shared/types'
 
-let terminalViewPromise: Promise<{
-  default: typeof import('./terminal-view').TerminalView
-}> | null = null
+const TerminalView = lazy(() =>
+  import('./terminal-view').then(({ TerminalView }) => ({ default: TerminalView }))
+)
 
-const loadTerminalView = (): NonNullable<typeof terminalViewPromise> => {
-  terminalViewPromise ??= import('./terminal-view')
-    .then(({ TerminalView }) => ({ default: TerminalView }))
-    .catch((error) => {
-      terminalViewPromise = null
-      throw error
-    })
-  return terminalViewPromise
-}
-
-const TerminalView = lazy(loadTerminalView)
-
-const extension: Extension = {
-  activate(app) {
-    app.register('view', 'terminal', {
-      sidebar: {
-        icon: SquareTerminalIcon,
-        id: 'terminal',
-        label: '终端',
+const plugin: RendererPlugin = {
+  id: 'terminal',
+  activate({ registry, subscriptions }) {
+    const renderers = registry.get<WorkbenchRendererRegistry>(workbenchRendererRegistryToken)
+    if (!renderers) throw new Error('Workbench renderer registry is unavailable.')
+    subscriptions.push(
+      renderers.register('terminal', {
+        bindTab: ({ resourceId, sessionId, updateTab }) => {
+          let active = true
+          void window.bridge
+            .invoke('terminal:getState', sessionId)
+            .then((payload) => {
+              if (!active) return
+              const state = payload as SessionTerminalsState
+              const terminal = state.terminals.find(({ id }) => id === resourceId)
+              if (terminal) updateTab({ title: terminal.title })
+            })
+            .catch(() => undefined)
+          return {
+            dispose: () => {
+              active = false
+            }
+          }
+        },
+        component: (props) => (
+          <Suspense fallback={null}>
+            <TerminalView {...props} />
+          </Suspense>
+        ),
+        icon: <SquareTerminalIcon aria-hidden />,
         order: 10,
-        placement: 'content'
-      },
-      render: () => (
-        <Suspense fallback={null}>
-          <TerminalView />
-        </Suspense>
-      )
-    } satisfies View)
+        title: '终端'
+      })
+    )
   }
 }
 
-export default extension
+export default plugin

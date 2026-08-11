@@ -1,4 +1,4 @@
-import { useNProgress } from "@tanem/react-nprogress"
+import { useNProgress } from '@tanem/react-nprogress'
 
 export function LoadingBar({ loading }: { loading: boolean }): React.JSX.Element {
   const { isFinished, progress, animationDuration } = useNProgress({ isAnimating: loading })
@@ -12,7 +12,7 @@ export function LoadingBar({ loading }: { loading: boolean }): React.JSX.Element
         className="h-full bg-muted-foreground/35"
         style={{
           width: `${progress * 100}%`,
-          transition: `width ${animationDuration}ms linear`,
+          transition: `width ${animationDuration}ms linear`
         }}
       />
     </div>

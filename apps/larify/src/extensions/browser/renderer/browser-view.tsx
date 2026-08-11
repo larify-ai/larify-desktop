@@ -1,11 +1,12 @@
-import { useState } from "react"
-import { WorkbenchTabsLayout, type WorkbenchTab } from "@renderer/components/workbench"
-import { GlobeIcon } from "lucide-react"
-import { BrowserToolbar } from "./browser-toolbar"
-import { BrowserViewport } from "./browser-viewport"
-import { EmptyState } from "./empty-state"
-import { LoadingBar } from "./loading-bar"
-import { useBrowser } from "./use-browser"
+import { useEffect, useState } from 'react'
+import { WorkbenchTabsLayout, type WorkbenchTab } from '@renderer/components/workbench'
+import { GlobeIcon } from 'lucide-react'
+import { BrowserToolbar } from './browser-toolbar'
+import { BrowserViewport } from './browser-viewport'
+import { EmptyState } from './empty-state'
+import { LoadingBar } from './loading-bar'
+import { useBrowser } from './use-browser'
+import { useAssistantSessions } from '@renderer/app/interaction/assistant/sessions-context'
 
 function BrowserTabIcon({ favicon }: { favicon: string }): React.JSX.Element {
   const [failed, setFailed] = useState(false)
@@ -22,13 +23,28 @@ function BrowserTabIcon({ favicon }: { favicon: string }): React.JSX.Element {
 }
 
 export function BrowserView(): React.JSX.Element {
-  const browser = useBrowser()
+  const sessionId = useAssistantSessions().activeId
+  const browser = useBrowser(sessionId)
   const { active, state } = browser
+  const create = browser.create
+  useEffect(() => {
+    const open = (event: Event): void => {
+      const url = (event as CustomEvent<string>).detail
+      if (!url) return
+      void create(url)
+        .then(() => {
+          window.dispatchEvent(new CustomEvent('larify:workbench-open', { detail: 'browser' }))
+        })
+        .catch((error) => console.error('[browser:open-url]', error))
+    }
+    window.addEventListener('larify:browser-open-url', open)
+    return () => window.removeEventListener('larify:browser-open-url', open)
+  }, [create])
   const tabs = state.tabs.map<WorkbenchTab>((tab) => ({
     active: tab.id === state.activeId,
-    icon: <BrowserTabIcon key={tab.favIconUrl || "fallback"} favicon={tab.favIconUrl} />,
+    icon: <BrowserTabIcon key={tab.favIconUrl || 'fallback'} favicon={tab.favIconUrl} />,
     id: String(tab.id),
-    title: tab.title || tab.url || "新标签页",
+    title: tab.title || tab.url || '新标签页'
   }))
 
   return (
@@ -47,12 +63,16 @@ export function BrowserView(): React.JSX.Element {
             tab={active}
             onBack={() => active && void browser.back(active.id)}
             onForward={() => active && void browser.forward(active.id)}
-            onNavigate={(url) => (active ? browser.navigate(active.id, url) : Promise.resolve(false))}
+            onNavigate={(url) =>
+              active ? browser.navigate(active.id, url) : Promise.resolve(false)
+            }
             onReload={() => active && void browser.reload(active.id)}
           />
           <LoadingBar loading={active?.loading ?? false} />
         </div>
-        <BrowserViewport visible={Boolean(active?.url)}>{!active?.url ? <EmptyState /> : null}</BrowserViewport>
+        <BrowserViewport sessionId={sessionId} visible={Boolean(active?.url)}>
+          {!active?.url ? <EmptyState /> : null}
+        </BrowserViewport>
       </div>
     </WorkbenchTabsLayout>
   )

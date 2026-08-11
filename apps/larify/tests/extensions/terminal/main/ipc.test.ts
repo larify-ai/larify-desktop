@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
-import type { SessionTerminalsState } from "../../../../src/extensions/terminal/shared/types"
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { SessionTerminalsState } from '../../../../src/extensions/terminal/shared/types'
 
 const electronMock = vi.hoisted(() => {
   const handlers = new Map<string, (...args: unknown[]) => unknown>()
@@ -8,8 +8,8 @@ const electronMock = vi.hoisted(() => {
     isDestroyed: vi.fn(() => false),
     webContents: {
       isDestroyed: vi.fn(() => false),
-      send: vi.fn((channel: string, payload: unknown) => sends.push({ channel, payload })),
-    },
+      send: vi.fn((channel: string, payload: unknown) => sends.push({ channel, payload }))
+    }
   }
   return {
     handlers,
@@ -21,31 +21,24 @@ const electronMock = vi.hoisted(() => {
       }),
       removeHandler: vi.fn((channel: string) => {
         handlers.delete(channel)
-      }),
-    },
+      })
+    }
   }
 })
 
-vi.mock("electron", () => ({
-  ipcMain: electronMock.ipcMain,
+vi.mock('electron', () => ({
+  ipcMain: electronMock.ipcMain
 }))
 
-async function importIpc(): Promise<
-  typeof import("../../../../src/extensions/terminal/main/ipc")
-> {
-  return import("../../../../src/extensions/terminal/main/ipc")
+async function importIpc(): Promise<typeof import('../../../../src/extensions/terminal/main/ipc')> {
+  return import('../../../../src/extensions/terminal/main/ipc')
 }
 
 class FakeTerminalService {
-  create = vi.fn(() => 7)
   write = vi.fn()
   resize = vi.fn()
-  close = vi.fn()
-  setActive = vi.fn()
-  reorder = vi.fn()
-  snapshot = vi.fn(async () => ({ data: "snapshot", cols: 80, rows: 24 }))
-  state = vi.fn((sessionId: string): SessionTerminalsState => ({ sessionId, terminals: [], activeId: null }))
-  destroySession = vi.fn()
+  snapshot = vi.fn(async () => ({ data: 'snapshot', cols: 80, rows: 24 }))
+  state = vi.fn((sessionId: string): SessionTerminalsState => ({ sessionId, terminals: [] }))
   unbindChange = vi.fn()
   unbindData = vi.fn()
   unbindExit = vi.fn()
@@ -77,7 +70,9 @@ class FakeTerminalService {
     return this.unbindData
   }
 
-  bindExit(callback: (sessionId: string, terminalId: number, exitCode: number) => void): () => void {
+  bindExit(
+    callback: (sessionId: string, terminalId: number, exitCode: number) => void
+  ): () => void {
     this.exitCallback = callback
     return this.unbindExit
   }
@@ -86,7 +81,13 @@ class FakeTerminalService {
     this.changeCallback?.(state)
   }
 
-  emitData(sessionId: string, terminalId: number, data: string, start?: number, end?: number): void {
+  emitData(
+    sessionId: string,
+    terminalId: number,
+    data: string,
+    start?: number,
+    end?: number
+  ): void {
     this.dataCallback?.(sessionId, terminalId, data, start, end)
   }
 
@@ -108,172 +109,136 @@ beforeEach(() => {
   electronMock.window.webContents.send.mockClear()
 })
 
-describe("registerTerminalIpc", () => {
-  it("registers terminal command handlers and forwards them to the service", async () => {
+describe('registerTerminalIpc', () => {
+  it('registers terminal renderer handlers and forwards them to the service', async () => {
     const { registerTerminalIpc } = await importIpc()
     const service = new FakeTerminalService()
 
     registerTerminalIpc(service as never, electronMock.window as never)
 
-    expect(electronMock.ipcMain.handle).toHaveBeenCalledTimes(9)
-    expect(electronMock.handlers.get("terminal:create")?.({}, "session-1", { title: "Shell", cwd: "/tmp" })).toBe(7)
-    expect(electronMock.handlers.get("terminal:getState")?.({}, "session-1")).toEqual({
-      sessionId: "session-1",
-      terminals: [],
-      activeId: null,
+    expect(electronMock.ipcMain.handle).toHaveBeenCalledTimes(4)
+    expect(electronMock.handlers.get('terminal:getState')?.({}, 'session-1')).toEqual({
+      sessionId: 'session-1',
+      terminals: []
     })
-    electronMock.handlers.get("terminal:write")?.({}, "session-1", 7, "echo hi\r")
-    electronMock.handlers.get("terminal:resize")?.({}, "session-1", 7, 120, 30)
-    electronMock.handlers.get("terminal:setActive")?.({}, "session-1", 7)
-    electronMock.handlers.get("terminal:reorder")?.({}, "session-1", 7, 0)
-    await expect(electronMock.handlers.get("terminal:snapshot")?.({}, "session-1", 7)).resolves.toEqual({
-      data: "snapshot",
+    electronMock.handlers.get('terminal:write')?.({}, 'session-1', 7, 'echo hi\r')
+    electronMock.handlers.get('terminal:resize')?.({}, 'session-1', 7, 120, 30)
+    await expect(
+      electronMock.handlers.get('terminal:snapshot')?.({}, 'session-1', 7)
+    ).resolves.toEqual({
+      data: 'snapshot',
       cols: 80,
-      rows: 24,
+      rows: 24
     })
-    electronMock.handlers.get("terminal:destroySession")?.({}, "session-1")
-
-    expect(service.create).toHaveBeenCalledWith("session-1", {
-      cwd: "/tmp",
-      title: "Shell",
-      cols: undefined,
-      rows: undefined,
-    })
-    expect(service.write).toHaveBeenCalledWith("session-1", 7, "echo hi\r")
-    expect(service.resize).toHaveBeenCalledWith("session-1", 7, 120, 30)
-    expect(service.setActive).toHaveBeenCalledWith("session-1", 7)
-    expect(service.reorder).toHaveBeenCalledWith("session-1", 7, 0)
-    expect(service.snapshot).toHaveBeenCalledWith("session-1", 7)
-    expect(service.destroySession).toHaveBeenCalledWith("session-1")
+    expect(service.write).toHaveBeenCalledWith('session-1', 7, 'echo hi\r')
+    expect(service.resize).toHaveBeenCalledWith('session-1', 7, 120, 30)
+    expect(service.snapshot).toHaveBeenCalledWith('session-1', 7)
   })
 
-  it("drops renderer-supplied shell, args, and env when creating a terminal", async () => {
+  it('sends state events to renderer windows', async () => {
     const { registerTerminalIpc } = await importIpc()
     const service = new FakeTerminalService()
     registerTerminalIpc(service as never, electronMock.window as never)
 
-    electronMock.handlers.get("terminal:create")?.({}, "session-1", {
-      cwd: "/tmp",
-      title: "Shell",
-      cols: 100,
-      rows: 40,
-      shell: "/bin/evil",
-      shellArgs: ["-c", "rm -rf /"],
-      shellEnv: { EVIL: "1" },
-    })
-
-    expect(service.create).toHaveBeenCalledWith("session-1", {
-      cwd: "/tmp",
-      title: "Shell",
-      cols: 100,
-      rows: 40,
-    })
-  })
-
-  it("sends state events to renderer windows", async () => {
-    const { registerTerminalIpc } = await importIpc()
-    const service = new FakeTerminalService()
-    registerTerminalIpc(service as never, electronMock.window as never)
-
-    service.emitChange({ sessionId: "session-1", terminals: [], activeId: null })
+    service.emitChange({ sessionId: 'session-1', terminals: [] })
 
     expect(electronMock.sends).toEqual([
-      { channel: "terminal:state", payload: { sessionId: "session-1", terminals: [], activeId: null } },
+      {
+        channel: 'terminal:state',
+        payload: { sessionId: 'session-1', terminals: [] }
+      }
     ])
   })
 
-  it("does not send events after the main window is destroyed", async () => {
+  it('does not send events after the main window is destroyed', async () => {
     const { registerTerminalIpc } = await importIpc()
     const service = new FakeTerminalService()
     registerTerminalIpc(service as never, electronMock.window as never)
     electronMock.window.isDestroyed.mockReturnValue(true)
 
-    service.emitChange({ sessionId: "session-1", terminals: [], activeId: null })
+    service.emitChange({ sessionId: 'session-1', terminals: [] })
 
     expect(electronMock.sends).toEqual([])
   })
 
-  it("does not send events after the renderer web contents is destroyed", async () => {
+  it('does not send events after the renderer web contents is destroyed', async () => {
     const { registerTerminalIpc } = await importIpc()
     const service = new FakeTerminalService()
     registerTerminalIpc(service as never, electronMock.window as never)
     electronMock.window.webContents.isDestroyed.mockReturnValue(true)
 
-    service.emitChange({ sessionId: "session-1", terminals: [], activeId: null })
+    service.emitChange({ sessionId: 'session-1', terminals: [] })
 
     expect(electronMock.sends).toEqual([])
   })
 
-  it("batches data events before sending them to the renderer", async () => {
+  it('batches data events before sending them to the renderer', async () => {
     vi.useFakeTimers()
     const { registerTerminalIpc } = await importIpc()
     const service = new FakeTerminalService()
     registerTerminalIpc(service as never, electronMock.window as never)
 
-    service.emitData("session-1", 7, "a", 5, 6)
-    service.emitData("session-1", 7, "b", 6, 7)
+    service.emitData('session-1', 7, 'a', 5, 6)
+    service.emitData('session-1', 7, 'b', 6, 7)
     expect(electronMock.sends).toEqual([])
 
     vi.advanceTimersByTime(10)
 
     expect(electronMock.sends).toEqual([
       {
-        channel: "terminal:data",
-        payload: { sessionId: "session-1", terminalId: 7, data: "ab", start: 5, end: 7 },
+        channel: 'terminal:data',
+        payload: { sessionId: 'session-1', terminalId: 7, data: 'ab', start: 5, end: 7 }
+      }
+    ])
+    vi.useRealTimers()
+  })
+
+  it('flushes and removes pending data when a resource leaves terminal state', async () => {
+    vi.useFakeTimers()
+    const { registerTerminalIpc } = await importIpc()
+    const service = new FakeTerminalService()
+    registerTerminalIpc(service as never, electronMock.window as never)
+
+    service.emitData('session-1', 7, 'pending', 0, 7)
+    service.emitChange({ sessionId: 'session-1', terminals: [] })
+
+    expect(electronMock.sends).toEqual([
+      {
+        channel: 'terminal:data',
+        payload: { sessionId: 'session-1', terminalId: 7, data: 'pending', start: 0, end: 7 }
       },
+      {
+        channel: 'terminal:state',
+        payload: { sessionId: 'session-1', terminals: [] }
+      }
     ])
-    vi.useRealTimers()
-  })
-
-  it("flushes pending data before exit and close events", async () => {
-    vi.useFakeTimers()
-    const { registerTerminalIpc } = await importIpc()
-    const service = new FakeTerminalService()
-    registerTerminalIpc(service as never, electronMock.window as never)
-
-    service.emitData("session-1", 7, "pending")
-    service.emitExit("session-1", 7, 0)
-
-    expect(electronMock.sends).toEqual([
-      { channel: "terminal:data", payload: { sessionId: "session-1", terminalId: 7, data: "pending" } },
-      { channel: "terminal:exit", payload: { sessionId: "session-1", terminalId: 7, exitCode: 0 } },
-    ])
-
-    service.emitData("session-1", 7, "closing")
-    await electronMock.handlers.get("terminal:close")?.({}, "session-1", 7)
-
-    expect(electronMock.sends.at(-1)).toEqual({
-      channel: "terminal:data",
-      payload: { sessionId: "session-1", terminalId: 7, data: "closing" },
-    })
-    expect(service.close).toHaveBeenCalledWith("session-1", 7)
-    vi.useRealTimers()
-  })
-
-  it("flushes and drops a session's batchers on destroySession", async () => {
-    vi.useFakeTimers()
-    const { registerTerminalIpc } = await importIpc()
-    const service = new FakeTerminalService()
-    registerTerminalIpc(service as never, electronMock.window as never)
-
-    service.emitData("session-1", 7, "pending", 0, 7)
-    await electronMock.handlers.get("terminal:destroySession")?.({}, "session-1")
-
-    expect(electronMock.sends).toEqual([
-      { channel: "terminal:data", payload: { sessionId: "session-1", terminalId: 7, data: "pending", start: 0, end: 7 } },
-    ])
-    expect(service.destroySession).toHaveBeenCalledWith("session-1")
-
     electronMock.sends.length = 0
-    service.emitData("session-1", 7, "after", 7, 12)
     vi.advanceTimersByTime(10)
-    expect(electronMock.sends).toEqual([
-      { channel: "terminal:data", payload: { sessionId: "session-1", terminalId: 7, data: "after", start: 7, end: 12 } },
-    ])
+    expect(electronMock.sends).toEqual([])
     vi.useRealTimers()
   })
 
-  it("unbinds service listeners and removes handlers on dispose", async () => {
+  it('flushes pending data before exit events', async () => {
+    vi.useFakeTimers()
+    const { registerTerminalIpc } = await importIpc()
+    const service = new FakeTerminalService()
+    registerTerminalIpc(service as never, electronMock.window as never)
+
+    service.emitData('session-1', 7, 'pending')
+    service.emitExit('session-1', 7, 0)
+
+    expect(electronMock.sends).toEqual([
+      {
+        channel: 'terminal:data',
+        payload: { sessionId: 'session-1', terminalId: 7, data: 'pending' }
+      },
+      { channel: 'terminal:exit', payload: { sessionId: 'session-1', terminalId: 7, exitCode: 0 } }
+    ])
+
+    vi.useRealTimers()
+  })
+
+  it('unbinds service listeners and removes handlers on dispose', async () => {
     const { registerTerminalIpc } = await importIpc()
     const service = new FakeTerminalService()
     const dispose = registerTerminalIpc(service as never, electronMock.window as never)
@@ -283,7 +248,7 @@ describe("registerTerminalIpc", () => {
     expect(service.unbindChange).toHaveBeenCalled()
     expect(service.unbindData).toHaveBeenCalled()
     expect(service.unbindExit).toHaveBeenCalled()
-    expect(electronMock.ipcMain.removeHandler).toHaveBeenCalledTimes(9)
+    expect(electronMock.ipcMain.removeHandler).toHaveBeenCalledTimes(4)
     expect(electronMock.handlers.size).toBe(0)
   })
 })

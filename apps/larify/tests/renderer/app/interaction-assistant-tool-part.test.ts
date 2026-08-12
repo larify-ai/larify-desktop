@@ -91,9 +91,42 @@ describe('interaction assistant tool part', () => {
     expect(captured.header?.title).toBe('fs_read')
   })
 
+  it('uses raw input metadata when tool input validation fails', () => {
+    render({
+      errorText: 'Invalid input',
+      rawInput: { toolCallTitle: '查询计数器数值', selector: '#count' },
+      state: 'output-error',
+      toolCallId: 'call-1',
+      toolName: 'browser_query_element',
+      type: 'dynamic-tool'
+    })
+
+    expect(captured.header?.title).toBe('查询计数器数值')
+    expect(captured.input).toEqual({
+      name: 'browser_query_element',
+      args: { selector: '#count' }
+    })
+  })
+
+  it('does not expose the internal tool name before the streamed title arrives', () => {
+    render({
+      input: { path: 'partially-streamed' },
+      state: 'input-streaming',
+      toolCallId: 'call-1',
+      toolName: 'fs_read',
+      type: 'dynamic-tool'
+    })
+
+    expect(captured.header).toBeUndefined()
+  })
+
   it('does not show an incomplete ask-user form while its input is streaming', () => {
     render({
-      input: { message: 'Choose', options: [{ label: 'Partially streamed' }] },
+      input: {
+        toolCallTitle: '等待用户回答',
+        message: 'Choose',
+        options: [{ label: 'Partially streamed' }]
+      },
       state: 'input-streaming',
       toolCallId: 'call-1',
       toolName: 'agent_ask_user',
@@ -125,6 +158,8 @@ describe('interaction assistant tool part', () => {
   })
 })
 
-function render(part: DynamicToolUIPart): void {
+function render(
+  part: DynamicToolUIPart | (Omit<DynamicToolUIPart, 'input'> & { rawInput: unknown })
+): void {
   renderToStaticMarkup(createElement(ToolPart, { part }))
 }

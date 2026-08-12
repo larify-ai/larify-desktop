@@ -113,7 +113,7 @@ describe('interaction assistant message view', () => {
     expect(markup).toContain('其他或补充说明（可选）')
   })
 
-  it('uses a stable waiting label while ask-user input is streaming', () => {
+  it('hides an ask-user card until its streamed display title arrives', () => {
     const markup = render(
       message([
         {
@@ -126,8 +126,8 @@ describe('interaction assistant message view', () => {
       ])
     )
 
-    expect(markup).toContain('等待回答')
-    expect(markup).not.toContain('等待中')
+    expect(markup).not.toContain('agent_ask_user')
+    expect(markup).not.toContain('等待回答')
   })
 
   it('keeps user attachments aligned with user content', () => {

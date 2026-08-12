@@ -18,12 +18,15 @@ function toolInput(input: unknown): { title?: string; args: unknown } {
   return { title: typeof toolCallTitle === 'string' ? toolCallTitle : undefined, args }
 }
 
-export function ToolPart({ part }: { part: Part }): React.JSX.Element {
+export function ToolPart({ part }: { part: Part }): React.JSX.Element | null {
   const name = getToolName(part)
   const onToolOutput = useToolOutput()
-  const { title, args } = toolInput(part.input)
+  const input = part.input ?? ('rawInput' in part ? part.rawInput : undefined)
+  const { title, args } = toolInput(input)
   const metadata = part.toolMetadata as { icon?: unknown } | undefined
   const icon = typeof metadata?.icon === 'string' ? metadata.icon : undefined
+
+  if (part.state === 'input-streaming' && !title) return null
 
   if (name === 'agent_ask_user') {
     const asking = part.state === 'input-available'

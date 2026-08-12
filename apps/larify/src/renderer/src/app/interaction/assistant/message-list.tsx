@@ -221,7 +221,7 @@ export function AssistantMessageList({
           const message = item(index)
           return message ? (
             <div
-              ref={live && index === totalCount - 1 ? followGrowingMessage : undefined}
+              ref={index === totalCount - 1 ? followGrowingMessage : undefined}
               className={`mx-auto w-full max-w-4xl min-w-0 px-6 pt-3 ${index === totalCount - 1 ? 'pb-30' : 'pb-3'}`}
               data-message-index={index}
             >

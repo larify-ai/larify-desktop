@@ -365,6 +365,24 @@ describe('interaction assistant message list', () => {
     detach()
   })
 
+  it('keeps observing a long final message with tool cards after streaming completes', async () => {
+    const finalMessage = complexMessage()
+    await render({ messages: [finalMessage], recentStart: 0, live: true })
+    const streamingContent = (captured.props as VirtuosoProps).itemContent(0)
+    act(() => (captured.props as VirtuosoProps).atBottomStateChange(true))
+    const detach = streamingContent.props.ref(document.createElement('div'))
+
+    await render({ messages: [finalMessage], recentStart: 0, live: false })
+    const completedContent = (captured.props as VirtuosoProps).itemContent(0)
+
+    expect(streamingContent.props.ref).toEqual(expect.any(Function))
+    expect(completedContent.props.ref).toBe(streamingContent.props.ref)
+    captured.autoscrollToBottom.mockClear()
+    act(() => resize())
+    expect(captured.autoscrollToBottom).toHaveBeenCalledOnce()
+    detach()
+  })
+
   it('does not follow height growth after the reader scrolls upward', async () => {
     await render({ messages: [message('streaming')], recentStart: 0, live: true })
     act(() => (captured.props as VirtuosoProps).atBottomStateChange(true))
@@ -487,6 +505,33 @@ async function render({
 
 function message(id: string): UIMessage {
   return { id, role: 'assistant', parts: [{ type: 'text', text: id }] }
+}
+
+function complexMessage(): UIMessage {
+  return {
+    id: 'long-final-message',
+    role: 'assistant',
+    parts: [
+      { type: 'text', text: 'long text '.repeat(2000) },
+      {
+        type: 'dynamic-tool',
+        toolName: 'browser_screenshot',
+        toolCallId: 'call-1',
+        state: 'output-available',
+        input: { toolCallTitle: '截取完整页面' },
+        output: { path: 'page.png' }
+      },
+      {
+        type: 'dynamic-tool',
+        toolName: 'browser_pdf',
+        toolCallId: 'call-2',
+        state: 'output-available',
+        input: { toolCallTitle: '保存页面为 PDF' },
+        output: { path: 'page.pdf' }
+      },
+      { type: 'text', text: '| 文件 | 大小 |\n| --- | ---: |\n| page.png | 26007 |' }
+    ]
+  }
 }
 
 function createScroller(scrollTop: number): HTMLDivElement {

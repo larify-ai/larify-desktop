@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/explicit-function-return-type */
 import { describe, expect, it, vi } from "vitest"
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { pathToFileURL } from "node:url"
@@ -633,6 +633,8 @@ describe("browser toolkit", () => {
   })
 
   it("returns interaction tool results in the original browser tool shapes", async () => {
+    const uploadPath = join(mkdtempSync(join(tmpdir(), "larify-browser-upload-")), "a.txt")
+    writeFileSync(uploadPath, "upload")
     const tab = {
       click: vi.fn(async () => undefined),
       elementHref: vi.fn(async () => "https://example.com/next"),
@@ -700,7 +702,7 @@ describe("browser toolkit", () => {
       target: "#b",
     })
     await expect(
-      tool("upload", service).execute({ id: 1, selector: "input", files: ["D:\\a.txt"] }, ctx),
+      tool("upload", service).execute({ id: 1, selector: "input", files: [uploadPath] }, ctx),
     ).resolves.toEqual({
       uploaded: 1,
     })
@@ -734,7 +736,40 @@ describe("browser toolkit", () => {
     expect(tab.download).toHaveBeenCalledWith("a", "D:\\Downloads\\file.txt", 1_800_000, controller.signal)
   })
 
+  it("rejects missing upload files before calling the browser", async () => {
+    const tab = { upload: vi.fn(async () => undefined) }
+    const service = {
+      ...createService(),
+      tab: vi.fn(() => tab),
+    } as unknown as BrowserService
+    const missing = join(mkdtempSync(join(tmpdir(), "larify-browser-missing-")), "missing.txt")
+
+    await expect(
+      tool("upload", service).execute({ id: 1, selector: "#file", files: [missing] }, ctx),
+    ).rejects.toThrow(`Upload file does not exist: ${missing}`)
+    expect(tab.upload).not.toHaveBeenCalled()
+  })
+
+  it("rejects upload directories before calling the browser", async () => {
+    const tab = { upload: vi.fn(async () => undefined) }
+    const service = {
+      ...createService(),
+      tab: vi.fn(() => tab),
+    } as unknown as BrowserService
+    const directory = mkdtempSync(join(tmpdir(), "larify-browser-directory-"))
+
+    await expect(
+      tool("upload", service).execute({ id: 1, selector: "#file", files: [directory] }, ctx),
+    ).rejects.toThrow(`Upload path is not a file: ${directory}`)
+    expect(tab.upload).not.toHaveBeenCalled()
+  })
+
   it("resolves relative interaction and recording paths from the tool working directory", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "larify-browser-paths-"))
+    const uploadPath = join(cwd, "files", "a.txt")
+    mkdirSync(join(cwd, "files"))
+    writeFileSync(uploadPath, "upload")
+    const localCtx = { context: { ...ctx.context, cwd } }
     const tab = {
       upload: vi.fn(async () => undefined),
       download: vi.fn(async (_selector: string, path: string) => path),
@@ -748,31 +783,31 @@ describe("browser toolkit", () => {
 
     await tool("upload", service).execute(
       { id: 1, selector: "input", files: ["files\\a.txt"] },
-      ctx,
+      localCtx,
     )
     await tool("download", service).execute(
       { id: 1, selector: "a", path: "downloads\\a.txt" },
-      ctx,
+      localCtx,
     )
-    await tool("record_start", service).execute({ id: 1, path: "video\\a.webm" }, ctx)
-    await tool("record_restart", service).execute({ id: 1, path: "video\\b.webm" }, ctx)
+    await tool("record_start", service).execute({ id: 1, path: "video\\a.webm" }, localCtx)
+    await tool("record_restart", service).execute({ id: 1, path: "video\\b.webm" }, localCtx)
 
-    expect(tab.upload).toHaveBeenCalledWith("input", [join(ctx.context.cwd, "files\\a.txt")])
+    expect(tab.upload).toHaveBeenCalledWith("input", [uploadPath])
     expect(tab.download).toHaveBeenCalledWith(
       "a",
-      join(ctx.context.cwd, "downloads\\a.txt"),
+      join(cwd, "downloads\\a.txt"),
       1_800_000,
       undefined,
     )
     expect(service.recordStart).toHaveBeenCalledWith(
       "session-1",
       tab,
-      join(ctx.context.cwd, "video\\a.webm"),
+      join(cwd, "video\\a.webm"),
     )
     expect(service.recordRestart).toHaveBeenCalledWith(
       "session-1",
       tab,
-      join(ctx.context.cwd, "video\\b.webm"),
+      join(cwd, "video\\b.webm"),
     )
   })
 

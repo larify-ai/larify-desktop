@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs"
+import { existsSync, statSync } from "node:fs"
 import { mkdir, writeFile } from "node:fs/promises"
 import { dirname, join, resolve } from "node:path"
 import { randomUUID } from "node:crypto"
@@ -555,8 +555,14 @@ function interactionTools(service: BrowserService): Record<string, Tool> {
       inputSchema: uploadSchema,
       execute: async (args, ctx) => {
         const { id, selector, files } = args
+        const paths = files.map((file) => resolveToolPath(ctx.cwd, file))
+        for (const path of paths) {
+          const stats = statSync(path, { throwIfNoEntry: false })
+          if (!stats) throw new Error(`Upload file does not exist: ${path}`)
+          if (!stats.isFile()) throw new Error(`Upload path is not a file: ${path}`)
+        }
         return withTab(service, ctx.sessionId, id, async (tab) => {
-          await tab.upload(selector, files.map((file) => resolveToolPath(ctx.cwd, file)))
+          await tab.upload(selector, paths)
           return { uploaded: files.length }
         })
       },

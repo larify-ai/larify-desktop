@@ -9,6 +9,7 @@
 | 3 | `browser-interactions-smoke-prompt.md` | `query_element`、`click`、`element_action`、`drag`、`upload`、`download`、`fill`、`type`、`press`、`select`、`scroll`、`wait_for` |
 | 4 | `browser-capture-input-smoke-prompt.md` | `screenshot`、`pdf`、`record_start`、`record_stop`、`record_restart`、键盘和鼠标工具 |
 | 5 | `browser-debug-smoke-prompt.md` | `eval_js`、`cdp_call`、`cdp_events`、`console`、`errors` |
+| 6 | `browser-error-paths-smoke-prompt.md` | 上传错误、下载超时、录屏中关闭标签页和资源清理 |
 
 每组都要求 agent：
 
@@ -16,4 +17,3 @@
 - 每一步先说明预期，再报告实际结果。
 - 保留测试过程中创建的输出文件，方便人工检查。
 - 最后输出通过/失败表和失败证据。
-

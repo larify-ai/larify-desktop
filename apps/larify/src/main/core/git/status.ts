@@ -1,20 +1,14 @@
 import path from 'node:path'
 import type { FileStatusResult } from 'simple-git'
 import { gitService, type GitService } from './core'
-
-const isInside = (root: string, candidate: string): boolean => {
-  const relative = path.relative(root, candidate)
-  return relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)
-}
+import { isInside, resolveRepositoryRoot } from './repository'
 
 export async function status(
   workspaceRoot: string,
   runtime: GitService = gitService
 ): Promise<FileStatusResult[]> {
   const git = await runtime.open(workspaceRoot)
-  if (!(await git.checkIsRepo())) throw new Error('Workspace is not a Git repository')
-
-  const repositoryRoot = path.resolve(await git.revparse(['--show-toplevel']))
+  const repositoryRoot = await resolveRepositoryRoot(workspaceRoot, git)
   const [{ files }, ignoredOutput] = await Promise.all([
     git.status(),
     git.raw([

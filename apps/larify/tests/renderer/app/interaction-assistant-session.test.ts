@@ -201,7 +201,7 @@ describe('AssistantSession', () => {
     })
 
     expect(mocks.assistant.mock.calls.at(-1)![0]).toEqual(
-      expect.objectContaining({ initialMessageCount: 2, recentStart: 0 })
+      expect.objectContaining({ recentStart: 0 })
     )
     await act(async () => root.unmount())
   })

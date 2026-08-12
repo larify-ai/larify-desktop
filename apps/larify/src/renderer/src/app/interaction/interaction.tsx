@@ -36,6 +36,7 @@ const SessionView = memo(function SessionView({
     <div className={active ? 'h-full' : 'hidden'}>
       <AssistantSession
         id={id}
+        active={active}
         title={heading?.title}
         initialMessages={messages}
         initialMessageCount={messageCount}

@@ -1,23 +1,23 @@
 // @vitest-environment jsdom
 
-import { act, createElement, forwardRef, useImperativeHandle } from 'react'
+import { act, createElement, forwardRef, useEffect, useImperativeHandle } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { UIMessage } from 'ai'
 
 const captured = vi.hoisted(() => ({
   props: undefined as unknown,
-  scrollToIndex: vi.fn(),
-  scrollTo: vi.fn(),
+  mounts: 0,
   autoscrollToBottom: vi.fn()
 }))
 
 vi.mock('react-virtuoso', () => ({
   Virtuoso: forwardRef(function Virtuoso(props: unknown, ref) {
     captured.props = props
+    useEffect(() => {
+      captured.mounts += 1
+    }, [])
     useImperativeHandle(ref, () => ({
-      scrollToIndex: captured.scrollToIndex,
-      scrollTo: captured.scrollTo,
       autoscrollToBottom: captured.autoscrollToBottom
     }))
     return null
@@ -34,11 +34,8 @@ interface VirtuosoProps {
   totalCount: number
   defaultItemHeight: number
   initialItemCount: number
-  initialTopMostItemIndex: number
+  initialTopMostItemIndex: { index: 'LAST'; align: 'end' } | number
   increaseViewportBy: { top: number; bottom: number }
-  components: {
-    Footer: React.ComponentType
-  }
   rangeChanged(range: { startIndex: number; endIndex: number }): void
   atBottomStateChange(atBottom: boolean): void
   computeItemKey(index: number): React.Key
@@ -49,6 +46,7 @@ let container: HTMLDivElement
 let root: Root
 
 beforeEach(() => {
+  captured.mounts = 0
   container = document.createElement('div')
   document.body.append(container)
   root = createRoot(container)
@@ -64,7 +62,6 @@ describe('interaction assistant message list', () => {
   it('starts with a stable historical count and the latest item', async () => {
     await render({
       messages: [message('latest')],
-      initialMessageCount: 5000,
       recentStart: 4999
     })
 
@@ -72,25 +69,25 @@ describe('interaction assistant message list', () => {
     expect(props.totalCount).toBe(5000)
     expect(props.defaultItemHeight).toBe(80)
     expect(props.initialItemCount).toBe(12)
-    expect(props.initialTopMostItemIndex).toBe(4999)
+    expect(props.initialTopMostItemIndex).toEqual({ index: 'LAST', align: 'end' })
     expect(props.computeItemKey(4999)).toBe('latest')
     expect(props.className).toContain('[scrollbar-gutter:stable]')
     expect(props.scrollerRef).toEqual(expect.any(Function))
   })
 
   it('does not render initial placeholders for an empty conversation', async () => {
-    await render({ messages: [], initialMessageCount: 0, recentStart: 0 })
+    await render({ messages: [], recentStart: 0 })
 
     const props = captured.props as VirtuosoProps
     expect(props.totalCount).toBe(0)
     expect(props.initialItemCount).toBe(0)
+    expect(props.initialTopMostItemIndex).toBe(0)
   })
 
   it('prefetches pages around the visible range without changing the total count', async () => {
     const onLoadRange = vi.fn()
     await render({
       messages: [message('latest')],
-      initialMessageCount: 5000,
       recentStart: 4999,
       onLoadRange
     })
@@ -107,20 +104,18 @@ describe('interaction assistant message list', () => {
   it('does not replace loaded messages with placeholders while scrolling', async () => {
     await render({
       messages: [message('latest')],
-      initialMessageCount: 5000,
       recentStart: 4999
     })
 
     const props = captured.props as VirtuosoProps
     expect(props).not.toHaveProperty('scrollSeekConfiguration')
-    expect(props.components).not.toHaveProperty('ScrollSeekPlaceholder')
+    expect(props).not.toHaveProperty('components')
   })
 
   it('reports one buffered page range even when part of it is cached', async () => {
     const onLoadRange = vi.fn()
     await render({
       messages: [message('latest')],
-      initialMessageCount: 5000,
       recentStart: 4999,
       olderMessages: new Map([[100, message('loaded')]]),
       onLoadRange
@@ -134,7 +129,6 @@ describe('interaction assistant message list', () => {
   it('grows only when the agent appends a new message', async () => {
     const props = {
       messages: [message('latest')],
-      initialMessageCount: 5000,
       recentStart: 4999
     }
     await render(props)
@@ -144,11 +138,70 @@ describe('interaction assistant message list', () => {
     expect((captured.props as VirtuosoProps).totalCount).toBe(5001)
   })
 
+  it('scrolls to the bottom when a mounted conversation becomes active', async () => {
+    await render({
+      active: false,
+      messages: [message('first')],
+      recentStart: 0
+    })
+    captured.autoscrollToBottom.mockClear()
+    await render({
+      active: true,
+      messages: [message('second-latest')],
+      recentStart: 4999
+    })
+
+    expect(captured.mounts).toBe(1)
+    expect((captured.props as VirtuosoProps).initialTopMostItemIndex).toEqual({
+      index: 'LAST',
+      align: 'end'
+    })
+    expect(captured.autoscrollToBottom).toHaveBeenCalledOnce()
+  })
+
+  it('positions once each time a mounted conversation is reactivated', async () => {
+    const props = { messages: [message('latest')], recentStart: 0 }
+    await render({ ...props, active: true })
+    expect(captured.autoscrollToBottom).toHaveBeenCalledTimes(1)
+
+    await render({ ...props, active: false })
+    await render({ ...props, active: true })
+    expect(captured.autoscrollToBottom).toHaveBeenCalledTimes(2)
+  })
+
+  it('scrolls to the bottom when initial messages finish restoring', async () => {
+    await render({
+      messages: [],
+      recentStart: 0
+    })
+    captured.autoscrollToBottom.mockClear()
+
+    await render({
+      messages: [message('latest')],
+      recentStart: 4999
+    })
+
+    expect(captured.mounts).toBe(1)
+    expect(captured.autoscrollToBottom).toHaveBeenCalledOnce()
+  })
+
+  it('hides the return button while the initial location is being measured', async () => {
+    await render({
+      messages: [message('latest')],
+      recentStart: 4999
+    })
+    act(() => (captured.props as VirtuosoProps).atBottomStateChange(false))
+    expect(container.querySelector('button')).toBeNull()
+
+    act(() => (captured.props as VirtuosoProps).atBottomStateChange(true))
+    act(() => (captured.props as VirtuosoProps).atBottomStateChange(false))
+    expect(container.querySelector('button')).not.toBeNull()
+  })
+
   it('does not request historical pages when the conversation has no history', async () => {
     const onLoadRange = vi.fn()
     await render({
       messages: [message('latest')],
-      initialMessageCount: 1,
       recentStart: 0,
       onLoadRange
     })
@@ -157,10 +210,9 @@ describe('interaction assistant message list', () => {
     expect(onLoadRange).not.toHaveBeenCalled()
   })
 
-  it('follows streaming growth only while the reader is at the bottom', async () => {
+  it('keeps following streaming growth when layout briefly reports away from bottom', async () => {
     const props = {
       messages: [message('streaming')],
-      initialMessageCount: 1,
       recentStart: 0,
       live: true
     }
@@ -169,29 +221,62 @@ describe('interaction assistant message list', () => {
 
     act(() => (captured.props as VirtuosoProps).atBottomStateChange(false))
     await render({ ...props, messages: [...props.messages] })
-    expect(captured.autoscrollToBottom).not.toHaveBeenCalled()
+    expect(captured.autoscrollToBottom).toHaveBeenCalled()
 
+    captured.autoscrollToBottom.mockClear()
     act(() => (captured.props as VirtuosoProps).atBottomStateChange(true))
     await render({ ...props, messages: [...props.messages] })
     expect(captured.autoscrollToBottom).toHaveBeenCalled()
   })
 
-  it('returns to the true bottom including the footer', async () => {
+  it('pauses streaming follow after the reader scrolls upward', async () => {
+    const props = {
+      messages: [message('streaming')],
+      recentStart: 0,
+      live: true
+    }
+    await render(props)
+    captured.autoscrollToBottom.mockClear()
+
+    act(() => container.firstElementChild?.dispatchEvent(new WheelEvent('wheel', { deltaY: -1 })))
+    act(() => (captured.props as VirtuosoProps).atBottomStateChange(false))
+    await render({ ...props, messages: [...props.messages] })
+
+    expect(captured.autoscrollToBottom).not.toHaveBeenCalled()
+  })
+
+  it('pauses streaming follow when the reader leaves the bottom without a wheel event', async () => {
+    const props = {
+      messages: [message('streaming')],
+      recentStart: 0,
+      live: true
+    }
+    await render(props)
+    act(() => (captured.props as VirtuosoProps).atBottomStateChange(true))
+    act(() => (captured.props as VirtuosoProps).atBottomStateChange(false))
+    captured.autoscrollToBottom.mockClear()
+
+    await render({ ...props, messages: [...props.messages] })
+
+    expect(captured.autoscrollToBottom).not.toHaveBeenCalled()
+  })
+
+  it('returns to the true bottom after initial positioning', async () => {
     await render({
       messages: [message('latest')],
-      initialMessageCount: 5000,
       recentStart: 4999
     })
+    act(() => (captured.props as VirtuosoProps).atBottomStateChange(true))
     act(() => (captured.props as VirtuosoProps).atBottomStateChange(false))
+    captured.autoscrollToBottom.mockClear()
     act(() => container.querySelector<HTMLButtonElement>('button')?.click())
 
-    expect(captured.scrollTo).toHaveBeenCalledWith({ top: Number.MAX_SAFE_INTEGER })
+    expect(captured.autoscrollToBottom).toHaveBeenCalledOnce()
   })
 
   it('keeps unloaded items at the configured estimated height', async () => {
     await render({
       messages: [message('latest')],
-      initialMessageCount: 5000,
       recentStart: 4999
     })
 
@@ -203,36 +288,33 @@ describe('interaction assistant message list', () => {
   })
 
   it('marks rendered messages as viewport anchor candidates', async () => {
-    await render({ messages: [message('latest')], initialMessageCount: 1, recentStart: 0 })
+    await render({ messages: [message('latest')], recentStart: 0 })
 
     await act(async () => root.render((captured.props as VirtuosoProps).itemContent(0)))
     expect(container.firstElementChild?.getAttribute('data-message-index')).toBe('0')
   })
 
-  it('reserves the rounded composer overlap below the final message', async () => {
+  it('reserves the rounded composer overlap inside the final message', async () => {
     await render({
       messages: [message('latest')],
-      initialMessageCount: 1,
       recentStart: 0
     })
 
-    await act(async () =>
-      root.render(createElement((captured.props as VirtuosoProps).components.Footer))
-    )
-    expect(container.firstElementChild?.className).toContain('h-30')
+    await act(async () => root.render((captured.props as VirtuosoProps).itemContent(0)))
+    expect(container.firstElementChild?.className).toContain('pb-30')
   })
 })
 
 async function render({
+  active = true,
   messages,
-  initialMessageCount,
   recentStart,
   live = false,
   olderMessages = new Map(),
   onLoadRange = vi.fn()
 }: {
+  active?: boolean
   messages: UIMessage[]
-  initialMessageCount: number
   recentStart: number
   live?: boolean
   olderMessages?: Map<number, UIMessage>
@@ -241,9 +323,9 @@ async function render({
   await act(async () =>
     root.render(
       createElement(AssistantMessageList, {
+        active,
         messages,
         live,
-        initialMessageCount,
         recentStart,
         olderMessages,
         onLoadRange

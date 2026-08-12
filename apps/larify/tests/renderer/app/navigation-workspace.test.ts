@@ -88,6 +88,7 @@ describe('navigation workspace', () => {
 
     const session = container.querySelector('[aria-current="page"]')
     expect(session?.textContent).toBe('Session active')
+    expect(session?.getAttribute('data-session-id')).toBe('active')
     click('Session active')
     expect(onClick).toHaveBeenCalledOnce()
   })

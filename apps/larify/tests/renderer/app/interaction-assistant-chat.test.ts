@@ -92,7 +92,6 @@ describe('AssistantChat', () => {
       expect.objectContaining({
         live: true,
         messages: mocks.useChat.mock.results[0].value.messages,
-        initialMessageCount: 3,
         recentStart: 0,
         olderMessages,
         onLoadRange

@@ -16,6 +16,12 @@ interface Evaluation<T> {
   exceptionDetails?: { text?: string; exception?: { description?: string } }
 }
 
+interface StoredSession {
+  id: string
+  title: string
+  messageCount: number
+}
+
 class DevTools {
   private id = 0
   private readonly pending = new Map<
@@ -166,13 +172,11 @@ describe.skipIf(!process.env.LIVE)('Interaction live integration', () => {
     devtools = await DevTools.connect()
     await devtools.reload()
     await waitFor(() => devtools!.evaluate(`document.readyState === 'complete'`))
-    await revealNavigationItem(devtools, '5000')
+    const session = await findLongestSession(devtools)
+    expect(session.messageCount).toBeGreaterThan(50)
+    await revealNavigationItem(devtools, session.id)
     await devtools.click(
-      `(() => {
-        return [...document.querySelectorAll('nav button')].find(
-          (button) => button.textContent?.includes('5000')
-        );
-      })()`
+      `document.querySelector('nav button[data-session-id="' + CSS.escape(${JSON.stringify(session.id)}) + '"]')`
     )
     await waitFor(async () =>
       devtools?.evaluate(
@@ -182,44 +186,201 @@ describe.skipIf(!process.env.LIVE)('Interaction live integration', () => {
       )
     )
 
+    const initial = await devtools.evaluate<{
+      samples: number
+      firstDistance: number
+      lastDistance: number
+      maxDistance: number
+      awayFrames: number
+      button: boolean
+    }>(
+      `(async () => {
+        const values = [];
+        let button = false;
+        for (let frame = 0; frame < 180; frame++) {
+          await new Promise(requestAnimationFrame);
+          const scroller = [...document.querySelectorAll('[role="log"]')].find(
+            (element) => element.getClientRects().length > 0 && element.scrollHeight > element.clientHeight
+          );
+          if (scroller) values.push(scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop);
+          button ||= Boolean(document.querySelector('button[aria-label="\u8fd4\u56de\u5e95\u90e8"]'));
+        }
+        return {
+          samples: values.length,
+          firstDistance: values[0] ?? Number.MAX_SAFE_INTEGER,
+          lastDistance: values.at(-1) ?? Number.MAX_SAFE_INTEGER,
+          maxDistance: values.length ? Math.max(...values) : Number.MAX_SAFE_INTEGER,
+          awayFrames: values.filter((value) => value >= 4).length,
+          button
+        };
+      })()`
+    )
+    expect(initial.samples).toBeGreaterThan(0)
+    expect(initial.maxDistance).toBeLessThan(4)
+    expect(initial.button).toBe(false)
+
     for (const position of [1, 0.66, 0.33, 0]) {
       await scrollTo(devtools, position)
       await waitFor(() => hasVisibleHistory(devtools), 10_000)
     }
 
     await waitFor(() =>
-      devtools!.evaluate(`Boolean(document.querySelector('button[aria-label="返回底部"]'))`)
+      devtools!.evaluate(`
+        [...document.querySelectorAll('button[aria-label="返回底部"]')].some(
+          (button) => button.getClientRects().length > 0
+        )
+      `)
     )
-    await devtools.click(`document.querySelector('button[aria-label="返回底部"]')`)
-    await waitFor(async () => {
-      const distance = await devtools?.evaluate<number>(`(() => {
-        ${visibleScroller()};
-        return scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop;
-      })()`)
-      return distance !== undefined && distance < 4
-    })
-  }, 45_000)
-})
-
-async function revealNavigationItem(devtools: DevTools, text: string): Promise<void> {
-  for (let attempt = 0; attempt < 50; attempt++) {
-    const visible = await devtools.evaluate<boolean>(
-      `[...document.querySelectorAll('nav button')].some((button) => button.textContent?.includes(${JSON.stringify(text)}))`
-    )
-    if (visible) return
-    const count = await devtools.evaluate<number>(`document.querySelectorAll('nav button').length`)
     await devtools.click(
-      `[...document.querySelectorAll('nav button')].find((button) => button.textContent?.trim() === '\u66f4\u591a')`
+      `[...document.querySelectorAll('button[aria-label="返回底部"]')].find(
+        (button) => button.getClientRects().length > 0
+      )`
+    )
+    await waitForBottom(devtools)
+
+    await scrollTo(devtools, 0)
+    const otherSessionId = await devtools.evaluate<string | null>(`
+      [...document.querySelectorAll('nav button[data-session-id]')].find(
+        (button) => button.dataset.sessionId !== ${JSON.stringify(session.id)}
+      )?.dataset.sessionId ?? null
+    `)
+    expect(otherSessionId).not.toBeNull()
+    await devtools.click(
+      `document.querySelector('nav button[data-session-id="' + CSS.escape(${JSON.stringify(otherSessionId)}) + '"]')`
+    )
+    await waitFor(() =>
+      devtools!.evaluate(
+        `document.querySelector('nav button[aria-current="page"]')?.dataset.sessionId === ${JSON.stringify(otherSessionId)}`
+      )
+    )
+    await devtools.click(
+      `document.querySelector('nav button[data-session-id="' + CSS.escape(${JSON.stringify(session.id)}) + '"]')`
+    )
+    await waitForBottom(devtools)
+    expect(
+      await devtools.evaluate(`
+        [...document.querySelectorAll('button[aria-label="返回底部"]')].some(
+          (button) => button.getClientRects().length > 0
+        )
+      `)
+    ).toBe(false)
+  }, 45_000)
+
+  it('does not pull the reader back during streaming after scrolling upward', async () => {
+    devtools = await DevTools.connect()
+    const session = await findLongestSession(devtools)
+    expect(session.messageCount).toBeGreaterThan(50)
+    await revealNavigationItem(devtools, session.id)
+    await devtools.click(`
+      document.querySelector(
+        'nav button[data-session-id="' + CSS.escape(${JSON.stringify(session.id)}) + '"]'
+      )
+    `)
+    await submitPrompt(
+      devtools,
+      '\u8bf7\u4ece 1 \u5230 200 \u9010\u884c\u8f93\u51fa\u6570\u5b57\uff0c\u6bcf\u884c\u53ea\u8f93\u51fa\u4e00\u4e2a\u6570\u5b57\uff0c\u4e0d\u8981\u7701\u7565\u3002'
     )
     await waitFor(
       () =>
-        devtools.evaluate(
-          `document.querySelectorAll('nav button').length !== ${count} || ![...document.querySelectorAll('nav button')].some((button) => button.textContent?.trim() === '\u66f4\u591a')`
-        ),
-      2_000
+        devtools!.evaluate(`Boolean(document.querySelector('button[aria-label="\u505c\u6b62"]'))`),
+      15_000
     )
+    await waitFor(() =>
+      devtools!.evaluate(`
+        [...document.querySelectorAll('[role="log"]')].some(
+          (element) => element.getClientRects().length > 0 &&
+            element.scrollHeight - element.clientHeight > 300
+        )
+      `)
+    )
+
+    await devtools.evaluate(`(() => {
+      ${visibleScroller()};
+      scroller.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true }));
+      scroller.scrollTop = 0;
+    })()`)
+    const distances = await devtools.evaluate<number[]>(`(async () => {
+      const values = [];
+      for (let frame = 0; frame < 60; frame++) {
+        await new Promise(requestAnimationFrame);
+        ${visibleScroller()};
+        values.push(scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop);
+      }
+      return values;
+    })()`)
+    expect(Math.min(...distances)).toBeGreaterThan(100)
+
+    const stop = await devtools.evaluate<boolean>(
+      `Boolean(document.querySelector('button[aria-label="\u505c\u6b62"]'))`
+    )
+    if (stop) {
+      await devtools.click(`document.querySelector('button[aria-label="\u505c\u6b62"]')`)
+    }
+  }, 60_000)
+})
+
+async function submitPrompt(devtools: DevTools, prompt: string): Promise<void> {
+  await devtools.evaluate(`(() => {
+    const textarea = [...document.querySelectorAll('textarea')].find(
+      (element) => element.getClientRects().length > 0
+    );
+    if (!textarea) throw new Error('Composer was not found.');
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
+    setter.call(textarea, ${JSON.stringify(prompt)});
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+  })()`)
+  await waitFor(() =>
+    devtools.evaluate(`(() => {
+      const textarea = [...document.querySelectorAll('textarea')].find(
+        (element) => element.getClientRects().length > 0
+      );
+      return !textarea?.closest('form')?.querySelector('button[type="submit"]')?.disabled;
+    })()`)
+  )
+  await devtools.click(`
+    [...document.querySelectorAll('textarea')].find(
+      (element) => element.getClientRects().length > 0
+    )?.closest('form')?.querySelector('button[type="submit"]')
+  `)
+}
+
+async function findLongestSession(devtools: DevTools): Promise<StoredSession> {
+  const session = await devtools.evaluate<StoredSession | null>(`(async () => {
+    const cwds = await window.bridge.invoke('session:cwds');
+    const sessions = [];
+    for (const cwd of [...new Set([...(Array.isArray(cwds) ? cwds : []), ''])]) {
+      const page = await window.bridge.invoke('session:list', cwd, 0, 1000);
+      if (Array.isArray(page)) sessions.push(...page);
+    }
+    const unique = [...new Map(sessions.map((item) => [item.id, item])).values()];
+    const counts = await Promise.all(unique.map(async (item) => ({
+      id: item.id,
+      title: item.title,
+      messageCount: await window.bridge.invoke('session:msg-count', item.id)
+    })));
+    return counts.sort((a, b) => b.messageCount - a.messageCount)[0] ?? null;
+  })()`)
+  if (!session) throw new Error('No stored conversation was found.')
+  return session
+}
+
+async function revealNavigationItem(devtools: DevTools, id: string): Promise<void> {
+  for (let attempt = 0; attempt < 50; attempt++) {
+    const visible = await devtools.evaluate<boolean>(
+      `Boolean(document.querySelector('nav button[data-session-id="' + CSS.escape(${JSON.stringify(id)}) + '"]'))`
+    )
+    if (visible) return
+    const clicked = await devtools.evaluate<number>(`(() => {
+      const buttons = [...document.querySelectorAll('nav button')].filter(
+        (button) => button.textContent?.trim() === '\u66f4\u591a'
+      );
+      buttons.forEach((button) => button.click());
+      return buttons.length;
+    })()`)
+    if (!clicked) break
+    await new Promise((resolve) => setTimeout(resolve, 200))
   }
-  throw new Error(`Navigation item containing "${text}" was not revealed.`)
+  throw new Error(`Navigation item for session "${id}" was not revealed.`)
 }
 
 async function scrollTo(devtools: DevTools, position: number): Promise<void> {
@@ -227,6 +388,21 @@ async function scrollTo(devtools: DevTools, position: number): Promise<void> {
     ${visibleScroller()};
     scroller.scrollTop = ${position} * (scroller.scrollHeight - scroller.clientHeight);
   })()`)
+}
+
+async function waitForBottom(devtools: DevTools): Promise<void> {
+  let distance = Number.MAX_SAFE_INTEGER
+  try {
+    await waitFor(async () => {
+      distance = await devtools.evaluate<number>(`(() => {
+        ${visibleScroller()};
+        return scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop;
+      })()`)
+      return distance < 4
+    })
+  } catch {
+    throw new Error(`Message scroller remained ${distance}px away from the bottom.`)
+  }
 }
 
 async function hasVisibleHistory(devtools: DevTools): Promise<boolean> {

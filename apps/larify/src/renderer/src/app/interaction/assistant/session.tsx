@@ -9,6 +9,7 @@ import { loadVisibleMessages, messagePageSize } from './session-messages'
 
 export function AssistantSession({
   id,
+  active = true,
   title,
   initialMessages,
   initialMessageCount,
@@ -17,6 +18,7 @@ export function AssistantSession({
   onSaved
 }: {
   id: string
+  active?: boolean
   title?: string
   initialMessages: UIMessage[]
   initialMessageCount: number
@@ -26,7 +28,6 @@ export function AssistantSession({
 }): React.JSX.Element {
   const [cwd, setCwd] = useState(initialCwd)
   const recentStart = Math.max(0, initialMessageCount - initialMessages.length)
-  const messageCount = recentStart + initialMessages.length
   const cache = useRef(new Map<number, UIMessage>())
   const [olderMessages, setOlderMessages] = useState(() => new Map<number, UIMessage>())
   const loading = useRef(new Set<number>())
@@ -95,10 +96,10 @@ export function AssistantSession({
 
   return (
     <AssistantChat
+      active={active}
       chat={chat}
       title={title}
       cwd={cwd}
-      initialMessageCount={messageCount}
       recentStart={recentStart}
       olderMessages={olderMessages}
       onLoadRange={loadRange}

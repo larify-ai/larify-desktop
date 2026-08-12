@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 interface ViewportAnchor {
   index: number
@@ -45,15 +45,28 @@ function findBottomAnchor(
   return fullyVisible ?? intersecting
 }
 
-export function useViewportBottomAnchor(): {
+export function useViewportBottomAnchor(resetKey?: unknown): {
   captureAnchor: (range?: RenderedRange) => void
   scrollerRef: (element: HTMLElement | Window | null) => void
+  scrollToBottom: () => void
 } {
   const [scroller, setScroller] = useState<HTMLElement | null>(null)
+  const scrollerElement = useRef<HTMLElement | null>(null)
   const anchor = useRef<ViewportAnchor | null>(null)
   const renderedRange = useRef<RenderedRange | null>(null)
   const captureFrame = useRef<number | null>(null)
   const restoreFrame = useRef<number | null>(null)
+
+  const resetAnchor = useCallback(() => {
+    anchor.current = null
+    renderedRange.current = null
+    if (captureFrame.current !== null) cancelAnimationFrame(captureFrame.current)
+    if (restoreFrame.current !== null) cancelAnimationFrame(restoreFrame.current)
+    captureFrame.current = null
+    restoreFrame.current = null
+  }, [])
+
+  useLayoutEffect(resetAnchor, [resetAnchor, resetKey])
 
   const captureAnchor = useCallback(
     (range?: RenderedRange) => {
@@ -123,8 +136,16 @@ export function useViewportBottomAnchor(): {
   }, [captureAnchor, scroller])
 
   const scrollerRef = useCallback((element: HTMLElement | Window | null) => {
-    setScroller(element instanceof HTMLElement ? element : null)
+    const next = element instanceof HTMLElement ? element : null
+    scrollerElement.current = next
+    setScroller(next)
   }, [])
 
-  return { captureAnchor, scrollerRef }
+  const scrollToBottom = useCallback(() => {
+    resetAnchor()
+    const element = scrollerElement.current
+    if (element) element.scrollTop = element.scrollHeight
+  }, [resetAnchor])
+
+  return { captureAnchor, scrollerRef, scrollToBottom }
 }

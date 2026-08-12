@@ -28,20 +28,20 @@ function firstTitle(messages: UIMessage[]): string {
 }
 
 export function AssistantChat({
+  active = true,
   chat,
   title,
   cwd,
-  initialMessageCount,
   recentStart,
   olderMessages,
   onLoadRange,
   onCwdChange,
   onHeadingChange
 }: {
+  active?: boolean
   chat: Chat<UIMessage>
   title?: string
   cwd: string
-  initialMessageCount: number
   recentStart: number
   olderMessages: Map<number, UIMessage>
   onLoadRange: (firstPage: number, lastPage: number) => void
@@ -70,9 +70,9 @@ export function AssistantChat({
     <div className="flex h-full min-w-0 flex-col">
       <ToolOutputContext.Provider value={submitToolOutput}>
         <AssistantMessageList
+          active={active}
           messages={messages}
           live={running}
-          initialMessageCount={initialMessageCount}
           recentStart={recentStart}
           olderMessages={olderMessages}
           onLoadRange={onLoadRange}

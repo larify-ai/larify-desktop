@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { UIMessage } from 'ai'
 import { ArrowDownIcon } from 'lucide-react'
 import { Virtuoso, type ListRange, type VirtuosoHandle } from 'react-virtuoso'
@@ -10,6 +10,7 @@ import { useViewportBottomAnchor } from './use-viewport-bottom-anchor'
 const Message = memo(MessageView)
 const pageBuffer = 1
 const estimatedMessageHeight = 80
+type ScrollMode = 'positioning' | 'following' | 'reading'
 
 function ScrollPlaceholder({
   height,
@@ -32,36 +33,73 @@ function ScrollPlaceholder({
   )
 }
 
-function MessageListFooter(): React.JSX.Element {
-  return <div className="h-30" aria-hidden="true" />
-}
-
 export function AssistantMessageList({
+  active = true,
   messages,
   live = false,
-  initialMessageCount,
   recentStart,
   olderMessages,
   onLoadRange
 }: {
+  active?: boolean
   messages: UIMessage[]
   live?: boolean
-  initialMessageCount: number
   recentStart: number
   olderMessages: Map<number, UIMessage>
   onLoadRange: (firstPage: number, lastPage: number) => void
 }): React.JSX.Element {
   const list = useRef<VirtuosoHandle>(null)
-  const [atBottom, setAtBottom] = useState(true)
-  const { captureAnchor, scrollerRef } = useViewportBottomAnchor()
+  const scrollMode = useRef<ScrollMode>('positioning')
+  const positioningStarted = useRef(false)
+  const [position, setPosition] = useState({ key: false, atBottom: true, complete: false })
+  const {
+    captureAnchor,
+    scrollerRef,
+    scrollToBottom: scrollViewportToBottom
+  } = useViewportBottomAnchor(active)
 
   useEffect(() => {
-    if (live && atBottom) list.current?.autoscrollToBottom()
-  }, [atBottom, live, messages])
+    if (live && scrollMode.current === 'following') list.current?.autoscrollToBottom()
+  }, [live, messages])
 
   const totalCount = recentStart + messages.length
+  const positioningKey = active && totalCount > 0
+  const currentPosition =
+    position.key === positioningKey
+      ? position
+      : { key: positioningKey, atBottom: true, complete: false }
+
+  useLayoutEffect(() => {
+    if (!positioningKey) {
+      positioningStarted.current = false
+      return
+    }
+    if (positioningStarted.current) return
+    positioningStarted.current = true
+    scrollMode.current = 'positioning'
+    list.current?.autoscrollToBottom()
+    scrollViewportToBottom()
+  }, [positioningKey, scrollViewportToBottom])
+
   const scrollToBottom = (): void => {
-    list.current?.scrollTo({ top: Number.MAX_SAFE_INTEGER })
+    scrollMode.current = 'positioning'
+    list.current?.autoscrollToBottom()
+    scrollViewportToBottom()
+  }
+  const handleAtBottomChange = (nextAtBottom: boolean): void => {
+    setPosition((current) => ({
+      key: positioningKey,
+      atBottom: nextAtBottom,
+      complete: current.key === positioningKey ? current.complete || nextAtBottom : nextAtBottom
+    }))
+    if (nextAtBottom) {
+      scrollMode.current = 'following'
+    } else if (scrollMode.current === 'positioning') {
+      list.current?.autoscrollToBottom()
+      scrollViewportToBottom()
+    } else {
+      scrollMode.current = 'reading'
+    }
   }
   const item = (index: number): UIMessage | undefined =>
     index < recentStart ? olderMessages.get(index) : messages[index - recentStart]
@@ -77,7 +115,14 @@ export function AssistantMessageList({
   }
 
   return (
-    <div className="relative min-h-0 min-w-0 flex-1">
+    <div
+      className="relative min-h-0 min-w-0 flex-1"
+      onWheelCapture={(event) => {
+        if (event.deltaY < 0) {
+          scrollMode.current = 'reading'
+        }
+      }}
+    >
       <Virtuoso
         ref={list}
         scrollerRef={scrollerRef}
@@ -86,17 +131,19 @@ export function AssistantMessageList({
         totalCount={totalCount}
         defaultItemHeight={estimatedMessageHeight}
         initialItemCount={Math.min(12, totalCount)}
-        initialTopMostItemIndex={Math.max(initialMessageCount - 1, 0)}
+        initialTopMostItemIndex={totalCount > 0 ? { index: 'LAST', align: 'end' } : 0}
         increaseViewportBy={{ top: 600, bottom: 600 }}
-        components={{ Footer: MessageListFooter }}
         followOutput="auto"
         rangeChanged={rangeChanged}
-        atBottomStateChange={setAtBottom}
+        atBottomStateChange={handleAtBottomChange}
         computeItemKey={(index) => item(index)?.id ?? index}
         itemContent={(index) => {
           const message = item(index)
           return message ? (
-            <div className="mx-auto w-full max-w-4xl min-w-0 px-6 py-3" data-message-index={index}>
+            <div
+              className={`mx-auto w-full max-w-4xl min-w-0 px-6 pt-3 ${index === totalCount - 1 ? 'pb-30' : 'pb-3'}`}
+              data-message-index={index}
+            >
               <Message message={message} streaming={live && message.id === messages.at(-1)?.id} />
             </div>
           ) : (
@@ -104,7 +151,7 @@ export function AssistantMessageList({
           )
         }}
       />
-      {!atBottom && messages.length > 0 && (
+      {active && currentPosition.complete && !currentPosition.atBottom && messages.length > 0 && (
         <Button
           type="button"
           variant="outline"

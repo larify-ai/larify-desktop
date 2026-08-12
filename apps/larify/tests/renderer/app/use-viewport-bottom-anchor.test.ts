@@ -9,6 +9,7 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
 let resize: (() => void) | null = null
 let capture: ((range?: { startIndex: number; endIndex: number }) => void) | null = null
+let scrollToBottom: (() => void) | null = null
 let observed: Element | null = null
 let disconnected = false
 
@@ -24,14 +25,22 @@ class ResizeObserverMock {
   }
 }
 
-function Harness({ showScroller = true }: { showScroller?: boolean }): React.JSX.Element | null {
-  const anchor = useViewportBottomAnchor()
+function Harness({
+  showScroller = true,
+  resetKey
+}: {
+  showScroller?: boolean
+  resetKey?: unknown
+}): React.JSX.Element | null {
+  const anchor = useViewportBottomAnchor(resetKey)
   useEffect(() => {
     capture = anchor.captureAnchor
+    scrollToBottom = anchor.scrollToBottom
     return () => {
       capture = null
+      scrollToBottom = null
     }
-  }, [anchor.captureAnchor])
+  }, [anchor.captureAnchor, anchor.scrollToBottom])
   if (!showScroller) return null
   return createElement(
     'div',
@@ -57,6 +66,7 @@ afterEach(() => {
   container.remove()
   resize = null
   capture = null
+  scrollToBottom = null
   vi.unstubAllGlobals()
 })
 
@@ -290,6 +300,39 @@ describe('viewport bottom anchor', () => {
     await nextFrame()
 
     expect(scroller.scrollTop).toBe(100)
+  })
+
+  it('cancels a pending restore before positioning a newly active conversation', async () => {
+    await act(async () => root.render(createElement(Harness, { resetKey: false })))
+    const scroller = container.querySelector<HTMLElement>('[data-scroller]')!
+    const item = container.querySelector<HTMLElement>('[data-message-index="7"]')!
+    scroller.getBoundingClientRect = () => rect(0, 400)
+    item.getBoundingClientRect = () => rect(200, 380)
+
+    captureIndex(7)
+    await nextFrame()
+    resize?.()
+    await act(async () => root.render(createElement(Harness, { resetKey: true })))
+    await nextFrame()
+
+    expect(scroller.scrollTop).toBe(0)
+  })
+
+  it('cancels a pending restore and moves the scroller to the bottom', async () => {
+    await act(async () => root.render(createElement(Harness)))
+    const scroller = container.querySelector<HTMLElement>('[data-scroller]')!
+    const item = container.querySelector<HTMLElement>('[data-message-index="7"]')!
+    scroller.getBoundingClientRect = () => rect(0, 400)
+    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 1000 })
+    item.getBoundingClientRect = () => rect(200, 380)
+
+    captureIndex(7)
+    await nextFrame()
+    resize?.()
+    scrollToBottom?.()
+    await nextFrame()
+
+    expect(scroller.scrollTop).toBe(1000)
   })
 
   it('observes and disconnects the active scroller', async () => {

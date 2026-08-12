@@ -56,6 +56,7 @@ export function Workspace({ workspace }: { workspace: WorkspacePreview }): React
             <button
               key={session.id}
               type="button"
+              data-session-id={session.id}
               aria-current={session.active ? 'page' : undefined}
               className={`${navigationItemClassName} h-8 ${session.active ? 'bg-sidebar-accent' : ''}`}
               onClick={session.onClick}

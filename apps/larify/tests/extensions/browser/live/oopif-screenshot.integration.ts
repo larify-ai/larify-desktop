@@ -1,6 +1,6 @@
 import { app, BrowserWindow, nativeImage, screen } from 'electron'
 import { createServer, type Server } from 'node:http'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { BrowserService } from '../../../../src/extensions/browser/main/browser-service'
@@ -74,6 +74,18 @@ async function waitForDownloadRef(tab: BrowserTab): Promise<string> {
   throw new Error(`download ref was not captured:\n${lastSnapshot}`)
 }
 
+async function waitForLinkRef(tab: BrowserTab, name: string): Promise<string> {
+  const deadline = Date.now() + 10_000
+  let lastSnapshot = ''
+  while (Date.now() < deadline) {
+    lastSnapshot = await tab.snapshot()
+    const match = lastSnapshot.match(new RegExp(`link "${name}" \\[ref=(e\\d+)\\]`))
+    if (match) return `@${match[1]}`
+    await new Promise((resolve) => setTimeout(resolve, 100))
+  }
+  throw new Error(`${name} ref was not captured:\n${lastSnapshot}`)
+}
+
 async function waitForDynamicRef(tab: BrowserTab): Promise<string> {
   const snapshot = await tab.snapshot()
   const match = snapshot.match(/button "Dynamic" \[ref=(e\d+)\]/)
@@ -108,8 +120,11 @@ async function main(): Promise<void> {
   let rootServer: Server | undefined
   let slowServer: Server | undefined
   let downloadServer: Server | undefined
+  let transferServer: Server | undefined
+  let downloadStarted = false
   let downloadClosed = false
   let downloadDir: string | undefined
+  let transferDir: string | undefined
   let recordingDir: string | undefined
   let recorder: Recorder | undefined
   let window: BrowserWindow | undefined
@@ -137,6 +152,7 @@ async function main(): Promise<void> {
     const childUrl = url(childServer, childHost)
     downloadServer = await new Promise((resolve) => {
       const server = createServer((_request, response) => {
+        downloadStarted = true
         response.on('close', () => {
           downloadClosed = true
         })
@@ -149,7 +165,18 @@ async function main(): Promise<void> {
       })
       server.listen(0, 'localhost', () => resolve(server))
     })
+    transferServer = await new Promise((resolve) => {
+      const server = createServer((_request, response) => {
+        response.writeHead(200, {
+          'content-disposition': 'attachment; filename="fixture.txt"',
+          'content-type': 'text/plain'
+        })
+        response.end('download-ok')
+      })
+      server.listen(0, 'localhost', () => resolve(server))
+    })
     const downloadUrl = url(downloadServer, 'localhost')
+    const transferUrl = url(transferServer, 'localhost')
     rootServer = await listen(
       'localhost',
       (path) =>
@@ -166,9 +193,20 @@ async function main(): Promise<void> {
       <div id="aria-disabled" role="button" aria-disabled="true">Disabled action</div>
       <div style="opacity:0"><button id="ancestor-hidden">Hidden action</button></div>
       <a href="${downloadUrl}">Download</a>
+      <a href="${transferUrl}">Small download</a>
+      <input id="upload" type="file">
+      <output id="upload-result"></output>
       <iframe src="${childUrl}"></iframe>
       <iframe src="/same-frame"></iframe>
-      <script>scrollTo(0,${rootScrollY})</script>`
+      <script>
+        document.querySelector('#upload').onchange = async (event) => {
+          const file = event.currentTarget.files[0]
+          document.querySelector('#upload-result').textContent = file
+            ? file.name + ':' + await file.text()
+            : ''
+        }
+        scrollTo(0,${rootScrollY})
+      </script>`
     )
     slowServer = await listenSlow('localhost', 1000)
 
@@ -349,7 +387,11 @@ async function main(): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 1500))
     const recording = await recorder.stop()
     if (recording.bytes <= 0) throw new Error('recorder produced an empty file')
-    console.log(`PASS Recorder output: ${recording.bytes} bytes`)
+    const webmHeader = await readFile(recording.path).then((data) =>
+      data.subarray(0, 4).toString('hex')
+    )
+    if (webmHeader !== '1a45dfa3') throw new Error(`recorder produced invalid WebM: ${webmHeader}`)
+    console.log(`PASS Recorder WebM output: ${recording.bytes} bytes`)
 
     const restartStartedAt = Date.now()
     await recorder.start(tab, join(recordingDir, 'recording-restart.webm'))
@@ -376,6 +418,29 @@ async function main(): Promise<void> {
     console.log(`PASS Recorder restart without warmup: ${restartedRecording.bytes} bytes`)
     console.log(`PASS Recorder window crash recovery: ${recoveredRecording.bytes} bytes`)
 
+    transferDir = await mkdtemp(join(tmpdir(), 'larify-transfer-live-'))
+    const uploadPath = join(transferDir, 'upload.txt')
+    await writeFile(uploadPath, 'upload-ok')
+    await tab.upload('#upload', [uploadPath])
+    let uploaded = ''
+    const uploadDeadline = Date.now() + 5000
+    while (Date.now() < uploadDeadline && uploaded !== 'upload.txt:upload-ok') {
+      uploaded = String(
+        await tab.evalJs(`() => document.querySelector('#upload-result').textContent`)
+      )
+      if (uploaded !== 'upload.txt:upload-ok')
+        await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+    if (uploaded !== 'upload.txt:upload-ok') throw new Error(`upload content mismatch: ${uploaded}`)
+    console.log('PASS BrowserTab upload content')
+
+    const smallDownloadRef = await waitForLinkRef(tab, 'Small download')
+    const downloadedPath = join(transferDir, 'downloaded.txt')
+    await tab.download(smallDownloadRef, downloadedPath, 10_000)
+    const downloaded = await readFile(downloadedPath, 'utf8')
+    if (downloaded !== 'download-ok') throw new Error(`download content mismatch: ${downloaded}`)
+    console.log('PASS BrowserTab download content')
+
     const downloadRef = await waitForDownloadRef(tab)
     downloadDir = await mkdtemp(join(tmpdir(), 'larify-download-destroy-'))
     const download = tab.download(downloadRef, join(downloadDir, 'large.bin'), 10_000)
@@ -387,7 +452,11 @@ async function main(): Promise<void> {
         if (!(error instanceof Error) || !error.message.includes('already in progress')) throw error
       }
     )
-    await new Promise((resolve) => setTimeout(resolve, 300))
+    const downloadStartDeadline = Date.now() + 5000
+    while (!downloadStarted && Date.now() < downloadStartDeadline) {
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+    if (!downloadStarted) throw new Error('download request did not start')
     tab.destroy()
     tab = undefined
     await download.then(
@@ -412,9 +481,11 @@ async function main(): Promise<void> {
       new Promise<void>((resolve) => childServer?.close(() => resolve()) ?? resolve()),
       new Promise<void>((resolve) => rootServer?.close(() => resolve()) ?? resolve()),
       new Promise<void>((resolve) => slowServer?.close(() => resolve()) ?? resolve()),
-      new Promise<void>((resolve) => downloadServer?.close(() => resolve()) ?? resolve())
+      new Promise<void>((resolve) => downloadServer?.close(() => resolve()) ?? resolve()),
+      new Promise<void>((resolve) => transferServer?.close(() => resolve()) ?? resolve())
     ])
     if (downloadDir) await rm(downloadDir, { recursive: true, force: true })
+    if (transferDir) await rm(transferDir, { recursive: true, force: true })
     if (recordingDir) await rm(recordingDir, { recursive: true, force: true })
   }
 }

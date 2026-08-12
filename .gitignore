@@ -4,6 +4,7 @@ dist/
 *.log
 .DS_Store
 .vite/
+/outputs/
 
 # TS incremental build info
 *.tsbuildinfo

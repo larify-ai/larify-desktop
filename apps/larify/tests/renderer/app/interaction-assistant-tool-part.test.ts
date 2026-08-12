@@ -60,7 +60,7 @@ beforeEach(() => {
 describe('interaction assistant tool part', () => {
   it('separates display metadata from executable arguments', () => {
     render({
-      input: { _title: 'Read file', path: 'a.txt' },
+      input: { toolCallTitle: 'Read file', path: 'a.txt' },
       output: 'done',
       state: 'output-available',
       toolCallId: 'call-1',

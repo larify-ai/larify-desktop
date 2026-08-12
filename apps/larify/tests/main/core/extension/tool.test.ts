@@ -9,11 +9,11 @@ describe('extension tool', () => {
     const wrapped = wrapTool(tool({ inputSchema: z.object({ path: z.string() }) }))
     const schema = wrapped.inputSchema as z.ZodType
 
-    expect(schema.safeParse({ path: 'a.txt', _title: '' }).success).toBe(false)
-    expect(schema.safeParse({ path: 'a.txt', _title: '   ' }).success).toBe(false)
-    expect(schema.safeParse({ path: 'a.txt', _title: ' Read file ' }).data).toEqual({
+    expect(schema.safeParse({ path: 'a.txt', toolCallTitle: '' }).success).toBe(false)
+    expect(schema.safeParse({ path: 'a.txt', toolCallTitle: '   ' }).success).toBe(false)
+    expect(schema.safeParse({ path: 'a.txt', toolCallTitle: ' Read file ' }).data).toEqual({
       path: 'a.txt',
-      _title: 'Read file'
+      toolCallTitle: 'Read file'
     })
   })
 })

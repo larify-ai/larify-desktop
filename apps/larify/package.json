@@ -11,7 +11,7 @@
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "test": "vitest run",
     "nest:run": "electron-vite build --logLevel error && electron . --nest-run",
-    "test:browser-live": "node tests/extensions/browser/live/run-oopif-screenshot.mjs",
+    "test:browser-live": "node tests/extensions/browser/live/run-oopif-screenshot.mjs && node tests/extensions/browser/live/run-drag.mjs && node tests/extensions/browser/live/run-input.mjs",
     "test:layout-performance": "node tests/performance/layout-resize.cdp.mjs",
     "test:workbench-responsive": "node tests/renderer/app/workbench/workbench-empty.cdp.mjs",
     "test:terminal-ui": "node tests/extensions/terminal/terminal-workbench.cdp.mjs",

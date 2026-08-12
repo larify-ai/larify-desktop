@@ -15,7 +15,7 @@ describe('interaction assistant message view', () => {
           toolName: 'fs_read',
           toolCallId: 'call-1',
           state: 'output-available',
-          input: { _title: 'Read file', path: 'a.txt' },
+          input: { toolCallTitle: 'Read file', path: 'a.txt' },
           output: 'done'
         },
         { type: 'text', text: 'after' }

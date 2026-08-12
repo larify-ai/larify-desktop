@@ -133,15 +133,43 @@ describe('BrowserService resources', () => {
     expect(h.managers[1].setVisible).not.toHaveBeenCalled()
   })
 
-  it('does not let a stale tab hide the active tab', () => {
+  it('lets the visible viewport hide its session after the manager active tab changes', () => {
     const service = new BrowserService({} as never, new ResourceManager())
-    const stale = service.createTab('session-a')
+    const visible = service.createTab('session-a')
+    service.setVisible('session-a', visible, true)
     service.createTab('session-a')
     h.managers[0].setVisible.mockClear()
 
-    service.setVisible('session-a', stale, false)
+    service.setVisible('session-a', visible, false)
+
+    expect(h.managers[0].setVisible).toHaveBeenCalledWith(false)
+  })
+
+  it('does not let an old viewport hide the current viewport', () => {
+    const service = new BrowserService({} as never, new ResourceManager())
+    const old = service.createTab('session-a')
+    const current = service.createTab('session-a')
+    service.setVisible('session-a', old, true)
+    service.setVisible('session-a', current, true)
+    h.managers[0].setVisible.mockClear()
+
+    service.setVisible('session-a', old, false)
 
     expect(h.managers[0].setVisible).not.toHaveBeenCalled()
+  })
+
+  it('hides the visible resource through its owning session', () => {
+    const service = new BrowserService({} as never, new ResourceManager())
+    const visible = service.createTab('session-a')
+    service.createTab('session-b')
+    service.setVisible('session-a', visible, true)
+    h.managers[0].setVisible.mockClear()
+    h.managers[1].setVisible.mockClear()
+
+    service.setVisible('session-b', visible, false)
+
+    expect(h.managers[0].setVisible).toHaveBeenCalledWith(false)
+    expect(h.managers[1].setVisible).not.toHaveBeenCalled()
   })
 
   it('emits state changes with the owning session id', () => {

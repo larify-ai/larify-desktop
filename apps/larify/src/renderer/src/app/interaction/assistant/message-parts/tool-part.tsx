@@ -14,8 +14,8 @@ function toolInput(input: unknown): { title?: string; args: unknown } {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
     return { args: input }
   }
-  const { _title, ...args } = input as Record<string, unknown>
-  return { title: typeof _title === 'string' ? _title : undefined, args }
+  const { toolCallTitle, ...args } = input as Record<string, unknown>
+  return { title: typeof toolCallTitle === 'string' ? toolCallTitle : undefined, args }
 }
 
 export function ToolPart({ part }: { part: Part }): React.JSX.Element {

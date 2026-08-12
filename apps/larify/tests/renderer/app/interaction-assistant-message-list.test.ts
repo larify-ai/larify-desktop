@@ -44,8 +44,19 @@ interface VirtuosoProps {
 
 let container: HTMLDivElement
 let root: Root
+let resize: () => void
+
+class ResizeObserverMock {
+  observe = vi.fn()
+  disconnect = vi.fn()
+
+  constructor(callback: ResizeObserverCallback) {
+    resize = () => callback([], this as unknown as ResizeObserver)
+  }
+}
 
 beforeEach(() => {
+  vi.stubGlobal('ResizeObserver', ResizeObserverMock)
   captured.mounts = 0
   container = document.createElement('div')
   document.body.append(container)
@@ -56,6 +67,7 @@ afterEach(() => {
   act(() => root.unmount())
   container.remove()
   vi.clearAllMocks()
+  vi.unstubAllGlobals()
 })
 
 describe('interaction assistant message list', () => {
@@ -195,7 +207,29 @@ describe('interaction assistant message list', () => {
 
     act(() => (captured.props as VirtuosoProps).atBottomStateChange(true))
     act(() => (captured.props as VirtuosoProps).atBottomStateChange(false))
+    expect(container.querySelector('button')).toBeNull()
+  })
+
+  it('shows the return button only after the reader leaves the bottom tolerance', async () => {
+    await render({ messages: [message('latest')], recentStart: 0 })
+    act(() => (captured.props as VirtuosoProps).atBottomStateChange(true))
+    const scroller = createScroller(100)
+    container.firstElementChild?.append(scroller)
+    act(() => (captured.props as VirtuosoProps).scrollerRef(scroller))
+
+    scroller.scrollTop = 80
+    act(() => scroller.dispatchEvent(new Event('scroll')))
+    await act(() => new Promise((resolve) => setTimeout(resolve, 2)))
+    expect(container.querySelector('button')).toBeNull()
+
+    scroller.scrollTop = 60
+    act(() => scroller.dispatchEvent(new Event('scroll')))
+    await act(() => new Promise((resolve) => setTimeout(resolve, 2)))
     expect(container.querySelector('button')).not.toBeNull()
+
+    scroller.scrollTop = 86
+    act(() => scroller.dispatchEvent(new Event('scroll')))
+    expect(container.querySelector('button')).toBeNull()
   })
 
   it('does not request historical pages when the conversation has no history', async () => {
@@ -217,6 +251,7 @@ describe('interaction assistant message list', () => {
       live: true
     }
     await render(props)
+    act(() => (captured.props as VirtuosoProps).atBottomStateChange(true))
     captured.autoscrollToBottom.mockClear()
 
     act(() => (captured.props as VirtuosoProps).atBottomStateChange(false))
@@ -236,16 +271,61 @@ describe('interaction assistant message list', () => {
       live: true
     }
     await render(props)
+    act(() => (captured.props as VirtuosoProps).atBottomStateChange(true))
+    const scroller = createScroller(100)
+    container.firstElementChild?.append(scroller)
+    act(() => (captured.props as VirtuosoProps).scrollerRef(scroller))
+    scroller.scrollTop = 50
+    act(() => scroller.dispatchEvent(new Event('scroll')))
+    await act(() => new Promise((resolve) => setTimeout(resolve, 2)))
+    act(() => (captured.props as VirtuosoProps).atBottomStateChange(false))
     captured.autoscrollToBottom.mockClear()
 
-    act(() => container.firstElementChild?.dispatchEvent(new WheelEvent('wheel', { deltaY: -1 })))
-    act(() => (captured.props as VirtuosoProps).atBottomStateChange(false))
     await render({ ...props, messages: [...props.messages] })
 
     expect(captured.autoscrollToBottom).not.toHaveBeenCalled()
   })
 
-  it('pauses streaming follow when the reader leaves the bottom without a wheel event', async () => {
+  it('cancels pending scroll intent when the conversation is hidden', async () => {
+    const props = { messages: [message('streaming')], recentStart: 0, live: true }
+    await render(props)
+    act(() => (captured.props as VirtuosoProps).atBottomStateChange(true))
+    const scroller = createScroller(100)
+    container.firstElementChild?.append(scroller)
+    act(() => (captured.props as VirtuosoProps).scrollerRef(scroller))
+    scroller.scrollTop = 50
+    act(() => scroller.dispatchEvent(new Event('scroll')))
+
+    await render({ ...props, active: false })
+    await act(() => new Promise((resolve) => setTimeout(resolve, 2)))
+    await render({ ...props, active: true, messages: [message('streaming longer')] })
+
+    expect(captured.autoscrollToBottom).toHaveBeenCalled()
+  })
+
+  it('ignores scroll corrections while positioning the conversation', async () => {
+    const props = {
+      messages: [message('streaming')],
+      recentStart: 0,
+      live: true
+    }
+    await render(props)
+    const scroller = createScroller(100)
+    container.firstElementChild?.append(scroller)
+    act(() => (captured.props as VirtuosoProps).scrollerRef(scroller))
+    const content = (captured.props as VirtuosoProps).itemContent(0)
+    const detach = content.props.ref(document.createElement('div'))
+    act(() => resize())
+    scroller.scrollTop = 50
+    act(() => scroller.dispatchEvent(new Event('scroll')))
+    await act(() => new Promise((resolve) => setTimeout(resolve, 2)))
+    act(() => (captured.props as VirtuosoProps).atBottomStateChange(false))
+
+    expect(captured.autoscrollToBottom).toHaveBeenCalled()
+    detach()
+  })
+
+  it('continues following when a growing message corrects the scroll position', async () => {
     const props = {
       messages: [message('streaming')],
       recentStart: 0,
@@ -253,12 +333,78 @@ describe('interaction assistant message list', () => {
     }
     await render(props)
     act(() => (captured.props as VirtuosoProps).atBottomStateChange(true))
+    const scroller = createScroller(100)
+    container.firstElementChild?.append(scroller)
+    act(() => (captured.props as VirtuosoProps).scrollerRef(scroller))
+    const content = (captured.props as VirtuosoProps).itemContent(0)
+    const detach = content.props.ref(document.createElement('div'))
+    act(() => resize())
+    scroller.scrollTop = 50
+    act(() => scroller.dispatchEvent(new Event('scroll')))
+    await act(() => new Promise((resolve) => setTimeout(resolve, 2)))
     act(() => (captured.props as VirtuosoProps).atBottomStateChange(false))
     captured.autoscrollToBottom.mockClear()
 
-    await render({ ...props, messages: [...props.messages] })
+    await render({ ...props, messages: [message('streaming longer')] })
+
+    expect(captured.autoscrollToBottom).toHaveBeenCalled()
+    detach()
+  })
+
+  it('follows asynchronous height growth inside the streaming message', async () => {
+    await render({ messages: [message('streaming')], recentStart: 0, live: true })
+    act(() => (captured.props as VirtuosoProps).atBottomStateChange(true))
+    const content = (captured.props as VirtuosoProps).itemContent(0)
+    const element = document.createElement('div')
+    const detach = content.props.ref(element)
+    captured.autoscrollToBottom.mockClear()
+
+    act(() => resize())
+
+    expect(captured.autoscrollToBottom).toHaveBeenCalledOnce()
+    detach()
+  })
+
+  it('does not follow height growth after the reader scrolls upward', async () => {
+    await render({ messages: [message('streaming')], recentStart: 0, live: true })
+    act(() => (captured.props as VirtuosoProps).atBottomStateChange(true))
+    const content = (captured.props as VirtuosoProps).itemContent(0)
+    const detach = content.props.ref(document.createElement('div'))
+    const scroller = createScroller(100)
+    container.firstElementChild?.append(scroller)
+    act(() => (captured.props as VirtuosoProps).scrollerRef(scroller))
+    scroller.scrollTop = 50
+    act(() => scroller.dispatchEvent(new Event('scroll')))
+    await act(() => new Promise((resolve) => setTimeout(resolve, 2)))
+    captured.autoscrollToBottom.mockClear()
+
+    act(() => resize())
 
     expect(captured.autoscrollToBottom).not.toHaveBeenCalled()
+    detach()
+  })
+
+  it('ignores scrolling inside message content while following output', async () => {
+    const props = {
+      messages: [message('streaming')],
+      recentStart: 0,
+      live: true
+    }
+    await render(props)
+    const scroller = document.createElement('div')
+    const nestedScroller = document.createElement('div')
+    scroller.append(nestedScroller)
+    container.firstElementChild?.append(scroller)
+    act(() => (captured.props as VirtuosoProps).scrollerRef(scroller))
+    act(() => (captured.props as VirtuosoProps).atBottomStateChange(true))
+    nestedScroller.scrollTop = 50
+    act(() => nestedScroller.dispatchEvent(new Event('scroll')))
+    act(() => (captured.props as VirtuosoProps).atBottomStateChange(false))
+    captured.autoscrollToBottom.mockClear()
+
+    await render({ ...props, messages: [message('streaming longer')] })
+
+    expect(captured.autoscrollToBottom).toHaveBeenCalled()
   })
 
   it('returns to the true bottom after initial positioning', async () => {
@@ -267,7 +413,12 @@ describe('interaction assistant message list', () => {
       recentStart: 4999
     })
     act(() => (captured.props as VirtuosoProps).atBottomStateChange(true))
-    act(() => (captured.props as VirtuosoProps).atBottomStateChange(false))
+    const scroller = createScroller(100)
+    container.firstElementChild?.append(scroller)
+    act(() => (captured.props as VirtuosoProps).scrollerRef(scroller))
+    scroller.scrollTop = 60
+    act(() => scroller.dispatchEvent(new Event('scroll')))
+    await act(() => new Promise((resolve) => setTimeout(resolve, 2)))
     captured.autoscrollToBottom.mockClear()
     act(() => container.querySelector<HTMLButtonElement>('button')?.click())
 
@@ -336,4 +487,14 @@ async function render({
 
 function message(id: string): UIMessage {
   return { id, role: 'assistant', parts: [{ type: 'text', text: id }] }
+}
+
+function createScroller(scrollTop: number): HTMLDivElement {
+  const scroller = document.createElement('div')
+  Object.defineProperties(scroller, {
+    clientHeight: { value: 100 },
+    scrollHeight: { value: 200 }
+  })
+  scroller.scrollTop = scrollTop
+  return scroller
 }

@@ -1,8 +1,9 @@
 /* eslint-disable @typescript-eslint/explicit-function-return-type */
 import { describe, expect, it, vi } from "vitest"
-import { existsSync, readFileSync } from "node:fs"
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
+import { pathToFileURL } from "node:url"
 import { z } from "zod"
 import { createBrowserTools } from "../../../../src/extensions/browser/main/tools"
 import type { BrowserService } from "../../../../src/extensions/browser/main/browser-service"
@@ -54,6 +55,33 @@ function parseToolInput(name: string, input: unknown, service = createService())
 }
 
 describe("browser toolkit", () => {
+  it("opens an existing Windows local path through create_tab", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "larify-browser-tool-"))
+    const localPath = join(directory, "local page.html")
+    writeFileSync(localPath, "<html></html>")
+    const tab = {
+      state: vi.fn(() => ({
+        id: 1,
+        url: pathToFileURL(localPath).href,
+        title: "Local page",
+        favIconUrl: null,
+        loading: false,
+        canGoBack: false,
+        canGoForward: false,
+        error: null,
+      })),
+      navigateAndWait: vi.fn(async () => undefined),
+    }
+    const service = {
+      ...createService(),
+      tab: vi.fn(() => tab),
+    } as unknown as BrowserService
+
+    await tool("create_tab", service).execute({ url: localPath }, ctx)
+
+    expect(tab.navigateAndWait).toHaveBeenCalledWith(localPath)
+  })
+
   it("exposes the migrated browser tool surface without browser_ prefixes", () => {
     expect(Object.keys(createBrowserTools(createService())).sort()).toEqual(
       [

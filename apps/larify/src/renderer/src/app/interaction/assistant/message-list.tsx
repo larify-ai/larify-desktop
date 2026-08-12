@@ -1,4 +1,4 @@
-import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { UIMessage } from 'ai'
 import { ArrowDownIcon } from 'lucide-react'
 import { Virtuoso, type ListRange, type VirtuosoHandle } from 'react-virtuoso'
@@ -10,6 +10,8 @@ import { useViewportBottomAnchor } from './use-viewport-bottom-anchor'
 const Message = memo(MessageView)
 const pageBuffer = 1
 const estimatedMessageHeight = 80
+const leaveBottomThreshold = 32
+const returnBottomThreshold = 16
 type ScrollMode = 'positioning' | 'following' | 'reading'
 
 function ScrollPlaceholder({
@@ -50,26 +52,71 @@ export function AssistantMessageList({
 }): React.JSX.Element {
   const list = useRef<VirtuosoHandle>(null)
   const scrollMode = useRef<ScrollMode>('positioning')
+  const scrollElement = useRef<HTMLElement | null>(null)
+  const lastScrollTop = useRef(0)
+  const resizingMessage = useRef(false)
+  const resizeVersion = useRef(0)
+  const scrollIntentTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const positioningStarted = useRef(false)
-  const [position, setPosition] = useState({ key: false, atBottom: true, complete: false })
+  const [position, setPosition] = useState({
+    key: false,
+    complete: false,
+    escaped: false
+  })
   const {
     captureAnchor,
     scrollerRef,
     scrollToBottom: scrollViewportToBottom
   } = useViewportBottomAnchor(active)
 
+  const handleScrollerRef = useCallback(
+    (element: HTMLElement | Window | null) => {
+      scrollerRef(element)
+      scrollElement.current = element instanceof HTMLElement ? element : null
+      lastScrollTop.current = scrollElement.current?.scrollTop ?? 0
+    },
+    [scrollerRef]
+  )
+
   useEffect(() => {
     if (live && scrollMode.current === 'following') list.current?.autoscrollToBottom()
   }, [live, messages])
+
+  useEffect(
+    () => () => {
+      if (scrollIntentTimer.current !== null) clearTimeout(scrollIntentTimer.current)
+    },
+    []
+  )
+
+  const followGrowingMessage = useCallback((element: HTMLDivElement | null) => {
+    if (!element || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(() => {
+      const version = ++resizeVersion.current
+      resizingMessage.current = true
+      if (scrollMode.current === 'following') list.current?.autoscrollToBottom()
+      requestAnimationFrame(() => {
+        setTimeout(() => {
+          if (resizeVersion.current === version) resizingMessage.current = false
+        }, 1)
+      })
+    })
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
 
   const totalCount = recentStart + messages.length
   const positioningKey = active && totalCount > 0
   const currentPosition =
     position.key === positioningKey
       ? position
-      : { key: positioningKey, atBottom: true, complete: false }
+      : { key: positioningKey, complete: false, escaped: false }
 
   useLayoutEffect(() => {
+    if (scrollIntentTimer.current !== null) {
+      clearTimeout(scrollIntentTimer.current)
+      scrollIntentTimer.current = null
+    }
     if (!positioningKey) {
       positioningStarted.current = false
       return
@@ -83,22 +130,29 @@ export function AssistantMessageList({
 
   const scrollToBottom = (): void => {
     scrollMode.current = 'positioning'
+    setPosition((current) => ({ ...current, escaped: false }))
     list.current?.autoscrollToBottom()
     scrollViewportToBottom()
   }
   const handleAtBottomChange = (nextAtBottom: boolean): void => {
-    setPosition((current) => ({
-      key: positioningKey,
-      atBottom: nextAtBottom,
-      complete: current.key === positioningKey ? current.complete || nextAtBottom : nextAtBottom
-    }))
+    setPosition((current) => {
+      const sameKey = current.key === positioningKey
+      const next = {
+        key: positioningKey,
+        complete: sameKey ? current.complete || nextAtBottom : nextAtBottom,
+        escaped: nextAtBottom ? false : sameKey && current.escaped
+      }
+      return current.key === next.key &&
+        current.complete === next.complete &&
+        current.escaped === next.escaped
+        ? current
+        : next
+    })
     if (nextAtBottom) {
       scrollMode.current = 'following'
     } else if (scrollMode.current === 'positioning') {
       list.current?.autoscrollToBottom()
       scrollViewportToBottom()
-    } else {
-      scrollMode.current = 'reading'
     }
   }
   const item = (index: number): UIMessage | undefined =>
@@ -117,15 +171,41 @@ export function AssistantMessageList({
   return (
     <div
       className="relative min-h-0 min-w-0 flex-1"
-      onWheelCapture={(event) => {
-        if (event.deltaY < 0) {
-          scrollMode.current = 'reading'
+      onScrollCapture={(event) => {
+        const element = scrollElement.current
+        if (!element || event.target !== element) return
+        const { scrollTop } = element
+        const movedUp = scrollTop < lastScrollTop.current
+        const distanceFromBottom = element.scrollHeight - element.clientHeight - scrollTop
+        if (distanceFromBottom <= returnBottomThreshold && scrollMode.current === 'reading') {
+          scrollMode.current = 'following'
+          setPosition((current) => ({ ...current, escaped: false }))
         }
+        if (movedUp && scrollMode.current === 'following') {
+          if (scrollIntentTimer.current !== null) clearTimeout(scrollIntentTimer.current)
+          scrollIntentTimer.current = setTimeout(() => {
+            scrollIntentTimer.current = null
+            if (
+              !resizingMessage.current &&
+              scrollElement.current === element &&
+              scrollMode.current === 'following' &&
+              element.scrollTop <= scrollTop &&
+              element.scrollHeight - element.clientHeight - element.scrollTop >=
+                leaveBottomThreshold
+            ) {
+              scrollMode.current = 'reading'
+              setPosition((current) =>
+                current.key === positioningKey ? { ...current, escaped: true } : current
+              )
+            }
+          }, 1)
+        }
+        lastScrollTop.current = scrollTop
       }}
     >
       <Virtuoso
         ref={list}
-        scrollerRef={scrollerRef}
+        scrollerRef={handleScrollerRef}
         role="log"
         className="size-full [scrollbar-gutter:stable]"
         totalCount={totalCount}
@@ -141,6 +221,7 @@ export function AssistantMessageList({
           const message = item(index)
           return message ? (
             <div
+              ref={live && index === totalCount - 1 ? followGrowingMessage : undefined}
               className={`mx-auto w-full max-w-4xl min-w-0 px-6 pt-3 ${index === totalCount - 1 ? 'pb-30' : 'pb-3'}`}
               data-message-index={index}
             >
@@ -151,7 +232,7 @@ export function AssistantMessageList({
           )
         }}
       />
-      {active && currentPosition.complete && !currentPosition.atBottom && messages.length > 0 && (
+      {active && currentPosition.complete && currentPosition.escaped && messages.length > 0 && (
         <Button
           type="button"
           variant="outline"

@@ -18,6 +18,7 @@ export class BrowserService {
   private readonly changeListeners = new Set<Listener<[string, BrowserState]>>()
   private readonly resourceRegistration: Disposable
   private readonly sessionCleanupRegistration: Disposable
+  private visibleResource?: { id: number; sessionId: string }
   private destroyTask: Promise<void> | null = null
   private destroyed = false
 
@@ -135,8 +136,9 @@ export class BrowserService {
 
   setVisible(sessionId: string, id: number, visible: boolean): void {
     if (!visible) {
-      const manager = this.managers.peek(sessionId)
-      if (manager?.state().activeId === id) manager.setVisible(false)
+      if (this.visibleResource?.id !== id) return
+      this.managers.peek(this.visibleResource.sessionId)?.setVisible(false)
+      this.visibleResource = undefined
       return
     }
     const resource = this.resources.get(id)
@@ -145,6 +147,7 @@ export class BrowserService {
     this.managers.forEach((manager, managerSessionId) => {
       manager.setVisible(managerSessionId === sessionId)
     })
+    this.visibleResource = { id, sessionId }
     manager.setActive(id)
     manager.setVisible(true)
   }

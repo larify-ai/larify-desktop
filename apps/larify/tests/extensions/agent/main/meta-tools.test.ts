@@ -86,7 +86,9 @@ describe('meta tools', () => {
       name: 'demo_lazy',
       description: 'Lazy tool'
     })
-    expect(definition.inputSchema.required).toEqual(expect.arrayContaining(['value', '_title']))
+    expect(definition.inputSchema.required).toEqual(
+      expect.arrayContaining(['value', 'toolCallTitle'])
+    )
   })
 
   it('rejects unknown plugins and tools clearly', async () => {

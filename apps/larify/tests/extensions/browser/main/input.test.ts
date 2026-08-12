@@ -7,6 +7,7 @@ import {
   mouseDown,
   mouseMove,
   mouseUp,
+  mouseWheel,
   newMouseState,
   typeText,
 } from "../../../../src/extensions/browser/main/input"
@@ -114,6 +115,21 @@ describe("mouse buttons bitmask state machine", () => {
 
     await expect(mouseMove(send as never, state, 50, 60)).rejects.toThrow("move failed")
     expect(state).toEqual({ x: 0, y: 0, buttons: 0 })
+  })
+})
+
+describe("mouse wheel completion", () => {
+  it("settles without depending on requestAnimationFrame in a hidden page", async () => {
+    const send = vi.fn(async () => ({}))
+
+    await mouseWheel(send as never, newMouseState(), 0, 500)
+
+    expect(send).toHaveBeenCalledOnce()
+    expect(send).toHaveBeenCalledWith(
+      "Input.dispatchMouseEvent",
+      { type: "mouseWheel", x: 0, y: 0, deltaX: 0, deltaY: 500 },
+      undefined,
+    )
   })
 })
 

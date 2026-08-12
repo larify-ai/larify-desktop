@@ -208,6 +208,7 @@ export class BrowserTab {
   private readonly frames = new FrameSessions()
   private readonly mouseState = newMouseState()
   private keyboardModifiers = 0
+  private inputTask = Promise.resolve()
   private readonly pendingNetworkRequests = new Set<string>()
   private readonly networkWaiters = new Set<() => void>()
   private readonly cancelDownloads = new Set<(error: Error) => void>()
@@ -449,7 +450,7 @@ export class BrowserTab {
   }
 
   async click(selector: string, button: MouseButton = "left"): Promise<void> {
-    await interactions.click(this.interactCtx(), selector, button)
+    await this.runInput(() => interactions.click(this.interactCtx(), selector, button))
   }
 
   async elementHref(selector: string): Promise<string> {
@@ -457,15 +458,15 @@ export class BrowserTab {
   }
 
   async dblclick(selector: string): Promise<void> {
-    await interactions.dblclick(this.interactCtx(), selector)
+    await this.runInput(() => interactions.dblclick(this.interactCtx(), selector))
   }
 
   async hover(selector: string): Promise<void> {
-    await interactions.hover(this.interactCtx(), selector)
+    await this.runInput(() => interactions.hover(this.interactCtx(), selector))
   }
 
   async fill(selector: string, text: string): Promise<void> {
-    await interactions.fill(this.interactCtx(), selector, text)
+    await this.runInput(() => interactions.fill(this.interactCtx(), selector, text))
   }
 
   async type(
@@ -475,27 +476,29 @@ export class BrowserTab {
     delayMs = 0,
     signal?: AbortSignal,
   ): Promise<void> {
-    await interactions.type(this.interactCtx(), selector, text, clear, delayMs, signal)
+    await this.runInput(() =>
+      interactions.type(this.interactCtx(), selector, text, clear, delayMs, signal)
+    )
   }
 
   async press(key: string): Promise<void> {
-    await interactions.press(this.interactCtx(), key, this.keyboardModifiers)
+    await this.runInput(() => interactions.press(this.interactCtx(), key, this.keyboardModifiers))
   }
 
   async focus(selector: string): Promise<void> {
-    await interactions.focus(this.interactCtx(), selector)
+    await this.runInput(() => interactions.focus(this.interactCtx(), selector))
   }
 
   async check(selector: string): Promise<void> {
-    await interactions.check(this.interactCtx(), selector)
+    await this.runInput(() => interactions.check(this.interactCtx(), selector))
   }
 
   async uncheck(selector: string): Promise<void> {
-    await interactions.uncheck(this.interactCtx(), selector)
+    await this.runInput(() => interactions.uncheck(this.interactCtx(), selector))
   }
 
   async select(selector: string, values: string[]): Promise<void> {
-    await interactions.select(this.interactCtx(), selector, values)
+    await this.runInput(() => interactions.select(this.interactCtx(), selector, values))
   }
 
   async scroll(
@@ -503,15 +506,17 @@ export class BrowserTab {
     direction: "up" | "down" | "left" | "right" = "down",
     amount = 300,
   ): Promise<void> {
-    await interactions.scroll(this.interactCtx(), selector, direction, amount)
+    await this.runInput(() =>
+      interactions.scroll(this.interactCtx(), selector, direction, amount)
+    )
   }
 
   async scrollIntoView(selector: string): Promise<void> {
-    await interactions.scrollIntoView(this.interactCtx(), selector)
+    await this.runInput(() => interactions.scrollIntoView(this.interactCtx(), selector))
   }
 
   async drag(source: string, target: string): Promise<void> {
-    await interactions.drag(this.interactCtx(), source, target)
+    await this.runInput(() => interactions.drag(this.interactCtx(), source, target))
   }
 
   async highlight(selector: string): Promise<void> {
@@ -519,7 +524,7 @@ export class BrowserTab {
   }
 
   async upload(selector: string, files: string[]): Promise<void> {
-    await interactions.upload(this.interactCtx(), selector, files)
+    await this.runInput(() => interactions.upload(this.interactCtx(), selector, files))
   }
 
   async download(
@@ -628,7 +633,7 @@ export class BrowserTab {
         onAbort()
         return
       }
-      interactions.click(this.interactCtx(), selector).catch((error) => {
+      this.runInput(() => interactions.click(this.interactCtx(), selector)).catch((error) => {
         fail(error instanceof Error ? error : new Error(String(error)))
       })
     })
@@ -675,45 +680,55 @@ export class BrowserTab {
   }
 
   async keyDown(key: string): Promise<void> {
-    const { modifiers, info } = parseKeyChord(key)
-    const modifier = modifierBitForKey(info.key)
-    const nextModifiers = this.keyboardModifiers | modifiers | modifier
-    await input.keyDown(this.cdpSend, info, nextModifiers)
-    if (modifier) this.keyboardModifiers = nextModifiers
+    await this.runInput(async () => {
+      const { modifiers, info } = parseKeyChord(key)
+      const modifier = modifierBitForKey(info.key)
+      const nextModifiers = this.keyboardModifiers | modifiers | modifier
+      await input.keyDown(this.cdpSend, info, nextModifiers)
+      if (modifier) this.keyboardModifiers = nextModifiers
+    })
   }
 
   async keyUp(key: string): Promise<void> {
-    const { modifiers, info } = parseKeyChord(key)
-    const modifier = modifierBitForKey(info.key)
-    const nextModifiers = modifier
-      ? this.keyboardModifiers & ~modifier
-      : this.keyboardModifiers | modifiers
-    await input.keyUp(this.cdpSend, info, nextModifiers)
-    if (modifier) this.keyboardModifiers = nextModifiers
+    await this.runInput(async () => {
+      const { modifiers, info } = parseKeyChord(key)
+      const modifier = modifierBitForKey(info.key)
+      const nextModifiers = modifier
+        ? this.keyboardModifiers & ~modifier
+        : this.keyboardModifiers | modifiers
+      await input.keyUp(this.cdpSend, info, nextModifiers)
+      if (modifier) this.keyboardModifiers = nextModifiers
+    })
   }
 
   async keyboardType(text: string): Promise<void> {
-    await input.typeText(this.cdpSend, text, this.keyboardModifiers)
+    await this.runInput(() => input.typeText(this.cdpSend, text, this.keyboardModifiers))
   }
 
   async keyboardInsertText(text: string): Promise<void> {
-    await input.insertText(this.cdpSend, text)
+    await this.runInput(() => input.insertText(this.cdpSend, text))
   }
 
   async mouseMove(x: number, y: number): Promise<void> {
-    await input.mouseMove(this.cdpSend, this.mouseState, x, y)
+    await this.runInput(() => input.mouseMove(this.cdpSend, this.mouseState, x, y))
   }
 
   async mouseDown(button: MouseButton = "left"): Promise<void> {
-    await input.mouseDown(this.cdpSend, this.mouseState, button)
+    await this.runInput(() => input.mouseDown(this.cdpSend, this.mouseState, button))
   }
 
   async mouseUp(button: MouseButton = "left"): Promise<void> {
-    await input.mouseUp(this.cdpSend, this.mouseState, button)
+    await this.runInput(() => input.mouseUp(this.cdpSend, this.mouseState, button))
   }
 
   async mouseWheel(deltaX: number, deltaY: number): Promise<void> {
-    await input.mouseWheel(this.cdpSend, this.mouseState, deltaX, deltaY)
+    await this.runInput(() => input.mouseWheel(this.cdpSend, this.mouseState, deltaX, deltaY))
+  }
+
+  private runInput(operation: () => Promise<void>): Promise<void> {
+    const task = this.inputTask.then(operation)
+    this.inputTask = task.catch(() => {})
+    return task
   }
 
   async waitForSelector(
@@ -775,10 +790,17 @@ export class BrowserTab {
 
   async screenshot(opts: ScreenshotOptions): Promise<ScreenshotResult> {
     if (!opts.selector && !opts.fullPage) {
-      const image = await this.view.webContents.capturePage()
-      const format = opts.format ?? "png"
-      const buffer = format === "jpeg" ? image.toJPEG(opts.quality ?? 80) : image.toPNG()
-      return { data: buffer.toString("base64"), mimeType: format === "jpeg" ? "image/jpeg" : "image/png" }
+      try {
+        const image = await this.view.webContents.capturePage()
+        const format = opts.format ?? "png"
+        const buffer = format === "jpeg" ? image.toJPEG(opts.quality ?? 80) : image.toPNG()
+        return {
+          data: buffer.toString("base64"),
+          mimeType: format === "jpeg" ? "image/jpeg" : "image/png"
+        }
+      } catch (error) {
+        if (!(error instanceof Error) || !/display surface/i.test(error.message)) throw error
+      }
     }
     return screenshot(this.interactCtx(), opts)
   }
@@ -988,9 +1010,47 @@ export class BrowserTab {
   private interactCtx(): Interactions {
     return {
       send: (method, params, sessionId) => this.sendCdp(method, params, sessionId),
+      waitForEvent: (method, sessionId, timeoutMs) =>
+        this.waitForCdpEvent(method, sessionId, timeoutMs),
       refMap: this.refMap,
       sessions: this.frames.asMap(),
     }
+  }
+
+  private waitForCdpEvent(
+    method: string,
+    sessionId?: string,
+    timeoutMs = 5000,
+  ): Promise<unknown> {
+    const dbg = this.view.webContents.debugger
+    const wc = this.view.webContents
+    return new Promise((resolve, reject) => {
+      const cleanup = (): void => {
+        clearTimeout(timer)
+        dbg.off('message', onMessage)
+        wc.off('destroyed', onDestroyed)
+      }
+      const onMessage = (
+        _event: Electron.Event,
+        eventMethod: string,
+        params: unknown,
+        eventSessionId?: string,
+      ): void => {
+        if (eventMethod !== method || (sessionId ?? '') !== (eventSessionId ?? '')) return
+        cleanup()
+        resolve(params)
+      }
+      const onDestroyed = (): void => {
+        cleanup()
+        reject(new Error(`Tab closed while waiting for CDP event: ${method}`))
+      }
+      const timer = setTimeout(() => {
+        cleanup()
+        reject(new Error(`CDP event timed out: ${method}`))
+      }, timeoutMs)
+      dbg.on('message', onMessage)
+      wc.once('destroyed', onDestroyed)
+    })
   }
 
   private assertNavigationCurrent(generation: number, target?: string): void {

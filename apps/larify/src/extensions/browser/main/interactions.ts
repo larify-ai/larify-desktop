@@ -62,6 +62,7 @@ export async function callOn(
 
 export interface Interactions {
   send: CdpSend
+  waitForEvent?: (method: string, sessionId?: string, timeoutMs?: number) => Promise<unknown>
   refMap: RefMap
   sessions?: IframeSessions
 }
@@ -108,6 +109,20 @@ export async function drag(ctx: Interactions, source: string, target: string): P
   if (s.sessionId !== t.sessionId || s.frameId !== t.frameId) {
     throw new Error('Cross-frame drag is not supported.')
   }
+  const { objectId, sessionId } = await resolveRefToObjectId(
+    ctx.send,
+    ctx.refMap,
+    source,
+    ctx.sessions
+  )
+  const html5 = await callOn(
+    ctx.send,
+    objectId,
+    'function(){ return this.draggable === true; }',
+    [],
+    sessionId
+  )
+  if (html5 && !ctx.waitForEvent) throw new Error('CDP event waiting is unavailable.')
   const mouse = (
     type: string,
     x: number,
@@ -115,11 +130,16 @@ export async function drag(ctx: Interactions, source: string, target: string): P
     extra: object,
     sessionId?: string
   ): Promise<unknown> => ctx.send('Input.dispatchMouseEvent', { type, x, y, ...extra }, sessionId)
-  await mouse('mouseMoved', s.x, s.y, {}, s.sessionId)
-  await mouse('mousePressed', s.x, s.y, { button: 'left', buttons: 1, clickCount: 1 }, s.sessionId)
+  if (html5) await ctx.send('Input.setInterceptDrags', { enabled: true }, s.sessionId)
   let x = s.x
   let y = s.y
   try {
+    const intercepted = html5
+      ? ctx.waitForEvent?.('Input.dragIntercepted', s.sessionId)
+      : undefined
+    void intercepted?.catch(() => {})
+    await mouse('mouseMoved', s.x, s.y, {}, s.sessionId)
+    await mouse('mousePressed', s.x, s.y, { button: 'left', buttons: 1, clickCount: 1 }, s.sessionId)
     for (let i = 1; i <= 10; i++) {
       const cx = s.x + ((t.x - s.x) * i) / 10
       const cy = s.y + ((t.y - s.y) * i) / 10
@@ -128,8 +148,14 @@ export async function drag(ctx: Interactions, source: string, target: string): P
       y = cy
       await sleep(10)
     }
-    await mouse('mouseReleased', t.x, t.y, { button: 'left', buttons: 0, clickCount: 1 }, s.sessionId)
-  } catch (error) {
+    if (intercepted) {
+      const data = ((await intercepted) as { data?: unknown }).data
+      if (!data) throw new Error('Browser did not provide drag data.')
+      for (const type of ['dragEnter', 'dragOver', 'drop']) {
+        await ctx.send('Input.dispatchDragEvent', { type, x: t.x, y: t.y, data }, s.sessionId)
+      }
+    }
+  } finally {
     await mouse(
       'mouseReleased',
       x,
@@ -137,7 +163,9 @@ export async function drag(ctx: Interactions, source: string, target: string): P
       { button: 'left', buttons: 0, clickCount: 1 },
       s.sessionId
     ).catch(() => {})
-    throw error
+    if (html5) {
+      await ctx.send('Input.setInterceptDrags', { enabled: false }, s.sessionId).catch(() => {})
+    }
   }
 }
 

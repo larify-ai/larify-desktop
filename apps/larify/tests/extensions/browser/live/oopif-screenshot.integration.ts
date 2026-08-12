@@ -197,6 +197,43 @@ async function main(): Promise<void> {
     if (window.listenerCount('closed') !== initialClosedListeners) {
       throw new Error('destroyed browser session retained its host cleanup listener')
     }
+    const hiddenId = service.createTab('hidden-capture')
+    const hiddenTab = service.tab('hidden-capture', hiddenId)
+    if (!hiddenTab) throw new Error('hidden capture tab was not created')
+    await hiddenTab.navigateAndWait(url(rootServer, 'localhost'))
+    const hiddenScreenshot = await hiddenTab.screenshot({ format: 'png' })
+    const hiddenSize = nativeImage
+      .createFromBuffer(Buffer.from(hiddenScreenshot.data, 'base64'))
+      .getSize()
+    if (hiddenSize.width <= 0 || hiddenSize.height <= 0) {
+      throw new Error(`hidden viewport screenshot was empty: ${JSON.stringify(hiddenSize)}`)
+    }
+    console.log(`PASS hidden viewport screenshot: ${hiddenSize.width}x${hiddenSize.height}`)
+    const hiddenDebugger = hiddenTab.view.webContents.debugger
+    const hiddenMetrics = (await hiddenDebugger.sendCommand('Page.getLayoutMetrics')) as {
+      cssVisualViewport?: { pageX: number; pageY: number; clientWidth: number; clientHeight: number }
+    }
+    const hiddenViewport = hiddenMetrics.cssVisualViewport
+    if (!hiddenViewport) throw new Error('CDP did not return a hidden CSS visual viewport')
+    const hiddenCdpCapture = (await hiddenDebugger.sendCommand('Page.captureScreenshot', {
+      format: 'png',
+      fromSurface: true,
+      clip: {
+        x: hiddenViewport.pageX,
+        y: hiddenViewport.pageY,
+        width: hiddenViewport.clientWidth,
+        height: hiddenViewport.clientHeight,
+        scale: 1
+      }
+    })) as { data: string }
+    const hiddenCdpSize = nativeImage
+      .createFromBuffer(Buffer.from(hiddenCdpCapture.data, 'base64'))
+      .getSize()
+    if (hiddenCdpSize.width <= 0 || hiddenCdpSize.height <= 0) {
+      throw new Error(`hidden CDP viewport screenshot was empty: ${JSON.stringify(hiddenCdpSize)}`)
+    }
+    console.log(`PASS hidden CDP viewport screenshot: ${hiddenCdpSize.width}x${hiddenCdpSize.height}`)
+    await resources.destroy('hidden-capture')
     await service.destroy()
     console.log('PASS BrowserService empty session resources and listener cleanup')
 

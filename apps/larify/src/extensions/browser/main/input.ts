@@ -199,4 +199,5 @@ export async function mouseWheel(
     { type: 'mouseWheel', x: state.x, y: state.y, deltaX, deltaY },
     sessionId
   )
+  await new Promise((resolve) => setTimeout(resolve, 32))
 }

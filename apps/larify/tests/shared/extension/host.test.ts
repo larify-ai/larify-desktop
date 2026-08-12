@@ -57,7 +57,7 @@ describe('ExtensionHost', () => {
     expect(
       (host.getTool('files', 'read')!.inputSchema as z.ZodType).safeParse({
         path: 'a.txt',
-        _title: 'Read file'
+        toolCallTitle: 'Read file'
       }).success
     ).toBe(true)
   })

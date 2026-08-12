@@ -14,6 +14,7 @@ export interface ScreenshotResult {
 }
 
 type Size = { width: number; height: number }
+type Viewport = Size & { x: number; y: number }
 
 export function mapFrameBoxToTopLevel(
   box: { x: number; y: number; width: number; height: number },
@@ -96,6 +97,33 @@ export async function screenshot(
       params.clip = { x: 0, y: 0, width: size.width, height: size.height, scale: 1 }
       params.captureBeyondViewport = true
     }
+  } else {
+    const metrics = (await ctx.send('Page.getLayoutMetrics')) as {
+      cssVisualViewport?: {
+        pageX: number
+        pageY: number
+        clientWidth: number
+        clientHeight: number
+      }
+      visualViewport?: {
+        pageX: number
+        pageY: number
+        clientWidth: number
+        clientHeight: number
+      }
+    }
+    const visualViewport = metrics.cssVisualViewport ?? metrics.visualViewport
+    const viewport: Viewport | undefined = visualViewport && {
+      x: visualViewport.pageX,
+      y: visualViewport.pageY,
+      width: visualViewport.clientWidth,
+      height: visualViewport.clientHeight
+    }
+    if (!viewport || viewport.width <= 0 || viewport.height <= 0) {
+      throw new Error('Current viewport is not available for capture.')
+    }
+    params.clip = { ...viewport, scale: 1 }
+    params.captureBeyondViewport = false
   }
 
   const res = (await ctx.send('Page.captureScreenshot', params)) as { data: string }

@@ -1,11 +1,15 @@
 import { describe, expect, it, vi } from 'vitest'
 
 vi.mock('../../../../src/extensions/browser/main/refResolve', () => ({
-  resolveRefToBox: vi.fn()
+  resolveRefToBox: vi.fn(),
+  resolveRefToObjectId: vi.fn(async () => ({ objectId: 'SOURCE' }))
 }))
 
 import { drag } from '../../../../src/extensions/browser/main/interactions'
-import { resolveRefToBox } from '../../../../src/extensions/browser/main/refResolve'
+import {
+  resolveRefToBox,
+  resolveRefToObjectId
+} from '../../../../src/extensions/browser/main/refResolve'
 
 interface Call {
   method: string
@@ -18,16 +22,35 @@ function makeCtx(): { ctx: Parameters<typeof drag>[0]; calls: Call[] } {
   const send = vi.fn(
     async (method: string, params: Record<string, unknown>, sessionId?: string) => {
       calls.push({ method, params, sessionId })
+      if (method === 'Runtime.callFunctionOn') return { result: { value: true } }
       return {}
     }
   )
   return {
-    ctx: { send, refMap: new Map() } as Parameters<typeof drag>[0],
+    ctx: {
+      send,
+      waitForEvent: vi.fn(async () => ({
+        data: { items: [], dragOperationsMask: 1 }
+      })),
+      refMap: new Map()
+    } as Parameters<typeof drag>[0],
     calls
   }
 }
 
 describe('drag frame sessions', () => {
+  it('dispatches HTML5 drag events instead of only moving a pressed mouse', async () => {
+    vi.mocked(resolveRefToBox)
+      .mockResolvedValueOnce({ x: 10, y: 20 })
+      .mockResolvedValueOnce({ x: 30, y: 40 })
+    const { ctx, calls } = makeCtx()
+
+    await drag(ctx, '#source', '#target')
+
+    expect(calls.some(({ method }) => method === 'Input.setInterceptDrags')).toBe(true)
+    expect(calls.some(({ method }) => method === 'Input.dispatchDragEvent')).toBe(true)
+  })
+
   it('rejects cross-frame drag before dispatching input', async () => {
     vi.mocked(resolveRefToBox)
       .mockResolvedValueOnce({ x: 10, y: 20, sessionId: 'SOURCE' })
@@ -58,17 +81,22 @@ describe('drag frame sessions', () => {
       vi.mocked(resolveRefToBox)
         .mockResolvedValueOnce({ x: 10, y: 20, sessionId })
         .mockResolvedValueOnce({ x: 30, y: 40, sessionId })
+      vi.mocked(resolveRefToObjectId).mockResolvedValueOnce({ objectId: 'SOURCE', sessionId })
       const { ctx, calls } = makeCtx()
 
       await drag(ctx, '#source', '#target')
 
-      expect(calls).toHaveLength(13)
+      expect(calls).toHaveLength(19)
       expect(calls.every((call) => call.sessionId === sessionId)).toBe(true)
-      expect(calls[1].params).toMatchObject({ type: 'mousePressed', x: 10, y: 20 })
-      expect(calls.at(-1)?.params).toMatchObject({
-        type: 'mouseReleased',
-        x: 30,
-        y: 40
+      expect(calls.some(({ params }) =>
+        params.type === 'mousePressed' && params.x === 10 && params.y === 20
+      )).toBe(true)
+      expect(calls.some(({ method, params }) =>
+        method === 'Input.dispatchDragEvent' && params.type === 'drop'
+      )).toBe(true)
+      expect(calls.at(-1)).toMatchObject({
+        method: 'Input.setInterceptDrags',
+        params: { enabled: false }
       })
     }
   )
@@ -82,22 +110,46 @@ describe('drag frame sessions', () => {
     const send = vi.fn(
       async (method: string, params: Record<string, unknown>, sessionId?: string) => {
         calls.push({ method, params, sessionId })
+        if (method === 'Runtime.callFunctionOn') return { result: { value: true } }
         if (params.type === 'mouseMoved' && ++moves === 4) {
           throw new Error('intermediate move failed')
         }
         return {}
       }
     )
-    const ctx = { send, refMap: new Map() } as Parameters<typeof drag>[0]
+    const ctx = {
+      send,
+      waitForEvent: vi.fn(async () => ({
+        data: { items: [], dragOperationsMask: 1 }
+      })),
+      refMap: new Map()
+    } as Parameters<typeof drag>[0]
 
     await expect(drag(ctx, '#source', '#target')).rejects.toThrow(
       'intermediate move failed'
     )
     expect(calls.some(({ params }) => params.type === 'mousePressed')).toBe(true)
-    expect(calls.at(-1)?.params).toMatchObject({
-      type: 'mouseReleased',
-      button: 'left',
-      buttons: 0
+    expect(calls.some(({ params }) => params.type === 'mouseReleased')).toBe(true)
+    expect(calls.at(-1)).toMatchObject({
+      method: 'Input.setInterceptDrags',
+      params: { enabled: false }
     })
+  })
+
+  it('keeps pointer-based drag working without waiting for HTML5 drag data', async () => {
+    vi.mocked(resolveRefToBox)
+      .mockResolvedValueOnce({ x: 10, y: 20 })
+      .mockResolvedValueOnce({ x: 30, y: 40 })
+    const { ctx, calls } = makeCtx()
+    vi.mocked(ctx.send).mockImplementation(async (method, params, sessionId) => {
+      calls.push({ method, params, sessionId })
+      if (method === 'Runtime.callFunctionOn') return { result: { value: false } }
+      return {}
+    })
+
+    await drag(ctx, '#source', '#target')
+
+    expect(calls.some(({ method }) => method === 'Input.setInterceptDrags')).toBe(false)
+    expect(calls.some(({ params }) => params.type === 'mouseReleased')).toBe(true)
   })
 })

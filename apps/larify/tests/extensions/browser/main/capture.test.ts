@@ -145,9 +145,14 @@ describe('element screenshot frame session', () => {
   })
 
   it('preserves viewport screenshot behavior when no selector is provided', async () => {
-    const send = vi.fn(async (method: string) =>
-      method === 'Page.captureScreenshot' ? { data: 'viewport' } : {}
-    )
+    const send = vi.fn(async (method: string) => {
+      if (method === 'Page.getLayoutMetrics') {
+        return {
+          cssVisualViewport: { pageX: 4, pageY: 6, clientWidth: 800, clientHeight: 600 }
+        }
+      }
+      return method === 'Page.captureScreenshot' ? { data: 'viewport' } : {}
+    })
 
     await expect(
       screenshot({ send, refMap: new Map() }, { format: 'jpeg', quality: 72 })
@@ -158,7 +163,9 @@ describe('element screenshot frame session', () => {
       format: 'jpeg',
       fromSurface: true,
       optimizeForSpeed: true,
-      quality: 72
+      quality: 72,
+      clip: { x: 4, y: 6, width: 800, height: 600, scale: 1 },
+      captureBeyondViewport: false
     })
   })
 

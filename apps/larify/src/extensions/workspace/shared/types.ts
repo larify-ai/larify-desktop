@@ -1,10 +1,10 @@
-import type { FileStatusResult } from 'simple-git'
-
-export interface WorkspaceEntry {
-  kind: 'directory' | 'file'
-  name: string
-  path: string
+export interface FileInfo {
+  isLeaf: boolean
+  key: string
+  title: string
 }
 
-export type WorkspaceGitStatus =
-  { available: true; statuses: FileStatusResult[] } | { available: false; message: string }
+export interface DirectoryListing {
+  entries: FileInfo[]
+  root: string
+}

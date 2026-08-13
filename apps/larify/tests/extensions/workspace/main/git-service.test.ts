@@ -1,10 +1,9 @@
 import { mkdtemp, mkdir, rm, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { simpleGit } from 'simple-git'
-import { GitService } from '../../../../src/extensions/workspace/main/git/git-service'
-import { GitService as GitRuntime } from '../../../../src/main/core/git'
+import { GitService as GitRuntime, head, status } from '../../../../src/main/core/git'
 
 const temporaryDirectories: string[] = []
 const gitTestTimeout = 15_000
@@ -29,7 +28,77 @@ afterEach(async () => {
   )
 })
 
-describe('GitService', () => {
+describe('Core Git', () => {
+  it(
+    'returns deleted and staged file states',
+    async () => {
+      const root = await createRepository()
+      const deleted = path.join(root, 'deleted.txt')
+      const staged = path.join(root, 'staged.txt')
+      await Promise.all([writeFile(deleted, 'delete me'), writeFile(staged, 'before')])
+      const git = simpleGit(root)
+      await git.add('.').commit('initial')
+      await Promise.all([rm(deleted), writeFile(staged, 'after')])
+      await git.add(staged)
+
+      const statuses = await status(root)
+
+      expect(statuses.find((entry) => entry.path === deleted)).toMatchObject({
+        index: ' ',
+        working_dir: 'D'
+      })
+      expect(statuses.find((entry) => entry.path === staged)).toMatchObject({
+        index: 'M',
+        working_dir: ' '
+      })
+    },
+    gitTestTimeout
+  )
+
+  it(
+    'returns merge conflicts',
+    async () => {
+      const root = await createRepository()
+      const file = path.join(root, 'conflict.txt')
+      const git = simpleGit(root)
+      await writeFile(file, 'base\n')
+      await git.add('.').commit('initial')
+      const baseBranch = (await git.branchLocal()).current
+      await git.checkoutLocalBranch('conflicting-change')
+      await writeFile(file, 'branch\n')
+      await git.add('.').commit('branch change')
+      await git.checkout(baseBranch)
+      await writeFile(file, 'base branch\n')
+      await git.add('.').commit('base change')
+      await expect(git.merge(['conflicting-change'])).rejects.toThrow()
+
+      const statuses = await status(root)
+
+      expect(statuses.find((entry) => entry.path === file)).toMatchObject({
+        index: 'U',
+        working_dir: 'U'
+      })
+    },
+    gitTestTimeout
+  )
+
+  it(
+    'preserves spaces and Unicode in paths',
+    async () => {
+      const root = await createRepository()
+      const file = path.join(root, '中文 file name.txt')
+      await writeFile(file, 'content')
+
+      const statuses = await status(root)
+
+      expect(statuses.find((entry) => entry.path === file)).toMatchObject({
+        index: '?',
+        working_dir: '?'
+      })
+    },
+    gitTestTimeout
+  )
+
   it(
     'returns normalized status paths from the system Git',
     async () => {
@@ -42,7 +111,7 @@ describe('GitService', () => {
       await simpleGit(root).mv(tracked, renamed)
       await writeFile(untracked, 'new')
 
-      const statuses = await new GitService().status(root)
+      const statuses = await status(root)
 
       expect(statuses.map((status) => status.path)).toEqual(
         expect.arrayContaining([renamed, untracked])
@@ -66,7 +135,7 @@ describe('GitService', () => {
         writeFile(path.join(sibling, 'outside.txt'), 'outside')
       ])
 
-      const statuses = await new GitService().status(workspace)
+      const statuses = await status(workspace)
 
       expect(statuses.map((status) => status.path)).toEqual([inside])
     },
@@ -82,7 +151,7 @@ describe('GitService', () => {
       await mkdir(ignoredDirectory)
       await writeFile(path.join(ignoredDirectory, 'output.txt'), 'ignored')
 
-      const statuses = await new GitService().status(root)
+      const statuses = await status(root)
 
       expect(statuses.find((status) => status.path === ignoredDirectory)).toMatchObject({
         index: '!',
@@ -103,7 +172,7 @@ describe('GitService', () => {
       await mkdir(ignoredDirectory)
       await writeFile(path.join(ignoredDirectory, 'output.txt'), 'ignored')
 
-      const statuses = await new GitService().status(workspace)
+      const statuses = await status(workspace)
 
       expect(statuses.find((status) => status.path === ignoredDirectory)).toMatchObject({
         index: '!',
@@ -120,7 +189,7 @@ describe('GitService', () => {
       const file = path.join(root, 'fallback.txt')
       await writeFile(file, 'fallback')
 
-      const statuses = await new GitService(new GitRuntime('larify-missing-git-binary')).status(root)
+      const statuses = await status(root, new GitRuntime('larify-missing-git-binary'))
 
       expect(statuses.map((status) => status.path)).toContain(file)
     },
@@ -136,7 +205,7 @@ describe('GitService', () => {
       await simpleGit(root).add('.').commit('initial')
       await writeFile(file, 'working tree\n')
 
-      const original = await new GitService().original(root, file)
+      const original = await head(root, file)
 
       expect(new TextDecoder().decode(original!)).toBe('committed\n')
     },
@@ -150,7 +219,59 @@ describe('GitService', () => {
       const file = path.join(root, 'untracked.txt')
       await writeFile(file, 'new\n')
 
-      await expect(new GitService().original(root, file)).resolves.toBeNull()
+      await expect(head(root, file)).resolves.toBeNull()
+    },
+    gitTestTimeout
+  )
+
+  it(
+    'initializes Git when HEAD is requested outside a repository',
+    async () => {
+      const root = await mkdtemp(path.join(os.tmpdir(), 'larify-no-git-head-'))
+      temporaryDirectories.push(root)
+      const file = path.join(root, 'untracked.txt')
+      await writeFile(file, 'new\n')
+
+      await expect(head(root, file)).resolves.toBeNull()
+      await expect(stat(path.join(root, '.git'))).resolves.toMatchObject({})
+    },
+    gitTestTimeout
+  )
+
+  it(
+    'shares repository root resolution between status and HEAD',
+    async () => {
+      const root = await createRepository()
+      const file = path.join(root, 'tracked.txt')
+      const git = simpleGit(root)
+      await writeFile(file, 'committed\n')
+      await git.add('.').commit('initial')
+      const checkIsRepo = vi.spyOn(git, 'checkIsRepo')
+      const revparse = vi.spyOn(git, 'revparse')
+      const runtime = { open: async () => git } as unknown as GitRuntime
+
+      await status(root, runtime)
+      await head(root, file, runtime)
+
+      expect(checkIsRepo).toHaveBeenCalledTimes(1)
+      expect(revparse).toHaveBeenCalledTimes(1)
+    },
+    gitTestTimeout
+  )
+
+  it(
+    'rejects a HEAD file outside the workspace',
+    async () => {
+      const root = await createRepository()
+      const workspace = path.join(root, 'workspace')
+      const outside = path.join(root, 'outside.txt')
+      await mkdir(workspace)
+      await writeFile(outside, 'outside')
+      await simpleGit(root).add('.').commit('initial')
+
+      await expect(head(workspace, outside)).rejects.toThrow(
+        'Path is outside the workspace repository'
+      )
     },
     gitTestTimeout
   )
@@ -161,7 +282,7 @@ describe('GitService', () => {
       const root = await mkdtemp(path.join(os.tmpdir(), 'larify-no-git-'))
       temporaryDirectories.push(root)
 
-      await expect(new GitService().status(root)).resolves.toEqual([])
+      await expect(status(root)).resolves.toEqual([])
       await expect(stat(path.join(root, '.git'))).resolves.toMatchObject({})
     },
     gitTestTimeout

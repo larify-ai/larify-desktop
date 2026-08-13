@@ -1,50 +1,30 @@
-import type { Extension } from '@shared/extension'
+import type { Plugin } from '../../../main/core/plugin/protocol'
+import { resourceManagerToken, type ResourceManager } from '../../../main/core/resource'
+import { larifyWorkspacePath } from '../../../main/utils/app-paths'
+import { windowToken } from '../../../main/window/token'
+import type { MainWindow } from '../../../main/window/types'
 import { registerWorkspaceIpc } from './ipc'
-import { WorkspaceService } from './workspace-service'
-import { WorkspaceEditorHost } from './workspace-editor-host'
-import { gitService } from '../../../main/core/git'
-import { GitService } from './git/git-service'
+import { WorkspaceManager } from './manager'
 
-interface MainWindowService {
-  get(): import('electron').BrowserWindow
-}
-
-const extension: Extension = {
-  activate(_app, context) {
-    const service = new WorkspaceService(new GitService(gitService))
-    let editor: WorkspaceEditorHost | null = null
-    const getEditor = (): WorkspaceEditorHost => {
-      if (editor) return editor
-      const mainWindow = _app.get<MainWindowService>('service', 'main-window')
-      if (!mainWindow) throw new Error('main-window service is not registered')
-      editor = new WorkspaceEditorHost(mainWindow.get())
-      return editor
-    }
-    const unregisterIpc = registerWorkspaceIpc(service, getEditor)
-    let preload: ReturnType<typeof setTimeout> | undefined
-    const warmEditor = (): void => {
-      preload = setTimeout(() => {
-        try {
-          getEditor()
-        } catch (error) {
-          console.error('[workspace:editor-preload]', error)
-        }
-      }, 0)
-    }
-    const mainWindow = _app.get<MainWindowService>('service', 'main-window')?.get()
-    const mainContents = mainWindow?.webContents
-    if (mainContents?.isLoadingMainFrame()) mainContents.once('did-finish-load', warmEditor)
-    else warmEditor()
-    context.subscriptions.push({
-      dispose: async () => {
-        mainContents?.removeListener('did-finish-load', warmEditor)
-        if (preload) clearTimeout(preload)
-        unregisterIpc()
-        editor?.destroy()
-        await service.dispose()
-      }
-    })
+const plugin: Plugin = {
+  manifest: {
+    id: 'workspace'
+  },
+  activate(context) {
+    const resources = context.registry.get<ResourceManager>(resourceManagerToken)
+    if (!resources) throw new Error('ResourceManager is unavailable.')
+    const mainWindow = context.registry.get<MainWindow>(windowToken)
+    if (!mainWindow) throw new Error('MainWindow is unavailable.')
+    const manager = new WorkspaceManager()
+    context.subscriptions.push(
+      resources.register('workspace', (id, _sessionId, options) => {
+        const root = (options as { root?: string } | undefined)?.root || larifyWorkspacePath()
+        return manager.open(id, root)
+      }),
+      manager,
+      { dispose: registerWorkspaceIpc(manager, mainWindow.get()) }
+    )
   }
 }
 
-export default extension
+export default plugin

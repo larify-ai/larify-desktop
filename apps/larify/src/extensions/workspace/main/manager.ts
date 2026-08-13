@@ -1,25 +1,24 @@
-import type { EmitArgsWithName } from 'chokidar'
 import type { Disposable } from '@shared/infra/disposable'
 import { addListener, notify, type Listener } from '../../../main/utils/listener'
 import type { DirectoryListing } from '../shared/types'
 import { WorkspaceService } from './service'
 
-type WorkspaceChange = [number, EmitArgsWithName[0], string]
+type ResourceChange = [number, string]
 
 export class WorkspaceManager implements Disposable {
-  private readonly changeListeners = new Set<Listener<WorkspaceChange>>()
+  private readonly changeListeners = new Set<Listener<ResourceChange>>()
   private readonly workspaces = new Map<number, WorkspaceService>()
 
-  bindChange(listener: (...change: WorkspaceChange) => void): () => void {
+  bindChange(listener: (...change: ResourceChange) => void): () => void {
     return addListener(this.changeListeners, listener)
   }
 
   open(id: number, root: string): Disposable {
     if (this.workspaces.has(id)) throw new Error(`Workspace resource ${id} is already open`)
 
-    const service = new WorkspaceService(root, (event, changedPath) => {
+    const service = new WorkspaceService(root, (directory) => {
       if (this.workspaces.get(id) === service) {
-        notify(this.changeListeners, id, event, changedPath)
+        notify(this.changeListeners, id, directory)
       }
     })
     this.workspaces.set(id, service)
@@ -30,6 +29,10 @@ export class WorkspaceManager implements Disposable {
   async list(id: number, directory?: string): Promise<DirectoryListing> {
     const service = this.requireWorkspace(id)
     return { entries: await service.list(directory), root: await service.rootPath() }
+  }
+
+  reveal(id: number, file: string): Promise<string[]> {
+    return this.requireWorkspace(id).reveal(file)
   }
 
   async dispose(): Promise<void> {

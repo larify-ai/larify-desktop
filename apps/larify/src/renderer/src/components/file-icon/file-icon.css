@@ -1,0 +1,20 @@
+@font-face {
+  font-family: 'Larify Seti';
+  src: url('./assets/seti.woff') format('woff');
+}
+
+.file-icon {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 16px;
+  height: 16px;
+  justify-content: center;
+  overflow: visible;
+  width: 16px;
+}
+
+.file-icon-font {
+  font-family: 'Larify Seti';
+  font-size: 14px;
+  line-height: 16px;
+}

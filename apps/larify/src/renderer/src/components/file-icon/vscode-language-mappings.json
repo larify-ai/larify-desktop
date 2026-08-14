@@ -1,0 +1,720 @@
+{
+  "source": {
+    "repository": "https://github.com/microsoft/vscode",
+    "revision": "96f2210282fa5c1528ecac70a73180c4d6292c89"
+  },
+  "languages": {
+    "bat": {
+      "extensions": [".bat", ".cmd"],
+      "fileNamePatterns": [],
+      "fileNames": [],
+      "sources": ["bat"]
+    },
+    "bibtex": {
+      "extensions": [".bib"],
+      "fileNamePatterns": [],
+      "fileNames": [],
+      "sources": ["latex"]
+    },
+    "c": {
+      "extensions": [".c", ".i"],
+      "fileNamePatterns": [],
+      "fileNames": [],
+      "sources": ["cpp"]
+    },
+    "chatagent": {
+      "extensions": [".agent.md", ".chatmode.md"],
+      "fileNamePatterns": ["**/.claude/agents/*.md", "**/.github/agents/*.md"],
+      "fileNames": [],
+      "sources": ["prompt-basics"]
+    },
+    "clojure": {
+      "extensions": [".clj", ".cljc", ".cljs", ".cljx", ".clojure", ".edn"],
+      "fileNamePatterns": [],
+      "fileNames": [],
+      "sources": ["clojure"]
+    },
+    "coffeescript": {
+      "extensions": [".coffee", ".cson", ".iced"],
+      "fileNamePatterns": [],
+      "fileNames": [],
+      "sources": ["coffeescript"]
+    },
+    "cpp": {
+      "extensions": [
+        ".c++",
+        ".c++m",
+        ".cc",
+        ".ccm",
+        ".cpp",
+        ".cppm",
+        ".cxx",
+        ".cxxm",
+        ".h",
+        ".h.in",
+        ".h++",
+        ".hh",
+        ".hpp",
+        ".hpp.in",
+        ".hxx",
+        ".ii",
+        ".inl",
+        ".ino",
+        ".ipp",
+        ".ixx",
+        ".mpp",
+        ".mxx",
+        ".tpp",
+        ".txx"
+      ],
+      "fileNamePatterns": [],
+      "fileNames": [],
+      "sources": ["cpp"]
+    },
+    "cpp_embedded_latex": {
+      "extensions": [],
+      "fileNamePatterns": [],
+      "fileNames": [],
+      "sources": ["latex"]
+    },
+    "csharp": {
+      "extensions": [".cake", ".cs", ".csx"],
+      "fileNamePatterns": [],
+      "fileNames": [],
+      "sources": ["csharp"]
+    },
+    "css": {
+      "extensions": [".css"],
+      "fileNamePatterns": [],
+      "fileNames": [],
+      "sources": ["css"]
+    },
+    "cuda-cpp": {
+      "extensions": [".cu", ".cuh"],
+      "fileNamePatterns": [],
+      "fileNames": [],
+      "sources": ["cpp"]
+    },
+    "dart": {
+      "extensions": [".dart"],
+      "fileNamePatterns": [],
+      "fileNames": [],
+      "sources": ["dart"]
+    },
+    "diff": {
+      "extensions": [".diff", ".patch", ".rej"],
+      "fileNamePatterns": [],
+      "fileNames": [],
+      "sources": ["diff"]
+    },
+    "dockercompose": {
+      "extensions": [],
+      "fileNamePatterns": [
+        "*docker*compose*.yaml",
+        "*docker*compose*.yml",
+        "compose.*.yaml",
+        "compose.*.yml",
+        "compose.yaml",
+        "compose.yml"
+      ],
+      "fileNames": [],
+      "sources": ["yaml"]
+    },
+    "dockerfile": {
+      "extensions": [".containerfile", ".dockerfile"],
+      "fileNamePatterns": ["containerfile.*", "dockerfile.*"],
+      "fileNames": ["containerfile", "dockerfile"],
+      "sources": ["docker"]
+    },
+    "dotenv": {
+      "extensions": [".env"],
+      "fileNamePatterns": [".env.*"],
+      "fileNames": [".env", ".flaskenv", "user-dirs.dirs"],
+      "sources": ["dotenv"]
+    },
+    "fsharp": {
+      "extensions": [".fs", ".fsi", ".fsscript", ".fsx"],
+      "fileNamePatterns": [],
+      "fileNames": [],
+      "sources": ["fsharp"]
+    },
+    "git-commit": {
+      "extensions": [],
+      "fileNamePatterns": [],
+      "fileNames": ["commit_editmsg", "merge_msg"],
+      "sources": ["git-base"]
+    },
+    "git-rebase": {
+      "extensions": [],
+      "fileNamePatterns": ["**/rebase-merge/done"],
+      "fileNames": ["git-rebase-todo"],
+      "sources": ["git-base"]
+    },
+    "go": {
+      "extensions": [".go"],
+      "fileNamePatterns": [],
+      "fileNames": [],
+      "sources": ["go"]
+    },
+    "groovy": {
+      "extensions": [".gradle", ".groovy", ".gvy", ".jenkinsfile", ".nf"],
+      "fileNamePatterns": ["jenkinsfile*"],
+      "fileNames": ["jenkinsfile"],
+      "sources": ["groovy"]
+    },
+    "handlebars": {
+      "extensions": [".handlebars", ".hbs", ".hjs"],
+      "fileNamePatterns": [],
+      "fileNames": [],
+      "sources": ["handlebars"]
+    },
+    "hlsl": {
+      "extensions": [".cginc", ".compute", ".fx", ".fxh", ".hlsl", ".hlsli", ".psh", ".vsh"],
+      "fileNamePatterns": [],
+      "fileNames": [],
+      "sources": ["hlsl"]
+    },
+    "html": {
+      "extensions": [
+        ".asp",
+        ".aspx",
+        ".ejs",
+        ".htm",
+        ".html",
+        ".jshtm",
+        ".jsp",
+        ".mdoc",
+        ".rhtml",
+        ".shtml",
+        ".volt",
+        ".xht",
+        ".xhtml"
+      ],
+      "fileNamePatterns": [],
+      "fileNames": [],
+      "sources": ["html"]
+    },
+    "ignore": {
+      "extensions": [".git-blame-ignore-revs", ".gitignore", ".gitignore_global", ".npmignore"],
+      "fileNamePatterns": [".copilotignore"],
+      "fileNames": [".vscodeignore"],
+      "sources": ["copilot", "extension-editing", "git-base", "npm"]
+    },
+    "ini": {
+      "extensions": [".ini"],
+      "fileNamePatterns": [],
+      "fileNames": [],
+      "sources": ["ini"]
+    },
+    "instructions": {
+      "extensions": [".instructions.md", "copilot-instructions.md"],
+      "fileNamePatterns": ["**/.claude/rules/**/*.md"],
+      "fileNames": [],
+      "sources": ["prompt-basics"]
+    },
+    "jade": {
+      "extensions": [".jade", ".pug"],
+      "fileNamePatterns": [],
+      "fileNames": [],
+      "sources": ["pug"]
+    },
+    "java": {
+      "extensions": [".jav", ".java"],
+      "fileNamePatterns": [],
+      "fileNames": [],
+      "sources": ["java"]
+    },
+    "javascript": {
+      "extensions": [".cjs", ".es6", ".js", ".mjs", ".pac"],
+      "fileNamePatterns": [],
+      "fileNames": ["jakefile"],
+      "sources": ["javascript"]
+    },
+    "javascriptreact": {
+      "extensions": [".jsx"],
+      "fileNamePatterns": [],
+      "fileNames": [],
+      "sources": ["javascript"]
+    },
+    "json": {
+      "extensions": [
+        ".bowerrc",
+        ".code-profile",
+        ".css.map",
+        ".geojson",
+        ".har",
+        ".ipynb",
+        ".js.map",
+        ".jscsrc",
+        ".jslintrc",
+        ".json",
+        ".jsonld",
+        ".ts.map",
+        ".tsbuildinfo",
+        ".vuerc",
+        ".webmanifest"
+      ],
+      "fileNamePatterns": [],
+      "fileNames": [".watchmanconfig", "composer.lock"],
+      "sources": ["configuration-editing", "json", "typescript-basics"]
+    },
+    "jsonc": {
+      "extensions": [
+        ".babelrc",
+        ".code-workspace",
+        ".eslintrc",
+        ".eslintrc.json",
+        ".hintrc",
+        ".jsfmtrc",
+        ".jshintrc",
+        ".jsonc",
+        ".swcrc",
+        ".toolset.jsonc",
+        "color-theme.json",
+        "icon-theme.json",
+        "language-configuration.json"
+      ],
+      "fileNamePatterns": [
+        "**/.github/hooks/*.json",
+        "jsconfig-*.json",
+        "jsconfig.*.json",
+        "tsconfig-*.json",
+        "tsconfig.*.json"
+      ],
+      "fileNames": [
+        ".babelrc.json",
+        ".devcontainer.json",
+        ".ember-cli",
+        "argv.json",
+        "babel.config.json",
+        "bun.lock",
+        "devcontainer.json",
+        "extensions.json",
+        "jsconfig.json",
+        "keybindings.json",
+        "launch.json",
+        "mcp.json",
+        "profiles.json",
+        "settings.json",
+        "tasks.json",
+        "tsconfig.json",
+        "typedoc.json"
+      ],
+      "sources": ["configuration-editing", "json", "typescript-basics"]
+    },
+    "jsonl": {
+      "extensions": [".jsonl", ".ndjson"],
+      "fileNamePatterns": [],
+      "fileNames": [],
+      "sources": ["json"]
+    },
+    "jsx-tags": {
+      "extensions": [],
+      "fileNamePatterns": [],
+      "fileNames": [],
+      "sources": ["javascript"]
+    },
+    "julia": {
+      "extensions": [".jl"],
+      "fileNamePatterns": [],
+      "fileNames": [],
+      "sources": ["julia"]
+    },
+    "juliamarkdown": {
+      "extensions": [".jmd"],
+      "fileNamePatterns": [],
+      "fileNames": [],
+      "sources": ["julia"]
+    },
+    "latex": {
+      "extensions": [".ctx", ".ltx", ".tex"],
+      "fileNamePatterns": [],
+      "fileNames": [],
+      "sources": ["latex"]
+    },
+    "less": {
+      "extensions": [".less"],
+      "fileNamePatterns": [],
+      "fileNames": [],
+      "sources": ["less"]
+    },
+    "log": {
+      "extensions": [".log", "*.log.?"],
+      "fileNamePatterns": [],
+      "fileNames": [],
+      "sources": ["log"]
+    },
+    "lua": {
+      "extensions": [".lua"],
+      "fileNamePatterns": [],
+      "fileNames": [],
+      "sources": ["lua"]
+    },
+    "makefile": {
+      "extensions": [".mak", ".mk"],
+      "fileNamePatterns": [],
+      "fileNames": ["gnumakefile", "makefile", "ocamlmakefile"],
+      "sources": ["make"]
+    },
+    "markdown": {
+      "extensions": [
+        ".copilotmd",
+        ".litcoffee",
+        ".markdn",
+        ".markdown",
+        ".md",
+        ".mdown",
+        ".mdtext",
+        ".mdtxt",
+        ".mdwn",
+        ".mkd",
+        ".mkdn",
+        ".ron",
+        ".ronn",
+        ".workbook"
+      ],
+      "fileNamePatterns": ["**/.cursor/**/*.mdc"],
+      "fileNames": [],
+      "sources": ["copilot", "markdown-basics"]
+    },
+    "markdown_latex_combined": {
+      "extensions": [],
+      "fileNamePatterns": [],
+      "fileNames": [],
+      "sources": ["latex"]
+    },
+    "markdown-math": {
+      "extensions": [],
+      "fileNamePatterns": [],
+      "fileNames": [],
+      "sources": ["markdown-math"]
+    },
+    "objective-c": {
+      "extensions": [".m"],
+      "fileNamePatterns": [],
+      "fileNames": [],
+      "sources": ["objective-c"]
+    },
+    "objective-cpp": {
+      "extensions": [".mm"],
+      "fileNamePatterns": [],
+      "fileNames": [],
+      "sources": ["objective-c"]
+    },
+    "perl": {
+      "extensions": [".pl", ".pm", ".pod", ".psgi", ".t"],
+      "fileNamePatterns": [],
+      "fileNames": [],
+      "sources": ["perl"]
+    },
+    "php": {
+      "extensions": [".ctp", ".php", ".php4", ".php5", ".phtml"],
+      "fileNamePatterns": [],
+      "fileNames": [],
+      "sources": ["php"]
+    },
+    "powershell": {
+      "extensions": [".ps1", ".psd1", ".psm1", ".psrc", ".pssc"],
+      "fileNamePatterns": [],
+      "fileNames": [],
+      "sources": ["powershell"]
+    },
+    "prompt": {
+      "extensions": [".prompt.md"],
+      "fileNamePatterns": [],
+      "fileNames": [],
+      "sources": ["prompt-basics"]
+    },
+    "properties": {
+      "extensions": [
+        ".cfg",
+        ".conf",
+        ".directory",
+        ".editorconfig",
+        ".gitattributes",
+        ".gitconfig",
+        ".gitmodules",
+        ".npmrc",
+        ".properties",
+        ".repo"
+      ],
+      "fileNamePatterns": ["**/.config/git/config", "**/.git/config"],
+      "fileNames": ["gitconfig"],
+      "sources": ["ini", "npm"]
+    },
+    "python": {
+      "extensions": [".cpy", ".gyp", ".gypi", ".ipy", ".py", ".pyi", ".pyt", ".pyw", ".rpy"],
+      "fileNamePatterns": [],
+      "fileNames": ["sconscript", "sconstruct"],
+      "sources": ["python"]
+    },
+    "r": {
+      "extensions": [".r", ".rhistory", ".rprofile", ".rt"],
+      "fileNamePatterns": [],
+      "fileNames": [],
+      "sources": ["r"]
+    },
+    "raku": {
+      "extensions": [".nqp", ".p6", ".pl6", ".pm6", ".raku", ".rakudoc", ".rakumod", ".rakutest"],
+      "fileNamePatterns": [],
+      "fileNames": [],
+      "sources": ["perl"]
+    },
+    "razor": {
+      "extensions": [".cshtml", ".razor"],
+      "fileNamePatterns": [],
+      "fileNames": [],
+      "sources": ["razor"]
+    },
+    "restructuredtext": {
+      "extensions": [".rst"],
+      "fileNamePatterns": [],
+      "fileNames": [],
+      "sources": ["restructuredtext"]
+    },
+    "ruby": {
+      "extensions": [".erb", ".gemspec", ".podspec", ".rake", ".rb", ".rbi", ".rbx", ".rjs", ".ru"],
+      "fileNamePatterns": [],
+      "fileNames": [
+        "appfile",
+        "appraisals",
+        "berksfile",
+        "berksfile.lock",
+        "brewfile",
+        "capfile",
+        "cheffile",
+        "dangerfile",
+        "deliverfile",
+        "fastfile",
+        "gemfile",
+        "guardfile",
+        "gymfile",
+        "hobofile",
+        "matchfile",
+        "podfile",
+        "puppetfile",
+        "rakefile",
+        "rantfile",
+        "scanfile",
+        "snapfile",
+        "thorfile",
+        "vagrantfile"
+      ],
+      "sources": ["ruby"]
+    },
+    "rust": {
+      "extensions": [".rs"],
+      "fileNamePatterns": [],
+      "fileNames": [],
+      "sources": ["rust"]
+    },
+    "scss": {
+      "extensions": [".scss"],
+      "fileNamePatterns": [],
+      "fileNames": [],
+      "sources": ["scss"]
+    },
+    "search-result": {
+      "extensions": [".code-search"],
+      "fileNamePatterns": [],
+      "fileNames": [],
+      "sources": ["search-result"]
+    },
+    "shaderlab": {
+      "extensions": [".shader"],
+      "fileNamePatterns": [],
+      "fileNames": [],
+      "sources": ["shaderlab"]
+    },
+    "shellscript": {
+      "extensions": [
+        ".bash",
+        ".bash_aliases",
+        ".bash_login",
+        ".bash_logout",
+        ".bash_profile",
+        ".bashrc",
+        ".csh",
+        ".cshrc",
+        ".ebuild",
+        ".eclass",
+        ".fish",
+        ".ksh",
+        ".profile",
+        ".sh",
+        ".tcshrc",
+        ".xprofile",
+        ".xsession",
+        ".xsessionrc",
+        ".yash_profile",
+        ".yashrc",
+        ".zlogin",
+        ".zlogout",
+        ".zprofile",
+        ".zsh",
+        ".zsh-theme",
+        ".zshenv",
+        ".zshrc"
+      ],
+      "fileNamePatterns": [],
+      "fileNames": [
+        ".envrc",
+        ".hushlogin",
+        "apkbuild",
+        "bashrc_apple_terminal",
+        "pkgbuild",
+        "zlogin",
+        "zlogout",
+        "zprofile",
+        "zshenv",
+        "zshrc",
+        "zshrc_apple_terminal"
+      ],
+      "sources": ["shellscript"]
+    },
+    "skill": {
+      "extensions": [],
+      "fileNamePatterns": [],
+      "fileNames": ["skill.md"],
+      "sources": ["prompt-basics"]
+    },
+    "snippets": {
+      "extensions": [".code-snippets"],
+      "fileNamePatterns": [
+        "**/snippets*.json",
+        "**/user/profiles/*/snippets/*.json",
+        "**/user/snippets/*.json"
+      ],
+      "fileNames": [],
+      "sources": ["json"]
+    },
+    "sql": {
+      "extensions": [".dsql", ".sql"],
+      "fileNamePatterns": [],
+      "fileNames": [],
+      "sources": ["sql"]
+    },
+    "swift": {
+      "extensions": [".swift"],
+      "fileNamePatterns": [],
+      "fileNames": [],
+      "sources": ["swift"]
+    },
+    "tex": {
+      "extensions": [".bbx", ".cbx", ".cls", ".sty"],
+      "fileNamePatterns": [],
+      "fileNames": [],
+      "sources": ["latex"]
+    },
+    "typescript": {
+      "extensions": [".cts", ".mts", ".ts"],
+      "fileNamePatterns": [],
+      "fileNames": [],
+      "sources": ["typescript-basics"]
+    },
+    "typescriptreact": {
+      "extensions": [".tsx"],
+      "fileNamePatterns": [],
+      "fileNames": [],
+      "sources": ["typescript-basics"]
+    },
+    "vb": {
+      "extensions": [".bas", ".brs", ".vb", ".vba", ".vbs"],
+      "fileNamePatterns": [],
+      "fileNames": [],
+      "sources": ["vb"]
+    },
+    "xml": {
+      "extensions": [
+        ".ascx",
+        ".atom",
+        ".axaml",
+        ".axml",
+        ".bpmn",
+        ".cpt",
+        ".csl",
+        ".csproj",
+        ".csproj.user",
+        ".dita",
+        ".ditamap",
+        ".dtd",
+        ".dtml",
+        ".ent",
+        ".fsproj",
+        ".fxml",
+        ".iml",
+        ".isml",
+        ".jmx",
+        ".launch",
+        ".menu",
+        ".mod",
+        ".mxml",
+        ".nuspec",
+        ".opml",
+        ".owl",
+        ".proj",
+        ".props",
+        ".pt",
+        ".publishsettings",
+        ".pubxml",
+        ".pubxml.user",
+        ".rbxlx",
+        ".rbxmx",
+        ".rdf",
+        ".rng",
+        ".rss",
+        ".shproj",
+        ".slnx",
+        ".storyboard",
+        ".svg",
+        ".targets",
+        ".tld",
+        ".tmx",
+        ".vbproj",
+        ".vbproj.user",
+        ".vcxproj",
+        ".vcxproj.filters",
+        ".wixproj",
+        ".wsdl",
+        ".wxi",
+        ".wxl",
+        ".wxs",
+        ".xaml",
+        ".xbl",
+        ".xib",
+        ".xlf",
+        ".xliff",
+        ".xml",
+        ".xoml",
+        ".xpdl",
+        ".xsd",
+        ".xul"
+      ],
+      "fileNamePatterns": [],
+      "fileNames": [],
+      "sources": ["xml"]
+    },
+    "xsl": {
+      "extensions": [".xsl", ".xslt"],
+      "fileNamePatterns": [],
+      "fileNames": [],
+      "sources": ["xml"]
+    },
+    "yaml": {
+      "extensions": [
+        ".cff",
+        ".eyaml",
+        ".eyml",
+        ".winget",
+        ".yaml",
+        ".yaml-tmlanguage",
+        ".yaml-tmpreferences",
+        ".yaml-tmtheme",
+        ".yml"
+      ],
+      "fileNamePatterns": [],
+      "fileNames": [],
+      "sources": ["yaml"]
+    }
+  }
+}

@@ -1,242 +1,94 @@
-.workspace-editor-page,
-.workspace-editor-page body,
-.workspace-editor-page #root {
-  height: 100%;
-  margin: 0;
-  overflow: hidden;
-  width: 100%;
-}
-
 .workspace-tree {
+  --rc-virtual-list-scrollbar-bg: var(--larify-scrollbar-thumb);
   background: transparent;
   color: var(--foreground);
+  font-size: 13px;
 }
 
-@font-face {
-  font-family: 'Workspace Seti';
-  src: url('./assets/ide-icons/seti.woff') format('woff');
+.workspace-tree .rc-tree-list,
+.workspace-tree .rc-tree-list-holder {
+  height: 100%;
 }
 
-.workspace-tree-scroll::-webkit-scrollbar-button,
-.workspace-tree-scroll::-webkit-scrollbar-button:single-button,
-.workspace-tree-scroll::-webkit-scrollbar-button:single-button:vertical:decrement,
-.workspace-tree-scroll::-webkit-scrollbar-button:single-button:vertical:increment,
-.workspace-tree-scroll::-webkit-scrollbar-button:vertical:start:decrement,
-.workspace-tree-scroll::-webkit-scrollbar-button:vertical:end:increment,
-.workspace-tree-scroll::-webkit-scrollbar-button:single-button:horizontal:decrement,
-.workspace-tree-scroll::-webkit-scrollbar-button:single-button:horizontal:increment,
-.workspace-tree-scroll::-webkit-scrollbar-button:horizontal:start:decrement,
-.workspace-tree-scroll::-webkit-scrollbar-button:horizontal:end:increment {
-  -webkit-appearance: none !important;
-  appearance: none !important;
-  background: transparent !important;
-  border: 0 !important;
-  display: none !important;
-  height: 0 !important;
-  max-height: 0 !important;
-  max-width: 0 !important;
-  min-height: 0 !important;
-  min-width: 0 !important;
-  width: 0 !important;
+.workspace-tree .rc-tree-list-holder-inner {
+  min-width: max-content;
 }
 
-.workspace-tree-row:hover {
-  background: var(--accent);
+.workspace-tree .rc-tree-list-scrollbar-thumb {
+  cursor: default !important;
 }
 
-.monaco-workbench {
-  --vscode-scrollbarSlider-background: var(--larify-scrollbar-thumb) !important;
-  --vscode-scrollbarSlider-hoverBackground: var(--larify-scrollbar-thumb-hover) !important;
-  --vscode-scrollbarSlider-activeBackground: var(--larify-scrollbar-thumb-active) !important;
+.workspace-tree
+  .rc-tree-list:has(> .rc-tree-list-scrollbar-horizontal):has(> .rc-tree-list-scrollbar-vertical)
+  > .rc-tree-list-scrollbar-horizontal {
+  right: var(--larify-scrollbar-size) !important;
 }
 
-.monaco-workbench .workspace-editor {
-  --vscode-editorGroupHeader-tabsBackground: var(--vscode-editor-background) !important;
-  --vscode-tab-activeBackground: var(--vscode-editor-background) !important;
-  --vscode-tab-inactiveBackground: var(--vscode-editor-background) !important;
-  --vscode-tab-selectedBackground: var(--vscode-editor-background) !important;
+.workspace-tree
+  .rc-tree-list:has(> .rc-tree-list-scrollbar-horizontal):has(> .rc-tree-list-scrollbar-vertical)
+  > .rc-tree-list-scrollbar-vertical {
+  bottom: var(--larify-scrollbar-size) !important;
 }
 
-.monaco-workbench .workspace-editor .breadcrumbs-below-tabs .breadcrumbs-control {
-  margin-left: -2px;
+.workspace-tree.rc-tree {
+  margin: 0;
+  outline: none;
 }
 
-.workspace-diff-layout-toggle {
+.workspace-tree .rc-tree-treenode {
   align-items: center;
-  background: transparent;
-  border: 0;
-  border-radius: 4px;
-  color: var(--vscode-icon-foreground);
-  cursor: pointer;
-  display: inline-flex;
-  height: 24px;
-  justify-content: center;
+  border-radius: 6px;
+  display: flex;
+  height: 26px;
+  line-height: 26px;
+  margin-bottom: 2px;
+  min-width: 100%;
   padding: 0;
-  position: absolute;
-  right: 0;
-  top: 34px;
-  width: var(--larify-scrollbar-size);
-  z-index: 10;
+  white-space: nowrap;
 }
 
-.workspace-diff-layout-toggle:hover {
-  background: var(--vscode-toolbar-hoverBackground);
+.workspace-tree .rc-tree-indent,
+.workspace-tree .rc-tree-switcher {
+  display: inline-flex;
+  flex: none;
 }
 
-.workspace-diff-layout-toggle svg {
-  height: 16px;
-  width: 16px;
+.workspace-tree .rc-tree-indent-unit {
+  width: 20px;
 }
 
-.monaco-workbench .workspace-editor .breadcrumbs-control .monaco-breadcrumb-item .hint-more {
-  display: none !important;
+.workspace-tree .rc-tree-switcher {
+  align-items: center;
+  background: none;
+  height: 26px;
+  justify-content: center;
+  margin-right: 0;
+  overflow: hidden;
+  width: 0;
 }
 
-.monaco-workbench .workspace-editor .part.editor > .content .editor-group-container > .title,
-.monaco-workbench
-  .workspace-editor
-  .part.editor
-  > .content
-  .editor-group-container
-  > .title
-  > .tabs-and-actions-container,
-.monaco-workbench
-  .workspace-editor
-  .part.editor
-  > .content
-  .editor-group-container
-  > .title
-  .tabs-container,
-.monaco-workbench
-  .workspace-editor
-  .part.editor
-  > .content
-  .editor-group-container
-  > .title
-  .tabs-container
-  > .tab {
-  background-color: var(--vscode-editor-background) !important;
-}
-
-.monaco-workbench .monaco-scrollable-element > .scrollbar.vertical {
-  width: var(--larify-scrollbar-size) !important;
-}
-
-.monaco-workbench .monaco-scrollable-element > .scrollbar.horizontal {
-  height: var(--larify-scrollbar-size) !important;
-}
-
-.monaco-workbench .monaco-scrollable-element > .scrollbar.vertical > .slider {
-  width: 100% !important;
-}
-
-.monaco-workbench .monaco-scrollable-element > .scrollbar.horizontal > .slider {
-  height: 100% !important;
-}
-
-.monaco-workbench .monaco-scrollable-element > .scrollbar > .slider {
-  background-color: var(--larify-scrollbar-thumb) !important;
-  background-clip: content-box !important;
-  border: 1px solid transparent;
-  border-radius: 999px;
-  box-sizing: border-box;
-}
-
-.monaco-workbench .monaco-scrollable-element > .scrollbar > .slider:hover {
-  background-color: var(--larify-scrollbar-thumb-hover) !important;
-}
-
-.monaco-workbench .monaco-scrollable-element > .scrollbar > .slider.active {
-  background-color: var(--larify-scrollbar-thumb-active) !important;
-}
-
-.workspace-editor .part.editor::after {
-  box-shadow: none !important;
-}
-
-.workspace-editor .editor-group-watermark .shortcuts,
-.workspace-editor .editor-actions {
-  display: none !important;
-}
-
-.workspace-editor .editor-group-watermark .letterpress {
-  width: 64px !important;
-}
-
-.workspace-editor .editor-group-watermark .watermark-container {
-  gap: 8px !important;
-}
-
-.workspace-tree-icon {
+.workspace-tree .rc-tree-node-content-wrapper {
   align-items: center;
   display: inline-flex;
-  flex: 0 0 16px;
-  height: 16px;
-  justify-content: center;
-  overflow: visible;
-  width: 16px;
+  border-radius: 6px;
+  height: 26px;
+  padding: 0 6px;
 }
 
-.workspace-tree-font-icon {
-  font-family: 'Workspace Seti';
-  font-size: 14px;
-  line-height: 16px;
+.workspace-tree .rc-tree-title {
+  white-space: nowrap;
 }
 
-.show-file-icons .workspace-tree-icon::before {
-  background-position: center !important;
-  background-size: 16px 16px !important;
-  font-size: 14px;
-  height: 16px !important;
-  line-height: 16px;
-  width: 16px !important;
+.workspace-tree .rc-tree-treenode:hover {
+  background: color-mix(in srgb, var(--accent) 55%, transparent);
 }
 
-.workspace-editor .monaco-icon-label.file-icon::before {
-  background-position: center !important;
-  background-size: 16px 16px !important;
-  min-width: 16px;
-  width: 16px !important;
+.workspace-tree .rc-tree-treenode:has(> .rc-tree-node-content-wrapper.rc-tree-node-selected) {
+  background: var(--accent);
+  color: var(--accent-foreground);
 }
 
-.workspace-editor .editor-group-watermark .watermark-container::after {
-  color: var(--vscode-foreground);
-  content: '开始审查';
-  font-size: 18px;
-  font-weight: 500;
-}
-.workspace-dirty-diff-added,
-.workspace-dirty-diff-modified {
-  box-sizing: border-box;
-  margin-left: 4px;
-  width: 3px !important;
-}
-
-.workspace-dirty-diff-added,
-.workspace-dirty-diff-modified {
-  background: var(--vscode-editorGutter-addedBackground);
-}
-
-.workspace-dirty-diff-deleted {
-  border-bottom: 4px solid transparent;
-  border-left: 4px solid var(--vscode-editorGutter-deletedBackground);
-  border-top: 4px solid transparent;
-  box-sizing: border-box;
-  height: 0 !important;
-  margin-left: 4px;
-  margin-top: -4px;
-  width: 0 !important;
-}
-
-.workspace-round-change-line {
-  background: color-mix(
-    in srgb,
-    var(--vscode-diffEditor-insertedLineBackground) 70%,
-    transparent
-  );
-  box-shadow: inset 2px 0 var(--vscode-editorGutter-addedBackground);
-}
-
-.workspace-round-deletion-anchor {
-  box-shadow: inset 2px 0 var(--vscode-editorGutter-deletedBackground);
+.workspace-tree .rc-tree-treenode:hover .rc-tree-node-content-wrapper,
+.workspace-tree .rc-tree-node-content-wrapper.rc-tree-node-selected {
+  background: transparent;
 }

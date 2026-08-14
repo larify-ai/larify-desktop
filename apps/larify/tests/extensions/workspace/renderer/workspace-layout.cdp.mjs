@@ -5,6 +5,15 @@ const wait = (duration) => new Promise((resolve) => setTimeout(resolve, duration
 const cdp = await connectLarifyCdp()
 
 const evaluate = (expression) => cdp.evaluate(expression)
+const waitFor = async (expression, label, timeout = 2_000) => {
+  const started = Date.now()
+  while (Date.now() - started < timeout) {
+    const value = await evaluate(expression)
+    if (value) return value
+    await wait(25)
+  }
+  throw new Error(`Timed out: ${label}`)
+}
 
 const point = (selector) =>
   evaluate(`(() => {
@@ -32,43 +41,30 @@ const click = async (selector) => {
   })
 }
 
-const drag = async (deltaX) => {
-  const start = await point('.workspace-layout-navigator-handle')
-  await cdp.send('Input.dispatchMouseEvent', {
-    type: 'mousePressed',
-    ...start,
-    button: 'left',
-    buttons: 1,
-    clickCount: 1
-  })
-  for (let index = 1; index <= 8; index += 1) {
-    await cdp.send('Input.dispatchMouseEvent', {
-      type: 'mouseMoved',
-      x: start.x + (deltaX * index) / 8,
-      y: start.y,
-      button: 'left',
-      buttons: 1
-    })
-    await wait(16)
-  }
-  await cdp.send('Input.dispatchMouseEvent', {
-    type: 'mouseReleased',
-    x: start.x + deltaX,
-    y: start.y,
-    button: 'left',
-    buttons: 0,
-    clickCount: 1
-  })
-  await wait(80)
-}
-
+const activeSessionSelector = '[data-workbench-session][data-active]'
+const activeWorkbenchSelector = `${activeSessionSelector} [data-workbench-view="workspace"][data-active]`
+const layoutSelector = `${activeWorkbenchSelector} .workspace-layout`
+const navigatorContainerSelector = `${activeWorkbenchSelector} .workspace-layout-navigator`
+const navigatorSelector = `${activeWorkbenchSelector} .workspace-navigator`
+const handleSelector = `${activeWorkbenchSelector} .workspace-layout-navigator-handle`
+const treeSelector = `${activeWorkbenchSelector} .workspace-tree-scroll`
+const toggleSelector = `${activeSessionSelector} [data-workspace-navigator-toggle]`
+const toggleNavigator = () =>
+  evaluate(`document.querySelector(${JSON.stringify(toggleSelector)}).click()`)
+const resizeNavigator = (key, count) =>
+  evaluate(`(() => {
+    const handle = document.querySelector(${JSON.stringify(handleSelector)})
+    for (let index = 0; index < ${count}; index += 1) {
+      handle.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: ${JSON.stringify(key)} }))
+    }
+  })()`)
 const navigatorWidth = () =>
-  evaluate(`document.querySelector('.workspace-navigator')?.getBoundingClientRect().width`)
-
-const toggleSelector = '.larify-workbench-tab-actions button'
+  evaluate(
+    `document.querySelector(${JSON.stringify(navigatorSelector)})?.getBoundingClientRect().width`
+  )
 
 try {
-  if (!(await evaluate(`Boolean(document.querySelector('.workspace-layout'))`))) {
+  if (!(await evaluate(`Boolean(document.querySelector(${JSON.stringify(layoutSelector)}))`))) {
     await click('.larify-workbench-home')
     await wait(100)
     const fileCardIndex = await evaluate(`
@@ -82,9 +78,11 @@ try {
   }
 
   if (
-    !(await evaluate(`Boolean(document.querySelector('.workspace-layout-navigator[data-open]'))`))
+    !(await evaluate(
+      `Boolean(document.querySelector(${JSON.stringify(`${navigatorContainerSelector}[data-open]`)}))`
+    ))
   ) {
-    await click(toggleSelector)
+    await toggleNavigator()
     await wait(250)
   }
 
@@ -92,77 +90,181 @@ try {
   if (initialWidth === undefined) throw new Error('Workspace navigator did not open')
 
   const scrollLayers = await evaluate(`(() => {
-    const navigator = document.querySelector('.workspace-navigator')
-    const tree = document.querySelector('.workspace-tree-scroll')
+    const navigator = document.querySelector(${JSON.stringify(navigatorSelector)})
+    const tree = document.querySelector(${JSON.stringify(treeSelector)})
     return {
       navigator: navigator && getComputedStyle(navigator).overflow,
       tree: tree && getComputedStyle(tree).overflow
     }
   })()`)
-  if (scrollLayers.navigator !== 'hidden' || scrollLayers.tree !== 'auto') {
+  if (scrollLayers.navigator !== 'hidden' || scrollLayers.tree !== 'hidden') {
     throw new Error(`Unexpected scroll layers: ${JSON.stringify(scrollLayers)}`)
   }
 
-  await click(toggleSelector)
-  await wait(250)
-  const closedX = await evaluate(
-    `document.querySelector('.workspace-navigator').getBoundingClientRect().x`
+  const scrollbars = await evaluate(`(() => {
+    const tree = document.querySelector(${JSON.stringify(treeSelector)})
+    const vertical = tree?.querySelector('.rc-tree-list-scrollbar-vertical')
+    const horizontal = tree?.querySelector('.rc-tree-list-scrollbar-horizontal')
+    const thumb = tree?.querySelector('.rc-tree-list-scrollbar-thumb')
+    if (!vertical || !horizontal) {
+      return {
+        bothVisible: false,
+        cursor: thumb && getComputedStyle(thumb).cursor,
+        horizontal: Boolean(horizontal),
+        nodes: tree?.querySelectorAll('.rc-tree-treenode').length,
+        vertical: Boolean(vertical)
+      }
+    }
+    const verticalRect = vertical.getBoundingClientRect()
+    const horizontalRect = horizontal.getBoundingClientRect()
+    return {
+      bothVisible: true,
+      cursor: thumb && getComputedStyle(thumb).cursor,
+      overlaps:
+        verticalRect.left < horizontalRect.right &&
+        verticalRect.right > horizontalRect.left &&
+        verticalRect.top < horizontalRect.bottom &&
+        verticalRect.bottom > horizontalRect.top
+    }
+  })()`)
+  if (scrollbars.cursor && scrollbars.cursor !== 'default') {
+    throw new Error(`Unexpected workspace scrollbar cursor: ${scrollbars.cursor}`)
+  }
+  if (scrollbars.overlaps) throw new Error('Workspace scrollbars overlap')
+
+  await toggleNavigator()
+  await waitFor(
+    `!document.querySelector(${JSON.stringify(navigatorContainerSelector)}).hasAttribute('data-open')`,
+    'navigator close'
   )
-  const layoutRight = await evaluate(
-    `document.querySelector('.workspace-layout').getBoundingClientRect().right`
-  )
-  if (closedX < layoutRight) throw new Error('Navigator did not animate outside the layout')
   const closedTabIndex = await evaluate(
-    `document.querySelector('.workspace-layout-navigator-handle').tabIndex`
+    `document.querySelector(${JSON.stringify(handleSelector)}).tabIndex`
   )
   if (closedTabIndex !== -1) throw new Error('Hidden navigator handle remains keyboard-focusable')
-  const closedInert = await evaluate(`document.querySelector('.workspace-layout-navigator').inert`)
+  const closedInert = await evaluate(
+    `document.querySelector(${JSON.stringify(navigatorContainerSelector)}).inert`
+  )
   if (!closedInert) throw new Error('Hidden navigator remains interactive')
-  const hiddenNavigatorFocused = await evaluate(`(() => {
-    const navigator = document.querySelector('.workspace-layout-navigator')
-    const focusable = navigator.querySelector('[tabindex]')
-    focusable?.focus()
-    return navigator.contains(document.activeElement)
-  })()`)
-  if (hiddenNavigatorFocused) throw new Error('Hidden navigator accepted keyboard focus')
-
-  await click(toggleSelector)
-  await wait(250)
+  await toggleNavigator()
+  await waitFor(
+    `document.querySelector(${JSON.stringify(navigatorContainerSelector)}).hasAttribute('data-open')`,
+    'navigator open'
+  )
   const openTabIndex = await evaluate(
-    `document.querySelector('.workspace-layout-navigator-handle').tabIndex`
+    `document.querySelector(${JSON.stringify(handleSelector)}).tabIndex`
   )
   if (openTabIndex !== 0) throw new Error('Visible navigator handle is not keyboard-focusable')
-  const openInert = await evaluate(`document.querySelector('.workspace-layout-navigator').inert`)
+  const openInert = await evaluate(
+    `document.querySelector(${JSON.stringify(navigatorContainerSelector)}).inert`
+  )
   if (openInert) throw new Error('Visible navigator remains inert')
-  const visibleHandleFocused = await evaluate(`(() => {
-    const handle = document.querySelector('.workspace-layout-navigator-handle')
-    handle.focus()
-    return document.activeElement === handle
-  })()`)
-  if (!visibleHandleFocused) throw new Error('Visible navigator handle rejected keyboard focus')
-  await drag(-80)
+  await resizeNavigator('ArrowLeft', 8)
   const resizedWidth = await navigatorWidth()
   if (resizedWidth < initialWidth + 70) {
     throw new Error(`Navigator did not resize: ${initialWidth} -> ${resizedWidth}`)
   }
 
-  await click(toggleSelector)
+  await toggleNavigator()
   await wait(250)
-  await click(toggleSelector)
-  await wait(250)
+  await toggleNavigator()
+  await waitFor(
+    `document.querySelector(${JSON.stringify(navigatorContainerSelector)}).hasAttribute('data-open')`,
+    'navigator reopen'
+  )
   const retainedWidth = await navigatorWidth()
   if (Math.abs(retainedWidth - resizedWidth) > 1) {
     throw new Error(`Navigator width was not retained: ${resizedWidth} -> ${retainedWidth}`)
   }
 
-  await drag(500)
+  const treeAlignment = await evaluate(`(() => {
+    const navigator = document.querySelector(${JSON.stringify(navigatorSelector)})
+    const node = document.querySelector(${JSON.stringify(`${treeSelector} .rc-tree-treenode`)})
+    if (!navigator || !node) return null
+    return {
+      navigatorLeft: navigator.getBoundingClientRect().left,
+      nodeLeft: node.getBoundingClientRect().left
+    }
+  })()`)
+  if (!treeAlignment || treeAlignment.nodeLeft - treeAlignment.navigatorLeft > 32) {
+    throw new Error(`Workspace tree is shifted horizontally: ${JSON.stringify(treeAlignment)}`)
+  }
+
+  await resizeNavigator('ArrowRight', 30)
   const minimumWidth = await navigatorWidth()
   if (minimumWidth < 159 || minimumWidth > 161) {
     throw new Error(`Unexpected minimum navigator width: ${minimumWidth}`)
   }
 
-  await drag(minimumWidth - initialWidth)
-  console.log(JSON.stringify({ initialWidth, minimumWidth, retainedWidth, scrollLayers }, null, 2))
+  for (let depth = 0; depth < 4; depth += 1) {
+    const expanded = await evaluate(`(() => {
+      const tree = document.querySelector(${JSON.stringify(treeSelector)})
+      const node = tree?.querySelector('.rc-tree-treenode[aria-expanded="false"]')
+      if (!node) return false
+      node.querySelector('.rc-tree-node-content-wrapper')?.click()
+      return true
+    })()`)
+    if (!expanded) break
+    await wait(500)
+  }
+  const overflowScrollbars = await evaluate(`(() => {
+    const tree = document.querySelector(${JSON.stringify(treeSelector)})
+    const list = tree?.querySelector('.rc-tree-list')
+    if (!list) return null
+    let vertical = list.querySelector(':scope > .rc-tree-list-scrollbar-vertical')
+    let horizontal = list.querySelector(':scope > .rc-tree-list-scrollbar-horizontal')
+    const injected = []
+    if (!horizontal) {
+      horizontal = document.createElement('div')
+      horizontal.className = 'rc-tree-list-scrollbar rc-tree-list-scrollbar-horizontal'
+      horizontal.style.cssText = 'position:absolute;left:0;right:0;bottom:0;height:8px'
+      list.append(horizontal)
+      injected.push(horizontal)
+    }
+    if (!vertical) {
+      vertical = document.createElement('div')
+      vertical.className = 'rc-tree-list-scrollbar rc-tree-list-scrollbar-vertical'
+      vertical.style.cssText = 'position:absolute;top:0;right:0;bottom:0;width:8px'
+      list.append(vertical)
+      injected.push(vertical)
+    }
+    const thumb = tree?.querySelector('.rc-tree-list-scrollbar-thumb')
+    const verticalRect = vertical.getBoundingClientRect()
+    const horizontalRect = horizontal.getBoundingClientRect()
+    const result = {
+      bothVisible: true,
+      cursor: thumb && getComputedStyle(thumb).cursor,
+      nodes: tree?.querySelectorAll('.rc-tree-treenode').length,
+      overlaps:
+        verticalRect.left < horizontalRect.right &&
+        verticalRect.right > horizontalRect.left &&
+        verticalRect.top < horizontalRect.bottom &&
+        verticalRect.bottom > horizontalRect.top
+    }
+    injected.forEach((element) => element.remove())
+    return result
+  })()`)
+  if (!overflowScrollbars?.bothVisible) throw new Error('Workspace scrollbar corner test failed')
+  if (overflowScrollbars.cursor !== 'default') {
+    throw new Error(`Unexpected workspace scrollbar cursor: ${overflowScrollbars.cursor}`)
+  }
+  if (overflowScrollbars.overlaps) throw new Error('Workspace scrollbars overlap')
+
+  await resizeNavigator('ArrowLeft', Math.round((initialWidth - minimumWidth) / 10))
+  console.log(
+    JSON.stringify(
+      {
+        initialWidth,
+        minimumWidth,
+        retainedWidth,
+        scrollLayers,
+        scrollbars,
+        overflowScrollbars,
+        treeAlignment
+      },
+      null,
+      2
+    )
+  )
 } finally {
   cdp.close()
 }

@@ -23,7 +23,7 @@ function ScrollPlaceholder({
 }): React.JSX.Element {
   return (
     <div
-      className="mx-auto flex w-full max-w-4xl flex-col justify-center gap-3 px-6 py-3"
+      className="mx-auto flex w-[calc(100%-var(--larify-scrollbar-size))] max-w-4xl translate-x-[calc(var(--larify-scrollbar-size)/2)] flex-col justify-center gap-3 px-6 py-3"
       style={{ height }}
       data-message-index={index}
       data-scroll-placeholder
@@ -222,7 +222,7 @@ export function AssistantMessageList({
           return message ? (
             <div
               ref={index === totalCount - 1 ? followGrowingMessage : undefined}
-              className={`mx-auto w-full max-w-4xl min-w-0 px-6 pt-3 ${index === totalCount - 1 ? 'pb-30' : 'pb-3'}`}
+              className={`mx-auto w-[calc(100%-var(--larify-scrollbar-size))] max-w-4xl min-w-0 translate-x-[calc(var(--larify-scrollbar-size)/2)] px-6 pt-3 ${index === totalCount - 1 ? 'pb-30' : 'pb-3'}`}
               data-message-index={index}
             >
               <Message message={message} streaming={live && message.id === messages.at(-1)?.id} />

@@ -471,6 +471,12 @@ describe('interaction assistant message list', () => {
 
     await act(async () => root.render((captured.props as VirtuosoProps).itemContent(0)))
     expect(container.firstElementChild?.className).toContain('pb-30')
+    expect(container.firstElementChild?.className).toContain(
+      'translate-x-[calc(var(--larify-scrollbar-size)/2)]'
+    )
+    expect(container.firstElementChild?.className).toContain(
+      'w-[calc(100%-var(--larify-scrollbar-size))]'
+    )
   })
 })
 

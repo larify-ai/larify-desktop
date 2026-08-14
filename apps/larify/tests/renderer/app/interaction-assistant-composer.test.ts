@@ -110,6 +110,8 @@ describe('AssistantComposer', () => {
     const composer = container.querySelector('.mx-auto')
     expect(composer?.className).toContain('max-w-4xl')
     expect(composer?.className).toContain('-mt-4')
+    expect(composer?.className).toContain('w-full')
+    expect(composer?.className).not.toContain('translate-x-')
     expect(composer?.firstElementChild?.className).toContain('z-10')
     expect(container.textContent).toContain('默认空间')
     const workspaceButton = container.querySelector('button[title="默认空间"]')

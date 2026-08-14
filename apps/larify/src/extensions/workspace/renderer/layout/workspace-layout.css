@@ -1,0 +1,91 @@
+.workspace-layout {
+  background: var(--background);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  width: 100%;
+}
+.workspace-layout-body {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  position: relative;
+}
+.workspace-layout-content {
+  background: var(--background);
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  transition: margin-right 180ms ease-out;
+}
+.workspace-navigator {
+  background: var(--background);
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  padding: 8px;
+  width: 100%;
+}
+.workspace-layout-navigator {
+  border-left: 1px solid var(--border-strong);
+  bottom: 0;
+  max-width: 100%;
+  position: absolute;
+  right: 0;
+  top: 0;
+  transform: translateX(100%);
+  transition:
+    transform 180ms ease-out,
+    visibility 0s 180ms;
+  visibility: hidden;
+  z-index: 1;
+}
+.workspace-layout-navigator[data-open] {
+  transform: translateX(0);
+  transition: transform 180ms ease-out;
+  visibility: visible;
+}
+.workspace-layout-navigator:not([data-open]) {
+  pointer-events: none;
+}
+.workspace-layout[data-resizing] .workspace-layout-content,
+.workspace-layout[data-resizing] .workspace-layout-navigator {
+  transition: none;
+}
+.workspace-layout[data-resizing] {
+  user-select: none;
+}
+.workspace-layout-navigator-handle {
+  bottom: 0;
+  cursor: ew-resize;
+  left: -4px;
+  position: absolute;
+  top: 0;
+  touch-action: none;
+  width: 8px;
+  z-index: 1;
+}
+.workspace-layout-navigator-handle::before {
+  background: transparent;
+  bottom: 0;
+  content: '';
+  left: calc(50% - 0.5px);
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  transition: background-color 100ms ease-out;
+  width: 1px;
+}
+.workspace-layout-navigator-handle:hover::before,
+.workspace-layout[data-resizing] .workspace-layout-navigator-handle::before {
+  background: color-mix(in srgb, var(--foreground) 20%, transparent);
+}
+@media (prefers-reduced-motion: reduce) {
+  .workspace-layout-content,
+  .workspace-layout-navigator {
+    transition: none;
+  }
+}

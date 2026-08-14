@@ -8,16 +8,18 @@ const SessionView = memo(function SessionView({
   session,
   active,
   refresh,
+  setCwd,
   setPersisted,
   setHeading
 }: {
   session: AssistantSessionState
   active: boolean
   refresh: () => Promise<void>
+  setCwd: (id: string, cwd: string) => void
   setPersisted: (id: string) => void
   setHeading: (id: string, heading: ConversationHeading | null) => void
 }): React.JSX.Element {
-  const { id, persisted, heading, messages, messageCount } = session
+  const { cwd, id, persisted, heading, messages, messageCount } = session
   const persistedRef = useRef(persisted)
   const updateHeading = useCallback(
     (heading: ConversationHeading | null) => setHeading(id, heading),
@@ -40,7 +42,8 @@ const SessionView = memo(function SessionView({
         title={heading?.title}
         initialMessages={messages}
         initialMessageCount={messageCount}
-        initialCwd={heading?.cwd ?? ''}
+        initialCwd={cwd}
+        onCwdChange={(cwd) => setCwd(id, cwd)}
         onHeadingChange={updateHeading}
         onSaved={saved}
       />
@@ -49,7 +52,7 @@ const SessionView = memo(function SessionView({
 })
 
 export function Interaction(): React.JSX.Element {
-  const { sessions, activeId, refresh, setPersisted, setHeading } = useAssistantSessions()
+  const { sessions, activeId, refresh, setCwd, setPersisted, setHeading } = useAssistantSessions()
 
   return (
     <Region label="Interaction" className="h-full min-w-0 overflow-hidden">
@@ -59,6 +62,7 @@ export function Interaction(): React.JSX.Element {
           session={session}
           active={session.id === activeId}
           refresh={refresh}
+          setCwd={setCwd}
           setPersisted={setPersisted}
           setHeading={setHeading}
         />

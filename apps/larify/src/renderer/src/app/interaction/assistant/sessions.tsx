@@ -10,6 +10,7 @@ import { loadMessagePage } from './session-messages'
 
 function createSession(): AssistantSessionState {
   return {
+    cwd: '',
     id: crypto.randomUUID(),
     heading: null,
     persisted: false,
@@ -86,6 +87,7 @@ export function AssistantSessionsProvider({
           : [
               ...current.sessions,
               {
+                cwd: stored.cwd,
                 id: activeId,
                 heading: { cwd: stored.cwd, title: stored.title },
                 persisted: true,
@@ -136,7 +138,15 @@ export function AssistantSessionsProvider({
     setState((current) => ({
       ...current,
       sessions: current.sessions.map((session) =>
-        session.id === id ? { ...session, heading } : session
+        session.id === id ? { ...session, heading, cwd: heading?.cwd ?? session.cwd } : session
+      )
+    }))
+  }, [])
+  const setCwd = useCallback((id: string, cwd: string) => {
+    setState((current) => ({
+      ...current,
+      sessions: current.sessions.map((session) =>
+        session.id === id ? { ...session, cwd } : session
       )
     }))
   }, [])
@@ -158,10 +168,22 @@ export function AssistantSessionsProvider({
       select,
       loadMore,
       refresh,
+      setCwd,
       setPersisted,
       setHeading
     }),
-    [activeSession, create, directory, loadMore, refresh, select, setHeading, setPersisted, state]
+    [
+      activeSession,
+      create,
+      directory,
+      loadMore,
+      refresh,
+      select,
+      setCwd,
+      setHeading,
+      setPersisted,
+      state
+    ]
   )
 
   return (

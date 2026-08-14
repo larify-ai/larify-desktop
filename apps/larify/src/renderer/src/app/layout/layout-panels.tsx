@@ -4,14 +4,14 @@ import { Interaction } from '../interaction/interaction'
 import { ConversationHeader } from '../interaction/assistant/conversation-header'
 import { Navigation } from '../navigation/navigation'
 import { useAssistantSessions } from '../interaction/assistant/sessions-context'
-import { Workbench } from '../workbench/workbench'
+import { WorkbenchHost } from '../workbench/workbench'
 import { expandedContentMinSize, layoutSpec, mainLayoutDefaultSizes } from './layout-spec'
 import { Titlebar } from './titlebar'
 import { useAllotmentToggle } from './use-allotment-toggle'
 import './layout-panels.css'
 
 export function LayoutPanels(): React.JSX.Element {
-  const activeSession = useAssistantSessions().activeSession
+  const { activeId, activeSession, sessions } = useAssistantSessions()
   const { heading } = activeSession
   const navigation = useAllotmentToggle()
   const workbench = useAllotmentToggle(true)
@@ -81,7 +81,7 @@ export function LayoutPanels(): React.JSX.Element {
                 className="h-full w-full overflow-hidden [contain:layout_paint]"
                 style={{ minWidth: layoutSpec.workbench.minSize }}
               >
-                <Workbench sessionId={activeSession.id} cwd={heading?.cwd ?? ''} />
+                <WorkbenchHost activeId={activeId} sessions={sessions} />
               </div>
             </Allotment.Pane>
           </Allotment>

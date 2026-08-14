@@ -14,6 +14,7 @@ export function AssistantSession({
   initialMessages,
   initialMessageCount,
   initialCwd,
+  onCwdChange,
   onHeadingChange,
   onSaved
 }: {
@@ -23,6 +24,7 @@ export function AssistantSession({
   initialMessages: UIMessage[]
   initialMessageCount: number
   initialCwd: string
+  onCwdChange: (cwd: string) => void
   onHeadingChange: (heading: ConversationHeading | null) => void
   onSaved: () => Promise<void>
 }): React.JSX.Element {
@@ -54,6 +56,7 @@ export function AssistantSession({
   const changeCwd = (next: string): void => {
     setTransportCwd(next)
     setCwd(next)
+    onCwdChange(next)
   }
 
   const loadRange = useCallback(

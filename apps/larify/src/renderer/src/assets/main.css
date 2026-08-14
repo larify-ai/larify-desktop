@@ -235,7 +235,7 @@
 }
 
 html {
-  --larify-scrollbar-size: 12px;
+  --larify-scrollbar-size: 8px;
   --larify-scrollbar-thumb: var(--scrollbar);
   --larify-scrollbar-thumb-hover: var(--scrollbar-hover);
   --larify-scrollbar-thumb-active: var(--scrollbar-active);

@@ -1,5 +1,6 @@
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import type { WorkbenchTab } from './workbench-tabs'
+import { WorkbenchTabActionsContext } from './workbench-tab-actions'
 import { WorkbenchTabs } from './workbench-tabs'
 
 interface WorkbenchTabsLayoutProps {
@@ -21,9 +22,12 @@ export function WorkbenchTabsLayout({
   onReorder,
   onSelect
 }: WorkbenchTabsLayoutProps): React.JSX.Element {
+  const [actions, setActions] = useState<ReactNode>(null)
+
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
       <WorkbenchTabs
+        actions={actions}
         activeId={activeId}
         tabs={tabs}
         onClose={onClose}
@@ -31,7 +35,9 @@ export function WorkbenchTabsLayout({
         onReorder={onReorder}
         onSelect={onSelect}
       />
-      <div className="relative min-h-0 flex-1 overflow-hidden bg-background">{children}</div>
+      <WorkbenchTabActionsContext.Provider value={setActions}>
+        <div className="relative min-h-0 flex-1 overflow-hidden bg-background">{children}</div>
+      </WorkbenchTabActionsContext.Provider>
     </div>
   )
 }

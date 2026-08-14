@@ -6,10 +6,12 @@ import { WorkbenchShell } from './workbench-shell'
 
 export function Workbench({
   sessionId,
-  cwd
+  cwd,
+  resources
 }: {
   sessionId: string
   cwd: string
+  resources?: Resource[]
 }): React.JSX.Element {
   const [stores] = useState(() => new Map<string, ReturnType<typeof createWorkbenchStore>>())
   let store = stores.get(sessionId)
@@ -23,6 +25,11 @@ export function Workbench({
   }, [sessionId])
 
   useLayoutEffect(() => {
+    if (resources) {
+      store.getState().syncResources(resources)
+      return
+    }
+
     let active = true
     let hasResourceChange = false
     const sync = (resources: Resource[]): void =>
@@ -44,11 +51,16 @@ export function Workbench({
       active = false
       unbindChange()
     }
-  }, [sessionId, store])
+  }, [resources, sessionId, store])
 
   const openTool = (id: string): void => {
     void window.bridge
-      .invoke('resource:create', id, sessionId, id === 'terminal' && cwd ? { cwd } : {})
+      .invoke(
+        'resource:create',
+        id,
+        sessionId,
+        id === 'terminal' && cwd ? { cwd } : id === 'workspace' ? { root: cwd } : {}
+      )
       .then((resourceId: number) => {
         if (sessionIdRef.current === sessionId) {
           store.getState().openView({ rendererId: id, resourceId })
@@ -60,8 +72,61 @@ export function Workbench({
   return (
     <Region label="Workbench" className="h-full min-w-0 overflow-hidden">
       <aside aria-label="Workbench content" className="h-full">
-        <WorkbenchShell store={store} sessionId={sessionId} onOpenTool={openTool} />
+        <WorkbenchShell cwd={cwd} store={store} sessionId={sessionId} onOpenTool={openTool} />
       </aside>
     </Region>
+  )
+}
+
+export function WorkbenchHost({
+  activeId,
+  sessions
+}: {
+  activeId: string
+  sessions: Array<{ cwd: string; id: string }>
+}): React.JSX.Element {
+  const [resources, setResources] = useState<Resource[]>([])
+
+  useLayoutEffect(() => {
+    let active = true
+    let hasResourceChange = false
+    const unbindChange = window.bridge.on('resource:change', (value) => {
+      if (!active) return
+      hasResourceChange = true
+      setResources(value as Resource[])
+    })
+    void window.bridge
+      .invoke('resource:list')
+      .then((value) => {
+        if (active && !hasResourceChange) setResources(value as Resource[])
+      })
+      .catch(() => undefined)
+    return () => {
+      active = false
+      unbindChange()
+    }
+  }, [])
+
+  const sessionIdsWithResources = new Set(resources.map((resource) => resource.sessionId))
+  return (
+    <div className="h-full">
+      {sessions.map((session) => {
+        if (session.id !== activeId && !sessionIdsWithResources.has(session.id)) return null
+        return (
+          <div
+            className={session.id === activeId ? 'h-full' : 'hidden'}
+            data-active={session.id === activeId || undefined}
+            data-workbench-session={session.id}
+            key={session.id}
+          >
+            <Workbench
+              cwd={session.cwd}
+              resources={resources.filter((resource) => resource.sessionId === session.id)}
+              sessionId={session.id}
+            />
+          </div>
+        )
+      })}
+    </div>
   )
 }

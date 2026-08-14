@@ -8,6 +8,10 @@
   padding: 0 8px;
 }
 
+.larify-workbench-tabs[data-has-active-tab] {
+  border-bottom: 1px solid var(--border-strong);
+}
+
 .larify-workbench-tab-scroll {
   flex: 1 1 auto;
   min-width: 0;
@@ -45,6 +49,13 @@
   gap: 2px;
   min-width: max-content;
   width: max-content;
+}
+
+.larify-workbench-tab-actions {
+  align-items: center;
+  display: flex;
+  flex: none;
+  margin-left: 4px;
 }
 
 .larify-workbench-tab {
@@ -170,25 +181,30 @@
 .larify-workbench-tab-menu {
   animation: none;
   background: var(--popover);
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  border: 0;
+  border-radius: 12px;
   box-shadow: var(--shadow-md);
   color: var(--popover-foreground);
-  min-width: 0;
+  min-width: 180px;
   padding: 4px;
   width: max-content;
   z-index: 50;
 }
 
 .larify-workbench-tab-menu-item {
+  align-items: center;
   border-radius: 6px;
   cursor: default;
+  display: flex;
   font-size: 12px;
+  justify-content: center;
   line-height: 16px;
   min-height: 28px;
   outline: none;
   padding: 4px 8px;
+  text-align: center;
   white-space: nowrap;
+  width: 100%;
 }
 
 .larify-workbench-tab-menu-item[data-highlighted] {

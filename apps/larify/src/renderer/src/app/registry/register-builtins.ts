@@ -1,6 +1,7 @@
 import type { Registry } from '@shared/infra/registry'
 import terminalPlugin from '../../../../extensions/terminal/renderer'
 import browserPlugin from '../../../../extensions/browser/renderer'
+import workspacePlugin from '../../../../extensions/workspace/renderer'
 import { RendererPluginHost, rendererPluginHostToken } from './renderer-plugins'
 import { WorkbenchRendererRegistry, workbenchRendererRegistryToken } from './workbench-renderers'
 
@@ -11,4 +12,5 @@ export function registerBuiltinRenderers(registry: Registry): void {
   registry.register(rendererPluginHostToken, host)
   host.activate(terminalPlugin)
   host.activate(browserPlugin)
+  host.activate(workspacePlugin)
 }

@@ -23,6 +23,7 @@ export interface WorkbenchTab {
 }
 
 interface WorkbenchTabsProps {
+  actions?: ReactNode
   activeId: string | null
   tabs: WorkbenchTab[]
   onClose(id: string): void
@@ -32,6 +33,7 @@ interface WorkbenchTabsProps {
 }
 
 export function WorkbenchTabs({
+  actions,
   activeId,
   tabs,
   onClose,
@@ -49,22 +51,20 @@ export function WorkbenchTabs({
     const scroller = scrollerRef.current
     if (!scroller) return
     const maxScrollLeft = scroller.scrollWidth - scroller.clientWidth
-    const next = [
-      scroller.scrollLeft > 1 && 'left',
-      scroller.scrollLeft < maxScrollLeft - 1 && 'right'
-    ]
-      .filter(Boolean)
-      .join(' ')
-    setScrollEdges(next)
+    setScrollEdges(
+      [scroller.scrollLeft > 1 && 'left', scroller.scrollLeft < maxScrollLeft - 1 && 'right']
+        .filter(Boolean)
+        .join(' ')
+    )
   }, [])
 
-  useEffect(() => {
-    if (!activeId) return
-    const activeTab = Array.from(
-      scrollerRef.current?.querySelectorAll<HTMLElement>('[data-tab-id]') ?? []
-    ).find((tab) => tab.dataset.tabId === activeId)
+  const revealActiveTab = useCallback((): void => {
     const scroller = scrollerRef.current
-    if (!activeTab || !scroller) return
+    if (!activeId || !scroller) return
+    const activeTab = Array.from(scroller.querySelectorAll<HTMLElement>('[data-tab-id]')).find(
+      (tab) => tab.dataset.tabId === activeId
+    )
+    if (!activeTab) return
 
     const tabLeft = activeTab.offsetLeft
     const tabRight = tabLeft + activeTab.offsetWidth
@@ -72,21 +72,24 @@ export function WorkbenchTabs({
     else if (tabRight > scroller.scrollLeft + scroller.clientWidth)
       scroller.scrollLeft = tabRight - scroller.clientWidth
     updateScrollEdges()
-  }, [activeId, tabs, updateScrollEdges])
+  }, [activeId, updateScrollEdges])
 
   useEffect(() => {
-    updateScrollEdges()
-  }, [tabs, updateScrollEdges])
+    revealActiveTab()
+  }, [tabs, revealActiveTab])
 
   useEffect(() => {
     const scroller = scrollerRef.current
     if (!scroller) return
     if (typeof ResizeObserver === 'undefined') return
-    const observer = new ResizeObserver(updateScrollEdges)
+    const observer = new ResizeObserver(() => {
+      revealActiveTab()
+      updateScrollEdges()
+    })
     observer.observe(scroller)
     if (tabListRef.current) observer.observe(tabListRef.current)
     return () => observer.disconnect()
-  }, [updateScrollEdges])
+  }, [revealActiveTab, updateScrollEdges])
 
   const finishDrag = (): void => {
     window.setTimeout(() => {
@@ -122,6 +125,7 @@ export function WorkbenchTabs({
         <Tabs.Root
           activationMode="automatic"
           className="larify-workbench-tabs"
+          data-has-active-tab={activeId !== null || undefined}
           data-theme-source="workbench"
           value={activeId ?? ''}
           onValueChange={onSelect}
@@ -146,7 +150,6 @@ export function WorkbenchTabs({
             <Tabs.List className="larify-workbench-tab-list" loop ref={tabListRef}>
               {tabs.map((tab, index) => (
                 <SortableTab
-                  canCloseOthers={tabs.length > 1}
                   canCloseRight={index < tabs.length - 1}
                   key={tab.id}
                   suppressClickRef={suppressClickRef}
@@ -158,6 +161,7 @@ export function WorkbenchTabs({
               ))}
             </Tabs.List>
           </div>
+          {actions && <div className="larify-workbench-tab-actions">{actions}</div>}
         </Tabs.Root>
       </SortableContext>
     </DndContext>
@@ -165,13 +169,11 @@ export function WorkbenchTabs({
 }
 
 function SortableTab({
-  canCloseOthers,
   canCloseRight,
   suppressClickRef,
   tab,
   onClose
 }: {
-  canCloseOthers: boolean
   canCloseRight: boolean
   suppressClickRef: React.RefObject<boolean>
   tab: WorkbenchTab
@@ -180,7 +182,6 @@ function SortableTab({
   const { isDragging, listeners, setNodeRef, transform, transition } = useSortable({ id: tab.id })
   const triggerRef = useRef<HTMLButtonElement>(null)
   const [menuOpen, setMenuOpen] = useState(false)
-  const [menuWidth, setMenuWidth] = useState(0)
 
   return (
     <DropdownMenu.Root modal={false} open={menuOpen} onOpenChange={setMenuOpen}>
@@ -191,6 +192,12 @@ function SortableTab({
         data-tab-id={tab.id}
         ref={setNodeRef}
         style={{ transform: CSS.Transform.toString(transform), transition }}
+        onPointerDownCapture={(event) => {
+          if (event.button !== 0) {
+            event.preventDefault()
+            event.stopPropagation()
+          }
+        }}
         onClickCapture={(event) => {
           if (
             suppressClickRef.current &&
@@ -201,8 +208,6 @@ function SortableTab({
         }}
         onContextMenuCapture={(event) => {
           event.preventDefault()
-          const rect = event.currentTarget.getBoundingClientRect()
-          setMenuWidth(rect.width)
           setMenuOpen(true)
         }}
       >
@@ -246,19 +251,11 @@ function SortableTab({
           className="larify-workbench-tab-menu"
           side="bottom"
           sideOffset={4}
-          style={{ width: menuWidth }}
           onCloseAutoFocus={(event) => {
             event.preventDefault()
             triggerRef.current?.focus()
           }}
         >
-          <DropdownMenu.Item
-            className="larify-workbench-tab-menu-item"
-            disabled={!canCloseOthers}
-            onSelect={() => onClose('others')}
-          >
-            关闭其他标签页
-          </DropdownMenu.Item>
           <DropdownMenu.Item
             className="larify-workbench-tab-menu-item"
             disabled={!canCloseRight}

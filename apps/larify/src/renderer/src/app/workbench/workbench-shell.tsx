@@ -10,14 +10,17 @@ import { WorkbenchRenderer } from './workbench-renderer'
 import type { WorkbenchStore, WorkbenchView } from './workbench-store'
 import type { WorkbenchTab } from './workbench-tabs'
 import { WorkbenchTabsLayout } from './workbench-tabs-layout'
+import { WorkbenchTabActionScope } from './workbench-tab-actions'
 
 interface WorkbenchShellProps {
+  cwd: string
   store: WorkbenchStore
   sessionId: string
   onOpenTool(id: string): void
 }
 
 export function WorkbenchShell({
+  cwd,
   store,
   sessionId,
   onOpenTool
@@ -48,30 +51,56 @@ export function WorkbenchShell({
       <Fragment>
         {views.map((view) => (
           <WorkbenchTabBinding
-            key={view.id}
+            cwd={cwd}
+            key={`binding:${view.id}`}
             renderers={renderers}
             sessionId={sessionId}
             updateTab={updateTab}
             view={view}
           />
         ))}
-        <WorkbenchRenderer
-          onOpenTool={onOpenTool}
-          onUpdateTab={updateTab}
-          sessionId={sessionId}
-          view={activeView}
-        />
+        {activeView === null && (
+          <WorkbenchRenderer
+            cwd={cwd}
+            onOpenTool={onOpenTool}
+            onUpdateTab={updateTab}
+            sessionId={sessionId}
+            view={null}
+          />
+        )}
+        {views.map((view) => (
+          <div
+            className={view.id === activeViewId ? 'h-full' : 'hidden'}
+            data-active={view.id === activeViewId || undefined}
+            data-resource-id={view.resourceId}
+            data-view-id={view.id}
+            data-workbench-view={view.rendererId}
+            key={`view:${view.id}`}
+          >
+            <WorkbenchTabActionScope active={view.id === activeViewId}>
+              <WorkbenchRenderer
+                cwd={cwd}
+                onOpenTool={onOpenTool}
+                onUpdateTab={updateTab}
+                sessionId={sessionId}
+                view={view}
+              />
+            </WorkbenchTabActionScope>
+          </div>
+        ))}
       </Fragment>
     </WorkbenchTabsLayout>
   )
 }
 
 function WorkbenchTabBinding({
+  cwd,
   renderers,
   sessionId,
   updateTab,
   view
 }: {
+  cwd: string
   renderers: WorkbenchRendererRegistry | undefined
   sessionId: string
   updateTab(id: number, tab: Partial<WorkbenchTabPresentation>): void
@@ -79,15 +108,20 @@ function WorkbenchTabBinding({
 }): null {
   const bindTab = renderers?.get(view.rendererId)?.bindTab
   useEffect(() => {
+    let active = true
     const binding = bindTab?.({
+      cwd,
       resourceId: view.resourceId,
       sessionId,
-      updateTab: (tab) => updateTab(view.id, tab)
+      updateTab: (tab) => {
+        if (active) updateTab(view.id, tab)
+      }
     })
     return () => {
+      active = false
       void binding?.dispose()
     }
-  }, [bindTab, sessionId, updateTab, view.id, view.resourceId])
+  }, [bindTab, cwd, sessionId, updateTab, view.id, view.resourceId])
   return null
 }
 

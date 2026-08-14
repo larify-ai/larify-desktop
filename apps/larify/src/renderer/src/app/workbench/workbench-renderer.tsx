@@ -8,7 +8,8 @@ import { useRendererRegistry } from '../registry/renderer-registry'
 import type { WorkbenchView } from './workbench-store'
 import { WorkbenchEmpty } from './workbench-empty'
 
-interface WorkbenchRendererProps {
+interface WorkbenchRendererSlotProps {
+  cwd: string
   onOpenTool(id: string): void
   onUpdateTab(id: number, tab: Partial<WorkbenchTabPresentation>): void
   sessionId: string
@@ -16,11 +17,12 @@ interface WorkbenchRendererProps {
 }
 
 export function WorkbenchRenderer({
+  cwd,
   onOpenTool,
   onUpdateTab,
   sessionId,
   view
-}: WorkbenchRendererProps): React.JSX.Element {
+}: WorkbenchRendererSlotProps): React.JSX.Element {
   const registry = useRendererRegistry()
   const renderers = registry.get<WorkbenchRendererRegistry>(workbenchRendererRegistryToken)
   const viewId = view?.id
@@ -38,7 +40,7 @@ export function WorkbenchRenderer({
   const renderer = renderers?.get(view.rendererId)
   if (renderer) {
     return createElement(renderer.component, {
-      key: view.id,
+      cwd,
       resourceId: view.resourceId,
       sessionId,
       updateTab: updateCurrentTab

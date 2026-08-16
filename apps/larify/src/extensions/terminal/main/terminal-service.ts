@@ -1,4 +1,5 @@
 import { chmodSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { homedir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -51,12 +52,32 @@ function shellCandidates(): string[] {
 
 function resolveShell(shell?: string): string {
   if (shell) return shell
-  const candidates = shellCandidates()
-  for (const candidate of candidates) {
-    const found = which.sync(candidate, { nothrow: true })
+  return findDefaultShell()
+}
+
+function findDefaultShell(): string {
+  for (const candidate of shellCandidates()) {
+    const found = findShell(candidate)
     if (found) return found
   }
   return fallbackShell()
+}
+
+function findShell(candidate: string): string | null {
+  if (process.platform === 'win32') {
+    try {
+      const [found] = execFileSync('where.exe', [candidate], {
+        encoding: 'utf8',
+        windowsHide: true
+      })
+        .trim()
+        .split(/\r?\n/)
+      if (found) return found
+    } catch {
+      // Fall back to which when where.exe cannot resolve the command.
+    }
+  }
+  return which.sync(candidate, { nothrow: true })
 }
 
 function fallbackShell(): string {

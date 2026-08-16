@@ -2,17 +2,19 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ResourceManager } from '../../../../src/main/core/resource'
 import type { BrowserState } from '../../../../src/extensions/browser/shared/types'
 
-const h = vi.hoisted(() => ({ managers: [] as Array<{
-  tabs: Map<number, unknown>
-  createTab: ReturnType<typeof vi.fn>
-  close: ReturnType<typeof vi.fn>
-  setActive: ReturnType<typeof vi.fn>
-  setBounds: ReturnType<typeof vi.fn>
-  setVisible: ReturnType<typeof vi.fn>
-  navigate: ReturnType<typeof vi.fn>
-  destroy: ReturnType<typeof vi.fn>
-  emit(state: BrowserState): void
-}> }))
+const h = vi.hoisted(() => ({
+  managers: [] as Array<{
+    tabs: Map<number, unknown>
+    createTab: ReturnType<typeof vi.fn>
+    close: ReturnType<typeof vi.fn>
+    setActive: ReturnType<typeof vi.fn>
+    setBounds: ReturnType<typeof vi.fn>
+    setVisible: ReturnType<typeof vi.fn>
+    navigate: ReturnType<typeof vi.fn>
+    destroy: ReturnType<typeof vi.fn>
+    emit(state: BrowserState): void
+  }>
+}))
 
 vi.mock('../../../../src/extensions/browser/main/tab-manager', () => ({
   BROWSER_PARTITION: 'persist:test',
@@ -27,14 +29,21 @@ vi.mock('../../../../src/extensions/browser/main/tab-manager', () => ({
       return tab
     })
     get = (id: number): unknown => this.tabs.get(id)
-    close = vi.fn(async (id: number) => { this.tabs.delete(id) })
+    isActive = (id: number): boolean => this.activeId === id
+    close = vi.fn(async (id: number) => {
+      this.tabs.delete(id)
+    })
     state = (): { tabs: unknown[]; activeId: number | null } => ({
       tabs: [...this.tabs.values()].map((tab) => (tab as { state(): unknown }).state()),
       activeId: this.activeId
     })
     onChange?: (state: BrowserState) => void
-    bindChange = vi.fn((callback: (state: BrowserState) => void) => { this.onChange = callback })
-    setActive = vi.fn((id: number) => { if (this.tabs.has(id)) this.activeId = id })
+    bindChange = vi.fn((callback: (state: BrowserState) => void) => {
+      this.onChange = callback
+    })
+    setActive = vi.fn((id: number) => {
+      if (this.tabs.has(id)) this.activeId = id
+    })
     setBounds = vi.fn()
     setVisible = vi.fn()
     navigate = vi.fn(() => true)
@@ -42,8 +51,12 @@ vi.mock('../../../../src/extensions/browser/main/tab-manager', () => ({
     goForward = vi.fn()
     reload = vi.fn()
     destroy = vi.fn()
-    emit = (state: BrowserState): void => { this.onChange?.(state) }
-    constructor() { h.managers.push(this) }
+    emit = (state: BrowserState): void => {
+      this.onChange?.(state)
+    }
+    constructor() {
+      h.managers.push(this)
+    }
   }
 }))
 
@@ -86,6 +99,46 @@ describe('BrowserService resources', () => {
     expect(h.managers[0].destroy).not.toHaveBeenCalled()
   })
 
+  it('hides the native view when its visible resource closes', async () => {
+    const resources = new ResourceManager()
+    const service = new BrowserService({} as never, resources)
+    const id = service.createTab('session-a')
+    service.setVisible('session-a', id, true)
+    h.managers[0].setVisible.mockClear()
+
+    await resources.close(id)
+
+    expect(h.managers[0].setVisible).toHaveBeenCalledOnce()
+    expect(h.managers[0].setVisible).toHaveBeenCalledWith(false)
+  })
+
+  it('does not hide a newer resource when an older resource closes', async () => {
+    const resources = new ResourceManager()
+    const service = new BrowserService({} as never, resources)
+    const old = service.createTab('session-a')
+    const current = service.createTab('session-a')
+    service.setVisible('session-a', old, true)
+    service.setVisible('session-a', current, true)
+    h.managers[0].setVisible.mockClear()
+
+    await resources.close(old)
+
+    expect(h.managers[0].setVisible).not.toHaveBeenCalled()
+  })
+
+  it('hides the native view when closing its visible resource fails', async () => {
+    const resources = new ResourceManager()
+    const service = new BrowserService({} as never, resources)
+    const id = service.createTab('session-a')
+    service.setVisible('session-a', id, true)
+    h.managers[0].setVisible.mockClear()
+    h.managers[0].close.mockRejectedValueOnce(new Error('close failed'))
+
+    await expect(resources.close(id)).rejects.toThrow('close failed')
+
+    expect(h.managers[0].setVisible).toHaveBeenCalledWith(false)
+  })
+
   it('updates the state after closing a tab', async () => {
     const service = new BrowserService({} as never, new ResourceManager())
     const first = service.createTab('session-a')
@@ -105,6 +158,48 @@ describe('BrowserService resources', () => {
     expect(h.managers[0].setActive).toHaveBeenCalledWith(id)
     expect(h.managers[0].setBounds).toHaveBeenCalledWith({ x: 1, y: 2, width: 3, height: 4 })
     expect(h.managers[0].setVisible).toHaveBeenCalledWith(true)
+    expect(h.managers[0].setVisible).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not lay out an already visible resource again', () => {
+    const service = new BrowserService({} as never, new ResourceManager())
+    const id = service.createTab('session-a')
+    service.setVisible('session-a', id, true)
+    h.managers[0].setActive.mockClear()
+    h.managers[0].setVisible.mockClear()
+
+    service.setVisible('session-a', id, true)
+
+    expect(h.managers[0].setActive).not.toHaveBeenCalled()
+    expect(h.managers[0].setVisible).not.toHaveBeenCalled()
+  })
+
+  it('hides a newly active blank tab even while the visible resource record is stale', () => {
+    const service = new BrowserService({} as never, new ResourceManager())
+    const first = service.createTab('session-a')
+    service.setVisible('session-a', first, true)
+    const second = service.createTab('session-a')
+    h.managers[0].setVisible.mockClear()
+
+    service.setVisible('session-a', second, false)
+
+    expect(h.managers[0].setVisible).toHaveBeenCalledOnce()
+    expect(h.managers[0].setVisible).toHaveBeenCalledWith(false)
+  })
+
+  it('switches visible resources in one session without toggling the native view', () => {
+    const service = new BrowserService({} as never, new ResourceManager())
+    const first = service.createTab('session-a')
+    const second = service.createTab('session-a')
+    service.setVisible('session-a', first, true)
+    h.managers[0].setActive.mockClear()
+    h.managers[0].setVisible.mockClear()
+
+    service.setVisible('session-a', second, true)
+
+    expect(h.managers[0].setActive).toHaveBeenCalledOnce()
+    expect(h.managers[0].setActive).toHaveBeenCalledWith(second)
+    expect(h.managers[0].setVisible).not.toHaveBeenCalled()
   })
 
   it('does not change the active tab when receiving stale bounds', () => {
@@ -201,6 +296,36 @@ describe('BrowserService resources', () => {
     expect(resources.list()).toEqual([{ id: other, type: 'browser', sessionId: 'session-b' }])
     expect(h.managers[0].destroy).toHaveBeenCalledOnce()
     expect(h.managers[1].destroy).not.toHaveBeenCalled()
+  })
+
+  it('can show a recreated session after its previous manager was destroyed', async () => {
+    const resources = new ResourceManager()
+    const service = new BrowserService({} as never, resources)
+    const first = service.createTab('session-a')
+    service.setVisible('session-a', first, true)
+
+    await resources.destroy('session-a')
+    const second = service.createTab('session-a')
+    service.setVisible('session-a', second, true)
+
+    expect(h.managers).toHaveLength(2)
+    expect(h.managers[1].setVisible).toHaveBeenCalledOnce()
+    expect(h.managers[1].setVisible).toHaveBeenCalledWith(true)
+  })
+
+  it('can show a recreated session after its previous manager fails to destroy', async () => {
+    const resources = new ResourceManager()
+    const service = new BrowserService({} as never, resources)
+    const first = service.createTab('session-a')
+    service.setVisible('session-a', first, true)
+    h.managers[0].destroy.mockRejectedValueOnce(new Error('destroy failed'))
+
+    await resources.destroy('session-a')
+    const second = service.createTab('session-a')
+    service.setVisible('session-a', second, true)
+
+    expect(h.managers).toHaveLength(2)
+    expect(h.managers[1].setVisible).toHaveBeenCalledWith(true)
   })
 
   it('rejects resources after global destruction starts', async () => {

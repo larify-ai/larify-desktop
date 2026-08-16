@@ -4,7 +4,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 const h = vi.hoisted(() => ({
   hostWin: null as unknown,
   mainWin: null as unknown,
-  views: [] as Array<{ visibleCalls: boolean[]; boundsCalls: unknown[]; parent: unknown }>
+  views: [] as Array<{
+    visibleCalls: boolean[]
+    boundsCalls: unknown[]
+    operations: string[]
+    parent: unknown
+  }>,
 }))
 
 vi.mock("electron", () => {
@@ -40,7 +45,7 @@ vi.mock("electron", () => {
       canGoBack: () => false,
       canGoForward: () => false,
       goBack(): void {},
-      goForward(): void {}
+      goForward(): void {},
     }
   }
 
@@ -48,15 +53,18 @@ vi.mock("electron", () => {
     webContents = new FakeWebContents()
     visibleCalls: boolean[] = []
     boundsCalls: unknown[] = []
+    operations: string[] = []
     parent: unknown = null
     constructor() {
       h.views.push(this)
     }
     setVisible(value: boolean): void {
       this.visibleCalls.push(value)
+      this.operations.push(`visible:${value}`)
     }
     setBounds(bounds: unknown): void {
       this.boundsCalls.push(bounds)
+      this.operations.push("bounds")
     }
   }
 
@@ -67,7 +75,7 @@ vi.mock("electron", () => {
       },
       removeChildView: (view: WebContentsView) => {
         if (view.parent === this) view.parent = null
-      }
+      },
     }
     constructor() {
       h.hostWin = this
@@ -103,8 +111,8 @@ function fakeWindow(): import("electron").BrowserWindow {
       },
       removeChildView: (view: { parent: unknown }) => {
         if (view.parent === win) view.parent = null
-      }
-    }
+      },
+    },
   }
   h.mainWin = win
   return win as unknown as import("electron").BrowserWindow
@@ -133,7 +141,7 @@ describe("BrowserTabManager", () => {
     expect(manager.state().tabs[0]).toMatchObject({
       id: 1,
       url: "https://example.com",
-      loading: true
+      loading: true,
     })
   })
 
@@ -146,7 +154,7 @@ describe("BrowserTabManager", () => {
 
     expect(changes.at(-1)).toMatchObject({
       activeId: 1,
-      tabs: [{ id: 1, url: "https://example.com" }]
+      tabs: [{ id: 1, url: "https://example.com" }],
     })
   })
 
@@ -202,6 +210,19 @@ describe("BrowserTabManager", () => {
     expect(secondView.visibleCalls.at(-1)).toBe(true)
   })
 
+  it("keeps a composited view visible while moving it into the main window", () => {
+    const manager = new BrowserTabManager(fakeWindow())
+    manager.createTab(1)
+    manager.setBounds({ x: 10, y: 20, width: 300, height: 200 })
+    const view = h.views[0]
+    view.operations.length = 0
+
+    manager.setVisible(true)
+
+    expect(view.operations).toEqual(["bounds"])
+    expect(view.visibleCalls).toEqual([true])
+  })
+
   it("moves the active tab off-screen when the viewport collapses", () => {
     const manager = new BrowserTabManager(fakeWindow())
     manager.createTab(1)
@@ -212,6 +233,95 @@ describe("BrowserTabManager", () => {
     manager.setBounds({ x: 0, y: 0, width: 0, height: 0 })
     expect(h.views[0].parent).toBe(h.hostWin)
     expect(h.views[0].visibleCalls.at(-1)).toBe(true)
+  })
+
+  it("does not lay out unchanged active, bounds, or visibility again", () => {
+    const manager = new BrowserTabManager(fakeWindow())
+    manager.createTab(1)
+    manager.setBounds({ x: 10, y: 20, width: 300, height: 200 })
+    manager.setVisible(true)
+    const view = h.views[0]
+    view.boundsCalls.length = 0
+    view.visibleCalls.length = 0
+
+    manager.setActive(1)
+    manager.setBounds({ x: 10, y: 20, width: 300, height: 200 })
+    manager.setVisible(true)
+
+    expect(view.boundsCalls).toEqual([])
+    expect(view.visibleCalls).toEqual([])
+  })
+
+  it("resizes only the active tab while dragging", () => {
+    const manager = new BrowserTabManager(fakeWindow())
+    manager.createTab(1)
+    manager.createTab(2)
+    manager.setBounds({ x: 10, y: 20, width: 300, height: 200 })
+    manager.setVisible(true)
+    const [hidden, active] = h.views
+    const hideView = vi.spyOn(manager as unknown as { hideView(tab: unknown): void }, "hideView")
+    hidden.boundsCalls.length = 0
+    hidden.visibleCalls.length = 0
+    active.boundsCalls.length = 0
+    active.visibleCalls.length = 0
+
+    manager.setBounds({ x: 10, y: 20, width: 320, height: 200 })
+
+    expect(hidden.boundsCalls).toEqual([])
+    expect(hidden.visibleCalls).toEqual([])
+    expect(active.boundsCalls).toEqual([{ x: 10, y: 20, width: 320, height: 200 }])
+    expect(active.visibleCalls).toEqual([])
+    expect(hideView).not.toHaveBeenCalled()
+  })
+
+  it("does not lay out the active view when closing an inactive tab", async () => {
+    const manager = new BrowserTabManager(fakeWindow())
+    const inactive = manager.createTab(1)
+    manager.createTab(2)
+    manager.setBounds({ x: 10, y: 20, width: 300, height: 200 })
+    manager.setVisible(true)
+    const active = h.views[1]
+    active.boundsCalls.length = 0
+
+    await manager.close(inactive)
+
+    expect(active.boundsCalls).toEqual([])
+  })
+
+  it("keeps exactly the active view in the main window across layout transitions", async () => {
+    const manager = new BrowserTabManager(fakeWindow())
+    manager.createTab(1)
+    manager.createTab(2)
+    manager.createTab(3)
+    manager.setBounds({ x: 10, y: 20, width: 300, height: 200 })
+    manager.setVisible(true)
+    const mainIds = (): number[] =>
+      h.views.flatMap((view, index) => (view.parent === h.mainWin ? [index + 1] : []))
+
+    expect(mainIds()).toEqual([3])
+    manager.setActive(1)
+    expect(mainIds()).toEqual([1])
+    await manager.close(2)
+    expect(mainIds()).toEqual([1])
+    manager.setVisible(false)
+    expect(mainIds()).toEqual([])
+    manager.setVisible(true)
+    expect(mainIds()).toEqual([1])
+    manager.setBounds({ x: 10, y: 20, width: 0, height: 200 })
+    expect(mainIds()).toEqual([])
+    manager.setBounds({ x: 10, y: 20, width: 300, height: 200 })
+    expect(mainIds()).toEqual([1])
+    await manager.close(1)
+    expect(mainIds()).toEqual([3])
+  })
+
+  it("keeps hidden tabs at a stable composited viewport", () => {
+    const manager = new BrowserTabManager(fakeWindow())
+    manager.createTab(1)
+    const hidden = h.views[0]
+
+    expect(hidden.boundsCalls.at(-1)).toEqual({ x: 0, y: 0, width: 1280, height: 800 })
+    expect(hidden.visibleCalls.at(-1)).toBe(true)
   })
 
   it("moves the active tab off-screen when the browser renderer is hidden", () => {
@@ -262,12 +372,12 @@ describe("BrowserTabManager", () => {
     const callback = vi.fn(async () => undefined)
 
     await expect(manager.withTemporaryTab("not a valid url", callback)).rejects.toThrow(
-      "invalid url"
+      "invalid url",
     )
 
     expect(callback).not.toHaveBeenCalled()
     expect(
-      (h.views.at(-1) as unknown as { webContents: { closed: boolean } }).webContents.closed
+      (h.views.at(-1) as unknown as { webContents: { closed: boolean } }).webContents.closed,
     ).toBe(true)
     expect(manager.state()).toEqual({ tabs: [], activeId: null })
   })
@@ -338,7 +448,7 @@ describe("BrowserTabManager", () => {
       () =>
         new Promise<void>((resolve) => {
           finishStop = resolve
-        })
+        }),
     )
     ;(
       manager as unknown as {
@@ -390,7 +500,7 @@ describe("BrowserTabManager", () => {
       () =>
         new Promise<void>((resolve) => {
           finishRecorderDestroy = resolve
-        })
+        }),
     )
     ;(manager as unknown as { recorder: { destroy: () => Promise<void> } }).recorder.destroy =
       destroyRecorder

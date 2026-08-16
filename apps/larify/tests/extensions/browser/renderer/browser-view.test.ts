@@ -69,6 +69,7 @@ describe('BrowserView', () => {
     await act(async () => {
       root.render(
         createElement(BrowserView, {
+          active: true,
           resourceId: 42,
           sessionId: 'session-a',
           updateTab: vi.fn()
@@ -114,6 +115,50 @@ describe('BrowserView', () => {
     expect(container.querySelector('[data-testid="browser-viewport"]')).toMatchObject({
       dataset: { resourceId: '42', sessionId: 'session-a' }
     })
+  })
+
+  it('hides the native view while its workbench tab is inactive', async () => {
+    h.state = {
+      id: 42,
+      url: 'https://example.com'
+    } as BrowserTabState
+    await act(async () => {
+      root.render(
+        createElement(BrowserView, {
+          active: false,
+          resourceId: 42,
+          sessionId: 'session-a',
+          updateTab: vi.fn()
+        })
+      )
+    })
+
+    expect(
+      container.querySelector('[data-testid="browser-viewport"]')?.getAttribute('data-visible')
+    ).toBe('false')
+  })
+
+  it('hides the native view when the active workbench tab changes', async () => {
+    h.state = {
+      id: 42,
+      url: 'https://example.com'
+    } as BrowserTabState
+    await renderView()
+
+    await act(async () => {
+      root.render(
+        createElement(BrowserView, {
+          active: false,
+          resourceId: 42,
+          sessionId: 'session-a',
+          updateTab: vi.fn()
+        })
+      )
+    })
+
+    expect(
+      container.querySelector('[data-testid="browser-viewport"]')?.getAttribute('data-visible')
+    ).toBe('false')
   })
 
   it('routes address navigation and contains rejected toolbar operations', async () => {

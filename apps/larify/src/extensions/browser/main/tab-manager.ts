@@ -6,6 +6,13 @@ import { Recorder } from "./recorder"
 
 export const BROWSER_PARTITION = "persist:larify-browser"
 const HOST_POSITION = { x: -3000, y: -3000 }
+const HOST_BOUNDS = { x: 0, y: 0, width: 1280, height: 800 }
+
+const sameBounds = (left: Rectangle, right: Rectangle): boolean =>
+  left.x === right.x &&
+  left.y === right.y &&
+  left.width === right.width &&
+  left.height === right.height
 
 export class BrowserTabManager {
   private tabs = new Map<number, BrowserTab>()
@@ -53,9 +60,15 @@ export class BrowserTabManager {
     return this.tabs.get(id)
   }
 
+  isActive(id: number): boolean {
+    return this.activeId === id
+  }
+
   createTab(id: number, url?: string): number {
     if (this.destroying) throw new Error("browser tab manager is destroyed")
+    const previous = this.activeId === null ? undefined : this.tabs.get(this.activeId)
     const tab = new BrowserTab(id, BROWSER_PARTITION)
+    tab.view.setVisible(true)
     tab.bindChange(() => this.emit())
     tab.view.webContents.setWindowOpenHandler((details) => {
       if (!this.destroying) {
@@ -70,7 +83,8 @@ export class BrowserTabManager {
     this.tabs.set(tab.id, tab)
     this.activeId = tab.id
     if (url) tab.navigate(url)
-    this.applyLayout()
+    if (previous) this.hideView(previous)
+    this.layoutActive()
     this.emit()
     return id
   }
@@ -110,9 +124,11 @@ export class BrowserTabManager {
   }
 
   setActive(id: number): void {
-    if (!this.tabs.has(id)) return
+    if (this.activeId === id || !this.tabs.has(id)) return
+    const previous = this.activeId === null ? undefined : this.tabs.get(this.activeId)
     this.activeId = id
-    this.applyLayout()
+    if (previous) this.hideView(previous)
+    this.layoutActive()
     this.emit()
   }
 
@@ -141,8 +157,8 @@ export class BrowserTabManager {
     if (this.activeId === id) {
       const remaining = [...this.tabs.keys()]
       this.activeId = remaining[index] ?? remaining[index - 1] ?? null
+      this.layoutActive()
     }
-    this.applyLayout()
     this.emit()
   }
 
@@ -179,13 +195,15 @@ export class BrowserTabManager {
   }
 
   setBounds(bounds: Rectangle): void {
+    if (sameBounds(this.bounds, bounds)) return
     this.bounds = bounds
-    this.applyLayout()
+    this.layoutActive()
   }
 
   setVisible(visible: boolean): void {
+    if (this.visible === visible) return
     this.visible = visible
-    this.applyLayout()
+    this.layoutActive()
   }
 
   state(): BrowserState {
@@ -229,10 +247,6 @@ export class BrowserTabManager {
     this.onChange?.(this.state())
   }
 
-  private hostBounds(): Rectangle {
-    return { x: 0, y: 0, width: this.bounds.width || 1280, height: this.bounds.height || 800 }
-  }
-
   private placeView(tab: BrowserTab, target: BrowserWindow, bounds: Rectangle): void {
     const current = this.viewParent.get(tab.id)
     if (current !== target) {
@@ -241,26 +255,23 @@ export class BrowserTabManager {
       this.viewParent.set(tab.id, target)
     }
     tab.view.setBounds(bounds)
-    tab.view.setVisible(true)
   }
 
   private hideView(tab: BrowserTab): void {
     const current = this.viewParent.get(tab.id)
-    if (current !== this.host) {
-      current?.contentView.removeChildView(tab.view)
-      this.host.contentView.addChildView(tab.view)
-      this.viewParent.set(tab.id, this.host)
-    }
-    tab.view.setBounds(this.hostBounds())
-    tab.view.setVisible(true)
+    if (current === this.host) return
+    current?.contentView.removeChildView(tab.view)
+    this.host.contentView.addChildView(tab.view)
+    this.viewParent.set(tab.id, this.host)
+    tab.view.setBounds(HOST_BOUNDS)
   }
 
-  private applyLayout(): void {
-    for (const tab of this.tabs.values()) {
-      const active =
-        this.visible && tab.id === this.activeId && this.bounds.width > 0 && this.bounds.height > 0
-      if (active) this.placeView(tab, this.window, this.bounds)
-      else this.hideView(tab)
-    }
+  private layoutActive(): void {
+    if (this.activeId === null) return
+    const tab = this.tabs.get(this.activeId)
+    if (!tab) return
+    const visible = this.visible && this.bounds.width > 0 && this.bounds.height > 0
+    if (visible) this.placeView(tab, this.window, this.bounds)
+    else this.hideView(tab)
   }
 }

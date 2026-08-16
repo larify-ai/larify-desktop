@@ -3,7 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const h = vi.hoisted(() => ({
   handlers: new Map<string, (...args: unknown[]) => unknown>(),
   listeners: new Map<string, (...args: unknown[]) => unknown>(),
-  sent: [] as Array<{ channel: string; payload: unknown }>
+  sent: [] as Array<{ channel: string; payload: unknown }>,
+  error: vi.fn()
 }))
 
 vi.mock('electron', () => ({
@@ -59,6 +60,8 @@ describe('registerBrowserIpc', () => {
     h.handlers.clear()
     h.listeners.clear()
     h.sent.length = 0
+    h.error.mockReset()
+    vi.spyOn(console, 'error').mockImplementation(h.error)
   })
 
   it('registers only resource operations and browser-specific commands', () => {
@@ -79,6 +82,9 @@ describe('registerBrowserIpc', () => {
     const service = fakeService()
     registerBrowserIpc(service)
     h.handlers.get('browser:navigate')!({ sender: sender() }, 'session-a', 7, 'openai.com')
+    h.handlers.get('browser:back')!({ sender: sender() }, 'session-a', 7)
+    h.handlers.get('browser:forward')!({ sender: sender() }, 'session-a', 7)
+    h.handlers.get('browser:reload')!({ sender: sender() }, 'session-a', 7)
     h.handlers.get('browser:setVisible')!({ sender: sender() }, 'session-a', 7, true)
     const event = { returnValue: null }
     h.listeners.get('browser:setBoundsSync')!(event, 'session-a', 7, {
@@ -88,6 +94,9 @@ describe('registerBrowserIpc', () => {
       height: 200
     })
     expect(service.navigate).toHaveBeenCalledWith('session-a', 7, 'openai.com')
+    expect(service.goBack).toHaveBeenCalledWith('session-a', 7)
+    expect(service.goForward).toHaveBeenCalledWith('session-a', 7)
+    expect(service.reload).toHaveBeenCalledWith('session-a', 7)
     expect(service.setVisible).toHaveBeenCalledWith('session-a', 7, true)
     expect(service.setBounds).toHaveBeenCalledWith('session-a', 7, {
       x: 1,
@@ -96,6 +105,27 @@ describe('registerBrowserIpc', () => {
       height: 200
     })
     expect(event.returnValue).toBe(true)
+  })
+
+  it('always replies to synchronous bounds updates when the service fails', () => {
+    const service = fakeService()
+    const error = new Error('view was destroyed')
+    vi.mocked(service.setBounds).mockImplementation(() => {
+      throw error
+    })
+    registerBrowserIpc(service)
+    const event = { returnValue: null as boolean | null }
+
+    expect(() =>
+      h.listeners.get('browser:setBoundsSync')!(event, 'session-a', 7, {
+        x: 1,
+        y: 2,
+        width: 300,
+        height: 200
+      })
+    ).not.toThrow()
+    expect(event.returnValue).toBe(false)
+    expect(h.error).toHaveBeenCalledWith('[browser] Failed to update bounds:', error)
   })
 
   it('returns one resource state and subscribes for changes', () => {
@@ -144,6 +174,23 @@ describe('registerBrowserIpc', () => {
 
     expect(webContents.off).toHaveBeenCalledWith('destroyed', expect.any(Function))
     expect(h.sent).toEqual([])
+  })
+
+  it('stops broadcasting to a renderer after send fails', () => {
+    const service = fakeService()
+    const webContents = sender()
+    webContents.send = vi.fn(() => {
+      throw new Error('renderer was destroyed')
+    })
+    registerBrowserIpc(service)
+    h.handlers.get('browser:getState')!({ sender: webContents }, 'session-a', 7)
+
+    const listener = vi.mocked(service.bindChange).mock.calls[0][0]
+    listener('session-a', { tabs: [], activeId: null })
+    listener('session-a', { tabs: [], activeId: null })
+
+    expect(webContents.send).toHaveBeenCalledOnce()
+    expect(webContents.off).toHaveBeenCalledWith('destroyed', expect.any(Function))
   })
 
   it('removes handlers on disposal', () => {

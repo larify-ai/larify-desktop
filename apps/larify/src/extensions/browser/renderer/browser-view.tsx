@@ -5,7 +5,11 @@ import { EmptyState } from './empty-state'
 import { LoadingBar } from './loading-bar'
 import { useBrowser } from './use-browser'
 
-export function BrowserView({ resourceId, sessionId }: WorkbenchRendererProps): React.JSX.Element {
+export function BrowserView({
+  active,
+  resourceId,
+  sessionId
+}: WorkbenchRendererProps): React.JSX.Element {
   const browser = useBrowser(sessionId, resourceId)
   const tab = browser.state
   const hasPage = Boolean(tab?.url && tab.url !== 'about:blank')
@@ -22,7 +26,7 @@ export function BrowserView({ resourceId, sessionId }: WorkbenchRendererProps): 
         />
         <LoadingBar loading={tab?.loading ?? false} />
       </div>
-      <BrowserViewport resourceId={resourceId} sessionId={sessionId} visible={hasPage}>
+      <BrowserViewport resourceId={resourceId} sessionId={sessionId} visible={Boolean(active) && hasPage}>
         {!hasPage ? <EmptyState /> : null}
       </BrowserViewport>
     </div>

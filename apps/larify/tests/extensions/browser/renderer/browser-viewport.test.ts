@@ -82,7 +82,7 @@ describe('BrowserViewport', () => {
     expect(invoke).toHaveBeenCalledWith('browser:setVisible', 'session-a', 42, true)
   })
 
-  it('synchronously reports every observed layout without another frame of delay', async () => {
+  it('deduplicates repeated observed layouts', async () => {
     await act(async () =>
       root.render(
         createElement(BrowserViewport, { resourceId: 42, sessionId: 'session-a', visible: true })
@@ -95,13 +95,7 @@ describe('BrowserViewport', () => {
       FakeResizeObserver.instance!.notify(viewport)
     })
 
-    expect(sendSync).toHaveBeenCalledTimes(2)
-    expect(sendSync).toHaveBeenNthCalledWith(1, 'browser:setBoundsSync', 'session-a', 42, {
-      height: 200,
-      width: 300,
-      x: 10,
-      y: 40
-    })
+    expect(sendSync).toHaveBeenCalledTimes(0)
   })
 
   it('keeps an empty viewport hidden', async () => {
@@ -240,29 +234,26 @@ describe('BrowserViewport', () => {
     })
   })
 
-  it('reports bounds in the same pointer event while a panel is dragged', async () => {
+  it('reports bounds after Allotment completes a native layout', async () => {
     await act(async () =>
       root.render(
         createElement(BrowserViewport, { resourceId: 42, sessionId: 'session-a', visible: true })
       )
     )
     sendSync.mockClear()
-    const updateLayout = (): void => {
-      vi.mocked(HTMLElement.prototype.getBoundingClientRect).mockReturnValue({
-        bottom: 240,
-        height: 200,
-        left: 20,
-        right: 320,
-        top: 40,
-        width: 300,
-        x: 20,
-        y: 40,
-        toJSON: () => ({})
-      } as DOMRect)
-    }
-    window.addEventListener('pointermove', updateLayout, { once: true })
+    vi.mocked(HTMLElement.prototype.getBoundingClientRect).mockReturnValue({
+      bottom: 240,
+      height: 200,
+      left: 20,
+      right: 320,
+      top: 40,
+      width: 300,
+      x: 20,
+      y: 40,
+      toJSON: () => ({})
+    } as DOMRect)
 
-    await act(async () => window.dispatchEvent(new PointerEvent('pointermove', { buttons: 1 })))
+    await act(async () => window.dispatchEvent(new Event('larify:native-layout')))
 
     expect(sendSync).toHaveBeenCalledWith('browser:setBoundsSync', 'session-a', 42, {
       height: 200,

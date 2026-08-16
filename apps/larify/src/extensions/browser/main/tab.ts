@@ -76,6 +76,8 @@ function waitForWebContentsLoadEvent(
     const cleanup = (): void => {
       clearTimeout(timer)
       wc.off("did-finish-load", finish)
+      wc.off("did-stop-loading", finish)
+      wc.off("did-navigate", onNavigate)
       wc.off("did-fail-load", onFail)
       wc.off("destroyed", onDestroyed)
       signal?.removeEventListener("abort", onAbort)
@@ -83,6 +85,12 @@ function waitForWebContentsLoadEvent(
     const finish = (): void => {
       cleanup()
       resolve()
+    }
+    const onNavigate = (_event: unknown, url: string): void => {
+      if (typeof url !== "string") return
+      const normalized = normalizeUrl(url) ?? url
+      if (acceptsFailedUrl && !acceptsFailedUrl(normalized)) return
+      finish()
     }
     const onFail = (
       _event: unknown,
@@ -109,6 +117,10 @@ function waitForWebContentsLoadEvent(
       reject(new Error(`navigation load event timed out after ${waits.formatTimeout(timeoutMs)}`))
     }, timeoutMs)
     wc.on("did-finish-load", finish)
+    wc.on("did-stop-loading", finish)
+    // Chromium's built-in viewers (notably PDF) can replace the document
+    // without emitting the normal page load events on the outer WebContents.
+    wc.on("did-navigate", onNavigate)
     wc.on("did-fail-load", onFail)
     wc.once("destroyed", onDestroyed)
     signal?.addEventListener("abort", onAbort, { once: true })
@@ -188,6 +200,10 @@ function evalJsExpression(script: string): string {
   ].join("\n")
 }
 
+interface BrowserTabOptions {
+  automation?: boolean
+}
+
 export class BrowserTab {
   readonly id: number
   readonly view: WebContentsView
@@ -213,17 +229,22 @@ export class BrowserTab {
   private readonly networkWaiters = new Set<() => void>()
   private readonly cancelDownloads = new Set<(error: Error) => void>()
   private downloadActive = false
+  private destroyed = false
   private readonly cdpSend: CdpSend = (method, params, sessionId) =>
     this.sendCdp(method, params, sessionId)
 
-  constructor(id: number, partition: string) {
+  constructor(id: number, partition: string, { automation = true }: BrowserTabOptions = {}) {
     this.id = id
     this.view = new WebContentsView({
       webPreferences: { partition, backgroundThrottling: false },
     })
     this.wireEvents()
-    const blankReady = this.view.webContents.loadURL("about:blank").catch(() => {})
-    this.cdpReady = this.initCdp(blankReady)
+    if (automation) {
+      const blankReady = this.view.webContents.loadURL("about:blank").catch(() => {})
+      this.cdpReady = this.initCdp(blankReady)
+    } else {
+      this.cdpReady = Promise.resolve()
+    }
   }
 
   bindChange(cb: () => void): void {
@@ -384,11 +405,15 @@ export class BrowserTab {
   }
 
   destroy(): void {
+    if (this.destroyed) return
+    this.destroyed = true
     const error = new Error("tab was closed during download")
     for (const cancel of [...this.cancelDownloads]) cancel(error)
-    const dbg = this.view.webContents.debugger
+    const wc = this.view.webContents
+    if (wc.isDestroyed()) return
+    const dbg = wc.debugger
     if (dbg?.isAttached()) dbg.detach()
-    this.view.webContents.close()
+    wc.close()
   }
 
   async sendCdp(
@@ -398,13 +423,16 @@ export class BrowserTab {
     timeoutMs = 30000,
     signal?: AbortSignal,
   ): Promise<unknown> {
+    const wc = this.view.webContents
     const throwIfCancelled = (): void => {
       if (signal?.aborted) throw new Error(`CDP command was cancelled: ${method}`)
+      if (this.destroyed || wc.isDestroyed())
+        throw new Error(`tab was closed before CDP command: ${method}`)
     }
     throwIfCancelled()
     await this.cdpReady
     throwIfCancelled()
-    const dbg = this.view.webContents.debugger
+    const dbg = wc.debugger
     if (!dbg.isAttached()) {
       dbg.attach()
       await this.setupAutoAttach(dbg)
@@ -726,7 +754,12 @@ export class BrowserTab {
   }
 
   private runInput(operation: () => Promise<void>): Promise<void> {
-    const task = this.inputTask.then(operation)
+    const task = this.inputTask.then(() => {
+      if (this.destroyed || this.view.webContents.isDestroyed()) {
+        throw new Error("tab was closed before input")
+      }
+      return operation()
+    })
     this.inputTask = task.catch(() => {})
     return task
   }
@@ -862,7 +895,6 @@ export class BrowserTab {
     const syncUrl = (): void => {
       this.currentUrl = wc.getURL()
       this.pendingUrl = ""
-      this.activeNavigationUrls.clear()
       emit()
     }
 
@@ -1027,8 +1059,8 @@ export class BrowserTab {
     return new Promise((resolve, reject) => {
       const cleanup = (): void => {
         clearTimeout(timer)
-        dbg.off('message', onMessage)
-        wc.off('destroyed', onDestroyed)
+        dbg.off("message", onMessage)
+        wc.off("destroyed", onDestroyed)
       }
       const onMessage = (
         _event: Electron.Event,
@@ -1036,7 +1068,7 @@ export class BrowserTab {
         params: unknown,
         eventSessionId?: string,
       ): void => {
-        if (eventMethod !== method || (sessionId ?? '') !== (eventSessionId ?? '')) return
+        if (eventMethod !== method || (sessionId ?? "") !== (eventSessionId ?? "")) return
         cleanup()
         resolve(params)
       }
@@ -1048,8 +1080,8 @@ export class BrowserTab {
         cleanup()
         reject(new Error(`CDP event timed out: ${method}`))
       }, timeoutMs)
-      dbg.on('message', onMessage)
-      wc.once('destroyed', onDestroyed)
+      dbg.on("message", onMessage)
+      wc.once("destroyed", onDestroyed)
     })
   }
 

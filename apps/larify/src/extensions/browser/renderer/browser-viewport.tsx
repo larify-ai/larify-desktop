@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { nativeLayoutEvent } from '@renderer/app/layout/native-layout'
 
 interface BrowserViewportProps {
   children?: ReactNode
@@ -20,6 +21,7 @@ export function BrowserViewport({
     const element = ref.current
     if (!element) return
     const pane = element.closest<HTMLElement>('.split-view-view')
+    let previousBounds: { x: number; y: number; width: number; height: number } | null = null
     void window.bridge.invoke('browser:setVisible', sessionId, resourceId, false)
 
     const report = (): void => {
@@ -37,23 +39,27 @@ export function BrowserViewport({
         width: right - left,
         height: bottom - top
       }
+      const changed =
+        !previousBounds ||
+        previousBounds.x !== bounds.x ||
+        previousBounds.y !== bounds.y ||
+        previousBounds.width !== bounds.width ||
+        previousBounds.height !== bounds.height
+      if (!changed) return
+      previousBounds = bounds
       setViewportHasSize(bounds.width > 0 && bounds.height > 0)
       window.bridge.sendSync('browser:setBoundsSync', sessionId, resourceId, bounds)
-    }
-
-    const reportDrag = (event: PointerEvent): void => {
-      if (event.buttons === 1) queueMicrotask(report)
     }
 
     report()
     const observer = new ResizeObserver(report)
     observer.observe(element)
     if (pane) observer.observe(pane)
-    window.addEventListener('pointermove', reportDrag)
+    window.addEventListener(nativeLayoutEvent, report)
     window.addEventListener('resize', report)
     return () => {
       observer.disconnect()
-      window.removeEventListener('pointermove', reportDrag)
+      window.removeEventListener(nativeLayoutEvent, report)
       window.removeEventListener('resize', report)
       void window.bridge.invoke('browser:setVisible', sessionId, resourceId, false)
     }

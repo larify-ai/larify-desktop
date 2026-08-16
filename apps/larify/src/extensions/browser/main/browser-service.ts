@@ -29,9 +29,13 @@ export class BrowserService {
     this.resourceRegistration = resources.register('browser', (id, sessionId, options) =>
       this.openResource(id, sessionId, options as { url?: string } | undefined)
     )
-    this.sessionCleanupRegistration = resources.registerSessionCleanup((sessionId) =>
-      this.managers.destroySession(sessionId)
-    )
+    this.sessionCleanupRegistration = resources.registerSessionCleanup(async (sessionId) => {
+      try {
+        await this.managers.destroySession(sessionId)
+      } finally {
+        if (this.visibleResource?.sessionId === sessionId) this.visibleResource = undefined
+      }
+    })
   }
 
   bindChange(callback: (sessionId: string, state: BrowserState) => void): () => void {
@@ -63,7 +67,18 @@ export class BrowserService {
       if (!existingManager) void this.managers.destroySession(sessionId).catch(() => {})
       throw error
     }
-    return { dispose: () => manager.close(id) }
+    return {
+      dispose: async () => {
+        try {
+          await manager.close(id)
+        } finally {
+          if (this.visibleResource?.id === id) {
+            manager.setVisible(false)
+            this.visibleResource = undefined
+          }
+        }
+      }
+    }
   }
 
   withTemporaryTab<T>(
@@ -131,25 +146,33 @@ export class BrowserService {
 
   setBounds(sessionId: string, id: number, bounds: Rectangle): void {
     const manager = this.managers.peek(sessionId)
-    if (manager?.state().activeId === id) manager.setBounds(bounds)
+    if (manager?.isActive(id)) manager.setBounds(bounds)
   }
 
   setVisible(sessionId: string, id: number, visible: boolean): void {
     if (!visible) {
-      if (this.visibleResource?.id !== id) return
-      this.managers.peek(this.visibleResource.sessionId)?.setVisible(false)
-      this.visibleResource = undefined
+      if (this.visibleResource?.id === id) {
+        this.managers.peek(this.visibleResource.sessionId)?.setVisible(false)
+        this.visibleResource = undefined
+        return
+      }
+      const manager = this.managers.peek(sessionId)
+      if (!manager?.isActive(id)) return
+      manager.setVisible(false)
+      if (this.visibleResource?.sessionId === sessionId) this.visibleResource = undefined
       return
     }
     const resource = this.resources.get(id)
     const manager = this.managers.peek(sessionId)
     if (resource?.type !== 'browser' || resource.sessionId !== sessionId || !manager) return
+    if (this.visibleResource?.id === id) return
+    const sessionAlreadyVisible = this.visibleResource?.sessionId === sessionId
     this.managers.forEach((manager, managerSessionId) => {
-      manager.setVisible(managerSessionId === sessionId)
+      if (managerSessionId !== sessionId) manager.setVisible(false)
     })
     this.visibleResource = { id, sessionId }
     manager.setActive(id)
-    manager.setVisible(true)
+    if (!sessionAlreadyVisible) manager.setVisible(true)
   }
 
   destroy(): Promise<void> {

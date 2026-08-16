@@ -77,8 +77,22 @@ describe('WorkspaceService watcher', () => {
     chokidar.watchers[0].emit('change', path.join(root, 'file.ts'))
     await service.dispose()
 
-    expect(onChange).toHaveBeenCalledWith('change', path.join(root, 'file.ts'))
+    expect(onChange).toHaveBeenCalledWith(root, path.join(root, 'file.ts'))
     expect(chokidar.watchers[0].close).toHaveBeenCalledOnce()
+  })
+
+  it('normalizes changed paths at the watcher boundary', async () => {
+    const root = await createRoot()
+    const onChange = vi.fn()
+    const service = new WorkspaceService(root, onChange)
+    const changedPath = `${path.join(root, 'nested')}${path.sep}..${path.sep}file.ts`
+
+    await service.rootPath()
+    chokidar.watchers[0].emit('change', changedPath)
+
+    const normalized = path.normalize(changedPath)
+    expect(onChange).toHaveBeenCalledWith(path.dirname(normalized), normalized)
+    await service.dispose()
   })
 
   it('can be disposed immediately after construction', async () => {

@@ -41,6 +41,9 @@ const click = async (selector) => {
   })
 }
 
+const clickAria = (label) =>
+  evaluate(`document.querySelector(${JSON.stringify(`[aria-label="${label}"]`)})?.click()`)
+
 const activeSessionSelector = '[data-workbench-session][data-active]'
 const activeWorkbenchSelector = `${activeSessionSelector} [data-workbench-view="workspace"][data-active]`
 const layoutSelector = `${activeWorkbenchSelector} .workspace-layout`
@@ -76,6 +79,73 @@ try {
     await evaluate(`Array.from(document.querySelectorAll('button'))[${fileCardIndex}].click()`)
     await wait(800)
   }
+  if (await evaluate(`Boolean(document.querySelector('[aria-label="显示工作台"]'))`)) {
+    await clickAria('显示工作台')
+    await wait(250)
+  }
+
+  const initialPanes = await evaluate(`(() => {
+    const panes = Array.from(document.querySelectorAll(
+      '.larify-workbench-allotment > .split-view-container > .split-view-view'
+    ))
+    return panes.map((pane) => pane.getBoundingClientRect().width)
+  })()`)
+  if (initialPanes.length !== 2 || Math.abs(initialPanes[1] - 700) > 24) {
+    const labels = await evaluate(
+      `Array.from(document.querySelectorAll('[aria-label]')).map((node) => node.getAttribute('aria-label'))`
+    )
+    throw new Error(
+      `Unexpected default workbench width: ${JSON.stringify({ initialPanes, labels })}`
+    )
+  }
+
+  const selectedFile = await evaluate(`(() => {
+    const leaf = document.querySelector(
+      ${JSON.stringify(`${treeSelector} .rc-tree-treenode[aria-selected] .rc-tree-node-content-wrapper`)}
+    ) ?? Array.from(document.querySelectorAll(
+      ${JSON.stringify(`${treeSelector} .rc-tree-node-content-wrapper`)}
+    )).find((node) => node.closest('.rc-tree-treenode')?.getAttribute('aria-expanded') === null)
+    if (!leaf) return null
+    const path = leaf.querySelector('[title]')?.getAttribute('title')
+    leaf.click()
+    return path?.split(/[\\\\/]/).at(-1) ?? null
+  })()`)
+  if (!selectedFile) throw new Error('Workspace file was not available for the tab-title test')
+  await waitFor(
+    `Array.from(document.querySelectorAll('[data-tab-id]')).some(
+      (tab) => tab.textContent?.includes(${JSON.stringify(selectedFile)})
+    )`,
+    'workspace tab title update'
+  )
+
+  if (!(await evaluate(`Boolean(document.querySelector('[aria-label="隐藏侧边栏"]'))`))) {
+    await clickAria('显示侧边栏')
+    await wait(250)
+  }
+  const panesBeforeNavigationCollapse = await evaluate(`(() =>
+    Array.from(document.querySelectorAll(
+      '.larify-workbench-allotment > .split-view-container > .split-view-view'
+    )).map((pane) => pane.getBoundingClientRect().width)
+  )()`)
+  await clickAria('隐藏侧边栏')
+  await wait(250)
+  const panesAfterNavigationCollapse = await evaluate(`(() =>
+    Array.from(document.querySelectorAll(
+      '.larify-workbench-allotment > .split-view-container > .split-view-view'
+    )).map((pane) => pane.getBoundingClientRect().width)
+  )()`)
+  const interactionGrowth = panesAfterNavigationCollapse[0] - panesBeforeNavigationCollapse[0]
+  const workbenchGrowth = panesAfterNavigationCollapse[1] - panesBeforeNavigationCollapse[1]
+  if (interactionGrowth < 180 || Math.abs(workbenchGrowth) > 24) {
+    throw new Error(
+      `Navigation collapse resized the wrong pane: ${JSON.stringify({
+        panesAfterNavigationCollapse,
+        panesBeforeNavigationCollapse
+      })}`
+    )
+  }
+  await clickAria('显示侧边栏')
+  await wait(250)
 
   if (
     !(await evaluate(
@@ -254,6 +324,10 @@ try {
     JSON.stringify(
       {
         initialWidth,
+        initialPanes,
+        panesAfterNavigationCollapse,
+        panesBeforeNavigationCollapse,
+        selectedFile,
         minimumWidth,
         retainedWidth,
         scrollLayers,

@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
+/* eslint-disable @typescript-eslint/no-empty-function */
 
 import { act, createElement, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { WorkspaceLayout } from '../../../../src/extensions/workspace/renderer/layout/workspace-layout'
 
 describe('WorkspaceLayout', () => {
@@ -19,6 +20,7 @@ describe('WorkspaceLayout', () => {
   afterEach(() => {
     act(() => root.unmount())
     container.remove()
+    vi.unstubAllGlobals()
   })
 
   it('does not reserve navigator space when no navigator is provided', () => {
@@ -79,6 +81,82 @@ describe('WorkspaceLayout', () => {
     expect(content().style.marginRight).toBe('160px')
   })
 
+  it('preserves the minimum content width instead of hiding during resize', () => {
+    render(true, createElement('div'))
+    const body = container.querySelector<HTMLElement>('.workspace-layout-body')!
+    Object.defineProperty(body, 'clientWidth', { configurable: true, value: 500 })
+    const handle = separator()!
+    handle.setPointerCapture = () => undefined
+    handle.hasPointerCapture = () => true
+    handle.releasePointerCapture = () => undefined
+
+    act(() => handle.dispatchEvent(pointerEvent('pointerdown', 300)))
+    act(() => handle.dispatchEvent(pointerEvent('pointermove', 100)))
+    act(() => handle.dispatchEvent(pointerEvent('pointerup', 100)))
+
+    expect(content().style.marginRight).toBe('220px')
+    expect(navigator()?.getAttribute('data-open')).toBe('true')
+  })
+
+  it('keeps one ResizeObserver while the navigator is dragged', () => {
+    let observerCount = 0
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor() {
+          observerCount += 1
+        }
+        observe(): void {}
+        disconnect(): void {}
+        unobserve(): void {}
+      }
+    )
+    render(true, createElement('div'))
+    const handle = separator()!
+    handle.setPointerCapture = () => undefined
+
+    act(() => handle.dispatchEvent(pointerEvent('pointerdown', 300)))
+    act(() => handle.dispatchEvent(pointerEvent('pointermove', 280)))
+    act(() => handle.dispatchEvent(pointerEvent('pointermove', 260)))
+
+    expect(observerCount).toBe(1)
+  })
+
+  it('reports navigator width only when the width changes', () => {
+    const onNavigatorWidthChange = vi.fn()
+    const navigatorNode = createElement('div')
+    act(() =>
+      root.render(
+        createElement(
+          WorkspaceLayout,
+          { navigator: navigatorNode, navigatorOpen: true, onNavigatorWidthChange },
+          createElement('div')
+        )
+      )
+    )
+    expect(onNavigatorWidthChange).toHaveBeenCalledTimes(1)
+
+    act(() =>
+      root.render(
+        createElement(
+          WorkspaceLayout,
+          {
+            animating: true,
+            navigator: navigatorNode,
+            navigatorOpen: true,
+            onNavigatorWidthChange
+          },
+          createElement('div')
+        )
+      )
+    )
+
+    expect(onNavigatorWidthChange).toHaveBeenCalledTimes(1)
+    press(separator()!, 'ArrowLeft')
+    expect(onNavigatorWidthChange).toHaveBeenCalledTimes(2)
+    expect(onNavigatorWidthChange).toHaveBeenLastCalledWith(210)
+  })
+
   it('ignores non-primary pointer buttons', () => {
     render(true, createElement('div'))
     const handle = separator()!
@@ -107,12 +185,58 @@ describe('WorkspaceLayout', () => {
     expect(container.querySelector('.workspace-layout')?.hasAttribute('data-resizing')).toBe(false)
   })
 
-  function render(navigatorOpen: boolean, navigator?: ReactNode): void {
+  it('preserves navigator visibility while an inactive tab measures zero width', () => {
+    const notifyResize = stubResizeObserver()
+    render(true, createElement('div'))
+    const body = container.querySelector<HTMLElement>('.workspace-layout-body')!
+
+    Object.defineProperty(body, 'clientWidth', { configurable: true, value: 700 })
+    act(notifyResize)
+    expect(content().style.marginRight).toBe('200px')
+
+    Object.defineProperty(body, 'clientWidth', { configurable: true, value: 0 })
+    act(notifyResize)
+    expect(content().style.marginRight).toBe('200px')
+    expect(navigator()?.getAttribute('data-open')).toBe('true')
+  })
+
+  it('ignores intermediate widths during the outer workbench animation', () => {
+    const notifyResize = stubResizeObserver()
+    render(true, createElement('div'))
+    const body = container.querySelector<HTMLElement>('.workspace-layout-body')!
+    Object.defineProperty(body, 'clientWidth', { configurable: true, value: 700 })
+    act(notifyResize)
+
+    render(true, createElement('div'), true)
+    Object.defineProperty(body, 'clientWidth', { configurable: true, value: 400 })
+    act(notifyResize)
+
+    expect(content().style.marginRight).toBe('200px')
+    expect(navigator()?.getAttribute('data-open')).toBe('true')
+  })
+
+  it('hides the navigator when constrained and restores it when space returns', () => {
+    const notifyResize = stubResizeObserver()
+    render(true, createElement('div'))
+    const body = container.querySelector<HTMLElement>('.workspace-layout-body')!
+
+    Object.defineProperty(body, 'clientWidth', { configurable: true, value: 400 })
+    act(notifyResize)
+    expect(content().style.marginRight).toBe('0px')
+    expect(navigator()?.hasAttribute('data-open')).toBe(false)
+
+    Object.defineProperty(body, 'clientWidth', { configurable: true, value: 700 })
+    act(notifyResize)
+    expect(content().style.marginRight).toBe('200px')
+    expect(navigator()?.getAttribute('data-open')).toBe('true')
+  })
+
+  function render(navigatorOpen: boolean, navigator?: ReactNode, animating = false): void {
     act(() =>
       root.render(
         createElement(
           WorkspaceLayout,
-          { navigator, navigatorOpen },
+          { animating, navigator, navigatorOpen },
           createElement('div', { 'data-content': true })
         )
       )
@@ -138,4 +262,20 @@ function press(element: HTMLElement, key: string): void {
 
 function pointerEvent(type: string, clientX: number, button = 0): Event {
   return new MouseEvent(type, { bubbles: true, button, clientX })
+}
+
+function stubResizeObserver(): () => void {
+  let notify = (): void => undefined
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      constructor(callback: ResizeObserverCallback) {
+        notify = () => callback([], this as unknown as ResizeObserver)
+      }
+      observe(): void {}
+      disconnect(): void {}
+      unobserve(): void {}
+    }
+  )
+  return () => notify()
 }

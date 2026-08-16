@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { FileStatusResult } from 'simple-git'
-import { createGitChangeTree } from '../../../../src/extensions/workspace/renderer/git-change-tree'
+import { createGitChangeTree } from '../../../../src/extensions/workspace/renderer/changes/git-change-tree'
 
 const status = (path: string, index: string, working_dir: string): FileStatusResult =>
   ({ path, index, working_dir }) as FileStatusResult
@@ -17,16 +17,13 @@ describe('createGitChangeTree', () => {
       {
         children: [
           {
-            kind: 'file',
-            loaded: true,
-            name: 'changed.ts',
-            path: 'D:\\workspace\\src\\changed.ts'
+            isLeaf: true,
+            key: 'D:\\workspace\\src\\changed.ts',
+            title: 'changed.ts'
           }
         ],
-        kind: 'directory',
-        loaded: true,
-        name: 'src',
-        path: 'D:\\workspace\\src'
+        key: 'D:\\workspace\\src',
+        title: 'src'
       }
     ])
   })
@@ -35,11 +32,8 @@ describe('createGitChangeTree', () => {
     expect(createGitChangeTree('/workspace', [status('/workspace/ignored', '!', '!')])).toEqual([
       {
         children: [],
-        kind: 'directory',
-        loaded: true,
-        name: 'workspace',
-        path: '/workspace',
-        root: true
+        key: '/workspace',
+        title: 'workspace'
       }
     ])
   })

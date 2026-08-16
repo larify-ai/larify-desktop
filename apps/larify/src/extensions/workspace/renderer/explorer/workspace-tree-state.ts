@@ -40,7 +40,9 @@ export const isDirectoryLoaded = (entries: DataNode[], directory: string): boole
   )
 
 export const initialExpandedKeys = (entries: DataNode[], changesOnly: boolean): string[] => {
-  if (!changesOnly) return []
+  if (!changesOnly) {
+    return entries.filter((entry) => !entry.isLeaf).map((entry) => String(entry.key))
+  }
   const keys: string[] = []
 
   const visit = (entry: DataNode, depth: number): void => {

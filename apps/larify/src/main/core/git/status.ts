@@ -1,7 +1,8 @@
 import path from 'node:path'
 import type { FileStatusResult } from 'simple-git'
 import { gitService, type GitService } from './core'
-import { isInside, resolveRepositoryRoot } from './repository'
+import { isPathInside } from '../../utils/path'
+import { resolveRepositoryRoot } from './repository'
 
 export async function status(
   workspaceRoot: string,
@@ -32,5 +33,5 @@ export async function status(
       path: path.resolve(repositoryRoot, file.path),
       from: file.from ? path.resolve(repositoryRoot, file.from) : undefined
     }))
-    .filter((file) => isInside(workspaceRoot, file.path))
+    .filter((file) => isPathInside(workspaceRoot, file.path))
 }

@@ -201,10 +201,10 @@ describe('initialExpandedKeys', () => {
     expect(initialExpandedKeys(entries, true)).toEqual(['/workspace'])
   })
 
-  it('keeps directories collapsed in the global view', () => {
+  it('opens the workspace root in the global view', () => {
     const entries = [directory('/workspace', [directory('/workspace/src', [])])]
 
-    expect(initialExpandedKeys(entries, false)).toEqual([])
+    expect(initialExpandedKeys(entries, false)).toEqual(['/workspace'])
   })
 })
 

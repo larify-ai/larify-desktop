@@ -10,14 +10,15 @@ import {
 } from '../../../../src/renderer/src/app/registry/workbench-renderers'
 
 describe('registerBuiltinRenderers', () => {
-  it('registers the terminal renderer with its default presentation', () => {
+  it('registers the builtin renderers with their default presentation', () => {
     const registry = new Registry()
     registerBuiltinRenderers(registry)
     const renderers = registry.get<WorkbenchRendererRegistry>(workbenchRendererRegistryToken)
 
     expect(renderers).toBeInstanceOf(WorkbenchRendererRegistry)
     expect(renderers?.get('terminal')).toMatchObject({ order: 10, title: '终端' })
-    expect(renderers?.list().map(([id]) => id)).toEqual(['terminal', 'browser'])
+    expect(renderers?.list().map(([id]) => id)).toEqual(['terminal', 'browser', 'workspace'])
+    expect(renderers?.get('workspace')).toMatchObject({ order: 30, title: '文件' })
     expect(renderers?.get('browser')).toMatchObject({ order: 20, title: '浏览器' })
     expect(renderers?.get('terminal')?.icon).toMatchObject({
       props: { 'aria-hidden': true }

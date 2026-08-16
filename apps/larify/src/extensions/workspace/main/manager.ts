@@ -1,9 +1,9 @@
 import type { Disposable } from '@shared/infra/disposable'
 import { addListener, notify, type Listener } from '../../../main/utils/listener'
-import type { DirectoryListing } from '../shared/types'
+import type { DirectoryListing, FileDescriptor } from '../shared/types'
 import { WorkspaceService } from './service'
 
-type ResourceChange = [number, string]
+type ResourceChange = [number, string, string]
 
 export class WorkspaceManager implements Disposable {
   private readonly changeListeners = new Set<Listener<ResourceChange>>()
@@ -16,14 +16,14 @@ export class WorkspaceManager implements Disposable {
   open(id: number, root: string): Disposable {
     if (this.workspaces.has(id)) throw new Error(`Workspace resource ${id} is already open`)
 
-    const service = new WorkspaceService(root, (directory) => {
+    const service = new WorkspaceService(root, (directory, changedPath) => {
       if (this.workspaces.get(id) === service) {
-        notify(this.changeListeners, id, directory)
+        notify(this.changeListeners, id, directory, changedPath)
       }
     })
     this.workspaces.set(id, service)
 
-    return { dispose: () => this.close(id) }
+    return { dispose: () => this.close(id, service) }
   }
 
   async list(id: number, directory?: string): Promise<DirectoryListing> {
@@ -35,14 +35,22 @@ export class WorkspaceManager implements Disposable {
     return this.requireWorkspace(id).reveal(file)
   }
 
+  readFile(id: number, file: string): Promise<string> {
+    return this.requireWorkspace(id).readFile(file)
+  }
+
+  inspectFile(id: number, file: string): Promise<FileDescriptor> {
+    return this.requireWorkspace(id).inspectFile(file)
+  }
+
   async dispose(): Promise<void> {
     await Promise.allSettled([...this.workspaces.keys()].map((id) => this.close(id)))
     this.changeListeners.clear()
   }
 
-  private async close(id: number): Promise<void> {
+  private async close(id: number, expected?: WorkspaceService): Promise<void> {
     const service = this.workspaces.get(id)
-    if (!service) return
+    if (!service || (expected && service !== expected)) return
     this.workspaces.delete(id)
     await service.dispose()
   }

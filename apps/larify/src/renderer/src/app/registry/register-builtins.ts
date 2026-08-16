@@ -4,10 +4,12 @@ import browserPlugin from '../../../../extensions/browser/renderer'
 import workspacePlugin from '../../../../extensions/workspace/renderer'
 import { RendererPluginHost, rendererPluginHostToken } from './renderer-plugins'
 import { WorkbenchRendererRegistry, workbenchRendererRegistryToken } from './workbench-renderers'
+import { PreviewRegistry, previewRegistryToken } from './file-previews'
 
 export function registerBuiltinRenderers(registry: Registry): void {
   const workbenchRenderers = new WorkbenchRendererRegistry(registry)
   registry.register(workbenchRendererRegistryToken, workbenchRenderers)
+  registry.register(previewRegistryToken, new PreviewRegistry())
   const host = new RendererPluginHost(registry)
   registry.register(rendererPluginHostToken, host)
   host.activate(terminalPlugin)

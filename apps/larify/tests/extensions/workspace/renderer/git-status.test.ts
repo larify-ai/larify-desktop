@@ -4,7 +4,7 @@ import type { FileStatusResult } from 'simple-git'
 import {
   createGitStatusColors,
   gitDecorationColorId
-} from '../../../../src/extensions/workspace/renderer/git-status'
+} from '../../../../src/extensions/workspace/renderer/changes/git-status'
 
 const status = (
   file: string,

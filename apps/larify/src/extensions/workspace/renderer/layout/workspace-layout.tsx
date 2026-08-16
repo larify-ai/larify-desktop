@@ -1,30 +1,89 @@
-import { useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import {
+  useLayoutEffect,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode
+} from 'react'
 
 const navigatorSize = { default: 200, min: 160, max: 320, step: 10 }
+const minimumContentWidth = 280
 const clampNavigatorWidth = (width: number): number =>
   Math.max(navigatorSize.min, Math.min(navigatorSize.max, width))
 
+interface LayoutState {
+  animating: boolean
+  navigatorWidth: number
+  visible: boolean
+}
+
+const measureNavigatorFit = (body: HTMLElement, state: LayoutState): boolean | undefined => {
+  if (state.animating || !state.visible || body.clientWidth === 0) return undefined
+  return body.clientWidth >= state.navigatorWidth + minimumContentWidth
+}
+
 interface WorkspaceLayoutProps {
+  animating?: boolean
   children: ReactNode
   navigator?: ReactNode
   navigatorOpen: boolean
+  onNavigatorWidthChange?(width: number): void
+  visible?: boolean
 }
 
 export function WorkspaceLayout({
+  animating = false,
   children,
   navigator,
-  navigatorOpen
+  navigatorOpen,
+  onNavigatorWidthChange,
+  visible = true
 }: WorkspaceLayoutProps): React.JSX.Element {
   const [navigatorWidth, setNavigatorWidth] = useState(navigatorSize.default)
+  const [navigatorFits, setNavigatorFits] = useState(true)
   const [resizingNavigator, setResizingNavigator] = useState(false)
+  const bodyRef = useRef<HTMLDivElement>(null)
+  const layoutStateRef = useRef<LayoutState>({ animating, navigatorWidth, visible })
   const resizeStart = useRef<{ pointerX: number; width: number } | null>(null)
   const showNavigator = navigator !== undefined && navigator !== null
-  const navigatorVisible = showNavigator && navigatorOpen
+  const navigatorVisible = showNavigator && navigatorOpen && navigatorFits
+
+  useLayoutEffect(() => {
+    layoutStateRef.current = { animating, navigatorWidth, visible }
+    const body = bodyRef.current
+    if (!body) return
+    const fits = measureNavigatorFit(body, layoutStateRef.current)
+    if (fits !== undefined) setNavigatorFits(fits)
+  }, [animating, navigatorWidth, visible])
+
+  useLayoutEffect(() => {
+    onNavigatorWidthChange?.(navigatorWidth)
+  }, [navigatorWidth, onNavigatorWidthChange])
+
+  useLayoutEffect(() => {
+    const body = bodyRef.current
+    if (!body) return
+    if (typeof ResizeObserver === 'undefined') return
+    const update = (): void => {
+      const fits = measureNavigatorFit(body, layoutStateRef.current)
+      if (fits !== undefined) setNavigatorFits(fits)
+    }
+    const observer = new ResizeObserver(update)
+    observer.observe(body)
+    update()
+    return () => observer.disconnect()
+  }, [])
+
+  const clampToAvailableWidth = (width: number): number => {
+    const bodyWidth = bodyRef.current?.clientWidth ?? 0
+    const availableWidth = bodyWidth > 0 ? bodyWidth - minimumContentWidth : navigatorSize.max
+    return clampNavigatorWidth(Math.min(width, Math.max(navigatorSize.min, availableWidth)))
+  }
 
   const resizeNavigator = (event: ReactPointerEvent<HTMLDivElement>): void => {
     const start = resizeStart.current
     if (!start) return
-    setNavigatorWidth(clampNavigatorWidth(start.width + start.pointerX - event.clientX))
+    setNavigatorWidth(clampToAvailableWidth(start.width + start.pointerX - event.clientX))
   }
   const stopResizing = (): void => {
     resizeStart.current = null
@@ -32,8 +91,12 @@ export function WorkspaceLayout({
   }
 
   return (
-    <div className="workspace-layout" data-resizing={resizingNavigator || undefined}>
-      <div className="workspace-layout-body">
+    <div
+      className="workspace-layout"
+      data-constrained={!navigatorFits || undefined}
+      data-resizing={resizingNavigator || undefined}
+    >
+      <div className="workspace-layout-body" ref={bodyRef}>
         <main
           className="workspace-layout-content"
           style={{ marginRight: navigatorVisible ? navigatorWidth : 0 }}
@@ -63,7 +126,7 @@ export function WorkspaceLayout({
                 if (!direction) return
                 event.preventDefault()
                 setNavigatorWidth((width) =>
-                  clampNavigatorWidth(width + direction * navigatorSize.step)
+                  clampToAvailableWidth(width + direction * navigatorSize.step)
                 )
               }}
               onLostPointerCapture={stopResizing}

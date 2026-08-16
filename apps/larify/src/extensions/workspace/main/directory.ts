@@ -6,7 +6,7 @@ import type { FileNode } from '../shared/types'
 export function toFileNode(directory: string, entry: Pick<Dirent, 'isFile' | 'name'>): FileNode {
   return {
     isLeaf: entry.isFile(),
-    key: path.join(directory, entry.name),
+    key: path.normalize(path.join(directory, entry.name)),
     title: entry.name
   }
 }
@@ -17,7 +17,7 @@ export function compareFileNodes(a: FileNode, b: FileNode): number {
 }
 
 export async function readDirectory(directory: string): Promise<FileNode[]> {
-  const target = await realpath(path.resolve(directory))
+  const target = path.normalize(await realpath(path.resolve(directory)))
 
   return (await readdir(target, { withFileTypes: true }))
     .filter((entry) => entry.name !== '.git' && (entry.isDirectory() || entry.isFile()))

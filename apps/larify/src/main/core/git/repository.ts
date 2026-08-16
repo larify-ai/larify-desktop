@@ -3,11 +3,6 @@ import type { SimpleGit } from 'simple-git'
 
 const repositoryRoots = new Map<string, string>()
 
-export const isInside = (root: string, candidate: string): boolean => {
-  const relative = path.relative(root, candidate)
-  return relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)
-}
-
 export async function resolveRepositoryRoot(
   workspaceRoot: string,
   git: SimpleGit

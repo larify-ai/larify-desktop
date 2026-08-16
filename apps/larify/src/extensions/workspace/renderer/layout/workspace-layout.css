@@ -51,8 +51,8 @@
 .workspace-layout-navigator:not([data-open]) {
   pointer-events: none;
 }
-.workspace-layout[data-resizing] .workspace-layout-content,
-.workspace-layout[data-resizing] .workspace-layout-navigator {
+.workspace-layout:is([data-resizing], [data-constrained]) .workspace-layout-content,
+.workspace-layout:is([data-resizing], [data-constrained]) .workspace-layout-navigator {
   transition: none;
 }
 .workspace-layout[data-resizing] {

@@ -9,6 +9,7 @@ import type { WorkbenchView } from './workbench-store'
 import { WorkbenchEmpty } from './workbench-empty'
 
 interface WorkbenchRendererSlotProps {
+  active?: boolean
   cwd: string
   onOpenTool(id: string): void
   onUpdateTab(id: number, tab: Partial<WorkbenchTabPresentation>): void
@@ -17,6 +18,7 @@ interface WorkbenchRendererSlotProps {
 }
 
 export function WorkbenchRenderer({
+  active = true,
   cwd,
   onOpenTool,
   onUpdateTab,
@@ -40,6 +42,7 @@ export function WorkbenchRenderer({
   const renderer = renderers?.get(view.rendererId)
   if (renderer) {
     return createElement(renderer.component, {
+      active,
       cwd,
       resourceId: view.resourceId,
       sessionId,

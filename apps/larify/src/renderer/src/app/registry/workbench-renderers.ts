@@ -3,6 +3,7 @@ import type { Disposable } from '@shared/infra/disposable'
 import { defineService, type Registry } from '@shared/infra/registry'
 
 export interface WorkbenchRendererProps {
+  active?: boolean
   cwd: string
   resourceId: number
   sessionId: string

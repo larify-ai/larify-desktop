@@ -1,7 +1,9 @@
 import { watch, type FSWatcher } from 'chokidar'
-import { realpath } from 'node:fs/promises'
+import { readFile, realpath, stat } from 'node:fs/promises'
 import path from 'node:path'
-import type { FileNode } from '../shared/types'
+import { fileTypeFromFile } from 'file-type'
+import { lookup } from 'mime-types'
+import type { FileDescriptor, FileNode } from '../shared/types'
 import { readDirectory } from './directory'
 import { resolveWorkspace } from './workspace'
 
@@ -9,7 +11,7 @@ export class WorkspaceService {
   private readonly root: Promise<string>
   private watcher: FSWatcher | null = null
 
-  constructor(root: string, onChange: (directory: string) => void) {
+  constructor(root: string, onChange: (directory: string, path: string) => void) {
     this.root = this.initialize(root, onChange)
   }
 
@@ -44,17 +46,39 @@ export class WorkspaceService {
     ]
   }
 
+  async readFile(file: string): Promise<string> {
+    const size = (await stat(file)).size
+    if (size > 20 * 1024 * 1024) {
+      throw new Error(`文件过大，无法预览（${(size / 1024 / 1024).toFixed(1)} MiB，最大 20 MiB）`)
+    }
+    return readFile(file, 'utf8')
+  }
+
+  async inspectFile(file: string): Promise<FileDescriptor> {
+    const normalized = path.normalize(file)
+    const detected = await fileTypeFromFile(normalized)
+    return {
+      binary: detected !== undefined,
+      mime: detected?.mime ?? (lookup(normalized) || 'application/octet-stream'),
+      path: normalized
+    }
+  }
+
   async dispose(): Promise<void> {
     await this.root.catch(() => undefined)
     await this.watcher?.close()
     this.watcher = null
   }
 
-  private async initialize(root: string, onChange: (directory: string) => void): Promise<string> {
+  private async initialize(
+    root: string,
+    onChange: (directory: string, path: string) => void
+  ): Promise<string> {
     const resolved = await resolveWorkspace(root)
     this.watcher = watch(resolved, { atomic: true, depth: 0, ignoreInitial: true })
     this.watcher.on('all', (_event, changedPath) => {
-      onChange(path.dirname(changedPath))
+      const normalized = path.normalize(changedPath)
+      onChange(path.dirname(normalized), normalized)
     })
     return resolved
   }

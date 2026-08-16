@@ -1,130 +1,167 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import type { ImperativePanelHandle } from 'react-resizable-panels'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { FilesIcon } from 'lucide-react'
+import type { WorkbenchRendererProps } from '@renderer/app/registry/workbench-renderers'
 import {
-  ResizableHandle,
-  ResizablePanel,
-  ResizablePanelGroup
-} from '@renderer/components/ui/resizable'
-import { WorkspaceEmptyState } from './workspace-empty-state'
-import { workspaceEditorClient } from './workspace-editor-client'
-import { WorkspaceEditorViewport } from './workspace-editor-viewport'
-import { WorkspaceTree } from './workspace-tree'
-import { useGitDecorations } from './use-git-decorations'
-import { useWorkspaceExplorer } from './use-workspace-explorer'
-import { useAssistantSessions } from '@renderer/app/interaction/assistant/sessions-context'
-import { createGitChangeTree, createPathChangeTree } from './git-change-tree'
+  type WorkbenchAnimationState,
+  workbenchAnimationEvent,
+  workbenchStateRequestEvent
+} from '@renderer/app/layout/native-layout'
+import { useWorkbenchTabActions } from '@renderer/app/workbench/workbench-tab-actions'
+import { Button } from '@renderer/components/ui/button'
+import { WorkspaceTree } from './explorer/workspace-tree'
+import { ChangesIcon } from './changes/changes-icon'
+import { useGitDecorations } from './changes/use-git-decorations'
+import { useWorkspaceExplorer } from './explorer/use-workspace-explorer'
+import { createGitChangeTree, createPathChangeTree } from './changes/git-change-tree'
+import { WorkspaceLayout } from './layout/workspace-layout'
+import { EmptyFilePreview } from './preview/empty-file-preview'
 import {
   REVIEW_ROUND_EVENT,
-  resolveReviewPath,
   takeReviewRound,
   type ReviewRoundRequest
-} from './review-changes'
+} from './changes/review-changes'
 
-export function WorkspaceView(): React.JSX.Element {
-  const explorerRef = useRef<ImperativePanelHandle>(null)
-  const [explorerCollapsed, setExplorerCollapsed] = useState(false)
+const loadFilePreview = async (): Promise<{
+  default: typeof import('./preview/file-preview').FilePreview
+}> => {
+  const { FilePreview } = await import('./preview/file-preview')
+  return { default: FilePreview }
+}
+
+const FilePreview = lazy(loadFilePreview)
+
+type WorkspaceViewProps = Omit<WorkbenchRendererProps, 'cwd'>
+
+export function WorkspaceView({
+  active = false,
+  resourceId,
+  updateTab
+}: WorkspaceViewProps): React.JSX.Element {
   const [changesOnly, setChangesOnly] = useState(false)
-  const [activeFile, setActiveFile] = useState<string | null>(null)
-  const [editorRequested, setEditorRequested] = useState(false)
+  const [navigatorOpen, setNavigatorOpen] = useState(true)
+  const [navigatorWidth, setNavigatorWidth] = useState(200)
+  const [workbenchAnimating, setWorkbenchAnimating] = useState(false)
   const [workbenchVisible, setWorkbenchVisible] = useState(false)
+  const [lockedPreviewWidth, setLockedPreviewWidth] = useState<number | null>(null)
+  const previewRef = useRef<HTMLDivElement>(null)
+  const lastPreviewWidthRef = useRef(500)
+  const navigatorOpenRef = useRef(navigatorOpen)
+  const navigatorWidthRef = useRef(navigatorWidth)
+  const releasePreviewFrameRef = useRef<number | null>(null)
   const [revealPath, setRevealPath] = useState<string | null>(null)
-  const editorRootRef = useRef<string | null>(null)
-  const cwd = useAssistantSessions().activeSession.heading?.cwd ?? ''
-  const { entries, loadDirectory, revealFile, root } = useWorkspaceExplorer(cwd)
-  const {
-    available: gitAvailable,
-    decorations: gitDecorations,
-    statuses: gitStatuses
-  } = useGitDecorations(root)
-  const revealInTree = useCallback(
-    (path: string): void => {
-      setRevealPath(path)
-      void revealFile(path).catch((error) => console.error('[workspace:reveal-file]', error))
-    },
-    [revealFile]
+  const { entries, loadDirectory, revealFile, root } = useWorkspaceExplorer(resourceId)
+  const { decorations: gitDecorations, statuses: gitStatuses } = useGitDecorations(resourceId, root)
+  const tabActions = useMemo(
+    () => (
+      <>
+        <Button
+          aria-label={changesOnly ? '显示全部文件' : '仅显示变更文件'}
+          title={changesOnly ? '显示全部文件' : '仅显示变更文件'}
+          variant={changesOnly ? 'secondary' : 'ghost'}
+          size="icon-sm"
+          onClick={() => setChangesOnly(!changesOnly)}
+        >
+          <ChangesIcon className="size-4" />
+        </Button>
+        <Button
+          data-workspace-navigator-toggle
+          aria-label={navigatorOpen ? '隐藏目录树' : '显示目录树'}
+          title={navigatorOpen ? '隐藏目录树' : '显示目录树'}
+          variant={navigatorOpen ? 'secondary' : 'ghost'}
+          size="icon-sm"
+          onClick={() => {
+            setNavigatorOpen(!navigatorOpen)
+          }}
+        >
+          <FilesIcon className="size-4" />
+        </Button>
+      </>
+    ),
+    [changesOnly, navigatorOpen]
   )
+  useWorkbenchTabActions(tabActions)
 
   useEffect(() => {
-    const rootChanged = editorRootRef.current !== root
-    editorRootRef.current = root
-    if (rootChanged) {
-      setActiveFile(null)
-      setRevealPath(null)
+    navigatorOpenRef.current = navigatorOpen
+    navigatorWidthRef.current = navigatorWidth
+  }, [navigatorOpen, navigatorWidth])
+
+  useEffect(() => {
+    const updateAnimation = (event: Event): void => {
+      const { animating, visible } = (event as CustomEvent<WorkbenchAnimationState>).detail
+      if (animating) {
+        if (releasePreviewFrameRef.current !== null) {
+          cancelAnimationFrame(releasePreviewFrameRef.current)
+          releasePreviewFrameRef.current = null
+        }
+        if (!visible) {
+          const measuredWidth = previewRef.current?.getBoundingClientRect().width ?? 0
+          if (measuredWidth > 0) lastPreviewWidthRef.current = measuredWidth
+        }
+        setLockedPreviewWidth(lastPreviewWidthRef.current)
+      } else if (visible) {
+        let remainingFrames = 2
+        const releaseAtFinalWidth = (): void => {
+          const preview = previewRef.current
+          const pane = preview?.closest<HTMLElement>('.split-view-view')
+          const requiredWidth =
+            lastPreviewWidthRef.current + (navigatorOpenRef.current ? navigatorWidthRef.current : 0)
+          if (
+            pane &&
+            pane.getBoundingClientRect().width + 1 < requiredWidth &&
+            remainingFrames-- > 0
+          ) {
+            releasePreviewFrameRef.current = requestAnimationFrame(releaseAtFinalWidth)
+            return
+          }
+          releasePreviewFrameRef.current = null
+          setLockedPreviewWidth(null)
+        }
+        releaseAtFinalWidth()
+      } else {
+        setLockedPreviewWidth(null)
+      }
+      setWorkbenchAnimating(animating)
+      setWorkbenchVisible(visible)
     }
-    if (!root) return
-    void workspaceEditorClient
-      .prepare(root)
-      .catch((error) => console.error('[workspace-editor:prepare]', error))
-  }, [root])
-
-  useEffect(() => {
-    const disposeActive = workspaceEditorClient.onActive((file) => {
-      setEditorRequested(file !== null)
-      setActiveFile(file)
-      setRevealPath(file)
-    })
-    const disposeReveal = workspaceEditorClient.onReveal(revealInTree)
-    void workspaceEditorClient
-      .state()
-      .then(({ activeFile: file }) => {
-        if (!file) return
-        setEditorRequested(true)
-        setActiveFile(file)
-        setRevealPath(file)
-      })
-      .catch((error) => console.error('[workspace-editor:state]', error))
+    window.addEventListener(workbenchAnimationEvent, updateAnimation)
+    window.dispatchEvent(new Event(workbenchStateRequestEvent))
     return () => {
-      disposeActive()
-      disposeReveal()
+      if (releasePreviewFrameRef.current !== null) {
+        cancelAnimationFrame(releasePreviewFrameRef.current)
+      }
+      window.removeEventListener(workbenchAnimationEvent, updateAnimation)
     }
-  }, [revealInTree])
-
-  useEffect(() => {
-    const onActive = (event: Event): void =>
-      setWorkbenchVisible((event as CustomEvent<string | null>).detail === 'workspace')
-    window.addEventListener('larify:workbench-active', onActive)
-    window.dispatchEvent(new Event('larify:workbench-active-request'))
-    return () => window.removeEventListener('larify:workbench-active', onActive)
   }, [])
 
   useEffect(() => {
-    if (!activeFile) return
-    void revealFile(activeFile).catch((error) => console.error('[workspace:reveal-file]', error))
-  }, [activeFile, revealFile])
+    updateTab({ title: revealPath?.split(/[\\/]/).at(-1) ?? '文件' })
+  }, [revealPath, updateTab])
 
   useEffect(() => {
-    const openRound = (detail: ReviewRoundRequest): void => {
+    // Keep Monaco out of the application startup path, but warm its chunk as
+    // soon as the user opens the workspace so the first text file opens fast.
+    void Promise.all([loadFilePreview(), import('./preview/monaco-preview')]).catch(() => undefined)
+  }, [])
+
+  useEffect(() => {
+    const revealRound = (detail: ReviewRoundRequest): void => {
       const selected = detail.files.find((file) => file.path === detail.selectedPath)
       if (!root || !selected) return
-      const selectedPath = resolveReviewPath(root, selected.path)
       setChangesOnly(true)
-      setRevealPath(selectedPath)
-      setEditorRequested(true)
-      void workspaceEditorClient
-        .openHighlightedDiff(root, selectedPath, selected.patch)
-        .catch((error) => console.error('[workspace-editor:open-highlighted-diff]', error))
+      void revealFile(selected.path)
+        .then((path) => path && setRevealPath(path))
+        .catch((error) => console.error('[workspace:reveal-file]', error))
     }
     const onRound = (event: Event): void => {
-      openRound(takeReviewRound() ?? (event as CustomEvent<ReviewRoundRequest>).detail)
+      revealRound(takeReviewRound() ?? (event as CustomEvent<ReviewRoundRequest>).detail)
     }
 
     window.addEventListener(REVIEW_ROUND_EVENT, onRound)
     const currentRound = takeReviewRound()
-    if (currentRound) openRound(currentRound)
+    if (currentRound) revealRound(currentRound)
     return () => window.removeEventListener(REVIEW_ROUND_EVENT, onRound)
-  }, [root])
-
-  const openFile = useCallback(
-    (file: string): void => {
-      if (!root) return
-      setEditorRequested(true)
-      const request = changesOnly
-        ? workspaceEditorClient.openDiff(root, file)
-        : workspaceEditorClient.open(root, file)
-      void request.catch((error) => console.error('[workspace-editor:open]', error))
-    },
-    [changesOnly, root]
-  )
+  }, [revealFile, root])
 
   const treeEntries = root
     ? changesOnly
@@ -132,56 +169,46 @@ export function WorkspaceView(): React.JSX.Element {
       : createPathChangeTree(root, []).map((entry) => ({ ...entry, children: entries }))
     : []
 
+  if (!root) return <EmptyFilePreview />
+
   return (
-    <ResizablePanelGroup direction="horizontal" className="workspace-view bg-(--workbench-content)">
-      <ResizablePanel
-        ref={explorerRef}
-        collapsible
-        collapsedSize={0}
-        defaultSize={22}
-        minSize={14}
-        maxSize={36}
-        onCollapse={() => setExplorerCollapsed(true)}
-        onExpand={() => setExplorerCollapsed(false)}
+    <WorkspaceLayout
+      animating={workbenchAnimating}
+      navigatorOpen={navigatorOpen}
+      onNavigatorWidthChange={setNavigatorWidth}
+      visible={workbenchVisible}
+      navigator={
+        <WorkspaceTree
+          key={root}
+          changesOnly={changesOnly}
+          entries={treeEntries}
+          gitDecorations={gitDecorations}
+          revealPath={revealPath}
+          onOpen={setRevealPath}
+          onToggle={loadDirectory}
+        />
+      }
+    >
+      <div
+        className="h-full w-full"
+        data-preview-animating={workbenchAnimating || undefined}
+        ref={previewRef}
+        style={lockedPreviewWidth === null ? undefined : { width: lockedPreviewWidth }}
       >
-        <div className="flex h-full min-h-0 flex-col bg-secondary p-1.5">
-          {root ? (
-            <WorkspaceTree
-              key={root}
-              gitAvailable={gitAvailable}
-              gitDecorations={gitDecorations}
-              entries={treeEntries}
-              changesOnly={changesOnly}
-              onOpen={openFile}
-              onToggleView={() => setChangesOnly((current) => !current)}
-              onToggle={(entry) => {
-                void loadDirectory(entry).catch((error) =>
-                  console.error('[workspace:load-directory]', error)
-                )
-              }}
-              revealPath={revealPath}
+        {revealPath ? (
+          <Suspense fallback={null}>
+            <FilePreview
+              active={active && (workbenchVisible || workbenchAnimating)}
+              animating={workbenchAnimating}
+              key={`${resourceId}:${revealPath}`}
+              resourceId={resourceId}
+              path={revealPath}
             />
-          ) : (
-            <div className="flex-1" />
-          )}
-        </div>
-      </ResizablePanel>
-      <ResizableHandle
-        aria-label="调整文件树宽度"
-        className={explorerCollapsed ? 'bg-transparent' : undefined}
-        onDoubleClick={() =>
-          explorerCollapsed ? explorerRef.current?.expand() : explorerRef.current?.collapse()
-        }
-      />
-      <ResizablePanel minSize={40}>
-        <div className="h-full bg-(--workbench-content)">
-          {editorRequested ? (
-            <WorkspaceEditorViewport visible={workbenchVisible} />
-          ) : (
-            <WorkspaceEmptyState />
-          )}
-        </div>
-      </ResizablePanel>
-    </ResizablePanelGroup>
+          </Suspense>
+        ) : (
+          <EmptyFilePreview />
+        )}
+      </div>
+    </WorkspaceLayout>
   )
 }

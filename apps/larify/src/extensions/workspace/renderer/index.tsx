@@ -1,66 +1,70 @@
 import { lazy, Suspense } from 'react'
-import type { Extension } from '@shared/extension'
-import type { View } from '@renderer/types/view'
+import { FileText } from 'lucide-react'
+import type { RendererPlugin } from '@renderer/app/registry/renderer-plugins'
+import {
+  type WorkbenchRendererRegistry,
+  workbenchRendererRegistryToken
+} from '@renderer/app/registry/workbench-renderers'
 import './workspace.css'
-import { WorkspaceEmptyState } from './workspace-empty-state'
-import { workspaceEditorClient } from './workspace-editor-client'
-import { WorkspaceIcon } from './workspace-icon'
+import './layout/workspace-layout.css'
+import { EmptyFilePreview } from './preview/empty-file-preview'
+import { type PreviewRegistry, previewRegistryToken } from '@renderer/app/registry/file-previews'
+import { NativeFilePreview } from './preview/native-file-preview'
 
-let workspaceViewPromise: Promise<{
-  default: typeof import('./workspace-view').WorkspaceView
-}> | null = null
+const WorkspaceView = lazy(() =>
+  import('./workspace-view').then(({ WorkspaceView }) => ({ default: WorkspaceView }))
+)
+const MonacoPreview = lazy(() =>
+  import('./preview/monaco-preview').then(({ MonacoPreview }) => ({ default: MonacoPreview }))
+)
 
-const loadWorkspaceView = (): NonNullable<typeof workspaceViewPromise> => {
-  if (!workspaceViewPromise) {
-    const start = 'larify:workspace-view-load:start'
-    performance.mark(start)
-    workspaceViewPromise = import('./workspace-view')
-      .then(({ WorkspaceView }) => ({ default: WorkspaceView }))
-      .catch((error) => {
-        workspaceViewPromise = null
-        throw error
+const plugin: RendererPlugin = {
+  id: 'workspace',
+  activate({ registry, subscriptions }) {
+    const renderers = registry.get<WorkbenchRendererRegistry>(workbenchRendererRegistryToken)
+    if (!renderers) throw new Error('Workbench renderer registry is unavailable.')
+    const previews = registry.get<PreviewRegistry>(previewRegistryToken)
+    if (!previews) throw new Error('Preview registry is unavailable.')
+
+    subscriptions.push(
+      previews.register({
+        component: NativeFilePreview,
+        priority: 100,
+        supports: ({ mime }) =>
+          mime === 'application/pdf' ||
+          mime === 'text/html' ||
+          mime.startsWith('image/') ||
+          mime.startsWith('audio/') ||
+          mime.startsWith('video/')
+      }),
+      previews.register({
+        component: (props) => (
+          <Suspense fallback={null}>
+            <MonacoPreview {...props} />
+          </Suspense>
+        ),
+        supports: (file) => !file.binary || file.mime.startsWith('text/')
       })
-      .finally(() => {
-        performance.measure('larify:workspace-view-load', start)
-        performance.clearMarks(start)
+    )
+
+    subscriptions.push(
+      renderers.register('workspace', {
+        component: ({ active, resourceId, sessionId, updateTab }) => (
+          <Suspense fallback={<EmptyFilePreview />}>
+            <WorkspaceView
+              active={active ?? false}
+              resourceId={resourceId}
+              sessionId={sessionId}
+              updateTab={updateTab}
+            />
+          </Suspense>
+        ),
+        icon: <FileText aria-hidden />,
+        order: 30,
+        title: '文件'
       })
+    )
   }
-  return workspaceViewPromise
 }
 
-const WorkspaceView = lazy(loadWorkspaceView)
-
-const currentTheme = (): 'dark' | 'light' =>
-  document.documentElement.classList.contains('dark') ? 'dark' : 'light'
-
-const extension: Extension = {
-  activate(app, context) {
-    app.register('view', 'workspace', {
-      sidebar: {
-        icon: WorkspaceIcon,
-        id: 'workspace',
-        label: '审查',
-        order: 6,
-        placement: 'content'
-      },
-      render: () => (
-        <Suspense fallback={<WorkspaceEmptyState />}>
-          <WorkspaceView />
-        </Suspense>
-      )
-    } satisfies View)
-    const observer = new MutationObserver(() => {
-      void workspaceEditorClient
-        .theme(currentTheme())
-        .catch((error) => console.error('[workspace:editor-theme]', error))
-    })
-    observer.observe(document.documentElement, { attributeFilter: ['class'] })
-    context.subscriptions.push({
-      dispose: () => {
-        observer.disconnect()
-      }
-    })
-  }
-}
-
-export default extension
+export default plugin

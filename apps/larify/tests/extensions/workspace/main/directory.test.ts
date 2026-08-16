@@ -3,9 +3,9 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
-  compareFileInfo,
+  compareFileNodes,
   readDirectory,
-  toFileInfo
+  toFileNode
 } from '../../../../src/extensions/workspace/main/directory'
 
 const roots: string[] = []
@@ -23,7 +23,7 @@ afterEach(async () => {
 describe('workspace directory', () => {
   it('converts directory entries to tree nodes', () => {
     expect(
-      toFileInfo('C:\\work', {
+      toFileNode('C:\\work', {
         isFile: () => true,
         name: 'file.txt'
       })
@@ -37,7 +37,7 @@ describe('workspace directory', () => {
       { isLeaf: true, key: '2', title: '2.txt' }
     ]
 
-    expect(entries.sort(compareFileInfo).map(({ title }) => title)).toEqual([
+    expect(entries.sort(compareFileNodes).map(({ title }) => title)).toEqual([
       'src',
       '2.txt',
       '10.txt'

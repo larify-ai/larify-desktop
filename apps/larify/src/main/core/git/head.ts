@@ -1,6 +1,7 @@
 import path from 'node:path'
 import { gitService, type GitService } from './core'
-import { isInside, resolveRepositoryRoot } from './repository'
+import { isPathInside } from '../../utils/path'
+import { resolveRepositoryRoot } from './repository'
 
 export async function head(
   workspaceRoot: string,
@@ -10,7 +11,7 @@ export async function head(
   const git = await runtime.open(workspaceRoot)
   const repositoryRoot = await resolveRepositoryRoot(workspaceRoot, git)
   const target = path.resolve(file)
-  if (!isInside(workspaceRoot, target) || !isInside(repositoryRoot, target)) {
+  if (!isPathInside(workspaceRoot, target) || !isPathInside(repositoryRoot, target)) {
     throw new Error('Path is outside the workspace repository')
   }
 

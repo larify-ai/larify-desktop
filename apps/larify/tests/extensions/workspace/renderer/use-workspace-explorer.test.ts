@@ -428,6 +428,25 @@ describe('useWorkspaceExplorer', () => {
     expect(workspace.readDirectory).not.toHaveBeenCalledWith('D:\\workspace\\old')
   })
 
+  it('cancels a pending reveal when unmounted', async () => {
+    let resolveReveal: ((value: string[]) => void) | undefined
+    workspace.reveal.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveReveal = resolve
+        })
+    )
+
+    const reveal = explorer.revealFile('D:\\workspace\\old\\file.ts')
+    act(() => root.unmount())
+    await act(async () => {
+      resolveReveal?.(['D:\\workspace\\old', 'D:\\workspace\\old\\file.ts'])
+    })
+
+    await expect(reveal).resolves.toBeUndefined()
+    expect(workspace.readDirectory).not.toHaveBeenCalledWith('D:\\workspace\\old')
+  })
+
   it('does not reveal through a directory load superseded by a failed refresh', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     let resolveReveal:

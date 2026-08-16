@@ -59,16 +59,19 @@ describe('workbench layout specification', () => {
     expect(panels).not.toContain('workbench.ref')
   })
 
-  it('uses the Codex panel widths and preserves the dialogue minimum', () => {
+  it('uses responsive panel widths and preserves both pane minimums', () => {
     expect(panels).not.toContain('defaultSize="64%"')
     expect(layoutSpec.interaction.minSize).toBe(336)
-    expect(layoutSpec.workbench).toEqual({ defaultSize: 500, minSize: 280 })
+    expect(layoutSpec.workbench).toEqual({ defaultSize: 700, minSize: 280 })
     expect(layoutSpec.workbench).not.toHaveProperty('maxSize')
     expect(expandedContentMinSize).toBe(616)
     expect(panels).toContain('minSize={layoutSpec.interaction.minSize}')
     expect(panels).toContain('preferredSize={layoutSpec.workbench.defaultSize}')
+    expect(panels).not.toContain('preferredWorkbenchSize')
+    expect(panels).not.toContain('workbenchExtraSize')
     expect(panels).not.toContain('panelRef=')
     expect(panels.match(/proportionalLayout=\{false\}/g)).toHaveLength(2)
+    expect(panels.match(/onChange=\{notifyNativeLayout\}/g)).toHaveLength(2)
     expect(panels).toContain('id="content"')
     expect(panels).toContain('expandedContentMinSize')
   })

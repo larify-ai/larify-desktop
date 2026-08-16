@@ -1,3 +1,4 @@
+import { useLayoutEffect } from 'react'
 import { Allotment } from 'allotment'
 import 'allotment/dist/style.css'
 import { Interaction } from '../interaction/interaction'
@@ -8,6 +9,11 @@ import { WorkbenchHost } from '../workbench/workbench'
 import { expandedContentMinSize, layoutSpec, mainLayoutDefaultSizes } from './layout-spec'
 import { Titlebar } from './titlebar'
 import { useAllotmentToggle } from './use-allotment-toggle'
+import {
+  notifyNativeLayout,
+  notifyWorkbenchAnimation,
+  workbenchStateRequestEvent
+} from './native-layout'
 import './layout-panels.css'
 
 export function LayoutPanels(): React.JSX.Element {
@@ -15,6 +21,19 @@ export function LayoutPanels(): React.JSX.Element {
   const { heading } = activeSession
   const navigation = useAllotmentToggle()
   const workbench = useAllotmentToggle(true)
+
+  useLayoutEffect(() => {
+    const sendWorkbenchState = (): void => {
+      notifyWorkbenchAnimation({
+        animating: workbench.animating,
+        visible: !workbench.collapsed
+      })
+    }
+    sendWorkbenchState()
+    window.addEventListener(workbenchStateRequestEvent, sendWorkbenchState)
+    return () => window.removeEventListener(workbenchStateRequestEvent, sendWorkbenchState)
+  }, [workbench.animating, workbench.collapsed])
+
   const mainDefaultSizes = mainLayoutDefaultSizes(
     typeof window === 'undefined'
       ? layoutSpec.navigation.defaultSize + layoutSpec.interaction.minSize
@@ -25,6 +44,7 @@ export function LayoutPanels(): React.JSX.Element {
       className={`larify-allotment${navigation.animating ? ' larify-allotment-animated' : ''}`}
       defaultSizes={mainDefaultSizes}
       id="main"
+      onChange={notifyNativeLayout}
       proportionalLayout={false}
     >
       <Allotment.Pane
@@ -61,6 +81,7 @@ export function LayoutPanels(): React.JSX.Element {
               workbench.animating ? ' larify-allotment-animated' : ''
             }`}
             id="content"
+            onChange={notifyNativeLayout}
             onVisibleChange={(index, visible) => {
               if (index === 1) workbench.setCollapsed(!visible)
             }}

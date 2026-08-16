@@ -45,24 +45,6 @@ export default defineConfig({
     }
   },
   renderer: {
-    optimizeDeps: {
-      exclude: [
-        '@codingame/monaco-vscode-api',
-        '@codingame/monaco-vscode-configuration-service-override',
-        '@codingame/monaco-vscode-css-default-extension',
-        '@codingame/monaco-vscode-files-service-override',
-        '@codingame/monaco-vscode-html-default-extension',
-        '@codingame/monaco-vscode-json-default-extension',
-        '@codingame/monaco-vscode-languages-service-override',
-        '@codingame/monaco-vscode-markdown-basics-default-extension',
-        '@codingame/monaco-vscode-model-service-override',
-        '@codingame/monaco-vscode-textmate-service-override',
-        '@codingame/monaco-vscode-theme-defaults-default-extension',
-        '@codingame/monaco-vscode-theme-service-override',
-        '@codingame/monaco-vscode-typescript-basics-default-extension',
-        '@codingame/monaco-vscode-views-service-override'
-      ]
-    },
     resolve: {
       alias: {
         '@shared': resolve('src/shared'),

@@ -5,6 +5,7 @@ import { installShutdown } from './shutdown'
 import { registerSession } from '../core/session/open'
 import { registerAgent } from '../core/agent'
 import { registerAttachment } from '../core/attachment'
+import { registerGit } from '../core/git'
 import { registerResourceManager } from '../core/resource'
 import { registerPlugin } from '../core/plugin'
 import { registerTheme } from '../theme'
@@ -24,6 +25,7 @@ async function createApplication(electron: App): Promise<Application> {
   registerTheme(application)
   registerDialog(application)
   registerSession(application)
+  registerGit(application)
   registerResourceManager(application)
   registerAttachment(application)
   await registerPlugin(application)

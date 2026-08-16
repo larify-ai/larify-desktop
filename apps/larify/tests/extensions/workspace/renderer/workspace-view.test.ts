@@ -2,178 +2,197 @@
 
 import { act, createElement, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, describe, expect, it, vi } from 'vitest'
-
-const editorClient = vi.hoisted(() => ({
-  onActive: vi.fn(() => vi.fn()),
-  onReveal: vi.fn(() => vi.fn()),
-  open: vi.fn().mockResolvedValue(undefined),
-  openDiff: vi.fn().mockResolvedValue(undefined),
-  openHighlightedDiff: vi.fn().mockResolvedValue(undefined),
-  prepare: vi.fn().mockResolvedValue(undefined),
-  state: vi.fn().mockResolvedValue({ activeFile: null }),
-  theme: vi.fn().mockResolvedValue(undefined)
-}))
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
-vi.mock('next-themes', () => ({
-  useTheme: () => ({ resolvedTheme: 'light' })
+const h = vi.hoisted(() => ({
+  actions: null as ReactNode,
+  filePreviewProps: null as Record<string, unknown> | null,
+  treeProps: null as Record<string, unknown> | null
 }))
 
-vi.mock('@renderer/components/ui/resizable', () => ({
-  ResizableHandle: () => null,
-  ResizablePanel: ({ children }: { children: ReactNode }) => createElement('div', null, children),
-  ResizablePanelGroup: ({ children }: { children: ReactNode }) =>
-    createElement('div', null, children)
+vi.mock('@renderer/app/workbench/workbench-tab-actions', () => ({
+  useWorkbenchTabActions: (actions: ReactNode) => {
+    h.actions = actions
+  }
 }))
 
-vi.mock('../../../../src/extensions/workspace/renderer/workspace-editor-client', () => ({
-  workspaceEditorClient: editorClient
+vi.mock('@renderer/components/ui/button', () => ({
+  Button: ({ children, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) =>
+    createElement('button', props, children)
 }))
 
-vi.mock('../../../../src/extensions/workspace/renderer/use-git-decorations', () => ({
-  useGitDecorations: () => ({ available: true, decorations: new Map(), statuses: [] })
-}))
-
-vi.mock('../../../../src/extensions/workspace/renderer/use-workspace-explorer', () => ({
+vi.mock('../../../../src/extensions/workspace/renderer/explorer/use-workspace-explorer', () => ({
   useWorkspaceExplorer: () => ({
     entries: [],
     loadDirectory: vi.fn(),
-    revealFile: vi.fn(),
+    revealFile: vi.fn(async (path: string) => `D:\\workspace\\${path}`),
     root: 'D:\\workspace'
   })
 }))
 
-vi.mock('../../../../src/extensions/workspace/renderer/workspace-editor-viewport', () => ({
-  WorkspaceEditorViewport: () => null
+vi.mock('../../../../src/extensions/workspace/renderer/changes/use-git-decorations', () => ({
+  useGitDecorations: () => ({ decorations: new Map(), statuses: [] })
 }))
 
-vi.mock('../../../../src/extensions/workspace/renderer/workspace-tree', () => ({
-  WorkspaceTree: ({
-    changesOnly,
-    onOpen,
-    onToggleView,
-    revealPath
-  }: {
-    changesOnly: boolean
-    onOpen(file: string): void
-    onToggleView(): void
-    revealPath?: string | null
-  }) =>
+vi.mock('../../../../src/extensions/workspace/renderer/explorer/workspace-tree', () => ({
+  WorkspaceTree: (props: Record<string, unknown>) => {
+    h.treeProps = props
+    return createElement('div', { 'data-testid': 'tree' })
+  }
+}))
+
+vi.mock('../../../../src/extensions/workspace/renderer/layout/workspace-layout', () => ({
+  WorkspaceLayout: ({ children, navigator }: { children: ReactNode; navigator: ReactNode }) =>
     createElement(
       'div',
-      {
-        'data-changes-only': String(changesOnly),
-        'data-reveal-path': revealPath ?? ''
-      },
-      createElement('button', { onClick: () => onOpen('D:\\workspace\\file.ts') }, 'open'),
-      createElement('button', { onClick: onToggleView }, 'toggle')
+      { className: 'split-view-view', 'data-testid': 'layout' },
+      navigator,
+      children
     )
+}))
+
+vi.mock('../../../../src/extensions/workspace/renderer/preview/empty-file-preview', () => ({
+  EmptyFilePreview: () => createElement('div', { 'data-testid': 'empty' })
+}))
+
+vi.mock('../../../../src/extensions/workspace/renderer/preview/file-preview', () => ({
+  FilePreview: (props: Record<string, unknown>) => {
+    h.filePreviewProps = props
+    return createElement('div', { 'data-testid': 'preview' })
+  }
+}))
+
+vi.mock('../../../../src/extensions/workspace/renderer/preview/monaco-preview', () => ({
+  MonacoPreview: () => null
 }))
 
 import { WorkspaceView } from '../../../../src/extensions/workspace/renderer/workspace-view'
+import { setReviewRound } from '../../../../src/extensions/workspace/renderer/changes/review-changes'
 
 describe('WorkspaceView', () => {
+  let container: HTMLDivElement
   let root: Root
+  let actionsContainer: HTMLDivElement
+  let actionsRoot: Root
+  let frames: FrameRequestCallback[]
 
-  afterEach(() => {
-    vi.useRealTimers()
-    vi.clearAllMocks()
-    editorClient.openDiff.mockResolvedValue(undefined)
-    editorClient.state.mockResolvedValue({ activeFile: null })
-  })
-
-  it('prepares the editor as soon as the workspace is available', async () => {
-    const container = document.createElement('div')
-    root = createRoot(container)
-    await act(async () => root.render(createElement(WorkspaceView)))
-
-    expect(editorClient.theme).not.toHaveBeenCalled()
-    expect(editorClient.prepare).toHaveBeenCalledWith('D:\\workspace')
-    act(() => root.unmount())
-  })
-
-  it('disposes editor event listeners after unmount', async () => {
-    const disposeActive = vi.fn()
-    const disposeReveal = vi.fn()
-    editorClient.onActive.mockReturnValueOnce(disposeActive)
-    editorClient.onReveal.mockReturnValueOnce(disposeReveal)
-    const container = document.createElement('div')
-    root = createRoot(container)
-    await act(async () => root.render(createElement(WorkspaceView)))
-    act(() => root.unmount())
-
-    expect(disposeActive).toHaveBeenCalledOnce()
-    expect(disposeReveal).toHaveBeenCalledOnce()
-  })
-
-  it('opens regular files in the global view and allows retrying after a failure', async () => {
-    editorClient.open.mockRejectedValueOnce(new Error('failed'))
-    const container = document.createElement('div')
-    root = createRoot(container)
-    await act(async () => root.render(createElement(WorkspaceView)))
-
-    await act(async () => {
-      container.querySelector('button')?.click()
+  beforeEach(() => {
+    h.actions = null
+    h.filePreviewProps = null
+    h.treeProps = null
+    frames = []
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      frames.push(callback)
+      return frames.length
     })
-    await act(async () => {
-      container.querySelector('button')?.click()
-    })
-
-    expect(editorClient.open).toHaveBeenCalledTimes(2)
-    expect(editorClient.openDiff).not.toHaveBeenCalled()
-    act(() => root.unmount())
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    container = document.createElement('div')
+    actionsContainer = document.createElement('div')
+    document.body.append(container, actionsContainer)
+    root = createRoot(container)
+    actionsRoot = createRoot(actionsContainer)
   })
 
-  it('opens diffs in the changes view', async () => {
-    const container = document.createElement('div')
-    root = createRoot(container)
-    await act(async () => root.render(createElement(WorkspaceView)))
-    const buttons = container.querySelectorAll('button')
+  afterEach(async () => {
+    await act(async () => {
+      root.unmount()
+      actionsRoot.unmount()
+    })
+    container.remove()
+    actionsContainer.remove()
+    vi.unstubAllGlobals()
+  })
 
-    await act(async () => buttons[1]?.click())
-    await act(async () => buttons[0]?.click())
+  const render = async (active = true): Promise<void> => {
+    await act(async () => {
+      root.render(
+        createElement(WorkspaceView, {
+          active,
+          resourceId: 42,
+          sessionId: 'session-a',
+          updateTab: vi.fn()
+        })
+      )
+    })
+  }
 
-    expect(editorClient.openDiff).toHaveBeenCalledWith(
-      'D:\\workspace',
-      'D:\\workspace\\file.ts'
+  const renderActions = async (): Promise<void> => {
+    await act(async () => actionsRoot.render(createElement('div', null, h.actions)))
+  }
+
+  it('switches between all files and changed files from the tab action', async () => {
+    await render()
+    await renderActions()
+    expect(h.treeProps?.changesOnly).toBe(false)
+
+    await act(async () => actionsContainer.querySelector('button')!.click())
+    await renderActions()
+
+    expect(h.treeProps?.changesOnly).toBe(true)
+    expect(actionsContainer.querySelector('button')?.getAttribute('aria-label')).toBe(
+      '显示全部文件'
     )
-    expect(editorClient.open).not.toHaveBeenCalled()
-    act(() => root.unmount())
   })
 
-  it('opens a review card in the changes view and highlights its full workspace file', async () => {
-    const container = document.createElement('div')
-    root = createRoot(container)
-    await act(async () => root.render(createElement(WorkspaceView)))
+  it('releases a locked preview width after two frames in a permanently narrow pane', async () => {
+    await render()
+    const pane = container.querySelector<HTMLElement>('[data-testid="layout"]')!
+    vi.spyOn(pane, 'getBoundingClientRect').mockReturnValue({ width: 100 } as DOMRect)
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent('larify:workbench-animation', {
+          detail: { animating: true, visible: true }
+        })
+      )
+    })
+    const preview = container.querySelector<HTMLElement>('[data-preview-animating]')!
+    expect(preview.style.width).toBe('500px')
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent('larify:workbench-animation', {
+          detail: { animating: false, visible: true }
+        })
+      )
+    })
+    expect(frames).toHaveLength(1)
+
+    act(() => frames.shift()!(0))
+    act(() => frames.shift()!(0))
+
+    expect(preview.style.width).toBe('')
+  })
+
+  it('keeps a reviewed file preview inactive until its workbench tab is active and visible', async () => {
+    await render(false)
+    await act(async () => {
+      setReviewRound({
+        files: [{ additions: 1, deletions: 0, patch: '', path: 'file.ts' }],
+        selectedPath: 'file.ts'
+      })
+      await Promise.resolve()
+    })
+    expect(h.filePreviewProps?.active).toBe(false)
 
     await act(async () => {
+      root.render(
+        createElement(WorkspaceView, {
+          active: true,
+          resourceId: 42,
+          sessionId: 'session-a',
+          updateTab: vi.fn()
+        })
+      )
       window.dispatchEvent(
-        new CustomEvent('larify:review-round', {
-          detail: {
-            files: [
-              {
-                additions: 1,
-                deletions: 0,
-                patch: '@@ -1 +1 @@',
-                path: 'src\\file.ts'
-              }
-            ],
-            selectedPath: 'src\\file.ts'
-          }
+        new CustomEvent('larify:workbench-animation', {
+          detail: { animating: false, visible: true }
         })
       )
     })
 
-    expect(editorClient.openHighlightedDiff).toHaveBeenCalledWith(
-      'D:\\workspace',
-      'D:\\workspace\\src\\file.ts',
-      '@@ -1 +1 @@'
-    )
-    const tree = container.querySelector('[data-changes-only]')
-    expect(tree?.getAttribute('data-changes-only')).toBe('true')
-    expect(tree?.getAttribute('data-reveal-path')).toBe('D:\\workspace\\src\\file.ts')
-    act(() => root.unmount())
+    expect(h.filePreviewProps?.active).toBe(true)
   })
 })

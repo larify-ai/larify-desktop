@@ -13,9 +13,12 @@ export function useAllotmentToggle(initiallyCollapsed = false): {
   const [collapsed, setCollapsed] = useState(initiallyCollapsed)
   const toggle = (): void => {
     window.clearTimeout(animationTimer.current)
-    setAnimating(true)
+    const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+    setAnimating(!reduceMotion)
     setCollapsed((current) => !current)
-    animationTimer.current = window.setTimeout(() => setAnimating(false), animationDuration)
+    animationTimer.current = reduceMotion
+      ? undefined
+      : window.setTimeout(() => setAnimating(false), animationDuration)
   }
 
   useEffect(() => () => window.clearTimeout(animationTimer.current), [])

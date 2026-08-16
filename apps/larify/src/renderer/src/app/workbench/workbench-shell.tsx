@@ -70,7 +70,10 @@ export function WorkbenchShell({
         )}
         {views.map((view) => (
           <div
-            className={view.id === activeViewId ? 'h-full' : 'hidden'}
+            aria-hidden={view.id !== activeViewId}
+            className={`absolute inset-0 h-full ${
+              view.id === activeViewId ? 'opacity-100' : 'pointer-events-none opacity-0'
+            }`}
             data-active={view.id === activeViewId || undefined}
             data-resource-id={view.resourceId}
             data-view-id={view.id}
@@ -79,6 +82,7 @@ export function WorkbenchShell({
           >
             <WorkbenchTabActionScope active={view.id === activeViewId}>
               <WorkbenchRenderer
+                active={view.id === activeViewId}
                 cwd={cwd}
                 onOpenTool={onOpenTool}
                 onUpdateTab={updateTab}

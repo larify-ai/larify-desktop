@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, createElement } from 'react'
+import { act, createElement, useEffect } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Registry } from '../../../../src/shared/infra/registry'
@@ -9,7 +9,7 @@ import {
   WorkbenchRendererRegistry,
   workbenchRendererRegistryToken
 } from '../../../../src/renderer/src/app/registry/workbench-renderers'
-import { Workbench } from '../../../../src/renderer/src/app/workbench/workbench'
+import { Workbench, WorkbenchHost } from '../../../../src/renderer/src/app/workbench/workbench'
 
 describe('Workbench', () => {
   let container: HTMLDivElement
@@ -175,6 +175,111 @@ describe('Workbench', () => {
     expect(container.querySelectorAll('[data-tab-id]')).toHaveLength(1)
     expect(container.querySelector('[data-state="active"]')?.textContent).toContain('Terminal')
   })
+
+  it('creates a workspace resource for the current project root', async () => {
+    invoke.mockImplementation((channel: string) =>
+      Promise.resolve(channel === 'resource:create' ? 7 : [])
+    )
+    registry.get<WorkbenchRendererRegistry>(workbenchRendererRegistryToken)?.register('workspace', {
+      component: () => null,
+      icon: createElement('span'),
+      order: 30,
+      title: 'Files'
+    })
+    await renderWorkbench(root, registry, sessionId, 'D:\\Workspace')
+
+    await act(async () => {
+      Array.from(container.querySelectorAll<HTMLButtonElement>('button'))
+        .find((button) => button.textContent === 'Files')
+        ?.click()
+    })
+
+    expect(invoke).toHaveBeenCalledWith('resource:create', 'workspace', sessionId, {
+      root: 'D:\\Workspace'
+    })
+  })
+
+  it('keeps inactive tabs mounted and unmounts a closed tab', async () => {
+    const mounted: number[] = []
+    const unmounted: number[] = []
+    invoke.mockImplementation((channel: string) =>
+      Promise.resolve(
+        channel === 'resource:list'
+          ? [
+              { id: 7, sessionId, type: 'tracked' },
+              { id: 8, sessionId, type: 'tracked' }
+            ]
+          : undefined
+      )
+    )
+    registry.get<WorkbenchRendererRegistry>(workbenchRendererRegistryToken)?.register('tracked', {
+      component: function TrackedRenderer({ resourceId }) {
+        useEffect(() => {
+          mounted.push(resourceId)
+          return () => {
+            unmounted.push(resourceId)
+          }
+        }, [resourceId])
+        return createElement('div', { 'data-resource-id': resourceId })
+      },
+      icon: createElement('span'),
+      order: 10,
+      title: 'Tracked'
+    })
+
+    await renderWorkbench(root, registry, sessionId)
+
+    expect(mounted).toEqual([7, 8])
+    expect(container.querySelectorAll('[data-workbench-view]')).toHaveLength(2)
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('[data-tab-id="1"] .larify-workbench-tab-close')
+        ?.click()
+    })
+    expect(unmounted).toEqual([7])
+    expect(invoke).toHaveBeenCalledWith('resource:close', 7)
+  })
+
+  it('mounts only the active session and inactive sessions that own resources', async () => {
+    const mounted: number[] = []
+    const firstSessionId = sessionId
+    const secondSessionId = `session-${crypto.randomUUID()}`
+    invoke.mockResolvedValueOnce([{ id: 7, sessionId: secondSessionId, type: 'tracked' }])
+    registry.get<WorkbenchRendererRegistry>(workbenchRendererRegistryToken)?.register('tracked', {
+      component: function TrackedRenderer({ resourceId }) {
+        useEffect(() => {
+          mounted.push(resourceId)
+        }, [resourceId])
+        return null
+      },
+      icon: createElement('span'),
+      order: 10,
+      title: 'Tracked'
+    })
+    const sessions = [session(firstSessionId), session(secondSessionId)]
+
+    await act(async () => {
+      root.render(
+        createElement(
+          RendererRegistryProvider,
+          { registry },
+          createElement(WorkbenchHost, { activeId: firstSessionId, sessions })
+        )
+      )
+    })
+    expect(mounted).toEqual([7])
+
+    await act(async () => {
+      root.render(
+        createElement(
+          RendererRegistryProvider,
+          { registry },
+          createElement(WorkbenchHost, { activeId: secondSessionId, sessions })
+        )
+      )
+    })
+    expect(mounted).toEqual([7])
+  })
 })
 
 async function renderWorkbench(
@@ -216,3 +321,5 @@ function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
   })
   return { promise, resolve }
 }
+
+const session = (id: string): { cwd: string; id: string } => ({ cwd: `D:\\${id}`, id })

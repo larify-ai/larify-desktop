@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, createElement, useState } from 'react'
+import { act, createElement, useMemo, useState } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Disposable } from '../../../../src/shared/infra/disposable'
@@ -12,6 +12,7 @@ import {
   workbenchRendererRegistryToken
 } from '../../../../src/renderer/src/app/registry/workbench-renderers'
 import { WorkbenchShell } from '../../../../src/renderer/src/app/workbench/workbench-shell'
+import { useWorkbenchTabActions } from '../../../../src/renderer/src/app/workbench/workbench-tab-actions'
 
 describe('WorkbenchShell', () => {
   let container: HTMLDivElement
@@ -55,9 +56,12 @@ describe('WorkbenchShell', () => {
         )
       )
     })
-    expect(container.querySelector('[data-testid="workbench-placeholder"]')?.textContent).toBe(
-      'browser 2'
-    )
+    expect(
+      container.querySelector('[data-active] [data-testid="workbench-placeholder"]')?.textContent
+    ).toBe('browser 2')
+    expect(container.querySelector('[data-testid="workbench-empty"]')).toBeNull()
+    expect(container.querySelectorAll('[data-workbench-view].hidden')).toHaveLength(0)
+    expect(container.querySelectorAll('[data-workbench-view].opacity-0')).toHaveLength(1)
 
     await act(async () => {
       container
@@ -65,9 +69,9 @@ describe('WorkbenchShell', () => {
         ?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }))
     })
     expect(store.getState().activeViewId).toBe(first)
-    expect(container.querySelector('[data-testid="workbench-placeholder"]')?.textContent).toBe(
-      'terminal 1'
-    )
+    expect(
+      container.querySelector('[data-active] [data-testid="workbench-placeholder"]')?.textContent
+    ).toBe('terminal 1')
 
     await act(async () => {
       container
@@ -104,9 +108,9 @@ describe('WorkbenchShell', () => {
     })
 
     expect(store.getState().activeViewId).toBe(second)
-    expect(container.querySelector('[data-testid="workbench-placeholder"]')?.textContent).toBe(
-      'browser 2'
-    )
+    expect(
+      container.querySelector('[data-active] [data-testid="workbench-placeholder"]')?.textContent
+    ).toBe('browser 2')
   })
 
   it('renders a component registered for the active renderer id', async () => {
@@ -166,13 +170,22 @@ describe('WorkbenchShell', () => {
         createElement(
           RendererRegistryProvider,
           { registry },
-          createElement(WorkbenchShell, { onOpenTool: vi.fn(), sessionId: 'session-1', store })
+          createElement(WorkbenchShell, {
+            cwd: 'D:\\workspace',
+            onOpenTool: vi.fn(),
+            sessionId: 'session-1',
+            store
+          })
         )
       )
     })
 
     expect(bindTab).toHaveBeenCalledWith(
-      expect.objectContaining({ resourceId: 7, sessionId: 'session-1' })
+      expect.objectContaining({
+        cwd: 'D:\\workspace',
+        resourceId: 7,
+        sessionId: 'session-1'
+      })
     )
     expect(store.getState().activeViewId).toBeNull()
     expect(store.getState().views[0].title).toBe('PowerShell')
@@ -180,6 +193,50 @@ describe('WorkbenchShell', () => {
     await act(async () => root.unmount())
     expect(dispose).toHaveBeenCalledOnce()
     root = createRoot(container)
+  })
+
+  it('ignores tab updates from a disposed binding', async () => {
+    const updates: Array<(tab: { title: string }) => void> = []
+    const dispose = vi.fn()
+    registry.get<WorkbenchRendererRegistry>(workbenchRendererRegistryToken)?.register('terminal', {
+      bindTab: ({ updateTab }) => {
+        updates.push(updateTab)
+        return { dispose }
+      },
+      component: vi.fn(() => null),
+      icon: null,
+      order: 10,
+      title: 'Terminal'
+    })
+    const store = createWorkbenchStore()
+    const viewId = store.getState().openView({ rendererId: 'terminal', resourceId: 7 })
+
+    const render = async (cwd: string): Promise<void> => {
+      await act(async () => {
+        root.render(
+          createElement(
+            RendererRegistryProvider,
+            { registry },
+            createElement(WorkbenchShell, {
+              cwd,
+              onOpenTool: vi.fn(),
+              sessionId: 'session-1',
+              store
+            })
+          )
+        )
+      })
+    }
+
+    await render('D:\\first')
+    await render('D:\\second')
+    expect(dispose).toHaveBeenCalledOnce()
+
+    await act(async () => {
+      updates[0]({ title: 'Stale' })
+      updates[1]({ title: 'Current' })
+    })
+    expect(store.getState().views.find((view) => view.id === viewId)?.title).toBe('Current')
   })
 
   it('renders the shared tool launcher and forwards its selection', async () => {
@@ -238,6 +295,9 @@ describe('WorkbenchShell', () => {
     expect(store.getState().activeViewId).toBeNull()
     expect(store.getState().views).toHaveLength(1)
     expect(container.querySelector('[data-testid="workbench-empty"]')).not.toBeNull()
+    expect(container.querySelector('[data-workbench-view]')?.classList.contains('opacity-0')).toBe(
+      true
+    )
     expect(document.querySelector('[role="menu"]')).toBeNull()
   })
 
@@ -311,7 +371,7 @@ describe('WorkbenchShell', () => {
     })
     const store = createWorkbenchStore()
     const first = store.getState().openView({ rendererId: 'terminal', resourceId: 1 })
-    store.getState().openView({ rendererId: 'terminal', resourceId: 2 })
+    const second = store.getState().openView({ rendererId: 'terminal', resourceId: 2 })
     await act(async () => {
       root.render(
         createElement(
@@ -321,11 +381,55 @@ describe('WorkbenchShell', () => {
         )
       )
     })
-    expect(container.querySelector('[data-testid="renderer-state"]')?.textContent).toBe('2')
+    expect(
+      container.querySelector('[data-active] [data-testid="renderer-state"]')?.textContent
+    ).toBe('2')
+
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('[data-active] [data-testid="renderer-state"]')
+        ?.click()
+    })
 
     await act(async () => store.getState().selectView(first))
 
-    expect(container.querySelector('[data-testid="renderer-state"]')?.textContent).toBe('1')
+    expect(
+      container.querySelector('[data-active] [data-testid="renderer-state"]')?.textContent
+    ).toBe('1')
+
+    await act(async () => store.getState().selectView(second))
+    expect(
+      container.querySelector('[data-active] [data-testid="renderer-state"]')?.textContent
+    ).toBe('3')
+  })
+
+  it('shows tab actions only for the active renderer', async () => {
+    registry.get<WorkbenchRendererRegistry>(workbenchRendererRegistryToken)?.register('workspace', {
+      component: TabActionRenderer,
+      icon: createElement('span'),
+      order: 10,
+      title: 'Workspace'
+    })
+    const store = createWorkbenchStore()
+    const first = store.getState().openView({ rendererId: 'workspace', resourceId: 1 })
+    store.getState().openView({ rendererId: 'workspace', resourceId: 2 })
+
+    await act(async () => {
+      root.render(
+        createElement(
+          RendererRegistryProvider,
+          { registry },
+          createElement(WorkbenchShell, { onOpenTool: vi.fn(), store })
+        )
+      )
+    })
+    expect(container.querySelector('[data-testid="tab-action"]')?.textContent).toBe('action 2')
+
+    await act(async () => store.getState().selectView(first))
+    expect(container.querySelector('[data-testid="tab-action"]')?.textContent).toBe('action 1')
+
+    await act(async () => store.getState().showLauncher())
+    expect(container.querySelector('[data-testid="tab-action"]')).toBeNull()
   })
 
   it('applies renderer tab updates to the currently rendered view', async () => {
@@ -358,7 +462,9 @@ describe('WorkbenchShell', () => {
     })
 
     await act(async () => {
-      container.querySelector<HTMLButtonElement>('[data-testid="update-renderer-tab"]')?.click()
+      container
+        .querySelector<HTMLButtonElement>('[data-active] [data-testid="update-renderer-tab"]')
+        ?.click()
     })
 
     expect(store.getState().views.find((view) => view.id === first)?.title).toBe('Terminal 1')
@@ -367,8 +473,21 @@ describe('WorkbenchShell', () => {
 })
 
 function StatefulTestRenderer({ resourceId }: { resourceId: number }): React.JSX.Element {
-  const [initialResourceId] = useState(resourceId)
-  return createElement('span', { 'data-testid': 'renderer-state' }, initialResourceId)
+  const [value, setValue] = useState(resourceId)
+  return createElement(
+    'button',
+    { 'data-testid': 'renderer-state', onClick: () => setValue((current) => current + 1) },
+    value
+  )
+}
+
+function TabActionRenderer({ resourceId }: { resourceId: number }): React.JSX.Element {
+  const action = useMemo(
+    () => createElement('span', { 'data-testid': 'tab-action' }, `action ${resourceId}`),
+    [resourceId]
+  )
+  useWorkbenchTabActions(action)
+  return createElement('span', null, resourceId)
 }
 
 class ResizeObserverMock {

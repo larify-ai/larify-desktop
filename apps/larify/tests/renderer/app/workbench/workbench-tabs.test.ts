@@ -239,7 +239,7 @@ describe('WorkbenchTabs', () => {
     expect(scroller.getAttribute('data-scroll-edges')).toBe('left')
   })
 
-  it('offers close-others and close-right actions', async () => {
+  it('offers the close-right action', async () => {
     const onClose = vi.fn()
     await renderTabs({ onClose })
     const tab = container.querySelector<HTMLElement>('[data-tab-id="terminal:1"]')!
@@ -257,12 +257,11 @@ describe('WorkbenchTabs', () => {
     })
 
     const items = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]'))
-    expect(items.map((item) => item.textContent)).toEqual(['关闭其他标签页', '关闭右侧标签页'])
+    expect(items.map((item) => item.textContent)).toEqual(['关闭右侧标签页'])
     const menu = document.querySelector<HTMLElement>('.larify-workbench-tab-menu')
-    expect(menu?.style.width).toBe('160px')
     expect(menu?.dataset.side).toBe('bottom')
 
-    await act(async () => items[1].click())
+    await act(async () => items[0].click())
     expect(onClose).toHaveBeenCalledWith('browser:1')
   })
 

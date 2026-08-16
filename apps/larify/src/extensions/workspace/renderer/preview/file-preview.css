@@ -1,0 +1,3 @@
+.workspace-file-preview .monaco-editor .cursor {
+  display: none !important;
+}

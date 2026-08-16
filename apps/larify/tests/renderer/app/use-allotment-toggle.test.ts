@@ -13,13 +13,18 @@ function ToggleHarness({ initiallyCollapsed = false }): React.JSX.Element {
   const panel = useAllotmentToggle(initiallyCollapsed)
 
   return createElement(
-    'button',
-    {
-      'data-animating': panel.animating,
-      'data-collapsed': panel.collapsed,
-      onClick: panel.toggle
-    },
-    'toggle'
+    'div',
+    null,
+    createElement(
+      'button',
+      {
+        'data-animating': panel.animating,
+        'data-collapsed': panel.collapsed,
+        onClick: panel.toggle
+      },
+      'toggle'
+    ),
+    createElement('button', { onClick: () => panel.setCollapsed(true) }, 'collapse')
   )
 }
 
@@ -29,6 +34,10 @@ describe('useAllotmentToggle', () => {
 
   beforeEach(() => {
     vi.useFakeTimers()
+    vi.stubGlobal(
+      'matchMedia',
+      vi.fn(() => ({ matches: false }))
+    )
     container = document.createElement('div')
     document.body.append(container)
     root = createRoot(container)
@@ -37,11 +46,16 @@ describe('useAllotmentToggle', () => {
   afterEach(() => {
     act(() => root.unmount())
     container.remove()
+    vi.unstubAllGlobals()
     vi.useRealTimers()
   })
 
   function button(): HTMLButtonElement {
-    return container.querySelector('button')!
+    return buttons()[0]
+  }
+
+  function buttons(): HTMLButtonElement[] {
+    return [...container.querySelectorAll('button')]
   }
 
   it('starts expanded and toggles synchronously', () => {
@@ -71,6 +85,41 @@ describe('useAllotmentToggle', () => {
     expect(button().dataset.animating).toBe('true')
     act(() => vi.advanceTimersByTime(180))
     expect(button().dataset.animating).toBe('false')
+  })
+
+  it('restarts the animation timeout from the latest toggle', () => {
+    act(() => root.render(createElement(ToggleHarness)))
+
+    act(() => button().click())
+    act(() => vi.advanceTimersByTime(100))
+    act(() => button().click())
+    act(() => vi.advanceTimersByTime(179))
+    expect(button().dataset.animating).toBe('true')
+
+    act(() => vi.advanceTimersByTime(1))
+    expect(button().dataset.animating).toBe('false')
+  })
+
+  it('does not animate an externally synchronized collapsed state', () => {
+    act(() => root.render(createElement(ToggleHarness)))
+
+    act(() => buttons()[1].click())
+
+    expect(button().dataset.collapsed).toBe('true')
+    expect(button().dataset.animating).toBe('false')
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('toggles without an animation timer when reduced motion is requested', () => {
+    vi.mocked(window.matchMedia).mockReturnValue({ matches: true } as MediaQueryList)
+    act(() => root.render(createElement(ToggleHarness)))
+
+    act(() => button().click())
+
+    expect(window.matchMedia).toHaveBeenCalledWith('(prefers-reduced-motion: reduce)')
+    expect(button().dataset.collapsed).toBe('true')
+    expect(button().dataset.animating).toBe('false')
+    expect(vi.getTimerCount()).toBe(0)
   })
 
   it('clears the animation timer when unmounted', () => {

@@ -14,7 +14,7 @@ vi.mock('../../../src/renderer/src/app/navigation/navigation', () => ({
 }))
 
 vi.mock('../../../src/renderer/src/app/workbench/workbench', () => ({
-  Workbench: () => createElement('div', { 'data-region': 'workbench' })
+  WorkbenchHost: () => createElement('div', { 'data-region': 'workbench' })
 }))
 
 vi.mock('../../../src/renderer/src/app/interaction/assistant/sessions-context', () => ({
@@ -84,6 +84,19 @@ describe('layout with the real resizable component', () => {
   it('uses nested Allotment split views with workbench feedback styling', () => {
     expect(container.querySelectorAll('.larify-allotment')).toHaveLength(2)
     expect(container.querySelector('.larify-workbench-allotment')).not.toBeNull()
+  })
+
+  it('reports the current workbench animation state on request', () => {
+    const states: Array<{ animating: boolean; visible: boolean }> = []
+    const receiveState = (event: Event): void => {
+      states.push((event as CustomEvent<{ animating: boolean; visible: boolean }>).detail)
+    }
+    window.addEventListener('larify:workbench-animation', receiveState)
+
+    window.dispatchEvent(new Event('larify:workbench-state-request'))
+
+    expect(states).toEqual([{ animating: false, visible: false }])
+    window.removeEventListener('larify:workbench-animation', receiveState)
   })
 
   it('keeps pane content at its minimum width while the outer pane collapses', () => {

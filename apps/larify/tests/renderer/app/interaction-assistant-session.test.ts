@@ -36,6 +36,7 @@ describe('AssistantSession', () => {
   it('keeps the same chat when the workspace changes', async () => {
     const invoke = vi.fn().mockResolvedValue(undefined)
     const onSaved = vi.fn().mockResolvedValue(undefined)
+    const onCwdChange = vi.fn()
     Object.defineProperty(window, 'bridge', {
       configurable: true,
       value: { invoke, on: vi.fn(() => () => undefined) }
@@ -51,6 +52,7 @@ describe('AssistantSession', () => {
           initialMessages: [],
           initialMessageCount: 0,
           initialCwd: '',
+          onCwdChange,
           onHeadingChange: vi.fn(),
           onSaved
         })
@@ -78,6 +80,7 @@ describe('AssistantSession', () => {
     expect(mocks.chat).toHaveBeenCalledWith(expect.objectContaining({ id: 'session' }))
     expect(changed.chat).toBe(initial.chat)
     expect(changed.cwd).toBe('D:\\Workspace\\project')
+    expect(onCwdChange).toHaveBeenCalledWith('D:\\Workspace\\project')
 
     const stream = await initial.chat.options.transport.sendMessages({
       chatId: 'session',

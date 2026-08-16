@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, createElement, useEffect } from 'react'
+import { act, createElement, StrictMode, useEffect } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AssistantSessionsProvider } from '../../../../../src/renderer/src/app/interaction/assistant/sessions'
@@ -43,6 +43,7 @@ describe('AssistantSessionsProvider', () => {
   it('starts with one active draft', () => {
     expect(sessions.sessions).toEqual([
       {
+        cwd: '',
         id: sessions.activeId,
         heading: null,
         persisted: false,
@@ -53,12 +54,56 @@ describe('AssistantSessionsProvider', () => {
     expect(sessions.activeSession).toEqual(sessions.sessions[0])
   })
 
-  it('reuses the existing draft', async () => {
+  it('reuses the existing draft and closes its resources', async () => {
     const id = sessions.activeId
+    invoke.mockImplementation((channel: string) =>
+      Promise.resolve(channel === 'resource:list' ? [{ id: 7 }] : undefined)
+    )
     await act(async () => sessions.create())
 
     expect(sessions.activeId).toBe(id)
     expect(sessions.sessions).toHaveLength(1)
+    expect(invoke).toHaveBeenCalledWith('resource:list', { sessionId: id })
+    expect(invoke).toHaveBeenCalledWith('resource:close', 7)
+  })
+
+  it('closes draft resources only once when Strict Mode replays the update', async () => {
+    act(() => root.unmount())
+    root = createRoot(document.createElement('div'))
+    invoke.mockImplementation((channel: string) =>
+      Promise.resolve(channel === 'resource:list' ? [{ id: 7 }] : undefined)
+    )
+    await act(async () => {
+      root.render(
+        createElement(
+          StrictMode,
+          null,
+          createElement(AssistantSessionsProvider, null, createElement(Probe))
+        )
+      )
+    })
+
+    await act(async () => sessions.create())
+
+    expect(invoke.mock.calls.filter(([channel]) => channel === 'resource:list')).toHaveLength(1)
+    expect(invoke.mock.calls.filter(([channel]) => channel === 'resource:close')).toHaveLength(1)
+  })
+
+  it('allows resource cleanup to retry after a failure', async () => {
+    let attempts = 0
+    invoke.mockImplementation((channel: string) => {
+      if (channel !== 'resource:list') return Promise.resolve(undefined)
+      attempts += 1
+      return attempts === 1
+        ? Promise.reject(new Error('unavailable'))
+        : Promise.resolve([{ id: 7 }])
+    })
+
+    await act(async () => sessions.create())
+    await act(async () => sessions.create())
+
+    expect(invoke.mock.calls.filter(([channel]) => channel === 'resource:list')).toHaveLength(2)
+    expect(invoke).toHaveBeenCalledWith('resource:close', 7)
   })
 
   it('creates and selects a new draft after the current session starts', async () => {
@@ -170,6 +215,7 @@ describe('AssistantSessionsProvider', () => {
 
     expect(sessions.sessions).toEqual([
       {
+        cwd: 'D:\\One',
         id: firstId,
         heading: { cwd: 'D:\\One', title: 'First' },
         persisted: true,
@@ -177,6 +223,7 @@ describe('AssistantSessionsProvider', () => {
         messageCount: 0
       },
       {
+        cwd: 'D:\\Two',
         id: secondId,
         heading: { cwd: 'D:\\Two', title: 'Second' },
         persisted: false,

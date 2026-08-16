@@ -29,6 +29,15 @@ function createState(): SessionsState {
   return { sessions: [session], activeId: session.id }
 }
 
+const closeSessionResources = async (sessionId: string): Promise<void> => {
+  const resources = (await window.bridge.invoke('resource:list', { sessionId })) as Array<{
+    id: number
+  }>
+  await Promise.allSettled(
+    resources.map(({ id }) => window.bridge.invoke('resource:close', id) as Promise<unknown>)
+  )
+}
+
 export function AssistantSessionsProvider({
   children
 }: {
@@ -38,6 +47,7 @@ export function AssistantSessionsProvider({
   const [directory, setDirectory] = useState<SessionDirectoryGroup[]>([])
   const refreshVersion = useRef(0)
   const loading = useRef(new Set<string>())
+  const closingResources = useRef(new Set<string>())
   const selected = useRef(state.activeId)
 
   const refresh = useCallback(async () => {
@@ -55,6 +65,13 @@ export function AssistantSessionsProvider({
       const draft = current.sessions.find(({ persisted }) => !persisted)
       if (draft) {
         selected.current = draft.id
+        queueMicrotask(() => {
+          if (closingResources.current.has(draft.id)) return
+          closingResources.current.add(draft.id)
+          void closeSessionResources(draft.id)
+            .catch(() => undefined)
+            .finally(() => closingResources.current.delete(draft.id))
+        })
         return { ...current, activeId: draft.id }
       }
 

@@ -6,16 +6,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
+function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((done) => {
+    resolve = done
+  })
+  return { promise, resolve }
+}
+
 const h = vi.hoisted(() => ({
   actions: null as ReactNode,
+  entries: [] as Record<string, unknown>[],
   filePreviewProps: null as Record<string, unknown> | null,
+  invoke: vi.fn(async () => 73),
+  revealFile: vi.fn(async (path: string) => `D:\\workspace\\${path}`),
   treeProps: null as Record<string, unknown> | null
-}))
-
-vi.mock('@renderer/app/workbench/workbench-tab-actions', () => ({
-  useWorkbenchTabActions: (actions: ReactNode) => {
-    h.actions = actions
-  }
 }))
 
 vi.mock('@renderer/components/ui/button', () => ({
@@ -25,9 +30,9 @@ vi.mock('@renderer/components/ui/button', () => ({
 
 vi.mock('../../../../src/extensions/workspace/renderer/explorer/use-workspace-explorer', () => ({
   useWorkspaceExplorer: () => ({
-    entries: [],
+    entries: h.entries,
     loadDirectory: vi.fn(),
-    revealFile: vi.fn(async (path: string) => `D:\\workspace\\${path}`),
+    revealFile: h.revealFile,
     root: 'D:\\workspace'
   })
 }))
@@ -49,8 +54,15 @@ vi.mock('../../../../src/extensions/workspace/renderer/layout/workspace-layout',
       'div',
       { className: 'split-view-view', 'data-testid': 'layout' },
       navigator,
+      h.actions,
       children
     )
+}))
+
+vi.mock('../../../../src/renderer/src/app/workbench/workbench-tab-actions', () => ({
+  useWorkbenchTabActions: (actions: ReactNode) => {
+    h.actions = actions
+  }
 }))
 
 vi.mock('../../../../src/extensions/workspace/renderer/preview/empty-file-preview', () => ({
@@ -74,14 +86,15 @@ import { setReviewRound } from '../../../../src/extensions/workspace/renderer/ch
 describe('WorkspaceView', () => {
   let container: HTMLDivElement
   let root: Root
-  let actionsContainer: HTMLDivElement
-  let actionsRoot: Root
   let frames: FrameRequestCallback[]
 
   beforeEach(() => {
     h.actions = null
     h.filePreviewProps = null
+    h.invoke.mockClear()
+    h.revealFile.mockClear()
     h.treeProps = null
+    Object.assign(window, { bridge: { invoke: h.invoke } })
     frames = []
     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
       frames.push(callback)
@@ -89,19 +102,15 @@ describe('WorkspaceView', () => {
     })
     vi.stubGlobal('cancelAnimationFrame', vi.fn())
     container = document.createElement('div')
-    actionsContainer = document.createElement('div')
-    document.body.append(container, actionsContainer)
+    document.body.append(container)
     root = createRoot(container)
-    actionsRoot = createRoot(actionsContainer)
   })
 
   afterEach(async () => {
     await act(async () => {
       root.unmount()
-      actionsRoot.unmount()
     })
     container.remove()
-    actionsContainer.remove()
     vi.unstubAllGlobals()
   })
 
@@ -117,24 +126,6 @@ describe('WorkspaceView', () => {
       )
     })
   }
-
-  const renderActions = async (): Promise<void> => {
-    await act(async () => actionsRoot.render(createElement('div', null, h.actions)))
-  }
-
-  it('switches between all files and changed files from the tab action', async () => {
-    await render()
-    await renderActions()
-    expect(h.treeProps?.changesOnly).toBe(false)
-
-    await act(async () => actionsContainer.querySelector('button')!.click())
-    await renderActions()
-
-    expect(h.treeProps?.changesOnly).toBe(true)
-    expect(actionsContainer.querySelector('button')?.getAttribute('aria-label')).toBe(
-      '显示全部文件'
-    )
-  })
 
   it('releases a locked preview width after two frames in a permanently narrow pane', async () => {
     await render()
@@ -194,5 +185,171 @@ describe('WorkspaceView', () => {
     })
 
     expect(h.filePreviewProps?.active).toBe(true)
+  })
+
+  it('shows file controls and opens HTML in the built-in browser', async () => {
+    const selected = vi.fn()
+    window.addEventListener('larify:workbench-select-resource', selected)
+    await render()
+    await act(async () => {
+      setReviewRound({
+        files: [{ additions: 1, deletions: 0, patch: '', path: 'docs/notes.md' }],
+        selectedPath: 'docs/notes.md'
+      })
+      await Promise.resolve()
+    })
+
+    expect(container.querySelector('[data-workspace-navigator-toggle]')).not.toBeNull()
+    expect(h.filePreviewProps?.mode).toBe('preview')
+    const treeEntries = h.treeProps?.entries
+    const source = container.querySelector<HTMLButtonElement>('button[aria-label="查看源码"]')!
+    await act(async () => source.click())
+    expect(h.filePreviewProps?.mode).toBe('source')
+    expect(h.treeProps?.entries).toBe(treeEntries)
+    expect(container.querySelector('button[aria-label="阅读预览"]')).not.toBeNull()
+
+    await act(async () => {
+      setReviewRound({
+        files: [{ additions: 1, deletions: 0, patch: '', path: 'site/index.html' }],
+        selectedPath: 'site/index.html'
+      })
+      await Promise.resolve()
+    })
+    const open = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="在内置浏览器中打开"]'
+    )!
+    await act(async () => open.click())
+    expect(h.invoke).toHaveBeenCalledWith('resource:create', 'browser', 'session-a', {
+      url: 'D:\\workspace\\site/index.html'
+    })
+    expect((selected.mock.calls[0][0] as CustomEvent).detail).toEqual({
+      rendererId: 'browser',
+      resourceId: 73,
+      sessionId: 'session-a'
+    })
+    expect(h.filePreviewProps?.mode).toBeUndefined()
+    window.removeEventListener('larify:workbench-select-resource', selected)
+  })
+
+  it('only handles Markdown link events addressed to its workspace', async () => {
+    await render()
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent('larify:workspace-markdown-open-file', {
+          detail: { path: 'ignored.md', resourceId: 99 }
+        })
+      )
+      await Promise.resolve()
+    })
+    expect(h.revealFile).not.toHaveBeenCalled()
+
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent('larify:workspace-markdown-open-file', {
+          detail: { hash: 'install', path: 'guide.md', resourceId: 42 }
+        })
+      )
+      await Promise.resolve()
+    })
+    expect(h.revealFile).toHaveBeenCalledWith('guide.md')
+    expect(h.filePreviewProps).toMatchObject({ target: { hash: 'install' } })
+
+    await act(async () => {
+      setReviewRound({
+        files: [{ additions: 1, deletions: 0, patch: '', path: 'other.md' }],
+        selectedPath: 'other.md'
+      })
+      await Promise.resolve()
+    })
+    expect(h.filePreviewProps?.target).toBeUndefined()
+  })
+
+  it('keeps the latest file when asynchronous reveals finish out of order', async () => {
+    const first = deferred<string>()
+    const second = deferred<string>()
+    h.revealFile.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
+    await render()
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent('larify:workspace-markdown-open-file', {
+          detail: { path: 'first.md', resourceId: 42 }
+        })
+      )
+      window.dispatchEvent(
+        new CustomEvent('larify:workspace-markdown-open-file', {
+          detail: { path: 'second.md', resourceId: 42 }
+        })
+      )
+    })
+    await act(async () => second.resolve('D:\\workspace\\second.md'))
+    await act(async () => first.resolve('D:\\workspace\\first.md'))
+
+    expect(h.filePreviewProps?.path).toBe('D:\\workspace\\second.md')
+  })
+
+  it('offers reading and source modes for the .markdown extension', async () => {
+    await render()
+    await act(async () => {
+      setReviewRound({
+        files: [{ additions: 1, deletions: 0, patch: '', path: 'notes.markdown' }],
+        selectedPath: 'notes.markdown'
+      })
+      await Promise.resolve()
+    })
+
+    expect(h.filePreviewProps?.mode).toBe('preview')
+    expect(container.querySelector('button[aria-label="查看源码"]')).not.toBeNull()
+  })
+
+  it('replays navigation when the same file and hash are selected again', async () => {
+    await render()
+    const navigate = async (): Promise<void> => {
+      await act(async () => {
+        window.dispatchEvent(
+          new CustomEvent('larify:workspace-markdown-open-file', {
+            detail: { hash: 'install', path: 'README.md', resourceId: 42 }
+          })
+        )
+        await Promise.resolve()
+      })
+    }
+
+    await navigate()
+    const firstPreview = container.querySelector('[data-testid="preview"]')
+    const firstTarget = h.filePreviewProps?.target
+    await navigate()
+
+    expect(container.querySelector('[data-testid="preview"]')).toBe(firstPreview)
+    expect(h.filePreviewProps).toMatchObject({ target: { hash: 'install' } })
+    expect(h.filePreviewProps?.target).not.toBe(firstTarget)
+  })
+
+  it('selects only the latest browser when creations finish out of order', async () => {
+    const first = deferred<number>()
+    const second = deferred<number>()
+    const selected = vi.fn()
+    h.invoke.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
+    window.addEventListener('larify:workbench-select-resource', selected)
+    await render()
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent('larify:workspace-markdown-open-external', {
+          detail: { resourceId: 42, url: 'https://first.example' }
+        })
+      )
+      window.dispatchEvent(
+        new CustomEvent('larify:workspace-markdown-open-external', {
+          detail: { resourceId: 42, url: 'https://second.example' }
+        })
+      )
+    })
+    await act(async () => second.resolve(2))
+    await act(async () => first.resolve(1))
+
+    expect(selected).toHaveBeenCalledOnce()
+    expect((selected.mock.calls[0][0] as CustomEvent).detail.resourceId).toBe(2)
+    window.removeEventListener('larify:workbench-select-resource', selected)
   })
 })

@@ -342,8 +342,7 @@
     "zprofile": "_icube_shell",
     "zshenv": "_icube_shell",
     "zshrc": "_icube_shell",
-    "zshrc_apple_terminal": "_icube_shell",
-    "skill.md": "_markdown"
+    "zshrc_apple_terminal": "_icube_shell"
   },
   "filePatterns": [
     [
@@ -786,8 +785,7 @@
       "zprofile": "_icube_shell_light",
       "zshenv": "_icube_shell_light",
       "zshrc": "_icube_shell_light",
-      "zshrc_apple_terminal": "_icube_shell_light",
-      "skill.md": "_markdown_light"
+      "zshrc_apple_terminal": "_icube_shell_light"
     },
     "filePatterns": [
       [

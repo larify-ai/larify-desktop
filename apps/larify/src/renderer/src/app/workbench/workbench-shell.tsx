@@ -137,6 +137,7 @@ const toTab = (
   return {
     icon: view.icon ?? renderer?.icon ?? null,
     id: String(view.id),
-    title: view.title ?? renderer?.title ?? `${view.rendererId} ${view.resourceId}`
+    title: view.title ?? renderer?.title ?? `${view.rendererId} ${view.resourceId}`,
+    tooltip: view.tooltip
   }
 }

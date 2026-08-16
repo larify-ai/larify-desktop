@@ -8,7 +8,11 @@ import {
 import './workspace.css'
 import './layout/workspace-layout.css'
 import { EmptyFilePreview } from './preview/empty-file-preview'
-import { type PreviewRegistry, previewRegistryToken } from '@renderer/app/registry/file-previews'
+import {
+  type PreviewRegistry,
+  type PreviewRendererProps,
+  previewRegistryToken
+} from '@renderer/app/registry/file-previews'
 import { NativeFilePreview } from './preview/native-file-preview'
 
 const WorkspaceView = lazy(() =>
@@ -17,6 +21,18 @@ const WorkspaceView = lazy(() =>
 const MonacoPreview = lazy(() =>
   import('./preview/monaco-preview').then(({ MonacoPreview }) => ({ default: MonacoPreview }))
 )
+const MarkdownPreview = lazy(() =>
+  import('./preview/markdown-preview').then(({ MarkdownPreview }) => ({ default: MarkdownPreview }))
+)
+
+function renderMarkdownFilePreview(props: PreviewRendererProps): React.JSX.Element {
+  const Renderer = props.mode === 'source' ? MonacoPreview : MarkdownPreview
+  return (
+    <Suspense fallback={null}>
+      <Renderer {...props} />
+    </Suspense>
+  )
+}
 
 const plugin: RendererPlugin = {
   id: 'workspace',
@@ -32,10 +48,15 @@ const plugin: RendererPlugin = {
         priority: 100,
         supports: ({ mime }) =>
           mime === 'application/pdf' ||
-          mime === 'text/html' ||
           mime.startsWith('image/') ||
           mime.startsWith('audio/') ||
           mime.startsWith('video/')
+      }),
+      previews.register({
+        component: renderMarkdownFilePreview,
+        priority: 50,
+        supports: ({ binary, mime, path }) =>
+          !binary && (mime === 'text/markdown' || /\.md$/i.test(path))
       }),
       previews.register({
         component: (props) => (
@@ -43,7 +64,7 @@ const plugin: RendererPlugin = {
             <MonacoPreview {...props} />
           </Suspense>
         ),
-        supports: (file) => !file.binary || file.mime.startsWith('text/')
+        supports: (file) => !file.binary
       })
     )
 

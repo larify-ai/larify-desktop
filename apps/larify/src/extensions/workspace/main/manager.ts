@@ -39,6 +39,10 @@ export class WorkspaceManager implements Disposable {
     return this.requireWorkspace(id).readFile(file)
   }
 
+  readAsset(id: number, file: string): Promise<{ bytes: Uint8Array; mime: string }> {
+    return this.requireWorkspace(id).readAsset(file)
+  }
+
   inspectFile(id: number, file: string): Promise<FileDescriptor> {
     return this.requireWorkspace(id).inspectFile(file)
   }

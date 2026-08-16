@@ -439,7 +439,11 @@ describe('WorkbenchShell', () => {
           'button',
           {
             'data-testid': 'update-renderer-tab',
-            onClick: () => updateTab({ title: `Terminal ${resourceId}` })
+            onClick: () =>
+              updateTab({
+                title: `Terminal ${resourceId}`,
+                tooltip: `D:\\workspace\\terminal-${resourceId}`
+              })
           },
           resourceId
         ),
@@ -469,6 +473,11 @@ describe('WorkbenchShell', () => {
 
     expect(store.getState().views.find((view) => view.id === first)?.title).toBe('Terminal 1')
     expect(store.getState().views.find((view) => view.id !== first)?.title).toBeUndefined()
+    expect(
+      container
+        .querySelector(`[data-tab-id="${first}"] .larify-workbench-tab-trigger`)
+        ?.getAttribute('title')
+    ).toBe('D:\\workspace\\terminal-1')
   })
 })
 

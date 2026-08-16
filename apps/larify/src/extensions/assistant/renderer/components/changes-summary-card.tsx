@@ -1,6 +1,6 @@
 import { cn } from '@renderer/lib/utils'
-import { ChangesIcon } from '../../../workspace/renderer/changes-icon'
-import { setReviewRound } from '../../../workspace/renderer/review-changes'
+import { ChangesIcon } from '../../../workspace/renderer/changes/changes-icon'
+import { setReviewRound } from '../../../workspace/renderer/changes/review-changes'
 import type { ChangedFileSummary } from '../lib/change-summary'
 
 export function ChangesSummaryCard({
@@ -31,9 +31,7 @@ export function ChangesSummaryCard({
         <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
           <ChangesIcon className="size-5" />
         </span>
-        <div className="min-w-0 flex-1 text-sm font-medium">
-          已编辑 {files.length} 个文件
-        </div>
+        <div className="min-w-0 flex-1 text-sm font-medium">已编辑 {files.length} 个文件</div>
         <div className="flex shrink-0 items-center gap-2 font-mono text-xs">
           <span className="text-[var(--git-added)]">+{additions}</span>
           <span className="text-[var(--git-deleted)]">−{deletions}</span>
@@ -50,12 +48,8 @@ export function ChangesSummaryCard({
             <span className="min-w-0 flex-1 truncate font-mono" title={file.path}>
               {file.path}
             </span>
-            <span className="shrink-0 font-mono text-[var(--git-added)]">
-              +{file.additions}
-            </span>
-            <span className="shrink-0 font-mono text-[var(--git-deleted)]">
-              −{file.deletions}
-            </span>
+            <span className="shrink-0 font-mono text-[var(--git-added)]">+{file.additions}</span>
+            <span className="shrink-0 font-mono text-[var(--git-deleted)]">−{file.deletions}</span>
           </button>
         ))}
       </div>

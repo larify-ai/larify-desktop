@@ -176,6 +176,54 @@ describe('Workbench', () => {
     expect(container.querySelector('[data-state="active"]')?.textContent).toContain('Terminal')
   })
 
+  it('selects a newly created resource requested by an active workbench view', async () => {
+    invoke.mockImplementation((channel: string) =>
+      Promise.resolve(
+        channel === 'resource:list' ? [{ id: 7, sessionId, type: 'workspace' }] : undefined
+      )
+    )
+    registry.get<WorkbenchRendererRegistry>(workbenchRendererRegistryToken)?.register('workspace', {
+      component: () => null,
+      icon: createElement('span'),
+      order: 30,
+      title: 'Files'
+    })
+    registry.get<WorkbenchRendererRegistry>(workbenchRendererRegistryToken)?.register('browser', {
+      component: () => null,
+      icon: createElement('span'),
+      order: 20,
+      title: 'Browser'
+    })
+    await renderWorkbench(root, registry, sessionId)
+
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent('larify:workbench-select-resource', {
+          detail: { rendererId: 'browser', resourceId: 8, sessionId: 'another-session' }
+        })
+      )
+    })
+    expect(container.querySelector('[data-state="active"]')).toBeNull()
+
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent('larify:workbench-select-resource', {
+          detail: { rendererId: 'browser', resourceId: 8, sessionId }
+        })
+      )
+    })
+
+    expect(container.querySelector('[data-state="active"]')?.textContent).toContain('Browser')
+
+    await act(async () => {
+      listeners.get('resource:change')?.([
+        { id: 7, sessionId, type: 'workspace' },
+        { id: 8, sessionId, type: 'browser' }
+      ])
+    })
+    expect(container.querySelector('[data-state="active"]')?.textContent).toContain('Browser')
+  })
+
   it('creates a workspace resource for the current project root', async () => {
     invoke.mockImplementation((channel: string) =>
       Promise.resolve(channel === 'resource:create' ? 7 : [])

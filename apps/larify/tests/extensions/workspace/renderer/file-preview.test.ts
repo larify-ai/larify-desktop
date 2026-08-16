@@ -233,7 +233,7 @@ describe('FilePreview', () => {
     expect(container.textContent).toContain('text/plain')
   })
 
-  it('forwards activity and animation state to the selected renderer', async () => {
+  it('forwards preview state and navigation to the selected renderer', async () => {
     const received: PreviewRendererProps[] = []
     registry = new Registry()
     const previews = new PreviewRegistry()
@@ -254,14 +254,22 @@ describe('FilePreview', () => {
           createElement(FilePreview, {
             active: false,
             animating: true,
+            mode: 'preview',
             path: 'D:\\workspace\\file.pdf',
-            resourceId: 9
+            resourceId: 9,
+            target: { hash: 'install' }
           })
         )
       )
     })
 
-    expect(received.at(-1)).toMatchObject({ active: false, animating: true, resourceId: 9 })
+    expect(received.at(-1)).toMatchObject({
+      active: false,
+      animating: true,
+      mode: 'preview',
+      resourceId: 9,
+      target: { hash: 'install' }
+    })
   })
 
   function registerPathPreview(): void {

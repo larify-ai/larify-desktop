@@ -1,9 +1,8 @@
-import { useEffect, useState } from 'react'
 import Editor from '@monaco-editor/react'
 import { Uri, type editor } from 'monaco-editor/editor/editor.api'
 import { useTheme } from 'next-themes'
-import { workspaceClient } from '../workspace-client'
 import type { PreviewRendererProps } from '@renderer/app/registry/file-previews'
+import { useWorkspaceTextFile } from './use-workspace-text-file'
 import './monaco'
 
 const editorOptions = {
@@ -25,46 +24,7 @@ const editorOptions = {
 
 export function MonacoPreview({ file, resourceId }: PreviewRendererProps): React.JSX.Element {
   const { resolvedTheme } = useTheme()
-  const requestKey = `${resourceId}:${file.path}`
-  const [state, setState] = useState<{ content?: string; error?: string; key: string }>({
-    key: requestKey
-  })
-
-  useEffect(() => {
-    let active = true
-    let refreshTimer: ReturnType<typeof setTimeout> | undefined
-    let request = 0
-    const load = (): void => {
-      const currentRequest = ++request
-      void workspaceClient.readFile(resourceId, file.path).then(
-        (content) => active && currentRequest === request && setState({ content, key: requestKey }),
-        (reason: unknown) => {
-          if (active && currentRequest === request) {
-            setState({
-              error: reason instanceof Error ? reason.message : String(reason),
-              key: requestKey
-            })
-          }
-        }
-      )
-    }
-
-    load()
-    const unsubscribe = workspaceClient.onDidChange(resourceId, (_directory, changedPath) => {
-      if (changedPath !== file.path) return
-      clearTimeout(refreshTimer)
-      refreshTimer = setTimeout(load, 100)
-    })
-
-    return () => {
-      active = false
-      clearTimeout(refreshTimer)
-      unsubscribe()
-    }
-  }, [file.path, requestKey, resourceId])
-
-  const { content, error } =
-    state.key === requestKey ? state : { content: undefined, error: undefined }
+  const { content, error } = useWorkspaceTextFile(resourceId, file.path)
   if (error) return <PreviewError message={error} />
   if (content === undefined) return <div className="h-full" />
 

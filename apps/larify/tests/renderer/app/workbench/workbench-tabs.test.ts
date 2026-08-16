@@ -98,6 +98,23 @@ describe('WorkbenchTabs', () => {
     expect(onHome).toHaveBeenCalledOnce()
   })
 
+  it('uses the tooltip for hover text and falls back to the title', async () => {
+    await renderTabs({
+      value: [{ ...tabs[0], tooltip: 'D:\\workspace\\README.md' }, tabs[1]]
+    })
+
+    expect(
+      container
+        .querySelector('[data-tab-id="terminal:1"] .larify-workbench-tab-trigger')
+        ?.getAttribute('title')
+    ).toBe('D:\\workspace\\README.md')
+    expect(
+      container
+        .querySelector('[data-tab-id="browser:1"] .larify-workbench-tab-trigger')
+        ?.getAttribute('title')
+    ).toBe('Browser')
+  })
+
   it('keeps the active tab controlled without an overflow menu', async () => {
     await renderTabs({ activeId: 'terminal:1' })
     await renderTabs({ activeId: 'browser:1' })

@@ -12,7 +12,9 @@ export interface PreviewRendererProps {
   active?: boolean
   animating?: boolean
   file: PreviewFile
+  mode?: 'preview' | 'source'
   resourceId: number
+  target?: { hash: string }
 }
 
 export interface PreviewRenderer {

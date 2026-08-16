@@ -13,6 +13,7 @@ export interface WorkbenchRendererProps {
 export interface WorkbenchTabPresentation {
   icon: ReactNode
   title: string
+  tooltip?: string
 }
 
 export interface WorkbenchRendererDefinition {

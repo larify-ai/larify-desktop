@@ -7,6 +7,7 @@ const channels = [
   'workspace:list',
   'workspace-preview:open',
   'workspace:read',
+  'workspace:read-asset',
   'workspace:reveal'
 ] as const
 
@@ -28,6 +29,9 @@ export function registerWorkspaceIpc(
     manager.inspectFile(id, file)
   )
   ipcMain.handle('workspace:read', (_event, id: number, file: string) => manager.readFile(id, file))
+  ipcMain.handle('workspace:read-asset', (_event, id: number, file: string) =>
+    manager.readAsset(id, file)
+  )
   ipcMain.handle('workspace:reveal', (_event, id: number, file: string) => manager.reveal(id, file))
   ipcMain.handle(
     'workspace-preview:open',

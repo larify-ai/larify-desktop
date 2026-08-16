@@ -42,7 +42,7 @@ describe('file icon inventory', () => {
     }).toEqual({
       definitions: 499,
       extensions: 520,
-      fileNames: 168,
+      fileNames: 167,
       languages: 86,
       patterns: 19
     })

@@ -32,6 +32,15 @@ describe('file icon theme', () => {
     )
   })
 
+  it('uses the regular Markdown icon for SKILL.md', () => {
+    expect(getFileIcon('SKILL.md', 'file', false, false)).toEqual(
+      getFileIcon('notes.md', 'file', false, false)
+    )
+    expect(getFileIcon('SKILL.md', 'file', false, true)).toEqual(
+      getFileIcon('notes.md', 'file', false, true)
+    )
+  })
+
   it('falls back when a named icon has no renderable glyph or asset', () => {
     const icon = getFileIcon('vite.config.ts', 'file', false, false)
     expect(icon.character ?? icon.url).toBeTruthy()

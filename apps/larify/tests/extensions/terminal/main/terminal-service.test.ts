@@ -12,6 +12,7 @@ const workspace = join(tmpdir(), 'larify-terminal-service-workspace')
 const existingCwd = join(tmpdir(), 'larify-terminal-service-existing')
 const managers: FakeManager[] = []
 const whichSync = vi.fn()
+const execFileSync = vi.fn()
 const waitForShellIntegrationMock = vi.fn(() => Promise.resolve(true))
 const originalShell = process.env.SHELL
 let nextCreateError: Error | null = null
@@ -21,6 +22,8 @@ vi.mock('which', () => ({
     sync: whichSync
   }
 }))
+
+vi.mock('node:child_process', () => ({ execFileSync }))
 
 vi.mock('electron', () => ({
   app: {
@@ -159,6 +162,8 @@ beforeEach(() => {
   managers.length = 0
   nextCreateError = null
   whichSync.mockReset()
+  execFileSync.mockReset()
+  execFileSync.mockReturnValue('')
   waitForShellIntegrationMock.mockReset()
   waitForShellIntegrationMock.mockResolvedValue(true)
   process.env.SHELL = originalShell
@@ -173,6 +178,78 @@ afterAll(() => {
 })
 
 describe('TerminalService', () => {
+  it.runIf(process.platform === 'win32')('prefers where.exe before which on Windows', async () => {
+    execFileSync.mockImplementation((_file: string, [candidate]: string[]) =>
+      candidate === 'pwsh.exe'
+        ? [
+            'C:\\Users\\test\\AppData\\Local\\Microsoft\\WindowsApps\\pwsh.exe',
+            'C:\\Program Files\\PowerShell\\7\\pwsh.exe'
+          ].join('\r\n')
+        : ''
+    )
+    const { TerminalService } = await importService()
+    const service = new TerminalService()
+
+    service.create('session-1')
+
+    expect(whichSync).not.toHaveBeenCalled()
+    expect(managers[0].create).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({
+        shell: 'C:\\Users\\test\\AppData\\Local\\Microsoft\\WindowsApps\\pwsh.exe',
+        title: 'PowerShell'
+      })
+    )
+  })
+
+  it.runIf(process.platform === 'win32')(
+    'falls back to which when where.exe cannot resolve a shell',
+    async () => {
+      execFileSync.mockImplementation(() => {
+        throw new Error('not found')
+      })
+      whichSync.mockImplementation((candidate: string) =>
+        candidate === 'pwsh.exe' ? 'C:\\PowerShell\\pwsh.exe' : null
+      )
+      const { TerminalService } = await importService()
+      const service = new TerminalService()
+
+      service.create('session-1')
+
+      expect(whichSync).toHaveBeenCalledWith('pwsh.exe', { nothrow: true })
+      expect(managers[0].create).toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({ shell: 'C:\\PowerShell\\pwsh.exe' })
+      )
+    }
+  )
+
+  it.runIf(process.platform === 'win32')(
+    'detects a newly available default shell without restarting',
+    async () => {
+      let pwshAvailable = false
+      execFileSync.mockImplementation((_file: string, [candidate]: string[]) => {
+        if (candidate === 'pwsh.exe' && pwshAvailable) return 'C:\\PowerShell\\pwsh.exe\r\n'
+        if (candidate === 'powershell.exe') {
+          return 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\r\n'
+        }
+        throw new Error('not found')
+      })
+      whichSync.mockReturnValue(null)
+      const { TerminalService } = await importService()
+      const service = new TerminalService()
+
+      service.create('session-1')
+      pwshAvailable = true
+      service.create('session-1')
+
+      expect(managers[0].create.mock.calls.map(([, options]) => options.shell)).toEqual([
+        'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
+        'C:\\PowerShell\\pwsh.exe'
+      ])
+    }
+  )
+
   it('uses the globally assigned resource id as the terminal id', async () => {
     whichSync.mockReturnValue('powershell.exe')
     const resources = new ResourceManager()
@@ -314,7 +391,7 @@ describe('TerminalService', () => {
     await expect(service.startRun('session-1', 1)).resolves.toBeNull()
     expect(service.state('session-1')).toEqual({
       sessionId: 'session-1',
-      terminals: [],
+      terminals: []
     })
 
     expect(managers[0].destroy).toHaveBeenCalledOnce()

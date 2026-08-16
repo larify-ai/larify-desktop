@@ -50,6 +50,7 @@ describe('workspace IPC', () => {
       }),
       list: vi.fn(async () => ({ entries: [], root: 'D:\\workspace' })),
       inspectFile: vi.fn(async () => ({ binary: false, mime: 'text/plain', path: 'file.ts' })),
+      readAsset: vi.fn(async () => ({ bytes: new Uint8Array([1]), mime: 'image/png' })),
       readFile: vi.fn(async () => 'content'),
       reveal: vi.fn(async () => ['D:\\workspace\\file.ts'])
     }
@@ -69,6 +70,14 @@ describe('workspace IPC', () => {
 
     await electron.handlers.get('workspace:read')?.({} as never, 7 as never, 'file.ts' as never)
     expect(manager.readFile).toHaveBeenCalledWith(7, 'file.ts')
+
+    const asset = await electron.handlers.get('workspace:read-asset')?.(
+      {} as never,
+      7 as never,
+      'image.png' as never
+    )
+    expect(manager.readAsset).toHaveBeenCalledWith(7, 'image.png')
+    expect(asset).toEqual({ bytes: new Uint8Array([1]), mime: 'image/png' })
 
     await electron.handlers.get('workspace:reveal')?.({} as never, 7 as never, 'file.ts' as never)
     expect(manager.reveal).toHaveBeenCalledWith(7, 'file.ts')
@@ -132,6 +141,7 @@ describe('workspace IPC', () => {
     unregister()
 
     expect(unbind).toHaveBeenCalledOnce()
+    expect(electron.ipcMain.removeHandler).toHaveBeenCalledWith('workspace:read-asset')
     expect(electron.handlers.size).toBe(0)
     expect(electron.listeners.size).toBe(0)
   })

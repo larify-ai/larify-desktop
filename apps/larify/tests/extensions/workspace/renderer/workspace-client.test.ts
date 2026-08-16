@@ -20,13 +20,28 @@ describe('workspace client', () => {
     void workspaceClient.readDirectory(8)
     void workspaceClient.inspectFile(7, 'D:\\workspace\\src\\file.ts')
     void workspaceClient.readFile(7, 'D:\\workspace\\src\\file.ts')
+    void workspaceClient.readAsset(7, 'D:\\workspace\\src\\image.png')
     void workspaceClient.reveal(7, 'D:\\workspace\\src\\file.ts')
 
     expect(invoke).toHaveBeenCalledWith('workspace:list', 7, 'D:\\workspace\\src')
     expect(invoke).toHaveBeenCalledWith('workspace:list', 8, undefined)
     expect(invoke).toHaveBeenCalledWith('workspace:inspect', 7, 'D:\\workspace\\src\\file.ts')
     expect(invoke).toHaveBeenCalledWith('workspace:read', 7, 'D:\\workspace\\src\\file.ts')
+    expect(invoke).toHaveBeenCalledWith('workspace:read-asset', 7, 'D:\\workspace\\src\\image.png')
     expect(invoke).toHaveBeenCalledWith('workspace:reveal', 7, 'D:\\workspace\\src\\file.ts')
+  })
+
+  it('returns asset bytes and propagates bridge failures', async () => {
+    const asset = { bytes: new Uint8Array([1, 2, 3]), mime: 'image/png' }
+    invoke.mockResolvedValueOnce(asset)
+    const { workspaceClient } =
+      await import('../../../../src/extensions/workspace/renderer/workspace-client')
+
+    await expect(workspaceClient.readAsset(7, 'D:\\workspace\\image.png')).resolves.toBe(asset)
+
+    const failure = new Error('asset read failed')
+    invoke.mockRejectedValueOnce(failure)
+    await expect(workspaceClient.readAsset(7, 'D:\\workspace\\missing.png')).rejects.toBe(failure)
   })
 
   it('forwards changes only for the requested resource', async () => {

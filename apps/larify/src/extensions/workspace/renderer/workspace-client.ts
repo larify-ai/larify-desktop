@@ -7,6 +7,11 @@ export const workspaceClient = {
     window.bridge.invoke('workspace:list', resourceId, directory) as Promise<DirectoryListing>,
   readFile: (resourceId: number, file: string) =>
     window.bridge.invoke('workspace:read', resourceId, file) as Promise<string>,
+  readAsset: (resourceId: number, file: string) =>
+    window.bridge.invoke('workspace:read-asset', resourceId, file) as Promise<{
+      bytes: Uint8Array
+      mime: string
+    }>,
   reveal: (resourceId: number, file: string) =>
     window.bridge.invoke('workspace:reveal', resourceId, file) as Promise<string[]>,
   onDidChange: (resourceId: number, listener: (directory: string, changedPath: string) => void) =>

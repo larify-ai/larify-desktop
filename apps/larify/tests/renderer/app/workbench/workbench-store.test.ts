@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { RendererResource } from '../../../../src/renderer/src/app/registry/renderer-resource'
 import { createWorkbenchStore } from '../../../../src/renderer/src/app/workbench/workbench-store'
 
@@ -104,15 +104,38 @@ describe('workbench store', () => {
     expect(store.getState().views.map((view) => view.id)).toEqual([second, third, first])
   })
 
-  it('updates presentation for one view', () => {
+  it('updates presentation for one view without notifying for equal values', () => {
     const store = createWorkbenchStore()
     const first = store.getState().openView(terminal(7))
     store.getState().openView(terminal(8))
+    const listener = vi.fn()
+    store.subscribe(listener)
 
-    store.getState().updateTab(first, { title: 'PowerShell' })
+    store.getState().updateTab(first, { title: 'PowerShell', tooltip: 'D:\\workspace' })
+    store.getState().updateTab(first, { title: 'PowerShell', tooltip: 'D:\\workspace' })
 
-    expect(store.getState().views[0]).toMatchObject({ id: first, title: 'PowerShell' })
+    expect(store.getState().views[0]).toMatchObject({
+      id: first,
+      title: 'PowerShell',
+      tooltip: 'D:\\workspace'
+    })
     expect(store.getState().views[1]).not.toHaveProperty('title')
+    expect(listener).toHaveBeenCalledOnce()
+  })
+
+  it('ignores empty and stale updates and can clear a tooltip', () => {
+    const store = createWorkbenchStore()
+    const id = store.getState().openView(terminal(7))
+    store.getState().updateTab(id, { tooltip: 'D:\\workspace' })
+    const listener = vi.fn()
+    store.subscribe(listener)
+
+    store.getState().updateTab(id, {})
+    store.getState().updateTab(99, { tooltip: 'stale' })
+    store.getState().updateTab(id, { tooltip: undefined })
+
+    expect(store.getState().views[0].tooltip).toBeUndefined()
+    expect(listener).toHaveBeenCalledOnce()
   })
 
   it('synchronizes resources while preserving existing view presentation and ids', () => {
@@ -122,7 +145,7 @@ describe('workbench store', () => {
       { id: 8, sessionId: 'session', type: 'terminal' }
     ])
     const [first, second] = store.getState().views
-    store.getState().updateTab(first.id, { title: 'PowerShell' })
+    store.getState().updateTab(first.id, { title: 'PowerShell', tooltip: 'D:\\workspace' })
 
     store.getState().syncResources([
       { id: 8, sessionId: 'session', type: 'terminal' },
@@ -131,7 +154,7 @@ describe('workbench store', () => {
     ])
 
     expect(store.getState().views).toEqual([
-      { ...first, title: 'PowerShell' },
+      { ...first, title: 'PowerShell', tooltip: 'D:\\workspace' },
       second,
       { id: 3, rendererId: 'terminal', resourceId: 9 }
     ])

@@ -53,6 +53,27 @@ export function Workbench({
     }
   }, [resources, sessionId, store])
 
+  useLayoutEffect(() => {
+    const selectResource = (event: Event): void => {
+      const detail = (
+        event as CustomEvent<{
+          rendererId?: string
+          resourceId?: number
+          sessionId?: string
+        }>
+      ).detail
+      if (
+        detail?.sessionId !== sessionId ||
+        !detail.rendererId ||
+        typeof detail.resourceId !== 'number'
+      )
+        return
+      store.getState().openView({ rendererId: detail.rendererId, resourceId: detail.resourceId })
+    }
+    window.addEventListener('larify:workbench-select-resource', selectResource)
+    return () => window.removeEventListener('larify:workbench-select-resource', selectResource)
+  }, [sessionId, store])
+
   const openTool = (id: string): void => {
     void window.bridge
       .invoke(

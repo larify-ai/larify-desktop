@@ -12,14 +12,13 @@ import { horizontalListSortingStrategy, SortableContext, useSortable } from '@dn
 import { CSS } from '@dnd-kit/utilities'
 import { HouseIcon, XIcon } from 'lucide-react'
 import { DropdownMenu, Tabs } from 'radix-ui'
+import type { WorkbenchTabPresentation } from '../registry/workbench-renderers'
 import { resolveTabReorder } from './tab-reorder'
 import { resolveTabCloseTargets, type WorkbenchTabCloseAction } from './tab-close-actions'
 import './workbench-tabs.css'
 
-export interface WorkbenchTab {
+export interface WorkbenchTab extends WorkbenchTabPresentation {
   id: string
-  icon: ReactNode
-  title: string
 }
 
 interface WorkbenchTabsProps {
@@ -214,7 +213,7 @@ function SortableTab({
         <Tabs.Trigger
           className="larify-workbench-tab-trigger"
           ref={triggerRef}
-          title={tab.title}
+          title={tab.tooltip ?? tab.title}
           value={tab.id}
         >
           <span aria-hidden className="larify-workbench-tab-icon">

@@ -1,15 +1,11 @@
-import type { ReactNode } from 'react'
 import { createStore, type StoreApi } from 'zustand/vanilla'
 import type { RendererResource } from '../registry/renderer-resource'
+import type { WorkbenchTabPresentation } from '../registry/workbench-renderers'
 import type { Resource } from '@shared/resource'
 
-export interface WorkbenchView extends RendererResource {
-  icon?: ReactNode
+export interface WorkbenchView extends RendererResource, Partial<WorkbenchTabPresentation> {
   id: number
-  title?: string
 }
-
-type WorkbenchTabUpdate = Partial<Pick<WorkbenchView, 'icon' | 'title'>>
 
 interface WorkbenchViewState {
   activeViewId: number | null
@@ -20,7 +16,7 @@ interface WorkbenchViewState {
   selectView(id: number): void
   showLauncher(): void
   syncResources(resources: Resource[]): void
-  updateTab(id: number, tab: WorkbenchTabUpdate): void
+  updateTab(id: number, tab: Partial<WorkbenchTabPresentation>): void
 }
 
 export const createWorkbenchStore = (): StoreApi<WorkbenchViewState> => {
@@ -111,7 +107,8 @@ export const createWorkbenchStore = (): StoreApi<WorkbenchViewState> => {
         const unchanged =
           view &&
           (!('icon' in tab) || view.icon === tab.icon) &&
-          (!('title' in tab) || view.title === tab.title)
+          (!('title' in tab) || view.title === tab.title) &&
+          (!('tooltip' in tab) || view.tooltip === tab.tooltip)
         if (!view || unchanged) return state
         return {
           views: state.views.map((item) => (item.id === id ? { ...item, ...tab } : item))

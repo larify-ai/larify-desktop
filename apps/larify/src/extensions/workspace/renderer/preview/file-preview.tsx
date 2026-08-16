@@ -9,13 +9,17 @@ import './file-preview.css'
 export function FilePreview({
   active,
   animating,
+  mode,
   path,
-  resourceId
+  resourceId,
+  target
 }: {
   active: boolean
   animating: boolean
+  mode?: 'preview' | 'source'
   path: string
   resourceId: number
+  target?: { hash: string }
 }): React.JSX.Element {
   const services = useRendererRegistry()
   const registry = services.get<PreviewRegistry>(previewRegistryToken)
@@ -49,7 +53,16 @@ export function FilePreview({
   const renderer = registry.find(file)
   if (!renderer) return <UnsupportedPreview message={`暂不支持预览 ${file.mime}`} />
   const Renderer = renderer.component
-  return <Renderer active={active} animating={animating} file={file} resourceId={resourceId} />
+  return (
+    <Renderer
+      active={active}
+      animating={animating}
+      file={file}
+      mode={mode}
+      resourceId={resourceId}
+      target={target}
+    />
+  )
 }
 
 function UnsupportedPreview({ message }: { message: string }): React.JSX.Element {

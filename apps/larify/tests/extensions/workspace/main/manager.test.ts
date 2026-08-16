@@ -7,6 +7,7 @@ const workspace = vi.hoisted(() => ({
     inspectFile: ReturnType<typeof vi.fn>
     list: ReturnType<typeof vi.fn>
     onChange?: (directory: string, changedPath: string) => void
+    readAsset: ReturnType<typeof vi.fn>
     readFile: ReturnType<typeof vi.fn>
     reveal: ReturnType<typeof vi.fn>
     rootPath: ReturnType<typeof vi.fn>
@@ -28,6 +29,7 @@ vi.mock('../../../../src/extensions/workspace/main/service', () => ({
       await this.opening
       return []
     })
+    readAsset = vi.fn(async () => ({ bytes: new Uint8Array([1, 2, 3]), mime: 'image/png' }))
     readFile = vi.fn(async (file: string) => `contents:${file}`)
     reveal = vi.fn(async (file: string) => [file])
     rootPath = vi.fn(async () => {
@@ -172,18 +174,23 @@ describe('WorkspaceManager', () => {
     expect(workspace.instances[0].reveal).toHaveBeenCalledWith('D:\\workspace\\file.ts')
   })
 
-  it('routes file reads and inspections to the owning resource', async () => {
+  it('routes file reads, assets, and inspections to the owning resource', async () => {
     const manager = new WorkspaceManager()
     manager.open(1, 'D:\\workspace')
     const file = 'D:\\workspace\\file.ts'
 
     await expect(manager.readFile(1, file)).resolves.toBe(`contents:${file}`)
+    await expect(manager.readAsset(1, file)).resolves.toEqual({
+      bytes: new Uint8Array([1, 2, 3]),
+      mime: 'image/png'
+    })
     await expect(manager.inspectFile(1, file)).resolves.toEqual({
       binary: false,
       mime: 'text/plain',
       path: file
     })
     expect(workspace.instances[0].readFile).toHaveBeenCalledWith(file)
+    expect(workspace.instances[0].readAsset).toHaveBeenCalledWith(file)
     expect(workspace.instances[0].inspectFile).toHaveBeenCalledWith(file)
   })
 

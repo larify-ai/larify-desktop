@@ -17,6 +17,19 @@ afterEach(async () => {
 })
 
 describe('WorkspaceService', () => {
+  it('reads image bytes from any absolute path', async () => {
+    const root = await createRoot()
+    const outside = await createRoot()
+    const image = path.join(outside, 'image.png')
+    await writeFile(image, Buffer.from([1, 2, 3]))
+    const service = new WorkspaceService(root, () => undefined)
+
+    const asset = await service.readAsset(image)
+    expect(Array.from(asset.bytes)).toEqual([1, 2, 3])
+    expect(asset.mime).toBe('image/png')
+    await service.dispose()
+  })
+
   it('reads a text file for preview', async () => {
     const root = await createRoot()
     const file = path.join(root, 'file.ts')

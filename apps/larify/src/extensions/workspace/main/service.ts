@@ -54,6 +54,15 @@ export class WorkspaceService {
     return readFile(file, 'utf8')
   }
 
+  async readAsset(file: string): Promise<{ bytes: Uint8Array; mime: string }> {
+    const size = (await stat(file)).size
+    if (size > 20 * 1024 * 1024) throw new Error('图片过大，无法预览')
+    return {
+      bytes: await readFile(file),
+      mime: lookup(file) || 'application/octet-stream'
+    }
+  }
+
   async inspectFile(file: string): Promise<FileDescriptor> {
     const normalized = path.normalize(file)
     const detected = await fileTypeFromFile(normalized)

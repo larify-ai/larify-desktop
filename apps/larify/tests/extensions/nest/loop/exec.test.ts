@@ -45,7 +45,7 @@ const app = {
 }
 const modelConfig = {
   modelId: 'deepseek-v4-flash',
-  thinking: 'enabled'
+  reasoningEffort: 'high'
 } as const
 const root = mkdtempSync(join(tmpdir(), 'larify-nest-exec-'))
 afterAll(() => rmSync(root, { force: true, recursive: true }))
@@ -146,5 +146,4 @@ describe('nest loop exec', () => {
     expect(mocks.runAgent).toHaveBeenCalledOnce()
     expect(mocks.saveSession).toHaveBeenCalledTimes(2)
   })
-
 })

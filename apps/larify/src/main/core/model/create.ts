@@ -13,8 +13,14 @@ export interface ModelRuntime {
 }
 
 export function createModelRuntime(config: AgentModelConfig = defaultModelConfig): ModelRuntime {
+  const thinking = config.reasoningEffort === 'off' ? 'disabled' : 'enabled'
   return {
     model: deepseek(config.modelId),
-    providerOptions: { deepseek: { thinking: { type: config.thinking } } }
+    providerOptions: {
+      deepseek: {
+        thinking: { type: thinking },
+        ...(thinking === 'enabled' && { reasoningEffort: config.reasoningEffort })
+      }
+    }
   }
 }

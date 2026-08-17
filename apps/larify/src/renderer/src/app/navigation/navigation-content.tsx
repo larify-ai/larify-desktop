@@ -20,16 +20,16 @@ export function NavigationContent(): React.JSX.Element {
         </NavigationAction>
       </nav>
 
+      <h2
+        id="workspaces-heading"
+        className="mt-0.5 mb-0.5 flex h-8 shrink-0 items-center px-3 text-sm font-medium text-muted-foreground"
+      >
+        工作空间
+      </h2>
       <nav
         aria-labelledby="workspaces-heading"
         className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto"
       >
-        <h2
-          id="workspaces-heading"
-          className="mt-0.5 mb-0.5 flex h-8 items-center px-3 text-sm font-medium text-muted-foreground"
-        >
-          工作空间
-        </h2>
         <div className="space-y-0.5">
           {workspaces.map((workspace) => (
             <Workspace key={workspace.id} workspace={workspace} />

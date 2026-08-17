@@ -47,6 +47,7 @@ describe('AssistantComposer', () => {
   }
 
   beforeEach(() => {
+    localStorage.clear()
     Object.defineProperty(window, 'bridge', {
       configurable: true,
       value: { invoke: vi.fn().mockResolvedValue([]) }
@@ -120,8 +121,58 @@ describe('AssistantComposer', () => {
     expect(container.querySelector('[data-slot="input-group"]')?.textContent).not.toContain(
       '默认空间'
     )
+    expect(container.querySelector('[aria-label="配置模型和思考强度"]')?.textContent).toContain(
+      'DeepSeek-V4-Flash低'
+    )
     await act(async () => submit())
     expect(onSubmit).not.toHaveBeenCalled()
+  })
+
+  it('selects and persists the model and official reasoning effort', async () => {
+    reactEnvironment.IS_REACT_ACT_ENVIRONMENT = true
+    container = document.createElement('div')
+    document.body.append(container)
+    root = createRoot(container)
+    await act(async () => render())
+
+    const open = async (): Promise<void> => {
+      const trigger = container.querySelector<HTMLButtonElement>(
+        '[aria-label="配置模型和思考强度"]'
+      )!
+      await act(async () => {
+        trigger.dispatchEvent(
+          new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' })
+        )
+      })
+    }
+    const select = async (label: string): Promise<void> => {
+      const option = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+        (item) => item.textContent === label
+      )!
+      await act(async () => option.click())
+    }
+
+    await open()
+    await select('DeepSeek-V4-Pro')
+    await open()
+    const max = [...document.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) =>
+        button.textContent === '高' && button.closest('[data-slot="dropdown-menu-content"]')
+    )!
+    await act(async () => max.click())
+    expect(document.querySelector('[data-slot="dropdown-menu-content"]')).not.toBeNull()
+
+    expect(localStorage.getItem('larify.modelConfig')).toBe(
+      '{"modelId":"deepseek-v4-pro","reasoningEffort":"max"}'
+    )
+    expect(container.querySelector('[aria-label="配置模型和思考强度"]')?.textContent).toContain(
+      'DeepSeek-V4-Pro高'
+    )
+
+    await act(async () => render({ status: 'streaming' }))
+    expect(
+      container.querySelector<HTMLButtonElement>('[aria-label="配置模型和思考强度"]')?.disabled
+    ).toBe(true)
   })
 
   it('keeps the attachment menu open while selecting a directory', async () => {

@@ -16,13 +16,29 @@ describe('createModelRuntime', () => {
   it('creates the configured model and provider options', () => {
     const runtime = createModelRuntime({
       modelId: 'deepseek-v4-pro',
-      thinking: 'enabled'
+      reasoningEffort: 'max'
     })
 
     expect(deepseek).toHaveBeenCalledWith('deepseek-v4-pro')
     expect(runtime).toEqual({
       model: { id: 'deepseek-v4-pro' },
-      providerOptions: { deepseek: { thinking: { type: 'enabled' } } }
+      providerOptions: {
+        deepseek: { thinking: { type: 'enabled' }, reasoningEffort: 'max' }
+      }
+    })
+  })
+
+  it('disables thinking without sending a reasoning effort', () => {
+    expect(
+      createModelRuntime({ modelId: 'deepseek-v4-flash', reasoningEffort: 'off' }).providerOptions
+    ).toEqual({ deepseek: { thinking: { type: 'disabled' } } })
+  })
+
+  it('uses the regular official reasoning effort', () => {
+    expect(
+      createModelRuntime({ modelId: 'deepseek-v4-flash', reasoningEffort: 'high' }).providerOptions
+    ).toEqual({
+      deepseek: { thinking: { type: 'enabled' }, reasoningEffort: 'high' }
     })
   })
 })

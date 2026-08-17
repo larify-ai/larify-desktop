@@ -1,22 +1,41 @@
 import { describe, expect, it, vi } from 'vitest'
+import { createElement } from 'react'
+import { renderToString } from 'react-dom/server'
 import {
   readModelConfig,
   writeModelConfig
 } from '../../../src/renderer/src/app/interaction/assistant/model-config'
 import { defaultModelConfig } from '../../../src/main/core/model/config'
+import { ModelSelector } from '../../../src/renderer/src/app/interaction/assistant/model-selector'
 
 describe('interaction assistant model configuration', () => {
+  it('renders with the default model when browser storage is unavailable', () => {
+    expect(renderToString(createElement(ModelSelector))).toContain('DeepSeek-V4-Flash')
+  })
+
   it('falls back to the default model for malformed persisted data', () => {
-    const storage = { getItem: vi.fn(() => '{not-json') }
+    const storage = { getItem: vi.fn(() => '{not-json'), setItem: vi.fn() }
     expect(readModelConfig(storage)).toEqual(defaultModelConfig)
+  })
+
+  it('overwrites legacy model configuration with the current default', () => {
+    const storage = {
+      getItem: vi.fn(() => '{"modelId":"deepseek-v4-pro","thinking":"enabled"}'),
+      setItem: vi.fn()
+    }
+    expect(readModelConfig(storage)).toEqual(defaultModelConfig)
+    expect(storage.setItem).toHaveBeenCalledWith(
+      'larify.modelConfig',
+      '{"modelId":"deepseek-v4-flash","reasoningEffort":"off"}'
+    )
   })
 
   it('persists the complete model configuration as one value', () => {
     const storage = { getItem: vi.fn(), setItem: vi.fn() }
-    writeModelConfig(storage, { modelId: 'deepseek-v4-flash', thinking: 'disabled' })
+    writeModelConfig(storage, { modelId: 'deepseek-v4-flash', reasoningEffort: 'off' })
     expect(storage.setItem).toHaveBeenCalledWith(
       'larify.modelConfig',
-      '{"modelId":"deepseek-v4-flash","thinking":"disabled"}'
+      '{"modelId":"deepseek-v4-flash","reasoningEffort":"off"}'
     )
   })
 })

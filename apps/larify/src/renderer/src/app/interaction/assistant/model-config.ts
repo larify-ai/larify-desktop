@@ -9,12 +9,19 @@ export const MODEL_CONFIG_KEY = 'larify.modelConfig'
 type ModelConfigStorage = Pick<Storage, 'getItem' | 'setItem'>
 
 export function readModelConfig(storage: ModelConfigStorage): AgentModelConfig {
+  let value: unknown
   try {
-    const value = JSON.parse(storage.getItem(MODEL_CONFIG_KEY) ?? 'null')
-    return isAgentModelConfig(value) ? value : defaultModelConfig
+    value = JSON.parse(storage.getItem(MODEL_CONFIG_KEY) ?? 'null')
+  } catch {
+    value = null
+  }
+  if (isAgentModelConfig(value)) return value
+  try {
+    writeModelConfig(storage, defaultModelConfig)
   } catch {
     return defaultModelConfig
   }
+  return defaultModelConfig
 }
 
 export function writeModelConfig(storage: ModelConfigStorage, value: AgentModelConfig): void {

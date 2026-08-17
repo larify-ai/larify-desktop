@@ -30,7 +30,7 @@ const input = (rootTaskFile: string): LoopInput => ({
   rootTaskFile,
   modelConfig: {
     modelId: 'deepseek-v4-flash',
-    thinking: 'enabled'
+    reasoningEffort: 'high'
   } as const
 })
 

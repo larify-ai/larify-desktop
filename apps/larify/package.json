@@ -18,6 +18,7 @@
     "test:workspace-ui": "node tests/extensions/workspace/renderer/workspace-layout.cdp.mjs",
     "test:workspace-changes": "node tests/extensions/workspace/renderer/changes-view.cdp.mjs",
     "test:review-card": "node tests/renderer/app/interaction/assistant/changes-summary-card.cdp.mjs",
+    "test:assistant-model": "node tests/renderer/app/interaction/assistant/model-selector.cdp.mjs",
     "test:workspace-markdown": "node tests/extensions/workspace/renderer/workspace-markdown-preview.cdp.mjs",
     "test:terminal-ui": "node tests/extensions/terminal/terminal-workbench.cdp.mjs",
     "test:terminal-user": "node tests/extensions/terminal/terminal-user-flow.cdp.mjs",

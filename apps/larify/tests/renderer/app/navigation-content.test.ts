@@ -59,7 +59,11 @@ describe('navigation content', () => {
     renderNavigation(create)
 
     expect(container.querySelector('nav[aria-label="全局入口"]')).not.toBeNull()
-    expect(container.querySelector('nav[aria-labelledby="workspaces-heading"]')).not.toBeNull()
+    const workspaceList = container.querySelector('nav[aria-labelledby="workspaces-heading"]')
+    const workspaceHeading = container.querySelector('#workspaces-heading')
+    expect(workspaceList).not.toBeNull()
+    expect(workspaceList?.className).toContain('overflow-y-auto')
+    expect(workspaceList?.contains(workspaceHeading)).toBe(false)
     expect(container.textContent).toContain('百宝箱')
     expect(container.textContent).toContain('知识库')
     expect(container.textContent).toContain('Workspace')

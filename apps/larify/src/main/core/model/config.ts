@@ -1,7 +1,8 @@
 export const modelIds = ['deepseek-v4-flash', 'deepseek-v4-pro'] as const
 
 export type ModelId = (typeof modelIds)[number]
-export type ThinkingMode = 'disabled' | 'enabled'
+export const reasoningEfforts = ['off', 'high', 'max'] as const
+export type ReasoningEffort = (typeof reasoningEfforts)[number]
 
 export const modelLabels: Record<ModelId, string> = {
   'deepseek-v4-flash': 'DeepSeek-V4-Flash',
@@ -15,24 +16,24 @@ export const modelContextWindows: Record<ModelId, { limit: number; rollover: num
 
 export interface AgentModelConfig {
   modelId: ModelId
-  thinking: ThinkingMode
+  reasoningEffort: ReasoningEffort
 }
 
 export const defaultModelConfig: AgentModelConfig = {
   modelId: 'deepseek-v4-flash',
-  thinking: 'disabled'
+  reasoningEffort: 'off'
 }
 
 export function isModelId(value: unknown): value is ModelId {
   return typeof value === 'string' && modelIds.includes(value as ModelId)
 }
 
-export function isThinkingMode(value: unknown): value is ThinkingMode {
-  return value === 'disabled' || value === 'enabled'
+export function isReasoningEffort(value: unknown): value is ReasoningEffort {
+  return reasoningEfforts.includes(value as ReasoningEffort)
 }
 
 export function isAgentModelConfig(value: unknown): value is AgentModelConfig {
   if (!value || typeof value !== 'object') return false
   const config = value as Partial<AgentModelConfig>
-  return isModelId(config.modelId) && isThinkingMode(config.thinking)
+  return isModelId(config.modelId) && isReasoningEffort(config.reasoningEffort)
 }

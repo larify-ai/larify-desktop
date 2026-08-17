@@ -22,6 +22,7 @@ import {
 import { useComposerHistory } from './composer-history'
 import { ComposerMenu } from './composer-menu'
 import { WorkspaceSelector } from './workspace-selector'
+import { ModelSelector } from './model-selector'
 
 interface AssistantComposerProps {
   cwd: string
@@ -77,6 +78,7 @@ function ComposerFooter({
       <PromptInputTools className="flex-1 overflow-hidden">
         <ComposerMenu inputRef={inputRef} />
       </PromptInputTools>
+      <ModelSelector disabled={running} />
       <PromptInputSubmit
         status={status}
         onStop={onStop}

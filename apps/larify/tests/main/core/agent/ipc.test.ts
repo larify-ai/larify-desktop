@@ -34,7 +34,7 @@ describe('agent IPC', () => {
       sessionId: 'session',
       cwd: 'cwd',
       message: { id: 'message', role: 'user', parts: [] },
-      modelConfig: { modelId: 'deepseek-v4-pro', thinking: 'enabled' }
+      modelConfig: { modelId: 'deepseek-v4-pro', reasoningEffort: 'max' }
     }
     mocks.handlers.get('agent:send')!({ sender: { send, isDestroyed } } as never, request as never)
 

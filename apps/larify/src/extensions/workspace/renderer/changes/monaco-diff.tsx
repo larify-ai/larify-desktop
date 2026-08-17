@@ -72,6 +72,7 @@ export function MonacoContentDiff({
   const deletedOnly = mode === 'unified' && modified.length === 0 && original.length > 0
   const renderedModified = deletedOnly ? original : modified
   const renderedOriginal = deletedOnly ? '' : original
+  const split = mode === 'split'
 
   return (
     <div
@@ -94,7 +95,12 @@ export function MonacoContentDiff({
           scheme === 'git-original' ? undefined : `${scheme}-modified`,
           modelKey
         )}
-        options={{ ...options, renderSideBySide: mode === 'split' }}
+        options={{
+          ...options,
+          compactMode: !split,
+          lineNumbersMinChars: split ? 2 : 4,
+          renderSideBySide: split
+        }}
         original={renderedOriginal}
         originalLanguage={workspaceMonacoLanguage(originalPath, renderedOriginal)}
         originalModelPath={modelPath(originalPath, scheme, modelKey)}

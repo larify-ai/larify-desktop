@@ -167,10 +167,30 @@ try {
     `document.querySelector(${JSON.stringify(`${view} .workspace-file-preview`)})?.getAttribute('data-diff-mode') === 'split'`,
     'split diff'
   )
-  const splitEditors = await evaluate(
-    `document.querySelectorAll(${JSON.stringify(`${view} .monaco-diff-editor .editor.original, ${view} .monaco-diff-editor .editor.modified`)}).length`
-  )
-  if (splitEditors < 2) throw new Error(`Split diff editors missing: ${splitEditors}`)
+  const splitEditorWidths = await evaluate(`(() => {
+    const selector = ${JSON.stringify(`${view} .monaco-diff-editor .editor.original, ${view} .monaco-diff-editor .editor.modified`)}
+    return Array.from(document.querySelectorAll(selector)).map((editor) =>
+      editor.getBoundingClientRect().width
+    )
+  })()`)
+  if (splitEditorWidths.length < 2 || splitEditorWidths.some((width) => width <= 0)) {
+    throw new Error(`Split diff editors are not visible: ${splitEditorWidths.join(', ')}`)
+  }
+  const splitGutterGeometry = await evaluate(`(() => {
+    const homeIcon = document.querySelector(${JSON.stringify(`${session} .larify-workbench-home svg`)})
+    const lineNumber = document.querySelector(${JSON.stringify(`${view} .monaco-diff-editor .editor.original .line-numbers`)})
+    return {
+      homeRight: homeIcon?.getBoundingClientRect().right ?? null,
+      lineNumberRight: lineNumber?.getBoundingClientRect().right ?? null
+    }
+  })()`)
+  if (
+    splitGutterGeometry.homeRight === null ||
+    splitGutterGeometry.lineNumberRight === null ||
+    Math.abs(splitGutterGeometry.homeRight - splitGutterGeometry.lineNumberRight) > 2
+  ) {
+    throw new Error(`Split gutter is misaligned: ${JSON.stringify(splitGutterGeometry)}`)
+  }
   await clickAria('切换到统一视图')
   await waitFor(
     `document.querySelector(${JSON.stringify(`${view} .workspace-file-preview`)})?.getAttribute('data-diff-mode') === 'unified'`,
@@ -209,6 +229,20 @@ try {
     throw new Error(`Unified gutter is misaligned: ${JSON.stringify(gutterGeometry)}`)
   if (gutterGeometry.codeLeft - gutterGeometry.lineNumberRight < 8)
     throw new Error(`Unified gutter has no content gap: ${JSON.stringify(gutterGeometry)}`)
+  await clickAria('切换到拆分视图')
+  await waitFor(
+    `document.querySelector(${JSON.stringify(`${view} .workspace-file-preview`)})?.getAttribute('data-diff-mode') === 'split'`,
+    'second split diff'
+  )
+  await waitFor(
+    `Array.from(document.querySelectorAll(${JSON.stringify(`${view} .monaco-diff-editor .editor.original, ${view} .monaco-diff-editor .editor.modified`)})).every((editor) => editor.getBoundingClientRect().width > 0)`,
+    'second split editor layout'
+  )
+  await clickAria('切换到统一视图')
+  await waitFor(
+    `document.querySelector(${JSON.stringify(`${view} .workspace-file-preview`)})?.getAttribute('data-diff-mode') === 'unified'`,
+    'second unified diff'
+  )
   await clickAria('隐藏变更目录树')
   await waitFor(
     `Boolean(document.querySelector('[aria-label="显示变更目录树"]'))`,
@@ -266,7 +300,8 @@ try {
         jsonTokenClasses,
         gutterGeometry,
         selectedFile,
-        splitEditors
+        splitGutterGeometry,
+        splitEditorWidths
       },
       null,
       2

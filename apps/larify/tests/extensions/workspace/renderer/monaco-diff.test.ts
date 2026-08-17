@@ -123,6 +123,7 @@ describe('MonacoDiff', () => {
           experimental: { useTrueInlineView: true },
           glyphMargin: false,
           lineDecorationsWidth: 8,
+          lineNumbersMinChars: 4,
           lightbulb: { enabled: 'off' },
           renderSideBySide: false,
           useInlineViewWhenSpaceIsLimited: false
@@ -161,7 +162,9 @@ describe('MonacoDiff', () => {
     expect(harness.props).toHaveBeenLastCalledWith(
       expect.objectContaining({
         options: expect.objectContaining({
+          compactMode: false,
           experimental: { useTrueInlineView: true },
+          lineNumbersMinChars: 2,
           renderSideBySide: true
         })
       })

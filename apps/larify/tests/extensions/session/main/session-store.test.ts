@@ -66,6 +66,7 @@ describe('SessionStore', () => {
     const store = await createStore()
     expect(store.loadVisibleMessages('missing')).toEqual([])
     expect(store.countMessages('missing')).toBe(0)
+    expect(store.hasSession('missing')).toBe(false)
     store.dispose()
   })
 
@@ -78,6 +79,7 @@ describe('SessionStore', () => {
       id: 'chat/one',
       cwd: '/workspace'
     })
+    expect(store.hasSession('chat/one')).toBe(true)
     expect(store.loadVisibleMessages('chat/one')).toEqual(messages)
     store.dispose()
   })

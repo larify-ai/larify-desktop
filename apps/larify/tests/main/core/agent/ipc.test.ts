@@ -43,11 +43,13 @@ describe('agent IPC', () => {
     expect(input).toBe(request)
 
     sink.chunk({ type: 'start' })
+    sink.title('Generated title')
     sink.error(new Error('failed'))
     sink.end()
     expect(send).toHaveBeenNthCalledWith(1, 'agent:chunk:session', { type: 'start' })
-    expect(send).toHaveBeenNthCalledWith(2, 'agent:error:session', 'failed')
-    expect(send).toHaveBeenNthCalledWith(3, 'agent:end:session')
+    expect(send).toHaveBeenNthCalledWith(2, 'agent:title:session', 'Generated title')
+    expect(send).toHaveBeenNthCalledWith(3, 'agent:error:session', 'failed')
+    expect(send).toHaveBeenNthCalledWith(4, 'agent:end:session')
   })
 
   it('ignores stream events after the renderer is destroyed', () => {
@@ -62,6 +64,7 @@ describe('agent IPC', () => {
 
     const sink = agent.send.mock.calls[0][1]
     sink.chunk({ type: 'start' })
+    sink.title('Generated title')
     sink.error(new Error('failed'))
     sink.end()
     expect(send).not.toHaveBeenCalled()

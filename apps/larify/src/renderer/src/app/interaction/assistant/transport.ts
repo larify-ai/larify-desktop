@@ -4,6 +4,7 @@ import type { AgentModelConfig } from '../../../../../main/core/model/config'
 function openAgentStream(
   sessionId: string,
   signal: AbortSignal | undefined,
+  onTitle: ((title: string) => void) | undefined,
   start: (cancelled: () => boolean) => Promise<void>
 ): ReadableStream<UIMessageChunk> {
   let finished = false
@@ -27,6 +28,9 @@ function openAgentStream(
       cleanup.push(
         window.bridge.on(`agent:chunk:${sessionId}`, (chunk) => {
           if (!finished) controller.enqueue(chunk as UIMessageChunk)
+        }),
+        window.bridge.on(`agent:title:${sessionId}`, (title) => {
+          if (!finished && typeof title === 'string') onTitle?.(title)
         }),
         window.bridge.on(`agent:end:${sessionId}`, () => finish()),
         window.bridge.on(`agent:error:${sessionId}`, finish)
@@ -58,7 +62,8 @@ function openAgentStream(
 export function createIpcTransport(
   getCwd: () => string,
   getModelConfig: () => AgentModelConfig,
-  onSaved?: () => Promise<void>
+  onSaved?: () => Promise<void>,
+  onTitle?: (title: string) => void
 ): ChatTransport<UIMessage> {
   return {
     async sendMessages({ chatId, messages, abortSignal }) {
@@ -67,7 +72,7 @@ export function createIpcTransport(
       const cwd = getCwd()
       const modelConfig = getModelConfig()
 
-      return openAgentStream(chatId, abortSignal, async (cancelled) => {
+      return openAgentStream(chatId, abortSignal, onTitle, async (cancelled) => {
         const saved = (await window.bridge.invoke('attachment:save', chatId, message)) ?? message
         if (cancelled()) return
         await window.bridge.invoke('agent:send', {

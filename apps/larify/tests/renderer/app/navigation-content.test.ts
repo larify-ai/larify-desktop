@@ -74,6 +74,6 @@ describe('navigation content', () => {
       (button) => button.textContent === '新建任务'
     )
     act(() => newTask?.click())
-    expect(create).toHaveBeenCalledOnce()
+    expect(create).toHaveBeenCalledWith()
   })
 })

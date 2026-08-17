@@ -11,7 +11,7 @@ export function NavigationContent(): React.JSX.Element {
   return (
     <div className="flex h-full min-h-0 flex-col pb-2">
       <nav aria-label="全局入口" className="space-y-0.5">
-        <NavigationAction icon={MessageCirclePlusIcon} onClick={sessions.create}>
+        <NavigationAction icon={MessageCirclePlusIcon} onClick={() => sessions.create()}>
           新建任务
         </NavigationAction>
         <NavigationAction icon={BoxIcon}>百宝箱</NavigationAction>

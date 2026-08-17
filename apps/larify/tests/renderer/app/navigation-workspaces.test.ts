@@ -136,11 +136,13 @@ describe('createWorkspaces', () => {
   })
 
   it('maps active state and delegates session selection and pagination', async () => {
+    const create = vi.fn()
     const select = vi.fn().mockResolvedValue(undefined)
     const loadMore = vi.fn().mockResolvedValue(undefined)
     const workspaces = createWorkspaces(
       source({
         activeId: 'second',
+        create,
         select,
         loadMore,
         directory: [
@@ -158,10 +160,32 @@ describe('createWorkspaces', () => {
 
     expect(workspaces[0].sessions.map(({ active }) => active)).toEqual([false, true])
     workspaces[0].sessions[1].onClick()
+    workspaces[0].onCreate?.()
     await workspaces[0].onMore()
 
     expect(select).toHaveBeenCalledWith('second')
+    expect(create).toHaveBeenCalledWith('D:\\Workspace')
     expect(loadMore).toHaveBeenCalledWith('D:\\Workspace')
     expect(workspaces[0].hasMore).toBe(true)
+  })
+
+  it('hides creation for the workspace that already owns the active draft', () => {
+    const create = vi.fn()
+    const workspaces = createWorkspaces(
+      source({
+        create,
+        activeSession: {
+          id: 'draft',
+          cwd: 'D:\\Workspace',
+          heading: null,
+          persisted: false,
+          messages: [],
+          messageCount: 0
+        },
+        directory: [{ cwd: 'D:\\Workspace', sessions: [], hasMore: false }]
+      })
+    )
+
+    expect(workspaces[0].onCreate).toBeUndefined()
   })
 })

@@ -82,6 +82,10 @@ export class SessionStore implements Disposable {
     return Number(row?.count ?? 0)
   }
 
+  hasSession(id: string): boolean {
+    return this.database.prepare('SELECT 1 FROM sessions WHERE id = ?').get(id) !== undefined
+  }
+
   createSession(session: Pick<Session, 'id' | 'title' | 'cwd'>): void {
     const now = Date.now()
     this.database

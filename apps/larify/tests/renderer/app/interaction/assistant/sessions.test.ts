@@ -67,6 +67,20 @@ describe('AssistantSessionsProvider', () => {
     expect(invoke).toHaveBeenCalledWith('resource:close', 7)
   })
 
+  it('creates a draft in the requested workspace', async () => {
+    const firstId = sessions.activeId
+    await act(async () => {
+      sessions.create('D:\\Workspace')
+    })
+    expect(sessions.activeSession).toMatchObject({ id: firstId, cwd: 'D:\\Workspace' })
+
+    await act(async () => {
+      sessions.setPersisted(firstId)
+      sessions.create('D:\\Another')
+    })
+    expect(sessions.activeSession).toMatchObject({ cwd: 'D:\\Another', persisted: false })
+  })
+
   it('closes draft resources only once when Strict Mode replays the update', async () => {
     act(() => root.unmount())
     root = createRoot(document.createElement('div'))

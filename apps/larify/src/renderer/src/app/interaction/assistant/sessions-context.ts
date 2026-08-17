@@ -17,7 +17,7 @@ export interface AssistantSessions {
   directory: SessionDirectoryGroup[]
   activeId: string
   activeSession: AssistantSessionState
-  create(): void
+  create(cwd?: string): void
   select(id: string): Promise<void>
   loadMore(cwd: string): Promise<void>
   refresh(): Promise<void>

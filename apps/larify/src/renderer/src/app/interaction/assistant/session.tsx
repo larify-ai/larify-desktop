@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Chat } from '@ai-sdk/react'
 import { lastAssistantMessageIsCompleteWithToolCalls, type UIMessage } from 'ai'
 import { createIpcTransport } from './transport'
@@ -28,7 +28,6 @@ export function AssistantSession({
   onHeadingChange: (heading: ConversationHeading | null) => void
   onSaved: () => Promise<void>
 }): React.JSX.Element {
-  const [cwd, setCwd] = useState(initialCwd)
   const recentStart = Math.max(0, initialMessageCount - initialMessages.length)
   const cache = useRef(new Map<number, UIMessage>())
   const [olderMessages, setOlderMessages] = useState(() => new Map<number, UIMessage>())
@@ -44,7 +43,11 @@ export function AssistantSession({
         transport: createIpcTransport(
           () => transportCwd,
           () => readModelConfig(localStorage),
-          onSaved
+          onSaved,
+          (title) => {
+            onHeadingChange({ cwd: transportCwd, title })
+            void onSaved().catch(() => undefined)
+          }
         )
       }),
       setTransportCwd(next: string) {
@@ -55,9 +58,12 @@ export function AssistantSession({
 
   const changeCwd = (next: string): void => {
     setTransportCwd(next)
-    setCwd(next)
     onCwdChange(next)
   }
+
+  useEffect(() => {
+    setTransportCwd(initialCwd)
+  }, [initialCwd, setTransportCwd])
 
   const loadRange = useCallback(
     (firstPage: number, lastPage: number) => {
@@ -102,7 +108,7 @@ export function AssistantSession({
       active={active}
       chat={chat}
       title={title}
-      cwd={cwd}
+      cwd={initialCwd}
       recentStart={recentStart}
       olderMessages={olderMessages}
       onLoadRange={loadRange}

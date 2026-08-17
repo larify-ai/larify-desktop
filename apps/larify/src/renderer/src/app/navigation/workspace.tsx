@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { FolderClosedIcon, FolderOpenIcon } from 'lucide-react'
+import { FolderClosedIcon, FolderOpenIcon, PlusIcon } from 'lucide-react'
 import { navigationItemClassName } from './navigation-action'
 import type { WorkspacePreview } from './workspaces'
 
@@ -41,15 +41,27 @@ export function Workspace({ workspace }: { workspace: WorkspacePreview }): React
 
   return (
     <section className="space-y-0.5">
-      <button
-        type="button"
-        aria-expanded={expanded}
-        className={`${navigationItemClassName} h-8 font-medium`}
-        onClick={toggle}
-      >
-        <Folder aria-hidden="true" className="size-[18px] shrink-0" />
-        <span className="min-w-0 truncate">{workspace.name}</span>
-      </button>
+      <div className="group relative">
+        <button
+          type="button"
+          aria-expanded={expanded}
+          className={`${navigationItemClassName} h-8 font-medium${workspace.onCreate ? ' pr-9' : ''}`}
+          onClick={toggle}
+        >
+          <Folder aria-hidden="true" className="size-[18px] shrink-0" />
+          <span className="min-w-0 truncate">{workspace.name}</span>
+        </button>
+        {workspace.onCreate && (
+          <button
+            type="button"
+            aria-label={`在 ${workspace.name} 中新建任务`}
+            className="absolute top-1/2 right-3 grid size-6 -translate-y-1/2 place-items-center rounded-md text-muted-foreground opacity-0 transition-[color,background-color,opacity] hover:bg-sidebar-accent hover:text-foreground focus-visible:bg-sidebar-accent focus-visible:text-foreground focus-visible:opacity-100 focus-visible:outline-none group-hover:opacity-100 group-focus-within:opacity-100"
+            onClick={workspace.onCreate}
+          >
+            <PlusIcon aria-hidden="true" className="size-4" />
+          </button>
+        )}
+      </div>
       {expanded && (
         <div className="space-y-0.5">
           {sessions.map((session) => (

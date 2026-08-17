@@ -16,6 +16,7 @@ export interface AgentWorkerInput {
 
 export interface AgentSink {
   chunk(chunk: UIMessageChunk): void
+  title?(title: string): void
   error(error: unknown): void
   end(): void
 }
@@ -48,6 +49,9 @@ export class AgentWorker {
         cwd: input.cwd,
         message: input.message,
         options: { ...input.runtime, abortSignal: controller.signal },
+        onTitle: (title) => {
+          if (!controller.signal.aborted) this.sink.title?.(title)
+        },
         onChunk: (chunk) => {
           if (controller.signal.aborted) return
           this.sink.chunk(chunk)

@@ -13,6 +13,7 @@ export interface WorkspacePreview {
   name: string
   sessions: SessionPreview[]
   hasMore: boolean
+  onCreate?: () => void
   onMore: () => Promise<void>
 }
 
@@ -31,6 +32,10 @@ export function createWorkspaces(source: AssistantSessions): WorkspacePreview[] 
       onClick: () => void source.select(session.id)
     })),
     hasMore: group.hasMore,
+    onCreate:
+      !source.activeSession.persisted && source.activeSession.cwd === group.cwd
+        ? undefined
+        : () => source.create(group.cwd),
     onMore: () => source.loadMore(group.cwd)
   }))
 }

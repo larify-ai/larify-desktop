@@ -26,11 +26,12 @@ function createWorker(): {
   snapshots: { start: ReturnType<typeof vi.fn>; compare: ReturnType<typeof vi.fn> }
   sink: {
     chunk: ReturnType<typeof vi.fn>
+    title: ReturnType<typeof vi.fn>
     error: ReturnType<typeof vi.fn>
     end: ReturnType<typeof vi.fn>
   }
 } {
-  const sink = { chunk: vi.fn(), error: vi.fn(), end: vi.fn() }
+  const sink = { chunk: vi.fn(), title: vi.fn(), error: vi.fn(), end: vi.fn() }
   const sessions = { saveMessages: vi.fn() }
   const snapshots = {
     start: vi.fn().mockResolvedValue(null),
@@ -111,6 +112,18 @@ describe('AgentWorker', () => {
     expect(sink.chunk).toHaveBeenCalledWith(chunk)
     expect(sink.end).toHaveBeenCalledOnce()
     expect(sink.error).not.toHaveBeenCalled()
+  })
+
+  it('forwards generated titles while running', async () => {
+    mocks.run.mockImplementation(async (_sessions, request) => {
+      request.onTitle('Generated title')
+      return undefined
+    })
+    const { worker, sink } = createWorker()
+
+    await worker.run(input)
+
+    expect(sink.title).toHaveBeenCalledWith('Generated title')
   })
 
   it('reports execution errors without ending', async () => {

@@ -74,12 +74,11 @@ describe('AssistantSession', () => {
       lastAssistantMessageIsCompleteWithToolCalls
     )
     await act(async () => initial.onCwdChange('D:\\Workspace\\project'))
-    const changed = mocks.assistant.mock.calls.at(-1)![0] as { chat: unknown; cwd: string }
+    const changed = mocks.assistant.mock.calls.at(-1)![0] as { chat: unknown }
 
     expect(mocks.chat).toHaveBeenCalledOnce()
     expect(mocks.chat).toHaveBeenCalledWith(expect.objectContaining({ id: 'session' }))
     expect(changed.chat).toBe(initial.chat)
-    expect(changed.cwd).toBe('D:\\Workspace\\project')
     expect(onCwdChange).toHaveBeenCalledWith('D:\\Workspace\\project')
 
     const stream = await initial.chat.options.transport.sendMessages({
@@ -97,6 +96,53 @@ describe('AssistantSession', () => {
     await vi.waitFor(() => expect(onSaved).toHaveBeenCalledOnce())
     await stream.cancel()
 
+    await act(async () => root.unmount())
+  })
+
+  it('syncs a reused draft to its newly selected workspace', async () => {
+    const invoke = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(window, 'bridge', {
+      configurable: true,
+      value: { invoke, on: vi.fn(() => () => undefined) }
+    })
+    const root = createRoot(document.createElement('div'))
+    const props = {
+      id: 'draft',
+      initialMessages: [],
+      initialMessageCount: 0,
+      onCwdChange: vi.fn(),
+      onHeadingChange: vi.fn(),
+      onSaved: vi.fn().mockResolvedValue(undefined)
+    }
+
+    await act(async () => {
+      root.render(createElement(AssistantSession, { ...props, initialCwd: '' }))
+    })
+    await act(async () => {
+      root.render(
+        createElement(AssistantSession, { ...props, initialCwd: 'D:\\Workspace\\project' })
+      )
+    })
+
+    const current = mocks.assistant.mock.calls.at(-1)![0] as {
+      chat: { options: { transport: ChatTransport<UIMessage> } }
+      cwd: string
+    }
+    expect(current.cwd).toBe('D:\\Workspace\\project')
+
+    const stream = await current.chat.options.transport.sendMessages({
+      chatId: 'draft',
+      messageId: undefined,
+      messages: [{ id: 'message', role: 'user', parts: [{ type: 'text', text: 'hello' }] }],
+      trigger: 'submit-message'
+    })
+    await vi.waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith(
+        'agent:send',
+        expect.objectContaining({ cwd: 'D:\\Workspace\\project' })
+      )
+    )
+    await stream.cancel()
     await act(async () => root.unmount())
   })
 

@@ -11,6 +11,7 @@ export function registerAgentHandlers(agent: Agent): Disposable {
     }
     return agent.send(input, {
       chunk: (chunk) => send(`agent:chunk:${channel}`, chunk),
+      title: (title) => send(`agent:title:${channel}`, title),
       error: (error) => send(`agent:error:${channel}`, errorMessage(error)),
       end: () => send(`agent:end:${channel}`)
     })

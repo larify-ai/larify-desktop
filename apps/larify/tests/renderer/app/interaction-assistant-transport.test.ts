@@ -64,6 +64,34 @@ describe('interaction assistant transport', () => {
     )
   })
 
+  it('forwards generated session titles while the stream is open', async () => {
+    const bridge = createBridge(async (channel) => {
+      if (channel !== 'agent:send') return
+      bridge.emit('agent:title:session-1', 'Generated title')
+      bridge.emit('agent:end:session-1')
+    })
+    const onTitle = vi.fn()
+    vi.stubGlobal('window', { bridge })
+    const transport = createIpcTransport(
+      () => 'C:/workspace',
+      () => defaultModelConfig,
+      undefined,
+      onTitle
+    )
+
+    await readAll(
+      await transport.sendMessages({
+        chatId: 'session-1',
+        messageId: undefined,
+        messages: [{ id: 'message-1', role: 'user', parts: [{ type: 'text', text: 'hello' }] }],
+        trigger: 'submit-message'
+      })
+    )
+
+    expect(onTitle).toHaveBeenCalledWith('Generated title')
+    expect(bridge.listenerCount()).toBe(0)
+  })
+
   it('notifies after the backend accepts and stores the message', async () => {
     const bridge = createBridge()
     const onSaved = vi.fn().mockResolvedValue(undefined)

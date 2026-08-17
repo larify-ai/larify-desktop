@@ -8,9 +8,9 @@ import {
 } from './session-directory'
 import { loadMessagePage } from './session-messages'
 
-function createSession(): AssistantSessionState {
+function createSession(cwd = ''): AssistantSessionState {
   return {
-    cwd: '',
+    cwd,
     id: crypto.randomUUID(),
     heading: null,
     persisted: false,
@@ -60,7 +60,7 @@ export function AssistantSessionsProvider({
     void refresh().catch(() => undefined)
   }, [refresh])
 
-  const create = useCallback(() => {
+  const create = useCallback((cwd = '') => {
     setState((current) => {
       const draft = current.sessions.find(({ persisted }) => !persisted)
       if (draft) {
@@ -72,10 +72,15 @@ export function AssistantSessionsProvider({
             .catch(() => undefined)
             .finally(() => closingResources.current.delete(draft.id))
         })
-        return { ...current, activeId: draft.id }
+        return {
+          sessions: current.sessions.map((session) =>
+            session.id === draft.id ? { ...session, cwd } : session
+          ),
+          activeId: draft.id
+        }
       }
 
-      const session = createSession()
+      const session = createSession(cwd)
       selected.current = session.id
       return { sessions: [...current.sessions, session], activeId: session.id }
     })

@@ -4,7 +4,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   save: vi.fn(),
   prepare: vi.fn(),
-  run: vi.fn()
+  run: vi.fn(),
+  title: vi.fn()
 }))
 
 vi.mock('../../../../src/main/core/session/save', () => ({
@@ -15,6 +16,9 @@ vi.mock('../../../../src/main/core/agent/messages', () => ({
 }))
 vi.mock('../../../../src/main/core/agent/session', () => ({
   runAgentSession: mocks.run
+}))
+vi.mock('../../../../src/main/core/session/title', () => ({
+  generateSessionTitle: mocks.title
 }))
 vi.mock('../../../../src/main/core/model', () => ({
   createModel: vi.fn(() => 'model')
@@ -41,6 +45,7 @@ const history: UIMessage = {
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.prepare.mockResolvedValue([history, user])
+  mocks.title.mockResolvedValue('Greeting')
 })
 
 describe('runStoredAgentSession', () => {
@@ -50,7 +55,9 @@ describe('runStoredAgentSession', () => {
       return [history, user, assistant]
     })
     const sessions = {
+      hasSession: vi.fn(() => true),
       loadMessages: vi.fn(() => [history, user]),
+      renameSession: vi.fn(),
       saveMessages: vi.fn()
     }
 
@@ -75,7 +82,9 @@ describe('runStoredAgentSession', () => {
   it('does not return an assistant message from an earlier run', async () => {
     mocks.run.mockResolvedValue([history, user])
     const sessions = {
+      hasSession: vi.fn(() => true),
       loadMessages: vi.fn(() => [history, user]),
+      renameSession: vi.fn(),
       saveMessages: vi.fn()
     }
 
@@ -93,7 +102,12 @@ describe('runStoredAgentSession', () => {
   it('does not save an incomplete response when streaming fails', async () => {
     mocks.run.mockRejectedValue(new Error('stream failed'))
 
-    const sessions = { loadMessages: vi.fn(() => [user]), saveMessages: vi.fn() }
+    const sessions = {
+      hasSession: vi.fn(() => true),
+      loadMessages: vi.fn(() => [user]),
+      renameSession: vi.fn(),
+      saveMessages: vi.fn()
+    }
     await expect(
       runStoredAgentSession(sessions as never, {
         sessionId: 'session',
@@ -106,5 +120,135 @@ describe('runStoredAgentSession', () => {
     expect(mocks.save).toHaveBeenCalledOnce()
     expect(mocks.save).toHaveBeenCalledWith(sessions, 'session', 'cwd', [user], undefined)
     expect(sessions.saveMessages).not.toHaveBeenCalled()
+  })
+
+  it('generates a title for the first non-trivial user message', async () => {
+    mocks.run.mockResolvedValue([user])
+    const onTitle = vi.fn()
+    const sessions = {
+      hasSession: vi.fn(() => false),
+      loadMessages: vi.fn(() => [user]),
+      renameSession: vi.fn(),
+      saveMessages: vi.fn()
+    }
+
+    await runStoredAgentSession(sessions as never, {
+      sessionId: 'session',
+      cwd: 'cwd',
+      message: { ...user, parts: [{ type: 'text', text: 'explain this issue' }] },
+      onTitle,
+      options: {} as never
+    })
+    await vi.waitFor(() =>
+      expect(sessions.renameSession).toHaveBeenCalledWith('session', 'Greeting')
+    )
+    expect(mocks.title).toHaveBeenCalledWith('explain this issue')
+    expect(onTitle).toHaveBeenCalledWith('Greeting')
+  })
+
+  it('finishes only after the generated title is persisted', async () => {
+    const title = Promise.withResolvers<string>()
+    mocks.title.mockReturnValue(title.promise)
+    mocks.run.mockResolvedValue([user])
+    const sessions = {
+      hasSession: vi.fn(() => false),
+      loadMessages: vi.fn(() => [user]),
+      renameSession: vi.fn(),
+      saveMessages: vi.fn()
+    }
+    const running = runStoredAgentSession(sessions as never, {
+      sessionId: 'session',
+      cwd: 'cwd',
+      message: { ...user, parts: [{ type: 'text', text: 'explain this issue' }] },
+      options: {} as never
+    })
+
+    let finished = false
+    void running.then(() => {
+      finished = true
+    })
+    await vi.waitFor(() => expect(mocks.run).toHaveBeenCalledOnce())
+    expect(finished).toBe(false)
+
+    title.resolve('Generated title')
+    await running
+    expect(sessions.renameSession).toHaveBeenCalledWith('session', 'Generated title')
+  })
+
+  it('skips title generation for short messages', async () => {
+    mocks.run.mockResolvedValue([user])
+    const sessions = {
+      hasSession: vi.fn(() => false),
+      loadMessages: vi.fn(() => [user]),
+      renameSession: vi.fn(),
+      saveMessages: vi.fn()
+    }
+
+    await runStoredAgentSession(sessions as never, {
+      sessionId: 'session',
+      cwd: 'cwd',
+      message: user,
+      options: {} as never
+    })
+
+    expect(mocks.title).not.toHaveBeenCalled()
+    expect(sessions.renameSession).not.toHaveBeenCalled()
+  })
+
+  it('skips title generation for an existing session or an explicit title', async () => {
+    mocks.run.mockResolvedValue([user])
+    const sessions = {
+      hasSession: vi.fn(() => true),
+      loadMessages: vi.fn(() => [user]),
+      renameSession: vi.fn(),
+      saveMessages: vi.fn()
+    }
+    const message = { ...user, parts: [{ type: 'text' as const, text: 'explain this issue' }] }
+
+    await runStoredAgentSession(sessions as never, {
+      sessionId: 'existing',
+      cwd: 'cwd',
+      message,
+      options: {} as never
+    })
+    sessions.hasSession.mockReturnValue(false)
+    await runStoredAgentSession(sessions as never, {
+      sessionId: 'named',
+      cwd: 'cwd',
+      message,
+      title: 'Named task',
+      options: {} as never
+    })
+
+    expect(mocks.title).not.toHaveBeenCalled()
+    expect(sessions.renameSession).not.toHaveBeenCalled()
+  })
+
+  it('keeps the derived title when title generation fails or returns empty text', async () => {
+    mocks.run.mockResolvedValue([user])
+    const sessions = {
+      hasSession: vi.fn(() => false),
+      loadMessages: vi.fn(() => [user]),
+      renameSession: vi.fn(),
+      saveMessages: vi.fn()
+    }
+    const message = { ...user, parts: [{ type: 'text' as const, text: 'explain this issue' }] }
+
+    mocks.title.mockRejectedValueOnce(new Error('title failed')).mockResolvedValueOnce('')
+    await runStoredAgentSession(sessions as never, {
+      sessionId: 'failed',
+      cwd: 'cwd',
+      message,
+      options: {} as never
+    })
+    await runStoredAgentSession(sessions as never, {
+      sessionId: 'empty',
+      cwd: 'cwd',
+      message,
+      options: {} as never
+    })
+    await vi.waitFor(() => expect(mocks.title).toHaveBeenCalledTimes(2))
+
+    expect(sessions.renameSession).not.toHaveBeenCalled()
   })
 })

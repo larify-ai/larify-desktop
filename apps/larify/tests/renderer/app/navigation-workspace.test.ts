@@ -93,6 +93,18 @@ describe('navigation workspace', () => {
     expect(onClick).toHaveBeenCalledOnce()
   })
 
+  it('creates a task in the workspace without toggling the directory', () => {
+    const onCreate = vi.fn()
+    renderWorkspace({ onCreate })
+
+    const add = container.querySelector<HTMLButtonElement>('[aria-label="在 Workspace 中新建任务"]')
+    expect(add?.className).toContain('opacity-0')
+    act(() => add?.click())
+
+    expect(onCreate).toHaveBeenCalledOnce()
+    expect(visibleSessions()).toHaveLength(5)
+  })
+
   it('loads another page without accepting repeated clicks', async () => {
     let resolve!: () => void
     const onMore = vi.fn(

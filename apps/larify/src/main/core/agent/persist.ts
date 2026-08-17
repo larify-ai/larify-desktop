@@ -17,11 +17,14 @@ export interface AgentRequest {
 export async function runStoredAgentSession(
   sessions: SessionStore,
   request: AgentRequest
-): Promise<void> {
+): Promise<UIMessage | undefined> {
   const { sessionId, cwd, message, options, onChunk } = request
   saveSessionMessages(sessions, sessionId, cwd, [message], request.title)
   const messages = await prepareMessages(sessions.loadMessages(sessionId))
-  await runAgentSession(messages, options, onChunk, (response) =>
+  let latestResponse: UIMessage | undefined
+  await runAgentSession(messages, options, onChunk, (response) => {
+    latestResponse = response
     sessions.saveMessages(sessionId, [response])
-  )
+  })
+  return latestResponse
 }

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, createElement, useState, type ReactNode } from 'react'
+import { act, createElement, StrictMode, useState, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import type { FileStatusResult } from 'simple-git'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -14,9 +14,11 @@ const h = vi.hoisted(() => ({
   loading: false,
   layoutProps: vi.fn(),
   openPath: '',
+  readDirectory: vi.fn(),
   statuses: [] as FileStatusResult[],
   treeProps: vi.fn(),
-  useGitDecorations: vi.fn()
+  useGitDecorations: vi.fn(),
+  workspaceRoot: 'D:\\workspace'
 }))
 
 vi.mock('../../../../src/extensions/workspace/renderer/changes/use-git-decorations', () => ({
@@ -28,6 +30,12 @@ vi.mock('../../../../src/extensions/workspace/renderer/changes/use-git-decoratio
       loading: h.loading,
       statuses: h.statuses
     }
+  }
+}))
+
+vi.mock('../../../../src/extensions/workspace/renderer/workspace-client', () => ({
+  workspaceClient: {
+    readDirectory: (resourceId: number) => h.readDirectory(resourceId)
   }
 }))
 
@@ -63,11 +71,28 @@ vi.mock('../../../../src/extensions/workspace/renderer/layout/workspace-layout',
 }))
 
 vi.mock('../../../../src/extensions/workspace/renderer/changes/monaco-diff', () => ({
-  MonacoDiff: ({ mode, status }: { mode: string; status: FileStatusResult }) =>
-    createElement('div', { 'data-mode': mode, 'data-path': status.path, 'data-testid': 'diff' })
+  MonacoDiff: ({
+    active,
+    animating,
+    mode,
+    status
+  }: {
+    active: boolean
+    animating: boolean
+    mode: string
+    status: FileStatusResult
+  }) =>
+    createElement('div', {
+      'data-active': active,
+      'data-animating': animating,
+      'data-mode': mode,
+      'data-path': status.path,
+      'data-testid': 'diff'
+    })
 }))
 
 import { ChangesView } from '../../../../src/extensions/workspace/renderer/changes/changes-view'
+import { requestChangesNavigation } from '../../../../src/extensions/workspace/renderer/changes/changes-navigation'
 
 const status = (path: string, index = ' ', working_dir = 'M'): FileStatusResult =>
   ({ index, path, working_dir }) as FileStatusResult
@@ -77,24 +102,32 @@ describe('ChangesView', () => {
   let reactRoot: Root
   const updateTab = vi.fn()
 
-  function Harness(): React.JSX.Element {
+  function Harness({
+    active = false,
+    resourceId = 7
+  }: {
+    active?: boolean
+    resourceId?: number
+  }): React.JSX.Element {
     const [actions, setActions] = useState<ReactNode>(null)
     return createElement(
       WorkbenchTabActionsContext.Provider,
       { value: setActions },
       createElement('div', { 'data-testid': 'actions' }, actions),
       createElement(ChangesView, {
+        active,
         cwd: 'D:\\workspace',
-        resourceId: 7,
+        resourceId,
         sessionId: 'session',
         updateTab
       })
     )
   }
 
-  const render = async (): Promise<void> => {
+  const render = async (resourceId = 7, strict = false, active = false): Promise<void> => {
     await act(async () => {
-      reactRoot.render(createElement(Harness))
+      const view = createElement(Harness, { active, resourceId })
+      reactRoot.render(strict ? createElement(StrictMode, null, view) : view)
       await Promise.resolve()
     })
   }
@@ -106,7 +139,12 @@ describe('ChangesView', () => {
     h.loading = false
     h.layoutProps.mockClear()
     h.openPath = ''
+    h.readDirectory.mockReset()
+    h.readDirectory.mockImplementation(() =>
+      Promise.resolve({ entries: [], root: h.workspaceRoot })
+    )
     h.statuses = []
+    h.workspaceRoot = 'D:\\workspace'
     container = document.createElement('div')
     document.body.append(container)
     reactRoot = createRoot(container)
@@ -142,6 +180,29 @@ describe('ChangesView', () => {
 
     expect(h.layoutProps).toHaveBeenLastCalledWith(
       expect.objectContaining({ animating: false, visible: true })
+    )
+  })
+
+  it('keeps the file preview active while the visible workbench is animating', async () => {
+    h.statuses = [status('D:\\workspace\\changed.ts')]
+    await render(7, false, true)
+    expect(container.querySelector('[data-testid="diff"]')?.getAttribute('data-active')).toBe(
+      'false'
+    )
+
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent('larify:workbench-animation', {
+          detail: { animating: true, visible: false }
+        })
+      )
+    })
+
+    expect(container.querySelector('[data-testid="diff"]')?.getAttribute('data-active')).toBe(
+      'true'
+    )
+    expect(container.querySelector('[data-testid="diff"]')?.getAttribute('data-animating')).toBe(
+      'true'
     )
   })
 
@@ -207,5 +268,90 @@ describe('ChangesView', () => {
     )
 
     expect(updateTab).toHaveBeenLastCalledWith({ title: '变更', tooltip: first.path })
+  })
+
+  it('selects a changed file requested by a card', async () => {
+    const first = status('D:\\workspace\\first.ts')
+    const second = status('D:\\workspace\\second.ts')
+    h.statuses = [first, second]
+    await render()
+
+    await act(async () => requestChangesNavigation({ path: 'second.ts', resourceId: 7 }))
+
+    expect(container.querySelector('[data-testid="diff"]')?.getAttribute('data-path')).toBe(
+      second.path
+    )
+  })
+
+  it('resolves a card path from the workspace root instead of cwd', async () => {
+    const changed = status('D:\\actual-workspace\\src\\changed.ts')
+    h.workspaceRoot = 'D:\\actual-workspace'
+    h.statuses = [changed]
+    requestChangesNavigation({ path: 'src/changed.ts', resourceId: 7 })
+
+    await render()
+
+    expect(h.useGitDecorations).toHaveBeenLastCalledWith(7, h.workspaceRoot, {
+      includeIgnored: false
+    })
+    expect(container.querySelector('[data-testid="diff"]')?.getAttribute('data-path')).toBe(
+      changed.path
+    )
+  })
+
+  it('applies a pending file selection after mounting', async () => {
+    const first = status('D:\\workspace\\first.ts')
+    const second = status('D:\\workspace\\second.ts')
+    h.statuses = [first, second]
+    requestChangesNavigation({ path: 'second.ts', resourceId: 7 })
+
+    await render(7, true)
+
+    expect(container.querySelector('[data-testid="diff"]')?.getAttribute('data-path')).toBe(
+      second.path
+    )
+  })
+
+  it('ignores a file selection for another changes resource', async () => {
+    const first = status('D:\\workspace\\first.ts')
+    h.statuses = [first]
+    await render(7)
+    await act(async () =>
+      requestChangesNavigation({ path: 'D:\\workspace\\other.ts', resourceId: 99 })
+    )
+
+    expect(container.querySelector('[data-testid="diff"]')?.getAttribute('data-path')).toBe(
+      first.path
+    )
+  })
+
+  it('ignores a workspace root that resolves after switching resources', async () => {
+    let resolveFirst: ((value: { entries: never[]; root: string }) => void) | undefined
+    let resolveSecond: ((value: { entries: never[]; root: string }) => void) | undefined
+    h.readDirectory
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirst = resolve
+          })
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveSecond = resolve
+          })
+      )
+
+    await render(7)
+    await render(8)
+    await act(async () => resolveSecond?.({ entries: [], root: 'D:\\second' }))
+    expect(h.useGitDecorations).toHaveBeenLastCalledWith(8, 'D:\\second', {
+      includeIgnored: false
+    })
+
+    await act(async () => resolveFirst?.({ entries: [], root: 'D:\\stale' }))
+    expect(h.useGitDecorations).toHaveBeenLastCalledWith(8, 'D:\\second', {
+      includeIgnored: false
+    })
   })
 })

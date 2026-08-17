@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 import type { Resource } from '@shared/resource'
 import { Region } from '../layout/region'
 import { createWorkbenchStore } from './workbench-store'
@@ -10,11 +10,16 @@ const resourceOptions = (id: string, cwd: string): Record<string, string> => {
   return {}
 }
 
+const optionsKey = (options: Record<string, string>): string =>
+  JSON.stringify(Object.entries(options).sort(([first], [second]) => first.localeCompare(second)))
+
 export function Workbench({
+  active = true,
   sessionId,
   cwd,
   resources
 }: {
+  active?: boolean
   sessionId: string
   cwd: string
   resources?: Resource[]
@@ -26,6 +31,8 @@ export function Workbench({
     stores.set(sessionId, store)
   }
   const sessionIdRef = useRef(sessionId)
+  const pendingTools = useRef(new Map<string, Promise<number | null>>())
+  const scopedTools = useRef(new Map<string, number>())
   useLayoutEffect(() => {
     sessionIdRef.current = sessionId
   }, [sessionId])
@@ -80,16 +87,102 @@ export function Workbench({
     return () => window.removeEventListener('larify:workbench-select-resource', selectResource)
   }, [sessionId, store])
 
-  const openTool = (id: string): void => {
-    void window.bridge
-      .invoke('resource:create', id, sessionId, resourceOptions(id, cwd))
-      .then((resourceId: number) => {
-        if (sessionIdRef.current === sessionId) {
-          store.getState().openView({ rendererId: id, resourceId })
-        }
+  const createTool = useCallback(
+    (id: string, options?: Record<string, string>): Promise<number | null> =>
+      window.bridge
+        .invoke('resource:create', id, sessionId, { ...resourceOptions(id, cwd), ...options })
+        .then((resourceId: number) => {
+          if (sessionIdRef.current === sessionId) {
+            store.getState().openView({ rendererId: id, resourceId })
+            return resourceId
+          }
+          return null
+        })
+        .catch(() => null),
+    [cwd, sessionId, store]
+  )
+
+  const runAfterOpen = useCallback(
+    (rendererId: string, resourceId: number, onOpen?: (resourceId: number) => void): void => {
+      if (!onOpen) return
+      window.setTimeout(() => {
+        const available = store
+          .getState()
+          .views.some((view) => view.rendererId === rendererId && view.resourceId === resourceId)
+        if (sessionIdRef.current === sessionId && available) onOpen(resourceId)
+      }, 0)
+    },
+    [sessionId, store]
+  )
+
+  const openTool = useCallback(
+    (id: string): void => {
+      void createTool(id)
+    },
+    [createTool]
+  )
+
+  const openWorkbenchTool = useCallback(
+    (
+      rendererId: string,
+      onOpen?: (resourceId: number) => void,
+      options?: Record<string, string>
+    ): void => {
+      const defaults = resourceOptions(rendererId, cwd)
+      const resolvedOptions = { ...defaults, ...options }
+      const scoped = options !== undefined && optionsKey(resolvedOptions) !== optionsKey(defaults)
+      const key = `${sessionId}:${rendererId}:${optionsKey(resolvedOptions)}`
+      const scopedResourceId = scoped ? scopedTools.current.get(key) : undefined
+      const views = store.getState().views
+      const existing = scoped
+        ? views.findLast(
+            (view) => view.rendererId === rendererId && view.resourceId === scopedResourceId
+          )
+        : views.findLast((view) => view.rendererId === rendererId)
+      if (existing) {
+        store.getState().openView({ rendererId, resourceId: existing.resourceId })
+        onOpen?.(existing.resourceId)
+        return
+      }
+      let pending = pendingTools.current.get(key)
+      if (!pending) {
+        pending = createTool(rendererId, resolvedOptions)
+        pendingTools.current.set(key, pending)
+        void pending.finally(() => pendingTools.current.delete(key))
+      }
+      void pending.then((resourceId) => {
+        if (resourceId === null) return
+        if (scoped) scopedTools.current.set(key, resourceId)
+        runAfterOpen(rendererId, resourceId, onOpen)
       })
-      .catch(() => undefined)
-  }
+    },
+    [createTool, cwd, runAfterOpen, sessionId, store]
+  )
+
+  useLayoutEffect(() => {
+    const openWorkbench = (event: Event): void => {
+      const detail = (event as CustomEvent<unknown>).detail
+      if (!active) return
+      if (typeof detail === 'string') {
+        openWorkbenchTool(detail)
+      } else if (detail && typeof detail === 'object' && 'rendererId' in detail) {
+        const { onOpen, options, rendererId } = detail as {
+          onOpen?: unknown
+          options?: unknown
+          rendererId?: unknown
+        }
+        if (typeof rendererId === 'string') {
+          openWorkbenchTool(
+            rendererId,
+            typeof onOpen === 'function' ? (onOpen as (resourceId: number) => void) : undefined,
+            options && typeof options === 'object' ? (options as Record<string, string>) : undefined
+          )
+        }
+      }
+    }
+    window.addEventListener('larify:workbench-open', openWorkbench)
+    return () => window.removeEventListener('larify:workbench-open', openWorkbench)
+  }, [active, openWorkbenchTool])
 
   return (
     <Region label="Workbench" className="h-full min-w-0 overflow-hidden">
@@ -142,6 +235,7 @@ export function WorkbenchHost({
             key={session.id}
           >
             <Workbench
+              active={session.id === activeId}
               cwd={session.cwd}
               resources={resources.filter((resource) => resource.sessionId === session.id)}
               sessionId={session.id}

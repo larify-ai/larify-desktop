@@ -11,6 +11,7 @@ const harness = vi.hoisted(() => ({
   detectType: vi.fn(),
   inspectFile: vi.fn(),
   original: vi.fn(),
+  previewProps: vi.fn(),
   props: vi.fn(),
   readFile: vi.fn()
 }))
@@ -26,10 +27,14 @@ vi.mock('@monaco-editor/react', () => ({
 vi.mock('monaco-editor/editor/editor.api', () => ({
   editor: { ShowLightbulbIconMode: { Off: 'off' } },
   Uri: {
-    file: (path: string) => ({
-      toString: () => `file:${path}`,
-      with: ({ scheme }: { scheme: string }) => ({ toString: () => `${scheme}:${path}` })
-    })
+    file: (path: string) => {
+      const uri = (scheme = 'file', query = ''): unknown => ({
+        toString: () => `${scheme}:${path}${query ? `?${query}` : ''}`,
+        with: (change: { query?: string; scheme?: string }) =>
+          uri(change.scheme ?? scheme, change.query ?? query)
+      })
+      return uri()
+    }
   }
 }))
 vi.mock('next-themes', () => ({ useTheme: () => ({ resolvedTheme: 'dark' }) }))
@@ -38,6 +43,12 @@ vi.mock('../../../../src/extensions/workspace/renderer/preview/monaco', () => ({
   workspaceMonacoTheme: (dark: boolean) =>
     dark ? 'larify-workspace-dark' : 'larify-workspace-light'
 }))
+vi.mock('../../../../src/extensions/workspace/renderer/preview/file-preview', () => ({
+  FilePreview: (props: unknown) => {
+    harness.previewProps(props)
+    return createElement('div', { 'data-testid': 'file-preview' })
+  }
+}))
 vi.mock('../../../../src/extensions/workspace/renderer/git-client', () => ({
   gitClient: { original: harness.original }
 }))
@@ -45,7 +56,10 @@ vi.mock('../../../../src/extensions/workspace/renderer/workspace-client', () => 
   workspaceClient: { inspectFile: harness.inspectFile, readFile: harness.readFile }
 }))
 
-import { MonacoDiff } from '../../../../src/extensions/workspace/renderer/changes/monaco-diff'
+import {
+  MonacoContentDiff,
+  MonacoDiff
+} from '../../../../src/extensions/workspace/renderer/changes/monaco-diff'
 
 const status = (values: Partial<FileStatusResult> = {}): FileStatusResult => ({
   index: ' ',
@@ -105,8 +119,10 @@ describe('MonacoDiff', () => {
         originalLanguage: 'typescript',
         originalModelPath: 'git-original:D:\\workspace\\file.ts',
         options: expect.objectContaining({
+          compactMode: true,
           experimental: { useTrueInlineView: true },
           glyphMargin: false,
+          lineDecorationsWidth: 8,
           lightbulb: { enabled: 'off' },
           renderSideBySide: false,
           useInlineViewWhenSpaceIsLimited: false
@@ -143,13 +159,17 @@ describe('MonacoDiff', () => {
     expect(harness.original).toHaveBeenCalledWith('D:\\workspace', 'D:\\workspace\\old.ts')
     expect(container.querySelector('[data-diff-mode="split"]')).not.toBeNull()
     expect(harness.props).toHaveBeenLastCalledWith(
-      expect.objectContaining({ options: expect.objectContaining({ renderSideBySide: true }) })
+      expect.objectContaining({
+        options: expect.objectContaining({
+          experimental: { useTrueInlineView: true },
+          renderSideBySide: true
+        })
+      })
     )
     await act(async () => root.unmount())
   })
 
   it('uses an empty modified side for a deleted file', async () => {
-    harness.readFile.mockRejectedValue(new Error('ENOENT'))
     const container = document.createElement('div')
     const root = createRoot(container)
 
@@ -165,8 +185,64 @@ describe('MonacoDiff', () => {
       await Promise.resolve()
     })
 
-    expect(harness.readFile).toHaveBeenCalledWith(7, 'D:\\workspace\\file.ts')
-    expect(harness.props).toHaveBeenLastCalledWith(expect.objectContaining({ modified: '' }))
+    expect(harness.readFile).not.toHaveBeenCalled()
+    expect(harness.inspectFile).not.toHaveBeenCalled()
+    expect(harness.props).toHaveBeenLastCalledWith(
+      expect.objectContaining({ modified: 'before', original: '' })
+    )
+    expect(container.querySelector('[data-deleted-only="true"]')).not.toBeNull()
+    expect(container.querySelector('[data-modified-empty="false"]')).not.toBeNull()
+    expect(container.querySelector('[data-original-empty="true"]')).not.toBeNull()
+    await act(async () => root.unmount())
+  })
+
+  it('keeps deleted contents on the original side in split mode', async () => {
+    const container = document.createElement('div')
+    const root = createRoot(container)
+
+    await act(async () => {
+      root.render(
+        createElement(MonacoDiff, {
+          mode: 'split',
+          resourceId: 7,
+          root: 'D:\\workspace',
+          status: status({ working_dir: 'D' })
+        })
+      )
+      await Promise.resolve()
+    })
+
+    expect(harness.props).toHaveBeenLastCalledWith(
+      expect.objectContaining({ modified: '', original: 'before' })
+    )
+    expect(container.querySelector('[data-deleted-only="false"]')).not.toBeNull()
+    await act(async () => root.unmount())
+  })
+
+  it('isolates review models by scheme and key', async () => {
+    const container = document.createElement('div')
+    const root = createRoot(container)
+
+    await act(async () => {
+      root.render(
+        createElement(MonacoContentDiff, {
+          modelKey: '7',
+          mode: 'unified',
+          modified: 'after',
+          modifiedPath: 'D:\\workspace\\file.ts',
+          original: 'before',
+          originalPath: 'D:\\workspace\\file.ts',
+          scheme: 'review-original'
+        })
+      )
+    })
+
+    expect(harness.props).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        modifiedModelPath: 'review-original-modified:D:\\workspace\\file.ts?7',
+        originalModelPath: 'review-original:D:\\workspace\\file.ts?7'
+      })
+    )
     await act(async () => root.unmount())
   })
 
@@ -190,6 +266,30 @@ describe('MonacoDiff', () => {
     await act(async () => root.unmount())
   })
 
+  it('does not read a file removed by a staged deletion', async () => {
+    const container = document.createElement('div')
+    const root = createRoot(container)
+
+    await act(async () => {
+      root.render(
+        createElement(MonacoDiff, {
+          mode: 'unified',
+          resourceId: 7,
+          root: 'D:\\workspace',
+          status: status({ index: 'D', working_dir: ' ' })
+        })
+      )
+      await Promise.resolve()
+    })
+
+    expect(harness.readFile).not.toHaveBeenCalled()
+    expect(harness.inspectFile).not.toHaveBeenCalled()
+    expect(harness.props).toHaveBeenLastCalledWith(
+      expect.objectContaining({ modified: 'before', original: '' })
+    )
+    await act(async () => root.unmount())
+  })
+
   it('uses an empty original side for a newly added file', async () => {
     harness.original.mockResolvedValue(null)
     const container = document.createElement('div')
@@ -208,10 +308,12 @@ describe('MonacoDiff', () => {
     })
 
     expect(harness.props).toHaveBeenLastCalledWith(expect.objectContaining({ original: '' }))
+    expect(container.querySelector('[data-original-empty="true"]')).not.toBeNull()
+    expect(container.querySelector('[data-modified-empty="false"]')).not.toBeNull()
     await act(async () => root.unmount())
   })
 
-  it('does not send binary working-tree content to Monaco', async () => {
+  it('uses the existing file preview for a binary working-tree file', async () => {
     harness.inspectFile.mockResolvedValue({
       binary: true,
       mime: 'image/png',
@@ -223,6 +325,8 @@ describe('MonacoDiff', () => {
     await act(async () => {
       root.render(
         createElement(MonacoDiff, {
+          active: true,
+          animating: true,
           mode: 'unified',
           resourceId: 7,
           root: 'D:\\workspace',
@@ -232,7 +336,37 @@ describe('MonacoDiff', () => {
       await Promise.resolve()
     })
 
-    expect(container.textContent).toBe('二进制文件无法预览')
+    expect(harness.previewProps).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        active: true,
+        animating: true,
+        path: 'D:\\workspace\\image.png',
+        resourceId: 7
+      })
+    )
+    expect(container.querySelector('[data-testid="file-preview"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="diff-editor"]')).toBeNull()
+    await act(async () => root.unmount())
+  })
+
+  it('shows binary detection failures instead of leaving an unhandled rejection', async () => {
+    harness.detectType.mockRejectedValue(new Error('类型检测失败'))
+    const container = document.createElement('div')
+    const root = createRoot(container)
+
+    await act(async () => {
+      root.render(
+        createElement(MonacoDiff, {
+          mode: 'unified',
+          resourceId: 7,
+          root: 'D:\\workspace',
+          status: status()
+        })
+      )
+      await Promise.resolve()
+    })
+
+    expect(container.textContent).toBe('类型检测失败')
     expect(container.querySelector('[data-testid="diff-editor"]')).toBeNull()
     await act(async () => root.unmount())
   })
@@ -240,7 +374,6 @@ describe('MonacoDiff', () => {
   it('detects binary content from HEAD for a deleted file', async () => {
     harness.original.mockResolvedValue(new Uint8Array([137, 80, 78, 71]))
     harness.detectType.mockResolvedValue({ ext: 'png', mime: 'image/png' })
-    harness.readFile.mockRejectedValue(new Error('ENOENT'))
     const container = document.createElement('div')
     const root = createRoot(container)
 
@@ -256,7 +389,8 @@ describe('MonacoDiff', () => {
       await Promise.resolve()
     })
 
-    expect(container.textContent).toBe('二进制文件无法预览')
+    expect(container.textContent).toBe('文件已删除')
+    expect(container.querySelector('[data-testid="file-preview"]')).toBeNull()
     expect(container.querySelector('[data-testid="diff-editor"]')).toBeNull()
     await act(async () => root.unmount())
   })
@@ -302,6 +436,46 @@ describe('MonacoDiff', () => {
     await act(async () => root.unmount())
   })
 
+  it('does not show stale content while switching workspace resources', async () => {
+    const container = document.createElement('div')
+    const root = createRoot(container)
+
+    await act(async () => {
+      root.render(
+        createElement(MonacoDiff, {
+          mode: 'unified',
+          resourceId: 7,
+          root: 'D:\\workspace',
+          status: status()
+        })
+      )
+      await Promise.resolve()
+    })
+    expect(container.querySelector('[data-testid="diff-editor"]')).not.toBeNull()
+
+    const pending = deferred<Uint8Array | null>()
+    harness.original.mockReturnValueOnce(pending.promise)
+    harness.readFile.mockResolvedValueOnce('other workspace')
+    await act(async () => {
+      root.render(
+        createElement(MonacoDiff, {
+          mode: 'unified',
+          resourceId: 8,
+          root: 'D:\\workspace',
+          status: status()
+        })
+      )
+      await Promise.resolve()
+    })
+
+    expect(container.querySelector('[data-testid="diff-editor"]')).toBeNull()
+    await act(async () => pending.resolve(new TextEncoder().encode('other original')))
+    expect(harness.props).toHaveBeenLastCalledWith(
+      expect.objectContaining({ modified: 'other workspace', original: 'other original' })
+    )
+    await act(async () => root.unmount())
+  })
+
   it('reloads content when Git refreshes an unchanged status pair', async () => {
     harness.original
       .mockResolvedValueOnce(new TextEncoder().encode('before 1'))
@@ -338,45 +512,6 @@ describe('MonacoDiff', () => {
     expect(harness.props).toHaveBeenLastCalledWith(
       expect.objectContaining({ modified: 'after 2', original: 'before 2' })
     )
-    await act(async () => root.unmount())
-  })
-
-  it('updates the original gutter when switching diff modes', async () => {
-    const updateOptions = vi.fn()
-    const layout = vi.fn()
-    const diffEditor = {
-      getOriginalEditor: () => ({ updateOptions }),
-      layout
-    }
-    const container = document.createElement('div')
-    const root = createRoot(container)
-
-    await act(async () => {
-      root.render(
-        createElement(MonacoDiff, {
-          mode: 'unified',
-          resourceId: 7,
-          root: 'D:\\workspace',
-          status: status()
-        })
-      )
-      await Promise.resolve()
-    })
-    await act(async () => harness.props.mock.lastCall?.[0].onMount(diffEditor))
-    expect(updateOptions).toHaveBeenLastCalledWith({ lineDecorationsWidth: 0, lineNumbers: 'off' })
-
-    await act(async () =>
-      root.render(
-        createElement(MonacoDiff, {
-          mode: 'split',
-          resourceId: 7,
-          root: 'D:\\workspace',
-          status: status()
-        })
-      )
-    )
-    expect(updateOptions).toHaveBeenLastCalledWith({ lineDecorationsWidth: 10, lineNumbers: 'on' })
-    expect(layout).toHaveBeenCalled()
     await act(async () => root.unmount())
   })
 

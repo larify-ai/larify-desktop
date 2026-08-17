@@ -3,6 +3,8 @@ import { Message, MessageContent } from '@renderer/components/ai-elements/messag
 import { FileAttachments } from './message-parts/file-attachments'
 import { MessagePart } from './message-parts/message-part'
 import { UserMessageContent } from './message-parts/user-message-content'
+import { summarizeMessageChanges } from './change-summary'
+import { ChangesSummaryCard } from './changes-summary-card'
 
 export function MessageView({
   message,
@@ -12,32 +14,38 @@ export function MessageView({
   streaming?: boolean
 }): React.JSX.Element | null {
   const files = message.parts.filter(isFileUIPart)
+  const changeSummary = message.role === 'assistant' ? summarizeMessageChanges(message) : null
   const hasContent = message.parts.some(
     (part) =>
       (part.type === 'text' && Boolean(part.text)) ||
       (part.type === 'reasoning' && Boolean(part.text)) ||
       isToolUIPart(part)
   )
-  if (!files.length && !hasContent) return null
+  if (!files.length && !hasContent && !changeSummary) return null
 
+  const lastStreamingIndex = message.parts.findLastIndex(
+    (part) => (part.type === 'text' || part.type === 'reasoning') && Boolean(part.text)
+  )
   const content = message.parts.map((part, index) => {
     if (isFileUIPart(part)) return null
     const id = `${message.id}-${index}`
-    const isLast = index === message.parts.length - 1
-    return <MessagePart key={id} part={part} streaming={streaming && isLast} />
+    return (
+      <MessagePart key={id} part={part} streaming={streaming && index === lastStreamingIndex} />
+    )
   })
 
   return (
     <Message from={message.role}>
       {files.length ? <FileAttachments files={files} messageId={message.id} /> : null}
-      {hasContent ? (
-        message.role === 'user' ? (
+      {message.role === 'user' ? (
+        hasContent ? (
           <UserMessageContent>{content}</UserMessageContent>
-        ) : (
-          <MessageContent className="select-text break-words [overflow-wrap:anywhere]">
-            {content}
-          </MessageContent>
-        )
+        ) : null
+      ) : hasContent || changeSummary ? (
+        <MessageContent className="select-text break-words [overflow-wrap:anywhere]">
+          {content}
+          {changeSummary ? <ChangesSummaryCard {...changeSummary} /> : null}
+        </MessageContent>
       ) : null}
     </Message>
   )

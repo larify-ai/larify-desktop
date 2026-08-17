@@ -18,11 +18,6 @@ import {
   workspaceMarkdownOpenExternalEvent,
   workspaceMarkdownOpenFileEvent
 } from './preview/markdown-navigation'
-import {
-  REVIEW_ROUND_EVENT,
-  takeReviewRound,
-  type ReviewRoundRequest
-} from './changes/review-changes'
 
 const loadFilePreview = async (): Promise<{
   default: typeof import('./preview/file-preview').FilePreview
@@ -190,22 +185,6 @@ export function WorkspaceView({
     // soon as the user opens the workspace so the first text file opens fast.
     void Promise.all([loadFilePreview(), import('./preview/monaco-preview')]).catch(() => undefined)
   }, [])
-
-  useEffect(() => {
-    const revealRound = (detail: ReviewRoundRequest): void => {
-      const selected = detail.files.find((file) => file.path === detail.selectedPath)
-      if (!root || !selected) return
-      revealWorkspaceFile(selected.path, undefined, '[workspace:reveal-file]')
-    }
-    const onRound = (event: Event): void => {
-      revealRound(takeReviewRound() ?? (event as CustomEvent<ReviewRoundRequest>).detail)
-    }
-
-    window.addEventListener(REVIEW_ROUND_EVENT, onRound)
-    const currentRound = takeReviewRound()
-    if (currentRound) revealRound(currentRound)
-    return () => window.removeEventListener(REVIEW_ROUND_EVENT, onRound)
-  }, [revealWorkspaceFile, root])
 
   const treeEntries = useMemo(
     () =>

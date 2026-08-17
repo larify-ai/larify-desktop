@@ -54,7 +54,7 @@ describe('runStoredAgentSession', () => {
       saveMessages: vi.fn()
     }
 
-    await runStoredAgentSession(sessions as never, {
+    const result = await runStoredAgentSession(sessions as never, {
       sessionId: 'session',
       cwd: 'cwd',
       message: user,
@@ -69,6 +69,25 @@ describe('runStoredAgentSession', () => {
     expect(mocks.prepare).toHaveBeenCalledWith([history, user])
     expect(sessions.saveMessages).toHaveBeenCalledWith('session', [assistant])
     expect(mocks.save).toHaveBeenCalledOnce()
+    expect(result).toBe(assistant)
+  })
+
+  it('does not return an assistant message from an earlier run', async () => {
+    mocks.run.mockResolvedValue([history, user])
+    const sessions = {
+      loadMessages: vi.fn(() => [history, user]),
+      saveMessages: vi.fn()
+    }
+
+    await expect(
+      runStoredAgentSession(sessions as never, {
+        sessionId: 'session',
+        cwd: 'cwd',
+        message: user,
+        options: {} as never
+      })
+    ).resolves.toBeUndefined()
+    expect(sessions.saveMessages).not.toHaveBeenCalled()
   })
 
   it('does not save an incomplete response when streaming fails', async () => {

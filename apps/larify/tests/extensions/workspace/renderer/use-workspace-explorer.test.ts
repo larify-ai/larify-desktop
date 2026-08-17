@@ -84,6 +84,48 @@ describe('useWorkspaceExplorer', () => {
     expect(workspace.readDirectory).toHaveBeenNthCalledWith(2, 'D:\\workspace\\src')
   })
 
+  it('reveals a file requested before the workspace root finishes loading', async () => {
+    let resolveInitial: ((entries: Array<{ key: string; title: string }>) => void) | undefined
+    workspace.readDirectory.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveInitial = resolve
+        })
+    )
+    act(() => root.unmount())
+    root = createRoot(container)
+    act(() => root.render(createElement(Harness)))
+
+    let revealed: string | undefined
+    await act(async () => {
+      revealed = await explorer.revealFile('D:\\workspace\\src\\file.ts')
+    })
+
+    expect(revealed).toBe('D:\\workspace\\src\\file.ts')
+    expect(workspace.reveal).toHaveBeenCalledWith(7, 'D:\\workspace\\src\\file.ts')
+    await act(async () => resolveInitial?.([{ key: 'D:\\workspace\\src', title: 'src' }]))
+  })
+
+  it('treats an empty load from a stale reveal callback as the workspace root', async () => {
+    let resolveInitial: ((entries: Array<{ key: string; title: string }>) => void) | undefined
+    workspace.readDirectory.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveInitial = resolve
+        })
+    )
+    act(() => root.unmount())
+    root = createRoot(container)
+    act(() => root.render(createElement(Harness)))
+    const staleReveal = explorer.revealFile
+
+    await act(async () => resolveInitial?.([{ key: 'D:\\workspace\\src', title: 'src' }]))
+    await act(async () => staleReveal('D:\\workspace\\src\\file.ts'))
+
+    expect(workspace.readDirectory).not.toHaveBeenCalledWith('')
+    expect(workspace.readDirectory).toHaveBeenCalledWith(undefined)
+  })
+
   it('loads nested reveal paths one directory at a time', async () => {
     workspace.readDirectory.mockImplementation(async (directory?: string) => {
       if (!directory) return [{ key: 'D:\\workspace\\src', title: 'src' }]

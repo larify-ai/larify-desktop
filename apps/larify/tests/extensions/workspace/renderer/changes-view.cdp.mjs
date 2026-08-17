@@ -21,7 +21,9 @@ const layout = `${view} .workspace-layout`
 const navigator = `${view} .workspace-layout-navigator`
 
 const clickAria = (label) =>
-  evaluate(`document.querySelector(${JSON.stringify(`[aria-label="${label}"]`)})?.click()`)
+  evaluate(
+    `(document.querySelector(${JSON.stringify(`${session} [aria-label="${label}"]`)}) ?? document.querySelector(${JSON.stringify(`[aria-label="${label}"]`)}))?.click()`
+  )
 const switchSession = (title) =>
   evaluate(`(() => {
     const button = Array.from(document.querySelectorAll('button[data-session-id]')).find(
@@ -58,7 +60,7 @@ const openChanges = async () => {
 }
 
 try {
-  const workspaceSession = await switchSession('你可以使用终端么')
+  const workspaceSession = await switchSession('您能编辑一些文件我看看么')
   if (!workspaceSession) throw new Error('Larify workspace session not found')
   await wait(300)
   await openChanges()
@@ -67,8 +69,23 @@ try {
     'initial diff'
   )
   if (
-    (await evaluate(`Boolean(document.querySelector('[aria-label="显示变更目录树"]'))`)) &&
-    !(await evaluate(`Boolean(document.querySelector(${JSON.stringify(`${layout}[data-constrained]`)}))`))
+    await evaluate(
+      `Boolean(document.querySelector(${JSON.stringify(`${session} [aria-label="切换到统一视图"]`)}))`
+    )
+  ) {
+    await clickAria('切换到统一视图')
+    await waitFor(
+      `document.querySelector(${JSON.stringify(`${view} .workspace-file-preview`)})?.getAttribute('data-diff-mode') === 'unified'`,
+      'initial unified diff'
+    )
+  }
+  if (
+    (await evaluate(
+      `Boolean(document.querySelector(${JSON.stringify(`${session} [aria-label="显示变更目录树"]`)}))`
+    )) &&
+    !(await evaluate(
+      `Boolean(document.querySelector(${JSON.stringify(`${layout}[data-constrained]`)}))`
+    ))
   ) {
     await clickAria('显示变更目录树')
     await waitFor(
@@ -93,7 +110,10 @@ try {
       leaves: leaves.length,
       mode: preview?.getAttribute('data-diff-mode'),
       navigatorOpen: root?.querySelector('.workspace-layout-navigator')?.hasAttribute('data-open'),
-      selected: tree?.querySelectorAll('.rc-tree-treenode[aria-selected="true"]').length ?? 0
+      selected: tree?.querySelectorAll('.rc-tree-treenode[aria-selected="true"]').length ?? 0,
+      visibleLightbulbs: [...(root?.querySelectorAll('.lightbulb-glyph') ?? [])].filter(
+        (node) => getComputedStyle(node).display !== 'none'
+      ).length
     }
   })()`)
   if (initial.leaves < 1) throw new Error(`No changed files: ${JSON.stringify(initial)}`)
@@ -106,6 +126,9 @@ try {
   if (initial.mode !== 'unified') {
     throw new Error(`Unexpected initial changes layout: ${JSON.stringify(initial)}`)
   }
+  if (initial.visibleLightbulbs !== 0) {
+    throw new Error(`Read-only diff shows code-action lightbulbs: ${initial.visibleLightbulbs}`)
+  }
 
   const selectedFile = await evaluate(`(() => {
     const leaves = Array.from(document.querySelectorAll(
@@ -117,6 +140,7 @@ try {
     }) ?? leaves[0]
     if (!target) return null
     target.scrollIntoView({ block: 'center' })
+    target.click()
     return target.querySelector('[title]')?.getAttribute('title') ?? null
   })()`)
   if (!selectedFile) throw new Error('Changed file could not be resolved')
@@ -152,7 +176,39 @@ try {
     `document.querySelector(${JSON.stringify(`${view} .workspace-file-preview`)})?.getAttribute('data-diff-mode') === 'unified'`,
     'unified diff'
   )
-
+  const unifiedLineNumberColumns = await evaluate(`(() => {
+    const selector = ${JSON.stringify(`${view} .monaco-diff-editor .margin-view-overlays`)}
+    return Array.from(document.querySelectorAll(selector)).filter((element) => {
+      const rect = element.getBoundingClientRect()
+      return rect.width > 0 && rect.height > 0 && getComputedStyle(element).visibility !== 'hidden'
+    }).length
+  })()`)
+  if (unifiedLineNumberColumns !== 1)
+    throw new Error(`Unified diff exposes ${unifiedLineNumberColumns} line-number columns`)
+  const gutterGeometry = await evaluate(`(() => {
+    const homeIcon = document.querySelector(${JSON.stringify(`${session} .larify-workbench-home svg`)})
+    const lineNumbers = Array.from(
+      document.querySelectorAll(${JSON.stringify(`${view} .monaco-diff-editor .line-numbers`)})
+    ).find((element) => {
+      const rect = element.getBoundingClientRect()
+      return rect.width > 0 && rect.height > 0 && getComputedStyle(element).visibility !== 'hidden'
+    })
+    if (!homeIcon || !lineNumbers?.firstChild) return null
+    const numberRange = document.createRange()
+    numberRange.selectNodeContents(lineNumbers)
+    const code = document.querySelector(${JSON.stringify(`${view} .monaco-diff-editor .editor.modified .view-line span`)})
+    return {
+      homeRight: homeIcon.getBoundingClientRect().right,
+      lineNumberRight: numberRange.getBoundingClientRect().right,
+      codeLeft: code?.getBoundingClientRect().left
+    }
+  })()`)
+  if (!gutterGeometry || gutterGeometry.codeLeft === undefined)
+    throw new Error('Unified gutter geometry could not be measured')
+  if (Math.abs(gutterGeometry.homeRight - gutterGeometry.lineNumberRight) > 1)
+    throw new Error(`Unified gutter is misaligned: ${JSON.stringify(gutterGeometry)}`)
+  if (gutterGeometry.codeLeft - gutterGeometry.lineNumberRight < 8)
+    throw new Error(`Unified gutter has no content gap: ${JSON.stringify(gutterGeometry)}`)
   await clickAria('隐藏变更目录树')
   await waitFor(
     `Boolean(document.querySelector('[aria-label="显示变更目录树"]'))`,
@@ -208,6 +264,7 @@ try {
         drag,
         initial,
         jsonTokenClasses,
+        gutterGeometry,
         selectedFile,
         splitEditors
       },

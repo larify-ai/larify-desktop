@@ -8,10 +8,11 @@ import { copyFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { exec } from 'dugite'
 import { formatPatch, parsePatch } from 'diff'
-import { ensureLarifyPath } from '../../../main/utils/app-paths'
+import { ensureLarifyPath } from '../../utils/app-paths'
 
 interface GitSnapshotSummary {
   additions: number
+  binary: boolean
   deletions: number
   path: string
 }
@@ -22,6 +23,7 @@ export interface GitSnapshotFile extends GitSnapshotSummary {
 
 export interface GitSnapshotPartData {
   files: GitSnapshotFile[]
+  root: string
 }
 
 interface SnapshotStart {
@@ -78,6 +80,7 @@ function parseNumstat(output: string): GitSnapshotSummary[] {
       return [
         {
           additions: added === '-' ? 0 : Number.parseInt(added, 10) || 0,
+          binary: added === '-' && deleted === '-',
           deletions: deleted === '-' ? 0 : Number.parseInt(deleted, 10) || 0,
           path
         }
@@ -94,7 +97,7 @@ export class GitSnapshotService {
     try {
       const root = await exec(['rev-parse', '--show-toplevel'], cwd)
       const repositoryBacked = root.exitCode === 0 && root.stdout.trim().length > 0
-      const repositoryRoot = repositoryBacked ? root.stdout.trim() : resolve(cwd)
+      const repositoryRoot = resolve(repositoryBacked ? root.stdout.trim() : cwd)
       const key = createHash('sha256').update(resolve(repositoryRoot)).digest('hex')
       const gitDir = join(this.storageRoot, key)
       return await this.lock(gitDir, async () => {
@@ -108,15 +111,11 @@ export class GitSnapshotService {
     }
   }
 
-  async finish(start: SnapshotStart | null): Promise<GitSnapshotPartData | null> {
+  async compare(start: SnapshotStart | null): Promise<GitSnapshotPartData | null> {
     if (!start) return null
     try {
       return await this.lock(start.gitDir, async () => {
-        const after = await this.capture(
-          start.gitDir,
-          start.repositoryRoot,
-          start.repositoryBacked
-        )
+        const after = await this.capture(start.gitDir, start.repositoryRoot, start.repositoryBacked)
         if (after === start.tree) return null
         const output = await git(
           [
@@ -170,10 +169,10 @@ export class GitSnapshotService {
           ...file,
           patch: patches.get(file.path) ?? ''
         }))
-        return { files }
+        return { files, root: start.repositoryRoot }
       })
     } catch (error) {
-      console.warn('[git snapshot finish]', error)
+      console.warn('[git snapshot compare]', error)
       return null
     }
   }
@@ -277,11 +276,7 @@ export class GitSnapshotService {
       )
     ).filter((path): path is string => path !== undefined)
     const paths = [...new Set([...tracked, ...smallUntracked])]
-    const ignored = await this.ignored(
-      paths,
-      repositoryRoot,
-      repositoryBacked ? undefined : gitDir
-    )
+    const ignored = await this.ignored(paths, repositoryRoot, repositoryBacked ? undefined : gitDir)
     if (ignored.size > 0) {
       await git(
         [

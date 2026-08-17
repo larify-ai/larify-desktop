@@ -35,6 +35,42 @@ async function createStore(): Promise<SessionStore> {
 }
 
 describe('runStoredAgentSession persistence', () => {
+  it('restores a persisted final Git patch after reopening the session store', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'larify-agent-persist-'))
+    directories.push(directory)
+    const database = join(directory, 'sessions.db')
+    const assistant: UIMessage = {
+      id: 'assistant',
+      role: 'assistant',
+      parts: [
+        {
+          type: 'data-git-snapshot',
+          id: 'review',
+          data: {
+            files: [
+              {
+                additions: 1,
+                binary: false,
+                deletions: 0,
+                patch: '@@ -0,0 +1 @@\n+saved\n',
+                path: 'saved.txt'
+              }
+            ],
+            root: '/workspace'
+          }
+        } as never
+      ]
+    }
+    const first = new SessionStore(database)
+    first.createSession({ cwd: '/workspace', id: 'session', title: 'Session' })
+    first.saveMessages('session', [assistant])
+    first.dispose()
+
+    const reopened = new SessionStore(database)
+    expect(reopened.loadMessages('session')).toEqual([assistant])
+    reopened.dispose()
+  })
+
   it('uses persisted ordering and does not duplicate a retried request', async () => {
     const store = await createStore()
     const user = message('user', 'user', 'hello')

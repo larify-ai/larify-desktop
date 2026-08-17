@@ -7,7 +7,8 @@ describe('discoverBuiltinPlugins', () => {
       'agent',
       'fs',
       'terminal',
-      'browser'
+      'browser',
+      'workspace'
     ])
   })
 })

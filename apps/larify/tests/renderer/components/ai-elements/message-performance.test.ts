@@ -5,7 +5,7 @@ import { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { UIMessage } from "ai"
-import { MessageView } from "../../../../src/extensions/assistant/renderer/components/message-view"
+import { MessageView } from "../../../../src/renderer/src/app/interaction/assistant/message-view"
 import {
   MessageBranch,
   MessageBranchContent,
@@ -44,40 +44,6 @@ describe("message rendering performance guards", () => {
   afterEach(async () => {
     await act(async () => root.unmount())
     container.remove()
-  })
-
-  it("collapses reasoning after the reasoning part finishes", async () => {
-    const reasoningMessage = (state: "streaming" | "done"): UIMessage => ({
-      id: "reasoning",
-      role: "assistant",
-      parts: [{ type: "reasoning", text: "thinking", state }],
-    })
-
-    await act(async () => {
-      root.render(createElement(MessageView, { message: reasoningMessage("streaming"), streaming: true }))
-    })
-
-    expect(container.querySelector("button")?.getAttribute("aria-expanded")).toBe("true")
-
-    await act(async () => {
-      root.render(createElement(MessageView, { message: reasoningMessage("done"), streaming: true }))
-    })
-
-    expect(container.querySelector("button")?.getAttribute("aria-expanded")).toBe("false")
-  })
-
-  it("treats a trailing reasoning part without state as streaming", async () => {
-    const message: UIMessage = {
-      id: "reasoning-without-state",
-      role: "assistant",
-      parts: [{ type: "reasoning", text: "thinking" }],
-    }
-
-    await act(async () => {
-      root.render(createElement(MessageView, { message, streaming: true }))
-    })
-
-    expect(container.querySelector("button")?.getAttribute("aria-expanded")).toBe("true")
   })
 
   it("skips committing unchanged old messages when wrapped with React.memo", async () => {

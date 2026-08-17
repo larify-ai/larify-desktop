@@ -81,6 +81,42 @@ describe('layout with the real resizable component', () => {
     expect(buttons('隐藏工作台')).toHaveLength(0)
   })
 
+  it('expands the workbench when a conversation card opens a tool', async () => {
+    expect(buttons('显示工作台')).toHaveLength(1)
+
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent('larify:workbench-open', {
+          detail: { rendererId: 'changes' }
+        })
+      )
+    })
+
+    expect(buttons('显示工作台')).toHaveLength(0)
+    expect(buttons('隐藏工作台')).toHaveLength(1)
+  })
+
+  it('keeps the workbench open when multiple open requests arrive', async () => {
+    await act(async () => {
+      const detail = { rendererId: 'changes' }
+      window.dispatchEvent(new CustomEvent('larify:workbench-open', { detail }))
+      window.dispatchEvent(new CustomEvent('larify:workbench-open', { detail }))
+    })
+
+    expect(buttons('显示工作台')).toHaveLength(0)
+    expect(buttons('隐藏工作台')).toHaveLength(1)
+
+    const states: Array<{ animating: boolean; visible: boolean }> = []
+    const receiveState = (event: Event): void => {
+      states.push((event as CustomEvent<{ animating: boolean; visible: boolean }>).detail)
+    }
+    window.addEventListener('larify:workbench-animation', receiveState)
+    window.dispatchEvent(new Event('larify:workbench-state-request'))
+    window.removeEventListener('larify:workbench-animation', receiveState)
+
+    expect(states.at(-1)).toEqual({ animating: false, visible: true })
+  })
+
   it('uses nested Allotment split views with workbench feedback styling', () => {
     expect(container.querySelectorAll('.larify-allotment')).toHaveLength(2)
     expect(container.querySelector('.larify-workbench-allotment')).not.toBeNull()

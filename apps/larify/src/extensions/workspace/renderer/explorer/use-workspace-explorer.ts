@@ -29,9 +29,12 @@ export function useWorkspaceExplorer(resourceId: number): {
   const revealFile = useCallback(
     async (file: string): Promise<string | undefined> => {
       revealController.current?.abort()
-      if (!root) return undefined
       const controller = new AbortController()
       revealController.current = controller
+      if (!root) {
+        await load('', controller.signal)
+        if (controller.signal.aborted) return undefined
+      }
       const path = await workspaceClient.reveal(resourceId, file)
       const key = path.at(-1)
       if (!key) return undefined

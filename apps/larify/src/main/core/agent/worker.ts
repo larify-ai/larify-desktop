@@ -2,6 +2,10 @@ import type { UIMessage, UIMessageChunk } from 'ai'
 import type { SessionStore } from '../session'
 import type { AgentOptions } from './engine'
 import { runStoredAgentSession } from './persist'
+import { GitSnapshotService } from '../git/snapshot'
+import { AgentReview, reviewChunk } from './review'
+
+const reviewTools = new Set(['fs_edit', 'fs_write'])
 
 export interface AgentWorkerInput {
   sessionId: string
@@ -22,6 +26,7 @@ export class AgentWorker {
 
   constructor(
     private readonly sessions: SessionStore,
+    private readonly snapshots: GitSnapshotService,
     private readonly sink: AgentSink
   ) {}
 
@@ -29,20 +34,54 @@ export class AgentWorker {
     if (this.controller || this.closed) return
     const controller = new AbortController()
     this.controller = controller
+    let review: AgentReview | undefined
     try {
-      await runStoredAgentSession(this.sessions, {
+      const start = await this.snapshots.start(input.cwd)
+      if (controller.signal.aborted) return
+      const activeReview = new AgentReview(this.snapshots, start, (chunk) => {
+        if (!controller.signal.aborted) this.sink.chunk(chunk)
+      })
+      review = activeReview
+      const reviewToolCalls = new Set<string>()
+      const response = await runStoredAgentSession(this.sessions, {
         sessionId: input.sessionId,
         cwd: input.cwd,
         message: input.message,
         options: { ...input.runtime, abortSignal: controller.signal },
         onChunk: (chunk) => {
-          if (!controller.signal.aborted) this.sink.chunk(chunk)
+          if (controller.signal.aborted) return
+          this.sink.chunk(chunk)
+          if (
+            (chunk.type === 'tool-input-start' || chunk.type === 'tool-input-available') &&
+            reviewTools.has(chunk.toolName)
+          ) {
+            reviewToolCalls.add(chunk.toolCallId)
+          } else if (
+            chunk.type === 'tool-output-available' &&
+            !chunk.preliminary &&
+            reviewToolCalls.delete(chunk.toolCallId)
+          ) {
+            activeReview.update()
+          } else if (
+            chunk.type === 'tool-input-error' ||
+            chunk.type === 'tool-output-error' ||
+            chunk.type === 'tool-output-denied'
+          ) {
+            reviewToolCalls.delete(chunk.toolCallId)
+          }
         }
       })
+      if (controller.signal.aborted) return
+      const snapshot = await activeReview.finish()
+      if (snapshot && response) {
+        response.parts.push(reviewChunk(snapshot) as (typeof response.parts)[number])
+        this.sessions.saveMessages(input.sessionId, [response])
+      }
       if (!controller.signal.aborted) this.finish(() => this.sink.end())
     } catch (error) {
       if (!controller.signal.aborted) this.finish(() => this.sink.error(error))
     } finally {
+      review?.dispose()
       if (this.controller === controller) this.controller = undefined
     }
   }

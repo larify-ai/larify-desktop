@@ -14,6 +14,12 @@ vi.mock('../../../../src/main/core/agent/persist', () => ({
 vi.mock('../../../../src/main/core/agent/runtime', () => ({
   createAgentRuntime: mocks.runtime
 }))
+vi.mock('../../../../src/main/core/git/snapshot', () => ({
+  GitSnapshotService: class {
+    start = vi.fn().mockResolvedValue(null)
+    compare = vi.fn().mockResolvedValue(null)
+  }
+}))
 vi.mock('../../../../src/main/utils/app-paths', () => ({
   larifyWorkspacePath: () => mocks.workspace
 }))
@@ -165,5 +171,28 @@ describe('Agent', () => {
     await vi.waitFor(() => expect(mocks.run).toHaveBeenCalledTimes(2))
     expect(first.end).toHaveBeenCalledOnce()
     await vi.waitFor(() => expect(second.end).toHaveBeenCalledOnce())
+  })
+
+  it('runs different sessions concurrently and cancels all of them on disposal', async () => {
+    const signals = new Map<string, AbortSignal>()
+    mocks.run.mockImplementation(async (_sessions, request) => {
+      const signal = request.options.abortSignal as AbortSignal
+      signals.set(request.sessionId, signal)
+      await new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve()))
+      return undefined
+    })
+    const first = { chunk: vi.fn(), error: vi.fn(), end: vi.fn() }
+    const second = { chunk: vi.fn(), error: vi.fn(), end: vi.fn() }
+    const agent = new Agent(sessions as never, pluginHost as never)
+
+    agent.send({ ...input, sessionId: 'first' }, first)
+    agent.send({ ...input, sessionId: 'second' }, second)
+    await vi.waitFor(() => expect(signals.size).toBe(2))
+    agent.dispose()
+
+    expect(signals.get('first')?.aborted).toBe(true)
+    expect(signals.get('second')?.aborted).toBe(true)
+    expect(first.end).toHaveBeenCalledOnce()
+    expect(second.end).toHaveBeenCalledOnce()
   })
 })

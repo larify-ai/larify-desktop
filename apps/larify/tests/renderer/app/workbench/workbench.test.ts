@@ -250,6 +250,215 @@ describe('Workbench', () => {
     })
   })
 
+  it('opens the tool requested by a conversation card', async () => {
+    invoke.mockImplementation((channel: string) =>
+      Promise.resolve(channel === 'resource:create' ? 7 : [])
+    )
+    await renderWorkbench(root, registry, sessionId, 'D:\\Workspace')
+
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('larify:workbench-open', { detail: 'changes' }))
+      await Promise.resolve()
+    })
+
+    expect(invoke).toHaveBeenCalledWith('resource:create', 'changes', sessionId, {
+      root: 'D:\\Workspace'
+    })
+  })
+
+  it('ignores workbench-open events in an inactive session', async () => {
+    invoke.mockImplementation((channel: string) =>
+      Promise.resolve(channel === 'resource:create' ? 7 : [])
+    )
+    await renderWorkbench(root, registry, sessionId, 'D:\\Workspace', false)
+
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('larify:workbench-open', { detail: 'changes' }))
+      await Promise.resolve()
+    })
+
+    expect(invoke.mock.calls.some(([channel]) => channel === 'resource:create')).toBe(false)
+  })
+
+  it('creates a workspace resource for a conversation card snapshot root', async () => {
+    invoke.mockImplementation((channel: string) =>
+      Promise.resolve(channel === 'resource:create' ? 7 : [])
+    )
+    await renderWorkbench(root, registry, sessionId, 'D:\\Workspace\\package')
+
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent('larify:workbench-open', {
+          detail: { options: { root: 'D:\\Workspace' }, rendererId: 'workspace' }
+        })
+      )
+      await Promise.resolve()
+    })
+
+    expect(invoke).toHaveBeenCalledWith('resource:create', 'workspace', sessionId, {
+      root: 'D:\\Workspace'
+    })
+
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent('larify:workbench-open', {
+          detail: { options: { root: 'D:\\Workspace' }, rendererId: 'workspace' }
+        })
+      )
+    })
+    expect(invoke.mock.calls.filter(([channel]) => channel === 'resource:create')).toHaveLength(1)
+  })
+
+  it('keeps workspace resources scoped to different snapshot roots', async () => {
+    let resourceId = 6
+    invoke.mockImplementation((channel: string) =>
+      Promise.resolve(channel === 'resource:create' ? ++resourceId : [])
+    )
+    await renderWorkbench(root, registry, sessionId, 'D:\\Workspace')
+
+    for (const rootPath of ['D:\\First', 'D:\\Second']) {
+      await act(async () => {
+        window.dispatchEvent(
+          new CustomEvent('larify:workbench-open', {
+            detail: { options: { root: rootPath }, rendererId: 'workspace' }
+          })
+        )
+        await Promise.resolve()
+      })
+    }
+
+    expect(invoke.mock.calls.filter(([channel]) => channel === 'resource:create')).toEqual([
+      ['resource:create', 'workspace', sessionId, { root: 'D:\\First' }],
+      ['resource:create', 'workspace', sessionId, { root: 'D:\\Second' }]
+    ])
+  })
+
+  it('deduplicates concurrent scoped workspace requests', async () => {
+    const created = deferred<unknown>()
+    invoke.mockImplementation((channel: string) =>
+      channel === 'resource:create' ? created.promise : Promise.resolve([])
+    )
+    await renderWorkbench(root, registry, sessionId, 'D:\\Workspace')
+
+    await act(async () => {
+      const detail = { options: { root: 'D:\\Snapshot' }, rendererId: 'workspace' }
+      window.dispatchEvent(new CustomEvent('larify:workbench-open', { detail }))
+      window.dispatchEvent(new CustomEvent('larify:workbench-open', { detail }))
+    })
+
+    expect(invoke.mock.calls.filter(([channel]) => channel === 'resource:create')).toHaveLength(1)
+    created.resolve(7)
+    await act(async () => created.promise)
+  })
+
+  it('reuses the changes view requested by a conversation card', async () => {
+    invoke.mockImplementation((channel: string) =>
+      Promise.resolve(channel === 'resource:create' ? 7 : [])
+    )
+    registry.get<WorkbenchRendererRegistry>(workbenchRendererRegistryToken)?.register('changes', {
+      component: () => null,
+      icon: createElement('span'),
+      order: 20,
+      title: 'Changes'
+    })
+    await renderWorkbench(root, registry, sessionId, 'D:\\Workspace')
+    const onOpen = vi.fn()
+
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent('larify:workbench-open', {
+          detail: { onOpen, rendererId: 'changes' }
+        })
+      )
+      await new Promise((resolve) => window.setTimeout(resolve, 0))
+    })
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent('larify:workbench-open', {
+          detail: { onOpen, rendererId: 'changes' }
+        })
+      )
+    })
+
+    expect(invoke).toHaveBeenCalledTimes(2)
+    expect(invoke).toHaveBeenCalledWith('resource:create', 'changes', sessionId, {
+      root: 'D:\\Workspace'
+    })
+    expect(onOpen).toHaveBeenNthCalledWith(1, 7)
+    expect(onOpen).toHaveBeenNthCalledWith(2, 7)
+    expect(container.querySelectorAll('[data-tab-id]')).toHaveLength(1)
+  })
+
+  it('reuses an existing changes view when the card root is the current workspace', async () => {
+    invoke.mockResolvedValue([{ id: 7, sessionId, type: 'changes' }])
+    registry.get<WorkbenchRendererRegistry>(workbenchRendererRegistryToken)?.register('changes', {
+      component: () => null,
+      icon: createElement('span'),
+      order: 20,
+      title: 'Changes'
+    })
+    await renderWorkbench(root, registry, sessionId, 'D:\\Workspace')
+    const onOpen = vi.fn()
+    invoke.mockClear()
+
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent('larify:workbench-open', {
+          detail: {
+            onOpen,
+            options: { root: 'D:\\Workspace' },
+            rendererId: 'changes'
+          }
+        })
+      )
+    })
+
+    expect(invoke).not.toHaveBeenCalledWith(
+      'resource:create',
+      'changes',
+      sessionId,
+      expect.anything()
+    )
+    expect(onOpen).toHaveBeenCalledWith(7)
+    expect(container.querySelectorAll('[data-tab-id]')).toHaveLength(1)
+  })
+
+  it('deduplicates concurrent requests for the same conversation tool', async () => {
+    const created = deferred<unknown>()
+    invoke.mockImplementation((channel: string) =>
+      channel === 'resource:create' ? created.promise : Promise.resolve([])
+    )
+    registry.get<WorkbenchRendererRegistry>(workbenchRendererRegistryToken)?.register('changes', {
+      component: () => null,
+      icon: createElement('span'),
+      order: 20,
+      title: 'Changes'
+    })
+    await renderWorkbench(root, registry, sessionId, 'D:\\Workspace')
+    const first = vi.fn()
+    const second = vi.fn()
+
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent('larify:workbench-open', {
+          detail: { onOpen: first, rendererId: 'changes' }
+        })
+      )
+      window.dispatchEvent(
+        new CustomEvent('larify:workbench-open', {
+          detail: { onOpen: second, rendererId: 'changes' }
+        })
+      )
+    })
+
+    expect(invoke.mock.calls.filter(([channel]) => channel === 'resource:create')).toHaveLength(1)
+    created.resolve(7)
+    await act(async () => created.promise)
+    await vi.waitFor(() => expect(first).toHaveBeenCalledWith(7))
+    expect(second).toHaveBeenCalledWith(7)
+    expect(container.querySelectorAll('[data-tab-id]')).toHaveLength(1)
+  })
+
   it('keeps inactive tabs mounted and unmounts a closed tab', async () => {
     const mounted: number[] = []
     const unmounted: number[] = []
@@ -337,14 +546,15 @@ async function renderWorkbench(
   root: Root,
   registry: Registry,
   sessionId: string,
-  cwd = ''
+  cwd = '',
+  active = true
 ): Promise<void> {
   await act(async () => {
     root.render(
       createElement(
         RendererRegistryProvider,
         { registry },
-        createElement(Workbench, { sessionId, cwd })
+        createElement(Workbench, { active, sessionId, cwd })
       )
     )
   })

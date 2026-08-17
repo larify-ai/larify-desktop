@@ -1,6 +1,7 @@
 import type { FileStatusResult } from 'simple-git'
 import type { DataNode } from 'rc-tree/lib/interface'
-import { basename, isAbsolute, join, normalize, relative, resolve, sep } from 'path-unified'
+import posixPath from 'path-unified/posix'
+import win32Path from 'path-unified/win32'
 
 export const isGitChange = (status: FileStatusResult): boolean => {
   const pair = `${status.index}${status.working_dir}`
@@ -8,31 +9,32 @@ export const isGitChange = (status: FileStatusResult): boolean => {
 }
 
 export const createPathChangeTree = (root: string, paths: string[]): DataNode[] => {
-  const normalizedRoot = normalize(root)
+  const pathApi = /^(?:[a-z]:[\\/]|\\\\)/i.test(root) ? win32Path : posixPath
+  const normalizedRoot = pathApi.normalize(root)
   const rootEntry: DataNode = {
     children: [],
     key: normalizedRoot,
-    title: basename(normalizedRoot) || normalizedRoot
+    title: pathApi.basename(normalizedRoot) || normalizedRoot
   }
   const entries = new Map<string, DataNode>([[normalizedRoot, rootEntry]])
 
   for (const candidate of paths) {
-    const file = resolve(normalizedRoot, candidate)
-    const relativePath = relative(normalizedRoot, file)
+    const file = pathApi.resolve(normalizedRoot, candidate)
+    const relativePath = pathApi.relative(normalizedRoot, file)
     if (
       !relativePath ||
       relativePath === '..' ||
-      isAbsolute(relativePath) ||
-      relativePath.startsWith(`..${sep}`)
+      pathApi.isAbsolute(relativePath) ||
+      relativePath.startsWith(`..${pathApi.sep}`)
     ) {
       continue
     }
-    const segments = relativePath.split(sep)
+    const segments = relativePath.split(pathApi.sep)
     let parent = rootEntry
     let current = normalizedRoot
 
     segments.forEach((segment, index) => {
-      current = join(current, segment)
+      current = pathApi.join(current, segment)
       const isLeaf = index === segments.length - 1
       let entry = entries.get(current)
       if (!entry) {

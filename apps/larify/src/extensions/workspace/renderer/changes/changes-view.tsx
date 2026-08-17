@@ -10,14 +10,23 @@ import {
 } from '@renderer/app/layout/native-layout'
 import { WorkspaceTree } from '../explorer/workspace-tree'
 import { WorkspaceLayout } from '../layout/workspace-layout'
+import { workspaceClient } from '../workspace-client'
 import { createGitChangeTree, isGitChange } from './git-change-tree'
 import { useGitDecorations } from './use-git-decorations'
+import {
+  CHANGES_NAVIGATION_EVENT,
+  peekChangesNavigation,
+  resolveChangesPath,
+  takeChangesNavigation,
+  type ChangesNavigationRequest
+} from './changes-navigation'
 
 const MonacoDiff = lazy(() =>
   import('./monaco-diff').then(({ MonacoDiff }) => ({ default: MonacoDiff }))
 )
 
 export function ChangesView({
+  active = false,
   cwd,
   resourceId,
   updateTab
@@ -28,15 +37,51 @@ export function ChangesView({
     animating: false,
     visible: false
   })
-  const [selected, setSelected] = useState<string | null>(null)
-  const { decorations, error, loading, statuses } = useGitDecorations(resourceId, cwd, {
+  const [workspace, setWorkspace] = useState({ resourceId, root: cwd || null })
+  const root = workspace.resourceId === resourceId ? workspace.root : cwd || null
+  const [selection, setSelection] = useState(() => ({
+    path: peekChangesNavigation(resourceId)?.path ?? null,
+    resourceId
+  }))
+  const selected = selection.resourceId === resourceId ? selection.path : null
+  const { decorations, error, loading, statuses } = useGitDecorations(resourceId, root, {
     includeIgnored: false
   })
   const changes = useMemo(() => statuses.filter(isGitChange), [statuses])
-  const entries = useMemo(() => createGitChangeTree(cwd, statuses), [cwd, statuses])
+  const entries = useMemo(() => (root ? createGitChangeTree(root, statuses) : []), [root, statuses])
   const hasChanges = changes.length > 0
-  const current = changes.find((status) => status.path === selected) ?? changes[0] ?? null
+  const requestedPath = selected && root ? resolveChangesPath(root, selected) : selected
+  const current = changes.find((status) => status.path === requestedPath) ?? changes[0] ?? null
   const selectedPath = current?.path ?? null
+  const previewActive = active && (workbenchState.visible || workbenchState.animating)
+
+  useEffect(() => {
+    let alive = true
+    void workspaceClient
+      .readDirectory(resourceId)
+      .then((listing) => {
+        if (alive) setWorkspace({ resourceId, root: listing.root })
+      })
+      .catch(() => undefined)
+    return () => {
+      alive = false
+    }
+  }, [resourceId])
+
+  useEffect(() => {
+    const show = (request: ChangesNavigationRequest): void => {
+      setSelection({ path: request.path, resourceId })
+    }
+    const onNavigate = (event: Event): void => {
+      const detail = (event as CustomEvent<ChangesNavigationRequest>).detail
+      if (detail.resourceId !== resourceId) return
+      show(takeChangesNavigation(resourceId) ?? detail)
+    }
+    window.addEventListener(CHANGES_NAVIGATION_EVENT, onNavigate)
+    const pending = takeChangesNavigation(resourceId)
+    if (pending) show(pending)
+    return () => window.removeEventListener(CHANGES_NAVIGATION_EVENT, onNavigate)
+  }, [resourceId])
 
   useEffect(() => {
     const update = (event: Event): void => {
@@ -95,7 +140,12 @@ export function ChangesView({
             entries={entries}
             gitDecorations={decorations}
             revealPath={selectedPath}
-            onOpen={setSelected}
+            onOpen={(path) =>
+              setSelection({
+                path,
+                resourceId
+              })
+            }
             onToggle={async () => undefined}
           />
         ) : null
@@ -104,10 +154,12 @@ export function ChangesView({
       {current ? (
         <Suspense fallback={<div className="h-full" />}>
           <MonacoDiff
+            active={previewActive}
+            animating={workbenchState.animating}
             key={`${current.from ?? ''}:${current.path}`}
             mode={mode}
             resourceId={resourceId}
-            root={cwd}
+            root={root ?? cwd}
             status={current}
           />
         </Suspense>

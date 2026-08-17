@@ -82,7 +82,6 @@ vi.mock('../../../../src/extensions/workspace/renderer/preview/monaco-preview', 
 }))
 
 import { WorkspaceView } from '../../../../src/extensions/workspace/renderer/workspace-view'
-import { setReviewRound } from '../../../../src/extensions/workspace/renderer/changes/review-changes'
 
 describe('WorkspaceView', () => {
   let container: HTMLDivElement
@@ -128,6 +127,17 @@ describe('WorkspaceView', () => {
     })
   }
 
+  const openFile = async (path: string): Promise<void> => {
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent('larify:workspace-markdown-open-file', {
+          detail: { path, resourceId: 42 }
+        })
+      )
+      await Promise.resolve()
+    })
+  }
+
   it('releases a locked preview width after two frames in a permanently narrow pane', async () => {
     await render()
     const pane = container.querySelector<HTMLElement>('[data-testid="layout"]')!
@@ -161,11 +171,7 @@ describe('WorkspaceView', () => {
   it('keeps a reviewed file preview inactive until its workbench tab is active and visible', async () => {
     await render(false)
     await act(async () => {
-      setReviewRound({
-        files: [{ additions: 1, deletions: 0, patch: '', path: 'file.ts' }],
-        selectedPath: 'file.ts'
-      })
-      await Promise.resolve()
+      await openFile('file.ts')
     })
     expect(h.filePreviewProps?.active).toBe(false)
 
@@ -192,13 +198,7 @@ describe('WorkspaceView', () => {
     const selected = vi.fn()
     window.addEventListener('larify:workbench-select-resource', selected)
     await render()
-    await act(async () => {
-      setReviewRound({
-        files: [{ additions: 1, deletions: 0, patch: '', path: 'docs/notes.md' }],
-        selectedPath: 'docs/notes.md'
-      })
-      await Promise.resolve()
-    })
+    await openFile('docs/notes.md')
 
     expect(container.querySelector('[data-workspace-navigator-toggle]')).not.toBeNull()
     expect(h.filePreviewProps?.mode).toBe('preview')
@@ -209,13 +209,7 @@ describe('WorkspaceView', () => {
     expect(h.treeProps?.entries).toBe(treeEntries)
     expect(container.querySelector('button[aria-label="阅读预览"]')).not.toBeNull()
 
-    await act(async () => {
-      setReviewRound({
-        files: [{ additions: 1, deletions: 0, patch: '', path: 'site/index.html' }],
-        selectedPath: 'site/index.html'
-      })
-      await Promise.resolve()
-    })
+    await openFile('site/index.html')
     const open = container.querySelector<HTMLButtonElement>(
       'button[aria-label="在内置浏览器中打开"]'
     )!
@@ -255,14 +249,28 @@ describe('WorkspaceView', () => {
     expect(h.revealFile).toHaveBeenCalledWith('guide.md')
     expect(h.filePreviewProps).toMatchObject({ target: { hash: 'install' } })
 
+    await openFile('other.md')
+    expect(h.filePreviewProps?.target).toBeUndefined()
+  })
+
+  it('does not consume review rounds that belong to the changes view', async () => {
+    await render()
+
     await act(async () => {
-      setReviewRound({
-        files: [{ additions: 1, deletions: 0, patch: '', path: 'other.md' }],
-        selectedPath: 'other.md'
-      })
+      window.dispatchEvent(
+        new CustomEvent('larify:review-round', {
+          detail: {
+            files: [{ additions: 1, deletions: 0, patch: 'patch', path: 'changed.ts' }],
+            resourceId: 42,
+            selectedPath: 'changed.ts'
+          }
+        })
+      )
       await Promise.resolve()
     })
-    expect(h.filePreviewProps?.target).toBeUndefined()
+
+    expect(h.revealFile).not.toHaveBeenCalled()
+    expect(h.filePreviewProps).toBeNull()
   })
 
   it('keeps the latest file when asynchronous reveals finish out of order', async () => {
@@ -291,13 +299,7 @@ describe('WorkspaceView', () => {
 
   it('offers reading and source modes for the .markdown extension', async () => {
     await render()
-    await act(async () => {
-      setReviewRound({
-        files: [{ additions: 1, deletions: 0, patch: '', path: 'notes.markdown' }],
-        selectedPath: 'notes.markdown'
-      })
-      await Promise.resolve()
-    })
+    await openFile('notes.markdown')
 
     expect(h.filePreviewProps?.mode).toBe('preview')
     expect(container.querySelector('button[aria-label="查看源码"]')).not.toBeNull()

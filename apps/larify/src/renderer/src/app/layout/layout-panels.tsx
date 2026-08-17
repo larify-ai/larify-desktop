@@ -21,6 +21,13 @@ export function LayoutPanels(): React.JSX.Element {
   const { heading } = activeSession
   const navigation = useAllotmentToggle()
   const workbench = useAllotmentToggle(true)
+  const setWorkbenchCollapsed = workbench.setCollapsed
+
+  useLayoutEffect(() => {
+    const showWorkbench = (): void => setWorkbenchCollapsed(false)
+    window.addEventListener('larify:workbench-open', showWorkbench)
+    return () => window.removeEventListener('larify:workbench-open', showWorkbench)
+  }, [setWorkbenchCollapsed])
 
   useLayoutEffect(() => {
     const sendWorkbenchState = (): void => {

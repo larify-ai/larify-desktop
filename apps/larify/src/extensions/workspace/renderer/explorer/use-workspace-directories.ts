@@ -34,7 +34,7 @@ export function useWorkspaceDirectories(resourceId: number): {
     async (directory: string, signal?: AbortSignal): Promise<DataNode[]> => {
       if (signal?.aborted) return []
       const currentLifecycle = lifecycle.current
-      const target = rootRef.current ? directory : undefined
+      const target = rootRef.current && directory ? directory : undefined
       const requestKey = target ?? ''
       const request = (requests.current.get(requestKey) ?? 0) + 1
       requests.current.set(requestKey, request)

@@ -298,8 +298,8 @@ html {
 }
 
 .larify-file-diff .diff-style-root {
-  --diff-add-content--: #40b08b1f;
-  --diff-del-content--: #e8463a1f;
+  --diff-add-content--: #40b08b47;
+  --diff-del-content--: #e8463a43;
   --diff-add-lineNumber--: #40b08b1f;
   --diff-del-lineNumber--: #e8463a1f;
   --diff-add-content-highlight--: #40b08b2e;
@@ -307,8 +307,8 @@ html {
 }
 
 .larify-file-diff .diff-tailwindcss-wrapper[data-theme="dark"] .diff-style-root {
-  --diff-add-content--: #00a56e47;
-  --diff-del-content--: #d02a2347;
+  --diff-add-content--: #00a56e7a;
+  --diff-del-content--: #d02a237a;
   --diff-add-lineNumber--: #00a56e47;
   --diff-del-lineNumber--: #d02a2347;
   --diff-add-content-highlight--: #00a56e47;

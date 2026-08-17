@@ -93,10 +93,41 @@
   background: transparent;
 }
 
-.workspace-file-preview .monaco-diff-editor .line-numbers {
-  padding-right: 4px;
+/* Monaco keeps the original editor mounted at zero width in compact inline
+   mode. Its overflowing gutter must not become a second line-number column. */
+.workspace-file-preview[data-diff-mode='unified'] .monaco-diff-editor > .editor.original {
+  visibility: hidden !important;
 }
 
-.workspace-file-preview[data-diff-mode='unified'] .monaco-diff-editor > .editor.original {
-  visibility: hidden;
+.workspace-file-preview .monaco-diff-editor .gutter-delete,
+.workspace-file-preview .monaco-diff-editor .gutter-insert {
+  display: none;
+}
+
+.workspace-file-preview .monaco-editor .lightbulb-glyph {
+  display: none !important;
+}
+
+/* Monaco models an empty document as one empty line. Hide the resulting
+   phantom deletion/insertion so new and deleted files match the Git patch. */
+.workspace-file-preview[data-original-empty='true'] .monaco-diff-editor .line-delete,
+.workspace-file-preview[data-original-empty='true']
+  .monaco-diff-editor
+  .char-delete.diff-range-empty,
+.workspace-file-preview[data-modified-empty='true'] .monaco-diff-editor .line-insert,
+.workspace-file-preview[data-modified-empty='true']
+  .monaco-diff-editor
+  .char-insert.diff-range-empty {
+  background: transparent;
+}
+
+/* Monaco's inline diff renders deleted blocks in a view zone without line
+   numbers. Deleted files are rendered on the numbered side, then recolored. */
+.workspace-file-preview[data-deleted-only='true'] .monaco-diff-editor .line-insert,
+.workspace-file-preview[data-deleted-only='true'] .monaco-diff-editor .char-insert {
+  background: var(--vscode-diffEditor-removedTextBackground);
+}
+
+.workspace-file-preview[data-deleted-only='true'] .monaco-diff-editor .diagonal-fill {
+  background-image: none;
 }

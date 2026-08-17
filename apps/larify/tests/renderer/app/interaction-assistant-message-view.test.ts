@@ -197,6 +197,42 @@ describe('interaction assistant message view', () => {
       )
     ).toBe('')
   })
+
+  it('renders a single change card for a snapshot-only assistant message', () => {
+    const markup = render(
+      message([snapshot([{ additions: 2, deletions: 1, path: 'src/file.ts', patch: 'patch' }])])
+    )
+
+    expect(markup).toContain('已编辑 1 个文件')
+    expect(markup).toContain('src/file.ts')
+    expect(markup).toContain('+2')
+    expect(markup).toContain('−1')
+  })
+
+  it('renders only the latest snapshot while a message is updated', () => {
+    const markup = render(
+      message([
+        snapshot([{ additions: 1, deletions: 0, path: 'old.ts', patch: 'old' }]),
+        { type: 'text', text: 'done' },
+        snapshot([{ additions: 3, deletions: 2, path: 'latest.ts', patch: 'latest' }])
+      ])
+    )
+
+    expect(markup).toContain('latest.ts')
+    expect(markup).not.toContain('old.ts')
+    expect(markup.match(/<section aria-label="已编辑 1 个文件"/g)).toHaveLength(1)
+  })
+
+  it('does not render an assistant change card in a user message', () => {
+    expect(
+      render(
+        message(
+          [snapshot([{ additions: 1, deletions: 0, path: 'user.ts', patch: 'patch' }])],
+          'user'
+        )
+      )
+    ).toBe('')
+  })
 })
 
 function render(value: UIMessage): string {
@@ -205,4 +241,10 @@ function render(value: UIMessage): string {
 
 function message(parts: unknown[], role: UIMessage['role'] = 'assistant'): UIMessage {
   return { id: 'message-1', role, parts } as UIMessage
+}
+
+function snapshot(
+  files: Array<{ additions: number; deletions: number; patch: string; path: string }>
+): { data: unknown; type: string } {
+  return { data: { files }, type: 'data-git-snapshot' }
 }

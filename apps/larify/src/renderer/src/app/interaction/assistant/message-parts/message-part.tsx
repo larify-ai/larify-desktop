@@ -12,7 +12,8 @@ export function MessagePart({
   part: Part
   streaming: boolean
 }): React.JSX.Element | null {
-  if (part.type === 'text') return part.text ? <MessageResponse>{part.text}</MessageResponse> : null
+  if (part.type === 'text')
+    return part.text ? <MessageResponse isAnimating={streaming}>{part.text}</MessageResponse> : null
   if (part.type === 'reasoning') return <ReasoningPart part={part} streaming={streaming} />
   if (isToolUIPart(part)) return <ToolPart part={part} />
   return null

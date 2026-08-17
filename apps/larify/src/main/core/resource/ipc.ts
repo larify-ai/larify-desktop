@@ -2,7 +2,12 @@ import { ipcMain, type BrowserWindow } from 'electron'
 import type { ResourceQuery } from '@shared/resource'
 import type { ResourceManager } from './manager'
 
-const channels = ['resource:create', 'resource:list', 'resource:close'] as const
+const channels = [
+  'resource:create',
+  'resource:list',
+  'resource:close',
+  'resource:close-many'
+] as const
 
 export function registerResourceIpc(manager: ResourceManager, window: BrowserWindow): () => void {
   const send = (): void => {
@@ -17,6 +22,7 @@ export function registerResourceIpc(manager: ResourceManager, window: BrowserWin
   )
   ipcMain.handle('resource:list', (_event, query?: ResourceQuery) => manager.list(query))
   ipcMain.handle('resource:close', (_event, id: number) => manager.close(id))
+  ipcMain.handle('resource:close-many', (_event, ids: number[]) => manager.closeMany(ids))
 
   return () => {
     unbindChange()

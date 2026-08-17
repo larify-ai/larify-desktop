@@ -288,7 +288,7 @@ describe('Workbench', () => {
         ?.click()
     })
     expect(unmounted).toEqual([7])
-    expect(invoke).toHaveBeenCalledWith('resource:close', 7)
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith('resource:close-many', [7]))
   })
 
   it('mounts only the active session and inactive sessions that own resources', async () => {

@@ -69,13 +69,13 @@ describe('workbench store', () => {
     const third = store.getState().openView(terminal(9))
 
     store.getState().selectView(second)
-    store.getState().closeView(second)
+    store.getState().closeViews([second])
     expect(store.getState().activeViewId).toBe(third)
 
-    store.getState().closeView(third)
+    store.getState().closeViews([third])
     expect(store.getState().activeViewId).toBe(first)
 
-    store.getState().closeView(first)
+    store.getState().closeViews([first])
     expect(store.getState()).toMatchObject({ activeViewId: null, views: [] })
   })
 
@@ -84,9 +84,24 @@ describe('workbench store', () => {
     const first = store.getState().openView(terminal(7))
     const second = store.getState().openView(terminal(8))
 
-    store.getState().closeView(first)
-    store.getState().closeView(99)
+    store.getState().closeViews([first])
+    store.getState().closeViews([99])
     expect(store.getState().activeViewId).toBe(second)
+  })
+
+  it('closes multiple views in one update and keeps the retained view active', () => {
+    const store = createWorkbenchStore()
+    const first = store.getState().openView(terminal(7))
+    const second = store.getState().openView(terminal(8))
+    const third = store.getState().openView(terminal(9))
+    store.getState().selectView(second)
+    const listener = vi.fn()
+    store.subscribe(listener)
+
+    store.getState().closeViews([first, second, 99])
+
+    expect(store.getState()).toMatchObject({ activeViewId: third, views: [{ id: third }] })
+    expect(listener).toHaveBeenCalledOnce()
   })
 
   it('reorders by id and rejects stale or out-of-range moves', () => {

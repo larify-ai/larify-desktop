@@ -7,7 +7,7 @@ interface WorkbenchTabsLayoutProps {
   activeId: string | null
   children: ReactNode
   tabs: WorkbenchTab[]
-  onClose(id: string): void
+  onClose(ids: string[]): void
   onHome(): void
   onReorder(id: string, fromIndex: number, toIndex: number): void
   onSelect(id: string): void

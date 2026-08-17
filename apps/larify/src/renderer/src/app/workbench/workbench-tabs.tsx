@@ -25,7 +25,7 @@ interface WorkbenchTabsProps {
   actions?: ReactNode
   activeId: string | null
   tabs: WorkbenchTab[]
-  onClose(id: string): void
+  onClose(ids: string[]): void
   onHome(): void
   onReorder(id: string, fromIndex: number, toIndex: number): void
   onSelect(id: string): void
@@ -154,7 +154,7 @@ export function WorkbenchTabs({
                   suppressClickRef={suppressClickRef}
                   tab={tab}
                   onClose={(action) => {
-                    resolveTabCloseTargets(tabs, tab.id, action).forEach((id) => onClose(id))
+                    onClose(resolveTabCloseTargets(tabs, tab.id, action))
                   }}
                 />
               ))}

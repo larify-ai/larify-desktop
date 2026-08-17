@@ -2,11 +2,7 @@ import type { Disposable } from '@shared/infra/disposable'
 import type { Resource, ResourceQuery } from '@shared/resource'
 import { addListener, notify, type Listener } from '../../utils/listener'
 
-export type ResourceFactory = (
-  id: number,
-  sessionId: string,
-  options: unknown
-) => Disposable
+export type ResourceFactory = (id: number, sessionId: string, options: unknown) => Disposable
 
 type SessionCleanup = (sessionId: string) => void | Promise<void>
 
@@ -72,11 +68,17 @@ export class ResourceManager implements Disposable {
   }
 
   async close(id: number): Promise<void> {
-    const resource = this.resources.get(id)
-    if (!resource) return
-    this.resources.delete(id)
+    await this.closeMany([id])
+  }
+
+  async closeMany(ids: readonly number[]): Promise<void> {
+    const resources = [...new Set(ids)]
+      .map((id) => this.resources.get(id))
+      .filter((resource) => resource !== undefined)
+    if (resources.length === 0) return
+    for (const resource of resources) this.resources.delete(resource.id)
     this.emit()
-    await resource.dispose()
+    await Promise.all(resources.map((resource) => resource.dispose()))
   }
 
   destroy(sessionId: string): Promise<void> {

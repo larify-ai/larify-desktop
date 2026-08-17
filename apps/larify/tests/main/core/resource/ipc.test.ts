@@ -21,7 +21,7 @@ beforeEach(() => {
 })
 
 describe('registerResourceIpc', () => {
-  it('exposes create, list, and close and publishes resource changes', async () => {
+  it('exposes create, list, and close operations and publishes resource changes', async () => {
     const manager = new ResourceManager()
     const send = vi.fn()
     const window = {
@@ -49,11 +49,16 @@ describe('registerResourceIpc', () => {
     await handlers.get('resource:close')?.({}, id)
     expect(close).toHaveBeenCalledOnce()
 
+    const other = handlers.get('resource:create')?.({}, 'terminal', 'session-a')
+    await handlers.get('resource:close-many')?.({}, [other])
+    expect(close).toHaveBeenCalledTimes(2)
+
     dispose()
     expect(mocks.removeHandler.mock.calls.map(([channel]) => channel)).toEqual([
       'resource:create',
       'resource:list',
-      'resource:close'
+      'resource:close',
+      'resource:close-many'
     ])
   })
 

@@ -10,7 +10,7 @@ export interface WorkbenchView extends RendererResource, Partial<WorkbenchTabPre
 interface WorkbenchViewState {
   activeViewId: number | null
   views: WorkbenchView[]
-  closeView(id: number): void
+  closeViews(ids: readonly number[]): void
   openView(resource: RendererResource): number
   reorderView(id: number, toIndex: number): void
   selectView(id: number): void
@@ -26,15 +26,18 @@ export const createWorkbenchStore = (): StoreApi<WorkbenchViewState> => {
     activeViewId: null,
     views: [],
 
-    closeView(id) {
+    closeViews(ids) {
       const { activeViewId, views } = get()
-      const index = views.findIndex((view) => view.id === id)
-      if (index === -1) return
+      const closed = new Set(ids)
+      if (!views.some((view) => closed.has(view.id))) return
 
-      const nextViews = views.filter((view) => view.id !== id)
+      const activeIndex = views.findIndex((view) => view.id === activeViewId)
+      const nextViews = views.filter((view) => !closed.has(view.id))
       const nextActiveViewId =
-        activeViewId === id
-          ? (nextViews[Math.min(index, nextViews.length - 1)]?.id ?? null)
+        activeViewId !== null && closed.has(activeViewId)
+          ? (views.slice(activeIndex + 1).find((view) => !closed.has(view.id))?.id ??
+            nextViews.at(-1)?.id ??
+            null)
           : activeViewId
       set({ activeViewId: nextActiveViewId, views: nextViews })
     },

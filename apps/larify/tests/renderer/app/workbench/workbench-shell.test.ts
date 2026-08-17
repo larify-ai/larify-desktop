@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, createElement, useMemo, useState } from 'react'
+import { act, createElement, useEffect, useMemo, useState } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Disposable } from '../../../../src/shared/infra/disposable'
@@ -79,7 +79,42 @@ describe('WorkbenchShell', () => {
         ?.click()
     })
     expect(store.getState().views.map((view) => view.id)).toEqual([first])
-    expect(invoke).toHaveBeenCalledWith('resource:close', 2)
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith('resource:close-many', [2]))
+  })
+
+  it('unmounts all closing views before closing their resources as one batch', async () => {
+    const disposed: number[] = []
+    registry.get<WorkbenchRendererRegistry>(workbenchRendererRegistryToken)?.register('terminal', {
+      component: (props) => createElement(DisposableTestRenderer, { ...props, disposed }),
+      icon: null,
+      order: 10,
+      title: 'Terminal'
+    })
+    const store = createWorkbenchStore()
+    const first = store.getState().openView({ rendererId: 'terminal', resourceId: 1 })
+    store.getState().openView({ rendererId: 'terminal', resourceId: 2 })
+    await act(async () => {
+      root.render(
+        createElement(
+          RendererRegistryProvider,
+          { registry },
+          createElement(WorkbenchShell, { onOpenTool: vi.fn(), store })
+        )
+      )
+    })
+    invoke.mockImplementation((channel: string, ids: number[]) => {
+      if (channel === 'resource:close-many') expect(disposed).toEqual([1])
+      return Promise.resolve(ids)
+    })
+
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>(`[data-tab-id="${first}"] .larify-workbench-tab-close`)
+        ?.click()
+    })
+
+    expect(store.getState().views.map(({ resourceId }) => resourceId)).toEqual([2])
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith('resource:close-many', [1]))
   })
 
   it('switches the active view and renderer with arrow keys', async () => {
@@ -497,6 +532,17 @@ function TabActionRenderer({ resourceId }: { resourceId: number }): React.JSX.El
   )
   useWorkbenchTabActions(action)
   return createElement('span', null, resourceId)
+}
+
+function DisposableTestRenderer({
+  disposed,
+  resourceId
+}: {
+  disposed: number[]
+  resourceId: number
+}): null {
+  useEffect(() => () => void disposed.push(resourceId), [disposed, resourceId])
+  return null
 }
 
 class ResizeObserverMock {

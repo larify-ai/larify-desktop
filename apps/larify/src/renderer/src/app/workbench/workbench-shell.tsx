@@ -29,7 +29,7 @@ export function WorkbenchShell({
   const renderers = registry.get<WorkbenchRendererRegistry>(workbenchRendererRegistryToken)
   const [, refreshTabs] = useReducer((value: number) => value + 1, 0)
   useEffect(() => registry.subscribe(workbenchRendererRegistryToken, refreshTabs), [registry])
-  const { activeViewId, closeView, reorderView, selectView, showLauncher, updateTab, views } =
+  const { activeViewId, closeViews, reorderView, selectView, showLauncher, updateTab, views } =
     useStore(store)
   const activeView = views.find((view) => view.id === activeViewId) ?? null
 
@@ -37,12 +37,19 @@ export function WorkbenchShell({
     <WorkbenchTabsLayout
       activeId={activeViewId === null ? null : String(activeViewId)}
       tabs={views.map((view) => toTab(view, renderers))}
-      onClose={(id) => {
-        const viewId = Number(id)
-        const view = views.find((item) => item.id === viewId)
-        if (!view) return
-        closeView(viewId)
-        void window.bridge?.invoke('resource:close', view.resourceId).catch(() => undefined)
+      onClose={(ids) => {
+        const viewIds = new Set(ids.map(Number))
+        const closing = views.filter((view) => viewIds.has(view.id))
+        if (closing.length === 0) return
+        closeViews(closing.map((view) => view.id))
+        window.setTimeout(() => {
+          void window.bridge
+            ?.invoke(
+              'resource:close-many',
+              closing.map((view) => view.resourceId)
+            )
+            .catch(() => undefined)
+        }, 0)
       }}
       onHome={showLauncher}
       onReorder={(id, _fromIndex, toIndex) => reorderView(Number(id), toIndex)}

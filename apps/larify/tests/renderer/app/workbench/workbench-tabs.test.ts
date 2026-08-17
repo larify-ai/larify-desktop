@@ -42,7 +42,7 @@ describe('WorkbenchTabs', () => {
     value = tabs
   }: {
     activeId?: string | null
-    onClose?: (id: string) => void
+    onClose?: (ids: string[]) => void
     onHome?: () => void
     onReorder?: (id: string, fromIndex: number, toIndex: number) => void
     onSelect?: (id: string) => void
@@ -94,7 +94,7 @@ describe('WorkbenchTabs', () => {
     })
 
     expect(onSelect).toHaveBeenCalledWith('browser:1')
-    expect(onClose).toHaveBeenCalledWith('terminal:1')
+    expect(onClose).toHaveBeenCalledWith(['terminal:1'])
     expect(onHome).toHaveBeenCalledOnce()
   })
 
@@ -279,7 +279,7 @@ describe('WorkbenchTabs', () => {
     expect(menu?.dataset.side).toBe('bottom')
 
     await act(async () => items[0].click())
-    expect(onClose).toHaveBeenCalledWith('browser:1')
+    expect(onClose).toHaveBeenCalledWith(['browser:1'])
   })
 
   it('returns focus to the tab after dismissing its context menu', async () => {

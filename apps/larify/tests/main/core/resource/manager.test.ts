@@ -3,8 +3,11 @@ import { ResourceManager } from '../../../../src/main/core/resource/manager'
 
 const testManager = (): ResourceManager => {
   const manager = new ResourceManager()
-  const open = (_id: number, _sessionId: string, options: unknown): { dispose(): void | Promise<void> } =>
-    (options as () => { dispose(): void | Promise<void> })()
+  const open = (
+    _id: number,
+    _sessionId: string,
+    options: unknown
+  ): { dispose(): void | Promise<void> } => (options as () => { dispose(): void | Promise<void> })()
   manager.register('terminal', open)
   manager.register('browser', open)
   return manager
@@ -94,6 +97,37 @@ describe('ResourceManager', () => {
     expect(states).toEqual([[1], []])
   })
 
+  it('closes multiple resources with one state change', async () => {
+    const manager = testManager()
+    const states: number[][] = []
+    const first = vi.fn()
+    const second = vi.fn()
+    manager.bindChange((resources) => states.push(resources.map(({ id }) => id)))
+    manager.create('terminal', 'session-a', () => ({ dispose: first }))
+    manager.create('browser', 'session-a', () => ({ dispose: second }))
+    states.length = 0
+
+    await manager.closeMany([1, 2, 2, 99])
+
+    expect(first).toHaveBeenCalledOnce()
+    expect(second).toHaveBeenCalledOnce()
+    expect(states).toEqual([[]])
+  })
+
+  it('starts every disposal and removes the batch when one disposal fails', async () => {
+    const manager = testManager()
+    const first = vi.fn(() => Promise.reject(new Error('close failed')))
+    const second = vi.fn()
+    manager.create('terminal', 'session-a', () => ({ dispose: first }))
+    manager.create('browser', 'session-a', () => ({ dispose: second }))
+
+    await expect(manager.closeMany([1, 2])).rejects.toThrow('close failed')
+
+    expect(first).toHaveBeenCalledOnce()
+    expect(second).toHaveBeenCalledOnce()
+    expect(manager.list()).toEqual([])
+  })
+
   it('isolates listener failures from resource lifecycle and other listeners', async () => {
     const manager = testManager()
     const states: number[][] = []
@@ -159,7 +193,10 @@ describe('ResourceManager', () => {
     const manager = testManager()
     let finish!: () => void
     manager.registerSessionCleanup(
-      () => new Promise<void>((resolve) => { finish = resolve })
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve
+        })
     )
 
     const destroying = manager.destroy('session-a')

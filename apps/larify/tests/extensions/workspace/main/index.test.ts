@@ -85,14 +85,42 @@ describe('workspace main plugin', () => {
     ).toThrow('MainWindow is unavailable')
   })
 
+  it('retains the first registration for cleanup when the second registration fails', () => {
+    const workspaceRegistration = { dispose: vi.fn() }
+    const resources = {
+      register: vi
+        .fn()
+        .mockReturnValueOnce(workspaceRegistration)
+        .mockImplementationOnce(() => {
+          throw new Error('changes already registered')
+        })
+    }
+    const subscriptions: Array<{ dispose(): void | Promise<void> }> = []
+    const registry = {
+      get: (token: unknown) =>
+        token === resourceManagerToken ? resources : { get: () => createWindow() }
+    }
+
+    expect(() => plugin.activate({ registry, subscriptions } as never)).toThrow(
+      'changes already registered'
+    )
+    expect(subscriptions).toHaveLength(4)
+    expect(subscriptions.at(-1)).toBe(workspaceRegistration)
+  })
+
   it('wires resources, previews and IPC to the same window', () => {
-    let factory!: (id: number, sessionId: string, options?: unknown) => unknown
+    const factories = new Map<
+      string,
+      (id: number, sessionId: string, options?: unknown) => unknown
+    >()
     const resourceRegistration = { dispose: vi.fn(() => harness.disposeOrder.push('resource')) }
     const resources = {
-      register: vi.fn((_type: string, next: typeof factory) => {
-        factory = next
-        return resourceRegistration
-      })
+      register: vi.fn(
+        (type: string, next: (id: number, sessionId: string, options?: unknown) => unknown) => {
+          factories.set(type, next)
+          return resourceRegistration
+        }
+      )
     }
     const window = createWindow()
     const mainWindow = { get: vi.fn(() => window) }
@@ -109,12 +137,13 @@ describe('workspace main plugin', () => {
 
     expect(mainWindow.get).toHaveBeenCalledOnce()
     expect(resources.register).toHaveBeenCalledWith('workspace', expect.any(Function))
+    expect(resources.register).toHaveBeenCalledWith('changes', expect.any(Function))
     expect(harness.previews[0].window).toBe(window)
     expect(harness.ipc).toHaveBeenCalledWith(harness.managers[0], harness.previews[0], window)
     expect(window.webContents.on).toHaveBeenCalledWith('did-start-navigation', expect.any(Function))
 
-    factory(7, 'session', { root: 'D:\\custom' })
-    factory(8, 'session')
+    factories.get('workspace')!(7, 'session', { root: 'D:\\custom' })
+    factories.get('changes')!(8, 'session')
     expect(harness.managers[0].open).toHaveBeenNthCalledWith(1, 7, 'D:\\custom')
     expect(harness.managers[0].open).toHaveBeenNthCalledWith(2, 8, 'D:\\default-workspace')
   })
@@ -129,8 +158,8 @@ describe('workspace main plugin', () => {
     }
     const workspaceDispose = vi.fn()
     const resources = {
-      register: vi.fn((_type: string, next: typeof factory) => {
-        factory = next
+      register: vi.fn((type: string, next: typeof factory) => {
+        if (type === 'workspace') factory = next
         return { dispose: vi.fn() }
       })
     }
@@ -157,6 +186,34 @@ describe('workspace main plugin', () => {
     expect(fallbackDispose).toHaveBeenCalledOnce()
   })
 
+  it('disposes a changes resource through the shared workspace lifecycle', async () => {
+    let factory!: (
+      id: number,
+      sessionId: string,
+      options?: unknown
+    ) => {
+      dispose(): void | Promise<void>
+    }
+    const workspaceDispose = vi.fn()
+    const resources = {
+      register: vi.fn((type: string, next: typeof factory) => {
+        if (type === 'changes') factory = next
+        return { dispose: vi.fn() }
+      })
+    }
+    const registry = {
+      get: (token: unknown) =>
+        token === resourceManagerToken ? resources : { get: () => createWindow() }
+    }
+    plugin.activate({ registry, subscriptions: [] } as never)
+    harness.managers[0].open.mockReturnValueOnce({ dispose: workspaceDispose })
+
+    await factory(9, 'session', { root: 'D:\\workspace' }).dispose()
+
+    expect(harness.previews[0].close).toHaveBeenCalledWith(9)
+    expect(workspaceDispose).toHaveBeenCalledOnce()
+  })
+
   it('clears native previews only when the main frame fully navigates', () => {
     const resources = { register: vi.fn(() => ({ dispose: vi.fn() })) }
     const window = createWindow()
@@ -174,7 +231,7 @@ describe('workspace main plugin', () => {
     listener({}, 'file:///renderer.html', false, true)
     expect(harness.previews[0].dispose).toHaveBeenCalledOnce()
 
-    subscriptions[3].dispose()
+    subscriptions[2].dispose()
     expect(window.webContents.off).toHaveBeenCalledWith('did-start-navigation', listener)
   })
 
@@ -191,6 +248,6 @@ describe('workspace main plugin', () => {
 
     for (const subscription of [...subscriptions].reverse()) await subscription.dispose()
 
-    expect(harness.disposeOrder).toEqual(['ipc', 'previews', 'manager', 'resource'])
+    expect(harness.disposeOrder).toEqual(['ipc', 'resource', 'resource', 'previews', 'manager'])
   })
 })

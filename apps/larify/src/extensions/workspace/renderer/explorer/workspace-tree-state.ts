@@ -1,6 +1,35 @@
 import type { DataNode } from 'rc-tree/lib/interface'
 
-const AUTO_EXPAND_LIMIT = 50
+export interface CompactDirectoryNode extends DataNode {
+  directoryPath?: string
+}
+
+const compactDirectory = (entry: DataNode): CompactDirectoryNode => {
+  let current: CompactDirectoryNode = {
+    ...entry,
+    children: entry.children?.map(compactDirectory)
+  }
+  const names = [String(entry.title ?? '')]
+
+  while (current.children?.length === 1 && !current.children[0].isLeaf) {
+    const child = current.children[0] as CompactDirectoryNode
+    names.push(String(child.title ?? ''))
+    current = {
+      ...child,
+      directoryPath: child.directoryPath ?? String(child.key),
+      key: entry.key,
+      title: names.join(' / ')
+    }
+  }
+
+  return current
+}
+
+export const compactDirectoryTree = (entries: DataNode[]): CompactDirectoryNode[] =>
+  entries.map((entry) => ({
+    ...entry,
+    children: entry.children?.map(compactDirectory)
+  }))
 
 export const mergeLoadedChildren = (next: DataNode[], previous: DataNode[]): DataNode[] => {
   const previousEntries = new Map(previous.map((entry) => [String(entry.key), entry]))
@@ -45,14 +74,12 @@ export const initialExpandedKeys = (entries: DataNode[], changesOnly: boolean): 
   }
   const keys: string[] = []
 
-  const visit = (entry: DataNode, depth: number): void => {
+  const visit = (entry: DataNode): void => {
     if (entry.isLeaf) return
-    const open = depth === 0 || (entry.children?.length ?? 0) <= AUTO_EXPAND_LIMIT
-    if (!open) return
     keys.push(String(entry.key))
-    entry.children?.forEach((child) => visit(child, depth + 1))
+    entry.children?.forEach(visit)
   }
 
-  entries.forEach((entry) => visit(entry, 0))
+  entries.forEach(visit)
   return keys
 }

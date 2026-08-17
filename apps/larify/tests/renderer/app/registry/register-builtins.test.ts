@@ -16,10 +16,16 @@ describe('registerBuiltinRenderers', () => {
     const renderers = registry.get<WorkbenchRendererRegistry>(workbenchRendererRegistryToken)
 
     expect(renderers).toBeInstanceOf(WorkbenchRendererRegistry)
-    expect(renderers?.get('terminal')).toMatchObject({ order: 10, title: '终端' })
-    expect(renderers?.list().map(([id]) => id)).toEqual(['terminal', 'browser', 'workspace'])
-    expect(renderers?.get('workspace')).toMatchObject({ order: 30, title: '文件' })
-    expect(renderers?.get('browser')).toMatchObject({ order: 20, title: '浏览器' })
+    expect(renderers?.get('workspace')).toMatchObject({ order: 10, title: '文件' })
+    expect(renderers?.get('changes')).toMatchObject({ order: 20, title: '变更' })
+    expect(renderers?.get('terminal')).toMatchObject({ order: 30, title: '终端' })
+    expect(renderers?.get('browser')).toMatchObject({ order: 40, title: '浏览器' })
+    expect(renderers?.list().map(([id]) => id)).toEqual([
+      'workspace',
+      'changes',
+      'terminal',
+      'browser'
+    ])
     expect(renderers?.get('terminal')?.icon).toMatchObject({
       props: { 'aria-hidden': true }
     })

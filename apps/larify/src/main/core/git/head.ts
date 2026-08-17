@@ -17,7 +17,10 @@ export async function head(
 
   const relative = path.relative(repositoryRoot, target).split(path.sep).join('/')
   try {
-    return new TextEncoder().encode(await git.raw(['show', `HEAD:${relative}`]))
+    const result = await runtime.exec(['show', `HEAD:${relative}`], repositoryRoot, {
+      encoding: 'buffer'
+    })
+    return result.exitCode === 0 ? new Uint8Array(result.stdout) : null
   } catch {
     return null
   }

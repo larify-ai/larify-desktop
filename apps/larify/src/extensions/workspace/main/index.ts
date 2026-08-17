@@ -1,4 +1,5 @@
 import type { Plugin } from '../../../main/core/plugin/protocol'
+import type { Disposable } from '@shared/infra/disposable'
 import { resourceManagerToken, type ResourceManager } from '../../../main/core/resource'
 import { larifyWorkspacePath } from '../../../main/utils/app-paths'
 import { windowToken } from '../../../main/window/token'
@@ -19,6 +20,7 @@ const plugin: Plugin = {
     const window = mainWindow.get()
     const manager = new WorkspaceManager()
     const previews = new NativePreviewManager(window)
+    context.subscriptions.push(manager, previews)
     const clearPreviewsOnNavigation = (
       _event: Electron.Event,
       _url: string,
@@ -27,30 +29,28 @@ const plugin: Plugin = {
     ): void => {
       if (isMainFrame && !isInPlace) previews.dispose()
     }
-    window.webContents.on('did-start-navigation', clearPreviewsOnNavigation)
-    context.subscriptions.push(
-      resources.register('workspace', (id, _sessionId, options) => {
-        const root = (options as { root?: string } | undefined)?.root || larifyWorkspacePath()
-        const workspace = manager.open(id, root)
-        return {
-          async dispose() {
-            try {
-              previews.close(id)
-            } finally {
-              await workspace.dispose()
-            }
+    const openWorkspace = (id: number, _sessionId: string, options: unknown): Disposable => {
+      const root = (options as { root?: string } | undefined)?.root || larifyWorkspacePath()
+      const workspace = manager.open(id, root)
+      return {
+        async dispose() {
+          try {
+            previews.close(id)
+          } finally {
+            await workspace.dispose()
           }
         }
-      }),
-      manager,
-      previews,
-      {
-        dispose() {
-          window.webContents.off('did-start-navigation', clearPreviewsOnNavigation)
-        }
-      },
-      { dispose: registerWorkspaceIpc(manager, previews, window) }
-    )
+      }
+    }
+    window.webContents.on('did-start-navigation', clearPreviewsOnNavigation)
+    context.subscriptions.push({
+      dispose() {
+        window.webContents.off('did-start-navigation', clearPreviewsOnNavigation)
+      }
+    })
+    context.subscriptions.push(resources.register('workspace', openWorkspace))
+    context.subscriptions.push(resources.register('changes', openWorkspace))
+    context.subscriptions.push({ dispose: registerWorkspaceIpc(manager, previews, window) })
   }
 }
 

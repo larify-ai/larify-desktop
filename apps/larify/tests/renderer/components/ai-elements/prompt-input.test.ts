@@ -300,6 +300,7 @@ describe('PromptInputProvider', () => {
     const drop = new Event('drop', { bubbles: true, cancelable: true })
     Object.defineProperty(drop, 'dataTransfer', {
       value: {
+        getData: () => '',
         items: {
           0: {
             getAsFile: () => file,
@@ -315,6 +316,113 @@ describe('PromptInputProvider', () => {
     })
 
     expect(mediaType).toBe('inode/directory')
+  })
+
+  it('adds a file dragged from the workspace tree', async () => {
+    reactEnvironment.IS_REACT_ACT_ENVIRONMENT = true
+    let attachment: { filename?: string; url: string } | undefined
+
+    const Probe = (): null => {
+      attachment = usePromptInputAttachments().files[0]
+      return null
+    }
+
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    root = createRoot(container)
+    await act(async () => {
+      root.render(createElement(PromptInput, { onSubmit: () => undefined }, createElement(Probe)))
+    })
+
+    const path = 'D:\\工作区\\源码\\文件.ts'
+    const drop = new Event('drop', { bubbles: true, cancelable: true })
+    Object.defineProperty(drop, 'dataTransfer', {
+      value: {
+        files: [],
+        getData: (type: string) =>
+          (type === 'application/x-larify-workspace-entry'
+            ? JSON.stringify({ directory: false, name: '文件.ts', path })
+            : ''),
+        items: [],
+        types: ['application/x-larify-workspace-entry']
+      }
+    })
+    await act(async () => {
+      container.querySelector('form')!.dispatchEvent(drop)
+    })
+
+    expect(attachment).toMatchObject({ filename: '文件.ts', url: path })
+  })
+
+  it('adds a directory dragged from the workspace tree', async () => {
+    reactEnvironment.IS_REACT_ACT_ENVIRONMENT = true
+    let mediaType: string | undefined
+
+    const Probe = (): null => {
+      mediaType = usePromptInputAttachments().files[0]?.mediaType
+      return null
+    }
+
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    root = createRoot(container)
+    await act(async () => {
+      root.render(createElement(PromptInput, { onSubmit: () => undefined }, createElement(Probe)))
+    })
+
+    const drop = new Event('drop', { bubbles: true, cancelable: true })
+    Object.defineProperty(drop, 'dataTransfer', {
+      value: {
+        files: [],
+        getData: () =>
+          JSON.stringify({ directory: true, name: 'src', path: 'D:\\workspace\\src' }),
+        items: [],
+        types: ['application/x-larify-workspace-entry']
+      }
+    })
+    await act(async () => {
+      container.querySelector('form')!.dispatchEvent(drop)
+    })
+
+    expect(mediaType).toBe('inode/directory')
+  })
+
+  it('handles workspace tree drops globally when requested', async () => {
+    reactEnvironment.IS_REACT_ACT_ENVIRONMENT = true
+    let fileCount = 0
+
+    const Probe = (): null => {
+      fileCount = usePromptInputAttachments().files.length
+      return null
+    }
+
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    root = createRoot(container)
+    await act(async () => {
+      root.render(
+        createElement(
+          PromptInput,
+          { globalDrop: true, onSubmit: () => undefined },
+          createElement(Probe)
+        )
+      )
+    })
+
+    const drop = new Event('drop', { bubbles: true, cancelable: true })
+    Object.defineProperty(drop, 'dataTransfer', {
+      value: {
+        getData: () =>
+          JSON.stringify({ directory: false, name: 'file.ts', path: 'D:\\workspace\\file.ts' }),
+        types: ['application/x-larify-workspace-entry']
+      }
+    })
+    await act(async () => {
+      document.body.dispatchEvent(drop)
+    })
+
+    expect(drop.defaultPrevented).toBe(true)
+    expect(fileCount).toBe(1)
   })
 
   it('submits pasted images as unnamed data URLs without fetching blob URLs', async () => {

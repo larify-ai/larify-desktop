@@ -6,14 +6,22 @@ import { workspaceClient } from '../workspace-client'
 
 const REFRESH_DELAY = 400
 
+interface GitDecorationsOptions {
+  includeIgnored?: boolean
+}
+
 export function useGitDecorations(
   resourceId: number,
-  root: string | null
+  root: string | null,
+  { includeIgnored = true }: GitDecorationsOptions = {}
 ): {
   decorations: Map<string, string>
+  error?: string
+  loading: boolean
   statuses: FileStatusResult[]
 } {
   const [snapshot, setSnapshot] = useState<{
+    error?: string
     root: string
     statuses: FileStatusResult[]
   }>({ root: '', statuses: [] })
@@ -37,22 +45,22 @@ export function useGitDecorations(
         return
       }
       running = true
-      const start = `larify:git-status:start:${crypto.randomUUID()}`
-      performance.mark(start)
       void gitClient
-        .status(root)
+        .status(root, includeIgnored)
         .then((statuses) => {
           if (cancelled) return
           setSnapshot({ root, statuses })
         })
         .catch((error) => {
           if (cancelled) return
-          setSnapshot({ root, statuses: [] })
+          setSnapshot({
+            error: error instanceof Error ? error.message : String(error),
+            root,
+            statuses: []
+          })
           console.error('[workspace:git-status]', error)
         })
         .finally(() => {
-          performance.measure('larify:git-status', start)
-          performance.clearMarks(start)
           running = false
           if (!cancelled && queued) {
             queued = false
@@ -70,7 +78,7 @@ export function useGitDecorations(
       clearTimeout(timer)
       unsubscribe()
     }
-  }, [resourceId, root])
+  }, [includeIgnored, resourceId, root])
 
   return useMemo(() => {
     const current = root && snapshot.root === root
@@ -78,6 +86,8 @@ export function useGitDecorations(
       decorations: current
         ? createGitStatusColors(root, snapshot.statuses)
         : new Map<string, string>(),
+      error: current ? snapshot.error : undefined,
+      loading: Boolean(root && !current),
       statuses: current ? snapshot.statuses : []
     }
   }, [root, snapshot])

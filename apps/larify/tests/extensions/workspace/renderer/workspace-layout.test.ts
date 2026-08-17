@@ -33,7 +33,7 @@ describe('WorkspaceLayout', () => {
   it('opens and closes the navigator without unmounting it', () => {
     render(true, createElement('button', { 'data-navigator': true }))
 
-    expect(content().style.marginRight).toBe('200px')
+    expect(content().style.marginRight).toBe('260px')
     expect(navigator()?.getAttribute('data-open')).toBe('true')
     expect(navigator()?.hasAttribute('inert')).toBe(false)
     expect(separator()?.tabIndex).toBe(0)
@@ -57,14 +57,14 @@ describe('WorkspaceLayout', () => {
     act(() => handle.dispatchEvent(pointerEvent('pointerdown', 300)))
     act(() => handle.dispatchEvent(pointerEvent('pointermove', 220)))
     act(() => handle.dispatchEvent(pointerEvent('pointerup', 220)))
-    expect(content().style.marginRight).toBe('280px')
+    expect(content().style.marginRight).toBe('340px')
 
     render(false, createElement('div'))
     expect(content().style.marginRight).toBe('0px')
 
     render(true, createElement('div'))
-    expect(content().style.marginRight).toBe('280px')
-    expect(separator()?.getAttribute('aria-valuenow')).toBe('280')
+    expect(content().style.marginRight).toBe('340px')
+    expect(separator()?.getAttribute('aria-valuenow')).toBe('340')
   })
 
   it('resizes the navigator with the keyboard and clamps its width', () => {
@@ -72,11 +72,11 @@ describe('WorkspaceLayout', () => {
     const handle = separator()
     expect(handle).not.toBeNull()
 
-    for (let index = 0; index < 20; index += 1) press(handle!, 'ArrowLeft')
-    expect(handle?.getAttribute('aria-valuenow')).toBe('320')
-    expect(content().style.marginRight).toBe('320px')
+    for (let index = 0; index < 30; index += 1) press(handle!, 'ArrowLeft')
+    expect(handle?.getAttribute('aria-valuenow')).toBe('520')
+    expect(content().style.marginRight).toBe('520px')
 
-    for (let index = 0; index < 30; index += 1) press(handle!, 'ArrowRight')
+    for (let index = 0; index < 50; index += 1) press(handle!, 'ArrowRight')
     expect(handle?.getAttribute('aria-valuenow')).toBe('160')
     expect(content().style.marginRight).toBe('160px')
   })
@@ -154,7 +154,7 @@ describe('WorkspaceLayout', () => {
     expect(onNavigatorWidthChange).toHaveBeenCalledTimes(1)
     press(separator()!, 'ArrowLeft')
     expect(onNavigatorWidthChange).toHaveBeenCalledTimes(2)
-    expect(onNavigatorWidthChange).toHaveBeenLastCalledWith(210)
+    expect(onNavigatorWidthChange).toHaveBeenLastCalledWith(270)
   })
 
   it('ignores non-primary pointer buttons', () => {
@@ -165,7 +165,7 @@ describe('WorkspaceLayout', () => {
     act(() => handle.dispatchEvent(pointerEvent('pointerdown', 300, 2)))
     act(() => handle.dispatchEvent(pointerEvent('pointermove', 200)))
 
-    expect(content().style.marginRight).toBe('200px')
+    expect(content().style.marginRight).toBe('260px')
     expect(container.querySelector('.workspace-layout')?.hasAttribute('data-resizing')).toBe(false)
   })
 
@@ -176,12 +176,12 @@ describe('WorkspaceLayout', () => {
 
     act(() => handle.dispatchEvent(pointerEvent('pointerdown', 300)))
     act(() => handle.dispatchEvent(pointerEvent('pointermove', 250)))
-    expect(content().style.marginRight).toBe('250px')
+    expect(content().style.marginRight).toBe('310px')
 
     act(() => handle.dispatchEvent(pointerEvent('pointercancel', 250)))
     act(() => handle.dispatchEvent(pointerEvent('pointermove', 200)))
 
-    expect(content().style.marginRight).toBe('250px')
+    expect(content().style.marginRight).toBe('310px')
     expect(container.querySelector('.workspace-layout')?.hasAttribute('data-resizing')).toBe(false)
   })
 
@@ -192,11 +192,11 @@ describe('WorkspaceLayout', () => {
 
     Object.defineProperty(body, 'clientWidth', { configurable: true, value: 700 })
     act(notifyResize)
-    expect(content().style.marginRight).toBe('200px')
+    expect(content().style.marginRight).toBe('260px')
 
     Object.defineProperty(body, 'clientWidth', { configurable: true, value: 0 })
     act(notifyResize)
-    expect(content().style.marginRight).toBe('200px')
+    expect(content().style.marginRight).toBe('260px')
     expect(navigator()?.getAttribute('data-open')).toBe('true')
   })
 
@@ -211,7 +211,7 @@ describe('WorkspaceLayout', () => {
     Object.defineProperty(body, 'clientWidth', { configurable: true, value: 400 })
     act(notifyResize)
 
-    expect(content().style.marginRight).toBe('200px')
+    expect(content().style.marginRight).toBe('260px')
     expect(navigator()?.getAttribute('data-open')).toBe('true')
   })
 
@@ -227,7 +227,21 @@ describe('WorkspaceLayout', () => {
 
     Object.defineProperty(body, 'clientWidth', { configurable: true, value: 700 })
     act(notifyResize)
-    expect(content().style.marginRight).toBe('200px')
+    expect(content().style.marginRight).toBe('260px')
+    expect(navigator()?.getAttribute('data-open')).toBe('true')
+  })
+
+  it('shows the navigator only when its width and minimum content width fit', () => {
+    const notifyResize = stubResizeObserver()
+    render(true, createElement('div'))
+    const body = container.querySelector<HTMLElement>('.workspace-layout-body')!
+
+    Object.defineProperty(body, 'clientWidth', { configurable: true, value: 539 })
+    act(notifyResize)
+    expect(navigator()?.hasAttribute('data-open')).toBe(false)
+
+    Object.defineProperty(body, 'clientWidth', { configurable: true, value: 540 })
+    act(notifyResize)
     expect(navigator()?.getAttribute('data-open')).toBe('true')
   })
 

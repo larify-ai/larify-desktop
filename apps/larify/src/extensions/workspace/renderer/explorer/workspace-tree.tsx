@@ -3,8 +3,14 @@ import Tree from 'rc-tree'
 import type RcTree from 'rc-tree/lib/Tree'
 import type { DataNode, Key } from 'rc-tree/lib/interface'
 import { useTheme } from 'next-themes'
+import { basename } from 'path-unified'
 import { FileIcon } from '@renderer/components/file-icon/file-icon'
-import { initialExpandedKeys } from './workspace-tree-state'
+import { createWorkspaceDragData, workspaceEntryDragType } from '@renderer/lib/attachment-drag'
+import {
+  compactDirectoryTree,
+  initialExpandedKeys,
+  type CompactDirectoryNode
+} from './workspace-tree-state'
 
 interface WorkspaceTreeProps {
   changesOnly: boolean
@@ -14,6 +20,9 @@ interface WorkspaceTreeProps {
   onToggle(directory: DataNode): Promise<void>
   revealPath?: string | null
 }
+
+const nodePath = (node: DataNode): string =>
+  String((node as CompactDirectoryNode).directoryPath ?? node.key)
 
 const findNode = (
   entries: DataNode[],
@@ -35,7 +44,7 @@ const measureTreeWidth = (entries: DataNode[], expandedKeys: Set<Key>, depth = 0
       (sum, character) => sum + (character.charCodeAt(0) > 255 ? 13 : 7),
       0
     )
-    const nodeWidth = depth * 20 + textWidth + 38
+    const nodeWidth = depth * 14 + textWidth + 38
     const childWidth =
       entry.children && expandedKeys.has(entry.key)
         ? measureTreeWidth(entry.children, expandedKeys, depth + 1)
@@ -64,10 +73,11 @@ function WorkspaceTreeContent({
   const { resolvedTheme } = useTheme()
   const containerRef = useRef<HTMLDivElement>(null)
   const treeRef = useRef<RcTree<DataNode>>(null)
+  const compactEntries = useMemo(() => compactDirectoryTree(entries), [entries])
   const [expandedKeys, setExpandedKeys] = useState<Key[]>(() =>
-    initialExpandedKeys(entries, changesOnly)
+    initialExpandedKeys(compactEntries, changesOnly)
   )
-  const initialized = useRef(!changesOnly || entries.length > 0)
+  const initialized = useRef(entries.length > 0)
   const [revealState, setRevealState] = useState({ dismissed: false, path: revealPath })
   const [selectedKeys, setSelectedKeys] = useState<Key[]>([])
   const [size, setSize] = useState({ height: 0, width: 0 })
@@ -90,20 +100,21 @@ function WorkspaceTreeContent({
   useEffect(() => {
     if (initialized.current || entries.length === 0) return
     initialized.current = true
-    setExpandedKeys(initialExpandedKeys(entries, changesOnly))
-  }, [changesOnly, entries])
+    setExpandedKeys(initialExpandedKeys(compactEntries, changesOnly))
+  }, [changesOnly, compactEntries, entries.length])
 
   const revealed = useMemo(() => {
     if (!revealPath) return undefined
-    return findNode(entries, revealPath)
-  }, [entries, revealPath])
+    return findNode(compactEntries, revealPath)
+  }, [compactEntries, revealPath])
 
   const revealActive = revealed && !revealState.dismissed
   const visibleExpandedKeys = revealActive
     ? [...new Set([...expandedKeys, ...revealed.parents])]
     : expandedKeys
   const visibleSelectedKeys = revealActive ? [revealed.path] : selectedKeys
-  const contentWidth = measureTreeWidth(entries, new Set(visibleExpandedKeys))
+  const visibleExpandedKeySet = new Set(visibleExpandedKeys)
+  const contentWidth = measureTreeWidth(compactEntries, visibleExpandedKeySet)
   const scrollWidth = size.width > 0 && contentWidth > size.width ? contentWidth : undefined
 
   useEffect(() => {
@@ -130,16 +141,21 @@ function WorkspaceTreeContent({
             itemHeight={28}
             scrollWidth={scrollWidth}
             selectedKeys={visibleSelectedKeys}
-            treeData={entries}
+            treeData={compactEntries}
             virtual
-            loadData={onToggle}
+            loadData={(node) =>
+              onToggle({
+                ...node,
+                key: nodePath(node)
+              })
+            }
             switcherIcon={<span className="block size-3.5" />}
             titleRender={(node) => (
               <TreeTitle
                 node={node}
                 gitDecorations={gitDecorations}
                 light={light}
-                open={visibleExpandedKeys.includes(node.key)}
+                open={visibleExpandedKeySet.has(node.key)}
               />
             )}
             onExpand={(keys) => {
@@ -170,9 +186,21 @@ function TreeTitle({
   open: boolean
 }): React.JSX.Element {
   const name = String(node.title ?? '')
-  const path = String(node.key)
+  const path = nodePath(node)
+  const attachmentName = basename(path) || name
   return (
-    <span className="flex items-center gap-1" title={path}>
+    <span
+      className="flex items-center gap-1"
+      draggable
+      title={path}
+      onDragStart={(event) => {
+        event.dataTransfer.effectAllowed = 'copy'
+        event.dataTransfer.setData(
+          workspaceEntryDragType,
+          createWorkspaceDragData({ directory: !node.isLeaf, name: attachmentName, path })
+        )
+      }}
+    >
       <FileIcon expanded={open} kind={node.isLeaf ? 'file' : 'folder'} light={light} name={name} />
       <span style={{ color: gitDecorations.get(path) }}>{name}</span>
     </span>

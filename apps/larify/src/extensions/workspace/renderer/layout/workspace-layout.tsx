@@ -6,7 +6,8 @@ import {
   type ReactNode
 } from 'react'
 
-const navigatorSize = { default: 200, min: 160, max: 320, step: 10 }
+export const workspaceNavigatorDefaultWidth = 260
+const navigatorSize = { default: workspaceNavigatorDefaultWidth, min: 160, max: 520, step: 10 }
 const minimumContentWidth = 280
 const clampNavigatorWidth = (width: number): number =>
   Math.max(navigatorSize.min, Math.min(navigatorSize.max, width))

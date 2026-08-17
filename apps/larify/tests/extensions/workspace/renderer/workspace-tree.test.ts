@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DataNode, Key } from 'rc-tree/lib/interface'
 import { WorkspaceTree } from '../../../../src/extensions/workspace/renderer/explorer/workspace-tree'
 import {
+  compactDirectoryTree,
   initialExpandedKeys,
   isDirectoryLoaded,
   mergeLoadedChildren,
@@ -14,14 +15,25 @@ import {
 
 const treeProps = vi.hoisted(() => ({
   current: undefined as
-    { expandedKeys: Key[]; onExpand(keys: Key[]): void; scrollWidth?: number } | undefined
+    | {
+        expandedKeys: Key[]
+        loadData(node: DataNode): Promise<void>
+        onExpand(keys: Key[]): void
+        scrollWidth?: number
+        titleRender(node: DataNode): React.ReactElement
+        treeData: DataNode[]
+      }
+    | undefined
 }))
 
 vi.mock('rc-tree', () => ({
   default: (props: {
     expandedKeys: Key[]
+    loadData(node: DataNode): Promise<void>
     onExpand(keys: Key[]): void
     scrollWidth?: number
+    titleRender(node: DataNode): React.ReactElement
+    treeData: DataNode[]
   }): React.JSX.Element => {
     treeProps.current = props
     return createElement('div')
@@ -41,6 +53,7 @@ const directory = (path: string, children: DataNode[]): DataNode => ({
 
 describe('WorkspaceTree', () => {
   let container: HTMLDivElement
+  let onToggle: ReturnType<typeof vi.fn>
   let root: Root
 
   beforeEach(() => {
@@ -60,6 +73,7 @@ describe('WorkspaceTree', () => {
     vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(300)
     container = document.createElement('div')
     document.body.appendChild(container)
+    onToggle = vi.fn(async () => undefined)
     root = createRoot(container)
   })
 
@@ -77,6 +91,25 @@ describe('WorkspaceTree', () => {
 
     render([directory('/workspace', [directory('/workspace/src', [])])])
     expect(treeProps.current?.expandedKeys).toEqual(['/workspace', '/workspace/src'])
+  })
+
+  it('expands the workspace root when global entries arrive asynchronously', () => {
+    render([], undefined, false)
+    expect(treeProps.current?.expandedKeys).toEqual([])
+
+    render([directory('/workspace', [directory('/workspace/src', [])])], undefined, false)
+
+    expect(treeProps.current?.expandedKeys).toEqual(['/workspace'])
+  })
+
+  it('expands a large changes tree', () => {
+    const directories = Array.from({ length: 500 }, (_, index) =>
+      directory(`/workspace/directory-${index}`, [])
+    )
+
+    render([directory('/workspace', directories)])
+
+    expect(treeProps.current?.expandedKeys).toHaveLength(501)
   })
 
   it('does not override the user expansion state after initialization', () => {
@@ -142,19 +175,70 @@ describe('WorkspaceTree', () => {
     expect(treeProps.current?.scrollWidth).toBeGreaterThan(80)
   })
 
-  function render(entries: DataNode[], revealPath?: string): void {
+  it('loads the deepest directory represented by a compact node', async () => {
+    const entries = [
+      directory('/workspace', [directory('/workspace/a', [directory('/workspace/a/b', [])])])
+    ]
+    render(entries)
+    const compactNode = treeProps.current?.treeData[0].children?.[0]
+
+    await act(async () => treeProps.current?.loadData(compactNode!))
+
+    expect(onToggle).toHaveBeenCalledWith(expect.objectContaining({ key: '/workspace/a/b' }))
+  })
+
+  it('drags a compact directory using its deepest path', () => {
+    const entries = [
+      directory('/workspace', [directory('/workspace/a', [directory('/workspace/a/b', [])])])
+    ]
+    render(entries)
+    const compactNode = treeProps.current?.treeData[0].children?.[0]
+    const setData = drag(compactNode!)
+
+    expect(setData).toHaveBeenCalledWith(
+      'application/x-larify-workspace-entry',
+      JSON.stringify({ directory: true, name: 'b', path: '/workspace/a/b' })
+    )
+  })
+
+  it('drags a file using its own path', () => {
+    const file = { isLeaf: true, key: '/workspace/file.ts', title: 'file.ts' }
+    render([directory('/workspace', [file])])
+    const setData = drag(file)
+
+    expect(setData).toHaveBeenCalledWith(
+      'application/x-larify-workspace-entry',
+      JSON.stringify({ directory: false, name: 'file.ts', path: '/workspace/file.ts' })
+    )
+  })
+
+  function render(entries: DataNode[], revealPath?: string, changesOnly = true): void {
     act(() =>
       root.render(
         createElement(WorkspaceTree, {
-          changesOnly: true,
+          changesOnly,
           entries,
           gitDecorations: new Map(),
           onOpen: vi.fn(),
-          onToggle: vi.fn(),
+          onToggle,
           revealPath
         })
       )
     )
+  }
+
+  function drag(node: DataNode): ReturnType<typeof vi.fn> {
+    const title = treeProps.current!.titleRender(node)
+    const setData = vi.fn()
+    const renderedTitle = (
+      title.type as (props: Record<string, unknown>) => React.ReactElement<{
+        onDragStart(event: {
+          dataTransfer: { effectAllowed: string; setData: typeof setData }
+        }): void
+      }>
+    )(title.props as Record<string, unknown>)
+    renderedTitle.props.onDragStart({ dataTransfer: { effectAllowed: '', setData } })
+    return setData
   }
 })
 
@@ -165,19 +249,8 @@ describe('initialExpandedKeys', () => {
     expect(initialExpandedKeys(entries, true)).toEqual(['/workspace', '/workspace/src'])
   })
 
-  it('keeps large directories collapsed', () => {
+  it('opens large directories in the changes view', () => {
     const children = Array.from({ length: 51 }, (_, index) => ({
-      isLeaf: true,
-      key: `/workspace/generated/${index}.ts`,
-      title: `${index}.ts`
-    }))
-    const entries = [directory('/workspace', [directory('/workspace/generated', children)])]
-
-    expect(initialExpandedKeys(entries, true)).toEqual(['/workspace'])
-  })
-
-  it('opens directories at the automatic expansion limit', () => {
-    const children = Array.from({ length: 50 }, (_, index) => ({
       isLeaf: true,
       key: `/workspace/generated/${index}.ts`,
       title: `${index}.ts`
@@ -187,7 +260,7 @@ describe('initialExpandedKeys', () => {
     expect(initialExpandedKeys(entries, true)).toEqual(['/workspace', '/workspace/generated'])
   })
 
-  it('does not pre-expand descendants of a collapsed directory', () => {
+  it('pre-expands nested directories in the changes view', () => {
     const children = [directory('/workspace/generated/nested', [])]
     children.push(
       ...Array.from({ length: 50 }, (_, index) => ({
@@ -198,7 +271,11 @@ describe('initialExpandedKeys', () => {
     )
     const entries = [directory('/workspace', [directory('/workspace/generated', children)])]
 
-    expect(initialExpandedKeys(entries, true)).toEqual(['/workspace'])
+    expect(initialExpandedKeys(entries, true)).toEqual([
+      '/workspace',
+      '/workspace/generated',
+      '/workspace/generated/nested'
+    ])
   })
 
   it('opens the workspace root in the global view', () => {
@@ -209,6 +286,69 @@ describe('initialExpandedKeys', () => {
 })
 
 describe('workspace tree data', () => {
+  it('compacts single-child directory chains below the workspace root', () => {
+    const file = { isLeaf: true, key: '/workspace/a/b/c/file.ts', title: 'file.ts' }
+    const entries = [
+      directory('/workspace', [
+        directory('/workspace/a', [
+          directory('/workspace/a/b', [directory('/workspace/a/b/c', [file])])
+        ])
+      ])
+    ]
+
+    const compact = compactDirectoryTree(entries)
+
+    expect(compact[0].title).toBe('workspace')
+    expect(compact[0].children?.[0]).toMatchObject({
+      directoryPath: '/workspace/a/b/c',
+      key: '/workspace/a',
+      title: 'a / b / c',
+      children: [file]
+    })
+  })
+
+  it('stops compacting when a directory has multiple children', () => {
+    const entries = [
+      directory('/workspace', [
+        directory('/workspace/src', [
+          directory('/workspace/src/a', []),
+          directory('/workspace/src/b', [])
+        ])
+      ])
+    ]
+
+    const compact = compactDirectoryTree(entries)
+
+    expect(compact[0].children?.[0]).toMatchObject({
+      key: '/workspace/src',
+      title: 'src'
+    })
+  })
+
+  it('treats Windows and Unicode paths as opaque keys', () => {
+    const file = { isLeaf: true, key: 'D:\\项目\\源码\\页面\\首页.tsx', title: '首页.tsx' }
+    const entries = [
+      {
+        children: [
+          {
+            children: [{ children: [file], key: 'D:\\项目\\源码\\页面', title: '页面' }],
+            key: 'D:\\项目\\源码',
+            title: '源码'
+          }
+        ],
+        key: 'D:\\项目',
+        title: '项目'
+      }
+    ]
+
+    expect(compactDirectoryTree(entries)[0].children?.[0]).toMatchObject({
+      directoryPath: 'D:\\项目\\源码\\页面',
+      key: 'D:\\项目\\源码',
+      title: '源码 / 页面',
+      children: [file]
+    })
+  })
+
   it('preserves loaded descendants when a directory is refreshed', () => {
     const loaded = directory('/workspace/src', [
       { isLeaf: true, key: '/workspace/src/file.ts', title: 'file.ts' }

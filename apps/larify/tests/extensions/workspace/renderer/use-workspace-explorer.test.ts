@@ -115,6 +115,28 @@ describe('useWorkspaceExplorer', () => {
     ])
   })
 
+  it('loads a single-child directory chain in one expansion', async () => {
+    workspace.readDirectory.mockImplementation(async (directory?: string) => {
+      if (!directory) return [{ key: 'D:\\workspace\\src', title: 'src' }]
+      if (directory === 'D:\\workspace\\src') {
+        return [{ key: 'D:\\workspace\\src\\nested', title: 'nested' }]
+      }
+      return [{ isLeaf: true, key: `${directory}\\file.ts`, title: 'file.ts' }]
+    })
+
+    act(() => root.unmount())
+    root = createRoot(container)
+    await act(async () => root.render(createElement(Harness)))
+    await act(async () => explorer.loadDirectory(explorer.entries[0]))
+
+    expect(workspace.readDirectory.mock.calls.slice(-3)).toEqual([
+      [undefined],
+      ['D:\\workspace\\src'],
+      ['D:\\workspace\\src\\nested']
+    ])
+    expect(explorer.entries[0].children?.[0].children).toHaveLength(1)
+  })
+
   it('reveals a file in the workspace root without another directory read', async () => {
     const reads = workspace.readDirectory.mock.calls.length
     let revealed: string | undefined

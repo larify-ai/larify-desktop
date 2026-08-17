@@ -3,18 +3,20 @@ import { Uri, type editor } from 'monaco-editor/editor/editor.api'
 import { useTheme } from 'next-themes'
 import type { PreviewRendererProps } from '@renderer/app/registry/file-previews'
 import { useWorkspaceTextFile } from './use-workspace-text-file'
-import './monaco'
+import { workspaceMonacoLanguage, workspaceMonacoTheme } from './monaco'
 
 const editorOptions = {
   automaticLayout: true,
   contextmenu: false,
   domReadOnly: true,
   folding: true,
+  glyphMargin: false,
   largeFileOptimizations: true,
   lineNumbers: 'on',
   lineNumbersMinChars: 4,
   minimap: { enabled: false },
   occurrencesHighlight: 'off',
+  overviewRulerLanes: 0,
   readOnly: true,
   renderLineHighlight: 'none',
   scrollbar: { horizontalScrollbarSize: 8, verticalScrollbarSize: 8 },
@@ -33,10 +35,11 @@ export function MonacoPreview({ file, resourceId }: PreviewRendererProps): React
       <Editor
         height="100%"
         loading={null}
+        language={workspaceMonacoLanguage(file.path, content)}
         path={Uri.file(file.path).toString()}
         value={content}
         options={editorOptions}
-        theme={resolvedTheme === 'dark' ? 'vs-dark' : 'light'}
+        theme={workspaceMonacoTheme(resolvedTheme === 'dark')}
       />
     </div>
   )

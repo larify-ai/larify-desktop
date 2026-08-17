@@ -33,7 +33,7 @@ describe('browser renderer plugin', () => {
     const subscriptions: Array<{ dispose(): void | Promise<void> }> = []
     plugin.activate({ registry, subscriptions })
     const renderer = renderers.get('browser')!
-    expect(renderer).toMatchObject({ order: 20, title: '浏览器' })
+    expect(renderer).toMatchObject({ order: 40, title: '浏览器' })
 
     const updateTab = vi.fn()
     const binding = renderer.bindTab!({ resourceId: 7, sessionId: 'session-a', updateTab })

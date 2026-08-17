@@ -1,20 +1,38 @@
 // @vitest-environment jsdom
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { join } from 'path-unified'
 
 const harness = vi.hoisted(() => ({
   config: vi.fn(),
+  defineTheme: vi.fn(),
+  setJsonMode: vi.fn(),
   workers: {
     editor: class EditorWorker {}
   }
 }))
 
-vi.mock('monaco-editor/editor/editor.api', () => ({ editor: {} }))
+vi.mock('monaco-editor/editor/editor.api', () => ({
+  editor: { defineTheme: harness.defineTheme },
+  languages: {
+    getLanguages: () => [
+      { extensions: ['.ts', '.tsx'], id: 'typescript' },
+      { extensions: ['.md'], id: 'markdown' },
+      { extensions: ['.json'], id: 'json' },
+      { filenames: ['Dockerfile'], id: 'dockerfile' },
+      { firstLine: '^#!.*\\bnode', id: 'javascript' }
+    ]
+  }
+}))
 vi.mock('@monaco-editor/react', () => ({ loader: { config: harness.config } }))
 vi.mock('monaco-editor/basic-languages/monaco.contribution', () => ({}))
+vi.mock('monaco-editor/language/json/monaco.contribution', () => ({
+  jsonDefaults: { setModeConfiguration: harness.setJsonMode }
+}))
 vi.mock('monaco-editor/editor/contrib/bracketMatching/browser/bracketMatching', () => ({}))
 vi.mock('monaco-editor/editor/contrib/find/browser/findController', () => ({}))
 vi.mock('monaco-editor/editor/contrib/folding/browser/folding', () => ({}))
+vi.mock('monaco-editor/features/codicon/register', () => ({}))
 vi.mock('monaco-editor/editor/editor.worker?worker', () => ({ default: harness.workers.editor }))
 
 describe('Monaco preview setup', () => {
@@ -27,6 +45,66 @@ describe('Monaco preview setup', () => {
   it('configures the React loader with the bundled Monaco instance', () => {
     expect(harness.config).toHaveBeenCalledOnce()
     expect(harness.config).toHaveBeenCalledWith({ monaco: expect.any(Object) })
+  })
+
+  it('registers Workspace themes with the legacy diff colors', () => {
+    expect(harness.defineTheme).toHaveBeenCalledWith(
+      'larify-workspace-dark',
+      expect.objectContaining({
+        colors: expect.objectContaining({
+          'diffEditor.insertedLineBackground': '#00A56E47',
+          'diffEditor.removedLineBackground': '#D02A2347'
+        })
+      })
+    )
+    expect(harness.defineTheme).toHaveBeenCalledWith(
+      'larify-workspace-light',
+      expect.objectContaining({
+        colors: expect.objectContaining({
+          'diffEditor.insertedLineBackground': '#40B08B1F',
+          'diffEditor.removedLineBackground': '#E8463A1F'
+        })
+      })
+    )
+  })
+
+  it('selects the registered light and dark themes', async () => {
+    const { workspaceMonacoTheme } =
+      await import('../../../../src/extensions/workspace/renderer/preview/monaco')
+
+    expect(workspaceMonacoTheme(true)).toBe('larify-workspace-dark')
+    expect(workspaceMonacoTheme(false)).toBe('larify-workspace-light')
+  })
+
+  it('resolves model languages from Monaco registrations', async () => {
+    const { workspaceMonacoLanguage } =
+      await import('../../../../src/extensions/workspace/renderer/preview/monaco')
+
+    expect(workspaceMonacoLanguage('file.ts')).toBe('typescript')
+    expect(workspaceMonacoLanguage('README.MD')).toBe('markdown')
+    expect(workspaceMonacoLanguage('package.json')).toBe('json')
+    expect(workspaceMonacoLanguage(join('workspace', 'Dockerfile'))).toBe('dockerfile')
+    expect(workspaceMonacoLanguage(join('workspace', 'DOCKERFILE'))).toBe('dockerfile')
+    expect(workspaceMonacoLanguage('script', '#!/usr/bin/env node\nconsole.log(1)')).toBe(
+      'javascript'
+    )
+    expect(workspaceMonacoLanguage('script.ts', '#!/usr/bin/env node')).toBe('typescript')
+    expect(workspaceMonacoLanguage('LICENSE')).toBe('plaintext')
+  })
+
+  it('enables only JSON tokenization for read-only previews', () => {
+    expect(harness.setJsonMode).toHaveBeenCalledWith({
+      colors: false,
+      completionItems: false,
+      diagnostics: false,
+      documentFormattingEdits: false,
+      documentRangeFormattingEdits: false,
+      documentSymbols: false,
+      foldingRanges: false,
+      hovers: false,
+      selectionRanges: false,
+      tokens: true
+    })
   })
 
   it.each(['json', 'css', 'html', 'typescript', 'editorWorkerService'])(

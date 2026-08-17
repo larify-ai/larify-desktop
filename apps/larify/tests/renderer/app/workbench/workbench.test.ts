@@ -224,25 +224,28 @@ describe('Workbench', () => {
     expect(container.querySelector('[data-state="active"]')?.textContent).toContain('Browser')
   })
 
-  it('creates a workspace resource for the current project root', async () => {
+  it.each([
+    ['workspace', 'Files'],
+    ['changes', 'Changes']
+  ])('creates a %s resource for the current project root', async (rendererId, title) => {
     invoke.mockImplementation((channel: string) =>
       Promise.resolve(channel === 'resource:create' ? 7 : [])
     )
-    registry.get<WorkbenchRendererRegistry>(workbenchRendererRegistryToken)?.register('workspace', {
+    registry.get<WorkbenchRendererRegistry>(workbenchRendererRegistryToken)?.register(rendererId, {
       component: () => null,
       icon: createElement('span'),
       order: 30,
-      title: 'Files'
+      title
     })
     await renderWorkbench(root, registry, sessionId, 'D:\\Workspace')
 
     await act(async () => {
       Array.from(container.querySelectorAll<HTMLButtonElement>('button'))
-        .find((button) => button.textContent === 'Files')
+        .find((button) => button.textContent === title)
         ?.click()
     })
 
-    expect(invoke).toHaveBeenCalledWith('resource:create', 'workspace', sessionId, {
+    expect(invoke).toHaveBeenCalledWith('resource:create', rendererId, sessionId, {
       root: 'D:\\Workspace'
     })
   })

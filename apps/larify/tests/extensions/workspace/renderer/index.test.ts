@@ -12,6 +12,14 @@ vi.mock('../../../../src/extensions/workspace/renderer/preview/markdown-preview'
 vi.mock('../../../../src/extensions/workspace/renderer/preview/monaco-preview', () => ({
   MonacoPreview: () => createElement('div', { 'data-preview': 'monaco' })
 }))
+vi.mock('../../../../src/extensions/workspace/renderer/changes/changes-view', () => ({
+  ChangesView: (props: { cwd: string; resourceId: number }) =>
+    createElement('div', {
+      'data-cwd': props.cwd,
+      'data-resource-id': props.resourceId,
+      'data-testid': 'changes-view'
+    })
+}))
 import plugin from '../../../../src/extensions/workspace/renderer'
 import { NativeFilePreview } from '../../../../src/extensions/workspace/renderer/preview/native-file-preview'
 import { Registry } from '../../../../src/shared/infra/registry'
@@ -23,6 +31,7 @@ import {
   WorkbenchRendererRegistry,
   workbenchRendererRegistryToken
 } from '../../../../src/renderer/src/app/registry/workbench-renderers'
+import { RendererPluginHost } from '../../../../src/renderer/src/app/registry/renderer-plugins'
 
 describe('workspace renderer plugin', () => {
   it('registers the workbench and selects previews by MIME and binary state', () => {
@@ -30,7 +39,8 @@ describe('workspace renderer plugin', () => {
 
     plugin.activate({ registry, subscriptions })
 
-    expect(renderers.get('workspace')).toMatchObject({ order: 30, title: '文件' })
+    expect(renderers.get('workspace')).toMatchObject({ order: 10, title: '文件' })
+    expect(renderers.get('changes')).toMatchObject({ order: 20, title: '变更' })
     for (const mime of ['application/pdf', 'image/png', 'audio/mpeg', 'video/mp4']) {
       expect(previews.find({ binary: false, mime, path: 'file' })?.component).toBe(
         NativeFilePreview
@@ -82,6 +92,7 @@ describe('workspace renderer plugin', () => {
     for (const subscription of [...subscriptions].reverse()) await subscription.dispose()
 
     expect(renderers.get('workspace')).toBeUndefined()
+    expect(renderers.get('changes')).toBeUndefined()
     expect(
       previews.find({ binary: true, mime: 'application/pdf', path: 'file.pdf' })
     ).toBeUndefined()
@@ -89,6 +100,55 @@ describe('workspace renderer plugin', () => {
       previews.find({ binary: false, mime: 'text/markdown', path: 'README.md' })
     ).toBeUndefined()
     expect(previews.find({ binary: false, mime: 'text/plain', path: 'file.txt' })).toBeUndefined()
+  })
+
+  it('renders the changes view with its complete workbench props', async () => {
+    const { registry, renderers, subscriptions } = createServices()
+    plugin.activate({ registry, subscriptions })
+    const renderer = renderers.get('changes')!
+    const container = document.createElement('div')
+    const root = createRoot(container)
+
+    await act(async () => {
+      root.render(
+        createElement(renderer.component, {
+          active: true,
+          cwd: 'D:\\workspace',
+          resourceId: 8,
+          sessionId: 'session',
+          updateTab: vi.fn()
+        })
+      )
+      await Promise.resolve()
+    })
+
+    expect(container.querySelector('[data-testid="changes-view"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="changes-view"]')?.getAttribute('data-cwd')).toBe(
+      'D:\\workspace'
+    )
+    expect(
+      container.querySelector('[data-testid="changes-view"]')?.getAttribute('data-resource-id')
+    ).toBe('8')
+    await act(async () => root.unmount())
+  })
+
+  it('rolls back workspace registration when changes registration conflicts', () => {
+    const { previews, registry, renderers } = createServices()
+    const existing = renderers.register('changes', {
+      component: () => createElement('div'),
+      icon: null,
+      order: 1,
+      title: 'existing'
+    })
+    const host = new RendererPluginHost(registry)
+
+    expect(() => host.activate(plugin)).toThrow(
+      'Workbench renderer "changes" is already registered.'
+    )
+    expect(renderers.get('workspace')).toBeUndefined()
+    expect(renderers.get('changes')?.title).toBe('existing')
+    expect(previews.find({ binary: false, mime: 'text/plain', path: 'file.txt' })).toBeUndefined()
+    existing.dispose()
   })
 
   it('switches Markdown between reading and source renderers', async () => {

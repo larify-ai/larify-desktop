@@ -64,7 +64,7 @@ const plugin: RendererPlugin = {
           </Suspense>
         ),
         icon: <GlobeIcon aria-hidden />,
-        order: 20,
+        order: 40,
         title: '浏览器'
       })
     )

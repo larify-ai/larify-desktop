@@ -54,7 +54,7 @@
 }
 
 .workspace-tree .rc-tree-indent-unit {
-  width: 20px;
+  width: 14px;
 }
 
 .workspace-tree .rc-tree-switcher {
@@ -91,4 +91,12 @@
 .workspace-tree .rc-tree-treenode:hover .rc-tree-node-content-wrapper,
 .workspace-tree .rc-tree-node-content-wrapper.rc-tree-node-selected {
   background: transparent;
+}
+
+.workspace-file-preview .monaco-diff-editor .line-numbers {
+  padding-right: 4px;
+}
+
+.workspace-file-preview[data-diff-mode='unified'] .monaco-diff-editor > .editor.original {
+  visibility: hidden;
 }

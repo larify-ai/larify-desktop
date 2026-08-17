@@ -40,6 +40,10 @@ import {
   TooltipTrigger,
 } from "@renderer/components/ui/tooltip";
 import { cn } from "@renderer/lib/utils";
+import {
+  readWorkspaceDragData,
+  workspaceEntryDragType,
+} from "@renderer/lib/attachment-drag";
 import type { ChatStatus, FileUIPart, SourceDocumentUIPart } from "ai";
 import {
   CornerDownLeftIcon,
@@ -272,6 +276,10 @@ const classifyDroppedItems = (
   }
   return { directories, files };
 };
+
+const hasAttachmentData = (dataTransfer: DataTransfer | null): dataTransfer is DataTransfer =>
+  dataTransfer !== null &&
+  (dataTransfer.types.includes("Files") || dataTransfer.types.includes(workspaceEntryDragType));
 
 const revokeAttachmentUrl = (url?: string): void => {
   if (url?.startsWith("blob:")) {
@@ -763,6 +771,23 @@ export const PromptInput = ({
 
   const addDroppedFiles = useCallback(
     (dataTransfer: DataTransfer) => {
+      const workspaceItem = dataTransfer.types.includes(workspaceEntryDragType)
+        ? readWorkspaceDragData(dataTransfer.getData(workspaceEntryDragType))
+        : undefined;
+      if (workspaceItem) {
+        addParts([
+          {
+            filename: workspaceItem.name,
+            id: nanoid(),
+            mediaType: workspaceItem.directory
+              ? "inode/directory"
+              : "application/octet-stream",
+            type: "file",
+            url: workspaceItem.path,
+          },
+        ]);
+        return;
+      }
       if (dataTransfer.items.length) {
         const dropped = classifyDroppedItems(dataTransfer.items);
         if (dropped.files.length) add(dropped.files);
@@ -792,57 +817,26 @@ export const PromptInput = ({
     }
   }, [files, syncHiddenInput]);
 
-  // Attach drop handlers on nearest form and document (opt-in)
+  // Attach drop handlers to the form, or to the document when globalDrop is enabled.
   useEffect(() => {
-    const form = formRef.current;
-    if (!form) {
-      return;
-    }
-    if (globalDrop) {
-      // when global drop is on, let the document-level handler own drops
-      return;
-    }
+    const onDragOver = (event: Event): void => {
+      if (hasAttachmentData((event as DragEvent).dataTransfer)) event.preventDefault();
+    };
+    const onDrop = (event: Event): void => {
+      const dataTransfer = (event as DragEvent).dataTransfer;
+      if (!hasAttachmentData(dataTransfer)) return;
+      event.preventDefault();
+      addDroppedFiles(dataTransfer);
+    };
 
-    const onDragOver = (e: DragEvent) => {
-      if (e.dataTransfer?.types?.includes("Files")) {
-        e.preventDefault();
-      }
-    };
-    const onDrop = (e: DragEvent) => {
-      if (e.dataTransfer?.types?.includes("Files")) {
-        e.preventDefault();
-      }
-      if (e.dataTransfer) addDroppedFiles(e.dataTransfer);
-    };
-    form.addEventListener("dragover", onDragOver);
-    form.addEventListener("drop", onDrop);
+    const target = globalDrop ? document : formRef.current;
+    if (!target) return;
+    const options = globalDrop ? { capture: true } : undefined;
+    target.addEventListener("dragover", onDragOver, options);
+    target.addEventListener("drop", onDrop, options);
     return () => {
-      form.removeEventListener("dragover", onDragOver);
-      form.removeEventListener("drop", onDrop);
-    };
-  }, [addDroppedFiles, globalDrop]);
-
-  useEffect(() => {
-    if (!globalDrop) {
-      return;
-    }
-
-    const onDragOver = (e: DragEvent) => {
-      if (e.dataTransfer?.types?.includes("Files")) {
-        e.preventDefault();
-      }
-    };
-    const onDrop = (e: DragEvent) => {
-      if (e.dataTransfer?.types?.includes("Files")) {
-        e.preventDefault();
-      }
-      if (e.dataTransfer) addDroppedFiles(e.dataTransfer);
-    };
-    document.addEventListener("dragover", onDragOver, { capture: true });
-    document.addEventListener("drop", onDrop, { capture: true });
-    return () => {
-      document.removeEventListener("dragover", onDragOver, { capture: true });
-      document.removeEventListener("drop", onDrop, { capture: true });
+      target.removeEventListener("dragover", onDragOver, options);
+      target.removeEventListener("drop", onDrop, options);
     };
   }, [addDroppedFiles, globalDrop]);
 

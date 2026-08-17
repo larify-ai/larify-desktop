@@ -49,6 +49,7 @@ vi.mock('../../../../src/extensions/workspace/renderer/explorer/workspace-tree',
 }))
 
 vi.mock('../../../../src/extensions/workspace/renderer/layout/workspace-layout', () => ({
+  workspaceNavigatorDefaultWidth: 260,
   WorkspaceLayout: ({ children, navigator }: { children: ReactNode; navigator: ReactNode }) =>
     createElement(
       'div',

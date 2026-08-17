@@ -15,7 +15,14 @@ export function useWorkspaceExplorer(resourceId: number): {
   useEffect(() => () => revealController.current?.abort(), [resourceId])
 
   const loadDirectory = useCallback(
-    (directory: DataNode): Promise<void> => load(String(directory.key)),
+    async (directory: DataNode): Promise<void> => {
+      let path = String(directory.key)
+      while (true) {
+        const children = await load(path)
+        if (children.length !== 1 || children[0].isLeaf) return
+        path = String(children[0].key)
+      }
+    },
     [load]
   )
 

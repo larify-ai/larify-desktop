@@ -12,7 +12,7 @@ import { WorkspaceTree } from './explorer/workspace-tree'
 import { useGitDecorations } from './changes/use-git-decorations'
 import { useWorkspaceExplorer } from './explorer/use-workspace-explorer'
 import { createPathChangeTree } from './changes/git-change-tree'
-import { WorkspaceLayout } from './layout/workspace-layout'
+import { WorkspaceLayout, workspaceNavigatorDefaultWidth } from './layout/workspace-layout'
 import { EmptyFilePreview } from './preview/empty-file-preview'
 import {
   workspaceMarkdownOpenExternalEvent,
@@ -45,7 +45,7 @@ export function WorkspaceView({
 }: WorkspaceViewProps): React.JSX.Element {
   const [navigatorOpen, setNavigatorOpen] = useState(true)
   const [markdownMode, setMarkdownMode] = useState<'preview' | 'source'>('preview')
-  const [navigatorWidth, setNavigatorWidth] = useState(200)
+  const [navigatorWidth, setNavigatorWidth] = useState(workspaceNavigatorDefaultWidth)
   const [workbenchAnimating, setWorkbenchAnimating] = useState(false)
   const [workbenchVisible, setWorkbenchVisible] = useState(false)
   const [lockedPreviewWidth, setLockedPreviewWidth] = useState<number | null>(null)

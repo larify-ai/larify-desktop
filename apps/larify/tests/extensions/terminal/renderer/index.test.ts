@@ -25,6 +25,10 @@ describe('terminal renderer registration', () => {
     new RendererPluginHost(registry).activate(plugin)
   })
 
+  it('registers its launcher metadata', () => {
+    expect(renderer.get('terminal')).toMatchObject({ order: 30, title: '终端' })
+  })
+
   it('loads the initial terminal title without mounting its component', async () => {
     const updateTab = vi.fn()
     renderer.get('terminal')?.bindTab?.({

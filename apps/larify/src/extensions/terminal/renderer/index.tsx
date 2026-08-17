@@ -41,7 +41,7 @@ const plugin: RendererPlugin = {
           </Suspense>
         ),
         icon: <SquareTerminalIcon aria-hidden />,
-        order: 10,
+        order: 30,
         title: '终端'
       })
     )

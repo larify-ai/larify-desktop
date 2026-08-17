@@ -4,6 +4,12 @@ import { Region } from '../layout/region'
 import { createWorkbenchStore } from './workbench-store'
 import { WorkbenchShell } from './workbench-shell'
 
+const resourceOptions = (id: string, cwd: string): Record<string, string> => {
+  if (id === 'terminal') return cwd ? { cwd } : {}
+  if (id === 'workspace' || id === 'changes') return { root: cwd }
+  return {}
+}
+
 export function Workbench({
   sessionId,
   cwd,
@@ -76,12 +82,7 @@ export function Workbench({
 
   const openTool = (id: string): void => {
     void window.bridge
-      .invoke(
-        'resource:create',
-        id,
-        sessionId,
-        id === 'terminal' && cwd ? { cwd } : id === 'workspace' ? { root: cwd } : {}
-      )
+      .invoke('resource:create', id, sessionId, resourceOptions(id, cwd))
       .then((resourceId: number) => {
         if (sessionIdRef.current === sessionId) {
           store.getState().openView({ rendererId: id, resourceId })

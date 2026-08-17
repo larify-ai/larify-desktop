@@ -17,6 +17,22 @@ const workspace = vi.hoisted(() => ({
   readFile: vi.fn()
 }))
 
+const monaco = vi.hoisted(() => ({
+  language: vi.fn(() => 'plaintext'),
+  props: undefined as
+    | {
+        language: string
+        options: Record<string, unknown>
+        path: string
+        theme: string
+        value: string
+      }
+    | undefined,
+  theme: vi.fn((dark: boolean) => (dark ? 'larify-workspace-dark' : 'larify-workspace-light'))
+}))
+
+const theme = vi.hoisted(() => ({ resolved: 'dark' }))
+
 function deferred<T>(): {
   promise: Promise<T>
   reject(reason: unknown): void
@@ -34,8 +50,10 @@ function deferred<T>(): {
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
 vi.mock('@monaco-editor/react', () => ({
-  default: ({ path, value }: { path: string; value: string }) =>
-    createElement('pre', { 'data-model-path': path }, value)
+  default: (props: NonNullable<typeof monaco.props>) => {
+    monaco.props = props
+    return createElement('pre', { 'data-model-path': props.path }, props.value)
+  }
 }))
 
 vi.mock('monaco-editor/editor/editor.api', () => ({
@@ -44,9 +62,12 @@ vi.mock('monaco-editor/editor/editor.api', () => ({
   }
 }))
 
-vi.mock('next-themes', () => ({ useTheme: () => ({ resolvedTheme: 'dark' }) }))
+vi.mock('next-themes', () => ({ useTheme: () => ({ resolvedTheme: theme.resolved }) }))
 
-vi.mock('../../../../src/extensions/workspace/renderer/preview/monaco', () => ({}))
+vi.mock('../../../../src/extensions/workspace/renderer/preview/monaco', () => ({
+  workspaceMonacoLanguage: monaco.language,
+  workspaceMonacoTheme: monaco.theme
+}))
 
 vi.mock('../../../../src/extensions/workspace/renderer/workspace-client', () => ({
   workspaceClient: {
@@ -80,6 +101,8 @@ describe('FilePreview', () => {
     )
     workspace.listener = undefined
     workspace.readFile.mockReset()
+    monaco.props = undefined
+    theme.resolved = 'dark'
     container = document.createElement('div')
     root = createRoot(container)
     registry = new Registry()
@@ -130,6 +153,42 @@ describe('FilePreview', () => {
     expect(container.querySelector('pre')?.dataset.modelPath).toBe(
       'file://D:/workspace/src/file.ts'
     )
+  })
+
+  it('configures a themed read-only source preview without editor gutters', async () => {
+    workspace.readFile.mockResolvedValue('const value = 1')
+    await renderPreview('D:\\workspace\\src\\file.ts')
+
+    expect(monaco.language).toHaveBeenCalledWith('D:\\workspace\\src\\file.ts', 'const value = 1')
+    expect(monaco.theme).toHaveBeenCalledWith(true)
+    expect(monaco.props).toMatchObject({
+      language: 'plaintext',
+      options: {
+        glyphMargin: false,
+        overviewRulerLanes: 0,
+        readOnly: true
+      },
+      theme: 'larify-workspace-dark'
+    })
+  })
+
+  it('updates the Monaco theme when the application theme changes', async () => {
+    workspace.readFile.mockResolvedValue('content')
+    await renderPreview('D:\\workspace\\src\\file.ts')
+
+    theme.resolved = 'light'
+    await renderPreview('D:\\workspace\\src\\file.ts')
+
+    expect(monaco.theme).toHaveBeenLastCalledWith(false)
+    expect(monaco.props?.theme).toBe('larify-workspace-light')
+  })
+
+  it('does not mount Monaco when reading the file fails', async () => {
+    workspace.readFile.mockRejectedValue(new Error('read failed'))
+    await renderPreview('D:\\workspace\\src\\file.ts')
+
+    expect(container.textContent).toBe('read failed')
+    expect(monaco.props).toBeUndefined()
   })
 
   it('debounces consecutive file changes', async () => {

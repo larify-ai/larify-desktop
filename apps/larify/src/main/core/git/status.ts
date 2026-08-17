@@ -6,21 +6,24 @@ import { resolveRepositoryRoot } from './repository'
 
 export async function status(
   workspaceRoot: string,
-  runtime: GitService = gitService
+  runtime: GitService = gitService,
+  includeIgnored = true
 ): Promise<FileStatusResult[]> {
   const git = await runtime.open(workspaceRoot)
   const repositoryRoot = await resolveRepositoryRoot(workspaceRoot, git)
   const [{ files }, ignoredOutput] = await Promise.all([
     git.status(),
-    git.raw([
-      'ls-files',
-      '--others',
-      '--ignored',
-      '--exclude-standard',
-      '--directory',
-      '--full-name',
-      '-z'
-    ])
+    includeIgnored
+      ? git.raw([
+          'ls-files',
+          '--others',
+          '--ignored',
+          '--exclude-standard',
+          '--directory',
+          '--full-name',
+          '-z'
+        ])
+      : Promise.resolve('')
   ])
   const ignored: FileStatusResult[] = ignoredOutput
     .split('\0')
@@ -28,10 +31,13 @@ export async function status(
     .map((ignoredPath) => ({ path: ignoredPath, index: '!', working_dir: '!' }))
 
   return [...files, ...ignored]
-    .map((file) => ({
-      ...file,
-      path: path.resolve(repositoryRoot, file.path),
-      from: file.from ? path.resolve(repositoryRoot, file.from) : undefined
-    }))
+    .map((file) => {
+      const resolvedFrom = file.from ? path.resolve(repositoryRoot, file.from) : undefined
+      return {
+        ...file,
+        path: path.resolve(repositoryRoot, file.path),
+        from: resolvedFrom && isPathInside(workspaceRoot, resolvedFrom) ? resolvedFrom : undefined
+      }
+    })
     .filter((file) => isPathInside(workspaceRoot, file.path))
 }

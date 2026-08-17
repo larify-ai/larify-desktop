@@ -6,7 +6,7 @@ import { isDirectoryLoaded, mergeLoadedChildren, updateDirectory } from './works
 export function useWorkspaceDirectories(resourceId: number): {
   entries: DataNode[]
   isLoaded(directory: string): boolean
-  load(directory: string, signal?: AbortSignal): Promise<void>
+  load(directory: string, signal?: AbortSignal): Promise<DataNode[]>
   root: string | null
 } {
   const [state, setState] = useState<{
@@ -31,8 +31,8 @@ export function useWorkspaceDirectories(resourceId: number): {
   )
 
   const load = useCallback(
-    async (directory: string, signal?: AbortSignal): Promise<void> => {
-      if (signal?.aborted) return
+    async (directory: string, signal?: AbortSignal): Promise<DataNode[]> => {
+      if (signal?.aborted) return []
       const currentLifecycle = lifecycle.current
       const target = rootRef.current ? directory : undefined
       const requestKey = target ?? ''
@@ -47,7 +47,7 @@ export function useWorkspaceDirectories(resourceId: number): {
         lifecycle.current !== currentLifecycle ||
         requests.current.get(requestKey) !== request
       ) {
-        return
+        return []
       }
       rootRef.current ??= nextRoot
       replaceEntries(
@@ -55,6 +55,7 @@ export function useWorkspaceDirectories(resourceId: number): {
           ? mergeLoadedChildren(children, entriesRef.current)
           : updateDirectory(entriesRef.current, directory, children)
       )
+      return children
     },
     [replaceEntries, resourceId]
   )

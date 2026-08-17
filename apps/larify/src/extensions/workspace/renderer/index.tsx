@@ -14,9 +14,13 @@ import {
   previewRegistryToken
 } from '@renderer/app/registry/file-previews'
 import { NativeFilePreview } from './preview/native-file-preview'
+import { ChangesIcon } from './changes/changes-icon'
 
 const WorkspaceView = lazy(() =>
   import('./workspace-view').then(({ WorkspaceView }) => ({ default: WorkspaceView }))
+)
+const ChangesView = lazy(() =>
+  import('./changes/changes-view').then(({ ChangesView }) => ({ default: ChangesView }))
 )
 const MonacoPreview = lazy(() =>
   import('./preview/monaco-preview').then(({ MonacoPreview }) => ({ default: MonacoPreview }))
@@ -81,8 +85,20 @@ const plugin: RendererPlugin = {
           </Suspense>
         ),
         icon: <FileText aria-hidden />,
-        order: 30,
+        order: 10,
         title: '文件'
+      })
+    )
+    subscriptions.push(
+      renderers.register('changes', {
+        component: (props) => (
+          <Suspense fallback={<EmptyFilePreview />}>
+            <ChangesView {...props} />
+          </Suspense>
+        ),
+        icon: <ChangesIcon />,
+        order: 20,
+        title: '变更'
       })
     )
   }

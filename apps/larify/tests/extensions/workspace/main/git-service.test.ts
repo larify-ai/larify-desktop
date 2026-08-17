@@ -143,6 +143,29 @@ describe('Core Git', () => {
   )
 
   it(
+    'does not expose a rename source outside a nested workspace',
+    async () => {
+      const root = await createRepository()
+      const workspace = path.join(root, 'workspace')
+      const outside = path.join(root, 'outside.txt')
+      const inside = path.join(workspace, 'inside.txt')
+      await mkdir(workspace)
+      await writeFile(outside, 'content')
+      const git = simpleGit(root)
+      await git.add('.').commit('initial')
+      await git.mv(outside, inside)
+
+      const statuses = await status(workspace)
+
+      expect(statuses.find((entry) => entry.path === inside)).toMatchObject({
+        from: undefined,
+        index: 'R'
+      })
+    },
+    gitTestTimeout
+  )
+
+  it(
     'returns ignored paths for explorer decorations',
     async () => {
       const root = await createRepository()
@@ -157,6 +180,21 @@ describe('Core Git', () => {
         index: '!',
         working_dir: '!'
       })
+    },
+    gitTestTimeout
+  )
+
+  it(
+    'skips the ignored-file scan when it is not requested',
+    async () => {
+      const root = await createRepository()
+      const ignored = path.join(root, 'ignored.txt')
+      await writeFile(path.join(root, '.gitignore'), 'ignored.txt\n')
+      await writeFile(ignored, 'ignored')
+
+      const statuses = await status(root, undefined, false)
+
+      expect(statuses.map((entry) => entry.path)).not.toContain(ignored)
     },
     gitTestTimeout
   )
@@ -213,6 +251,21 @@ describe('Core Git', () => {
   )
 
   it(
+    'preserves the original bytes used by quick diff',
+    async () => {
+      const root = await createRepository()
+      const file = path.join(root, 'binary.bin')
+      const original = new Uint8Array([0, 255, 254, 128, 10])
+      await writeFile(file, original)
+      await simpleGit(root).add('.').commit('initial')
+      await writeFile(file, new Uint8Array([1, 2, 3]))
+
+      await expect(head(root, file)).resolves.toEqual(original)
+    },
+    gitTestTimeout
+  )
+
+  it(
     'returns no quick diff baseline for an untracked file',
     async () => {
       const root = await createRepository()
@@ -248,7 +301,10 @@ describe('Core Git', () => {
       await git.add('.').commit('initial')
       const checkIsRepo = vi.spyOn(git, 'checkIsRepo')
       const revparse = vi.spyOn(git, 'revparse')
-      const runtime = { open: async () => git } as unknown as GitRuntime
+      const runtime = {
+        exec: new GitRuntime().exec,
+        open: async () => git
+      } as unknown as GitRuntime
 
       await status(root, runtime)
       await head(root, file, runtime)

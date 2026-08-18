@@ -6,13 +6,7 @@
     "src/preload/**/*",
     "src/shared/**/*",
     "src/extensions/*/shared/**/*",
-    "src/extensions/*/main/**/*",
-    "src/extensions/*/loop/**/*",
-    "src/extensions/*/utils/**/*"
-  ],
-  "exclude": [
-    "src/main/core/extension/**/*",
-    "src/extensions/nest/**/*"
+    "src/extensions/*/main/**/*"
   ],
   "compilerOptions": {
     "composite": true,

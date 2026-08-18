@@ -10,6 +10,7 @@ import { registerResourceManager } from '../core/resource'
 import { registerPlugin } from '../core/plugin'
 import { registerTheme } from '../theme'
 import { registerDialog } from '../dialog'
+import { registerUpdate } from '../update'
 import { openMainWindow, registerWindow } from '../window'
 import type { Application } from './application'
 
@@ -30,11 +31,12 @@ async function createApplication(electron: App): Promise<Application> {
   registerAttachment(application)
   await registerPlugin(application)
   registerAgent(application)
+  registerUpdate(application)
   return application
 }
 
 export async function bootstrap(electron: App): Promise<void> {
-  electronApp.setAppUserModelId('ai.larify.app')
+  electronApp.setAppUserModelId('ai.larify.desktop')
   const application = await createApplication(electron)
   installShutdown(electron, () => application.registry.disposeAll())
 }

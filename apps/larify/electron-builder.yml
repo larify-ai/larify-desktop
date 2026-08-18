@@ -1,4 +1,4 @@
-appId: com.electron.app
+appId: ai.larify.desktop
 productName: larify
 directories:
   buildResources: build
@@ -42,5 +42,7 @@ appImage:
   artifactName: ${name}-${version}.${ext}
 npmRebuild: false
 publish:
-  provider: generic
-  url: https://example.com/auto-updates
+  provider: github
+  owner: larify-ai
+  repo: larify-desktop
+  releaseType: release

@@ -1,0 +1,38 @@
+name: Release Windows
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Verify release version
+        shell: pwsh
+        run: |
+          $version = (Get-Content apps/larify/package.json | ConvertFrom-Json).version
+          if ("v$version" -ne "${{ github.ref_name }}") {
+            throw "Tag ${{ github.ref_name }} does not match apps/larify version $version"
+          }
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build and publish Windows release
+        run: npm run release:win --workspace apps/larify
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}

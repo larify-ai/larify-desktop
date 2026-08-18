@@ -1,4 +1,7 @@
 import { ensureLarifyPath } from '../../../main/utils/app-paths'
+import { defineService } from '@shared/infra/registry'
+
+export const embeddingWorkerToken = defineService()
 
 export const EMBEDDING_MODEL = 'onnx-community/Qwen3-Embedding-0.6B-ONNX'
 export const EMBEDDING_DIMENSIONS = 1024

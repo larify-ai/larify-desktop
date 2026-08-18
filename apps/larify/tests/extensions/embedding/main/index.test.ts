@@ -1,4 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { Registry } from '../../../../src/shared/infra/registry'
+import { PluginHost } from '../../../../src/main/core/plugin/host'
 
 const dispose = vi.fn(async () => undefined)
 
@@ -8,25 +10,20 @@ vi.mock('../../../../src/extensions/embedding/main/worker-client', () => ({
   }
 }))
 
-import extension, { getEmbeddingWorker } from '../../../../src/extensions/embedding/main'
+import plugin from '../../../../src/extensions/embedding/main'
+import { embeddingWorkerToken } from '../../../../src/extensions/embedding/main/service'
 
-beforeEach(() => {
-  vi.clearAllMocks()
-})
+describe('Embedding plugin', () => {
+  it('registers its worker service and disposes it on deactivation', async () => {
+    const registry = new Registry()
+    const host = new PluginHost(registry)
 
-describe('Embedding extension', () => {
-  it('reuses the worker until the extension is disposed', () => {
-    const subscriptions: Array<{ dispose(): void }> = []
-    const before = getEmbeddingWorker()
-    const unregister = { dispose: vi.fn() }
-    const app = { register: vi.fn(() => unregister) }
+    await host.activate(plugin)
 
-    expect(getEmbeddingWorker()).toBe(before)
-    extension.activate?.(app as never, { subscriptions } as never)
-    expect(app.register).toHaveBeenCalledWith('service', 'embedding', before)
-    subscriptions[1].dispose()
+    expect(registry.get(embeddingWorkerToken)).toBeDefined()
+    await host.deactivate('embedding')
 
     expect(dispose).toHaveBeenCalledOnce()
-    expect(getEmbeddingWorker()).not.toBe(before)
+    expect(registry.get(embeddingWorkerToken)).toBeUndefined()
   })
 })

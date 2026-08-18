@@ -1,23 +1,20 @@
-import type { Extension } from '@shared/extension'
-import { EmbeddingWorker } from './worker-client'
+import type { Plugin } from '../../../main/core/plugin/protocol'
+import { embeddingWorkerToken } from './service'
 
-let worker: EmbeddingWorker | undefined
-
-export function getEmbeddingWorker(): EmbeddingWorker {
-  return (worker ??= new EmbeddingWorker())
-}
-
-const extension: Extension = {
-  activate(app, context) {
-    context.subscriptions.push(app.register('service', 'embedding', getEmbeddingWorker()))
+const plugin: Plugin = {
+  manifest: {
+    id: 'embedding'
+  },
+  async activate(context) {
+    const { EmbeddingWorker } = await import('./worker-client')
+    const worker = new EmbeddingWorker()
+    context.registry.register(embeddingWorkerToken, worker)
     context.subscriptions.push({
-      dispose() {
-        const current = worker
-        worker = undefined
-        void current?.dispose()
+      async dispose() {
+        await context.registry.dispose(embeddingWorkerToken)
       }
     })
   }
 }
 
-export default extension
+export default plugin

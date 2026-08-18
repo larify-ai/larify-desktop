@@ -1,53 +1,26 @@
-import { join, resolve } from 'node:path'
-import type { Disposable, Extension } from '@shared/extension'
-import { createContextDiagnosticsProvider } from './diagnostics'
-import { cleanContextRegistry, registerContext } from './workspace'
-import { ContextWorker } from './worker-client'
-import type { EmbeddingWorker } from '../../embedding/main/worker-client'
+import type { Plugin } from '../../../main/core/plugin/protocol'
+import { embeddingWorkerToken } from '../../embedding/main/service'
 import { registerFileDiagnosticsProvider } from '../../fs/main/diagnostics'
+import { createContextDiagnosticsProvider } from './diagnostics'
+import { memoryRootPath } from './indexer'
+import { contextWorkerToken } from './service'
 
-const extension: Extension = {
-  activate(app, context) {
-    const worker = new ContextWorker(() => app.get<EmbeddingWorker>('service', 'embedding'))
-    const workspaces = new Map<string, Disposable>()
-    cleanContextRegistry()
-    app.register('service', 'context', worker)
-
-    app.on('workspace:open', (cwd) => {
-      if (typeof cwd !== 'string') return
-      const workspace = resolve(cwd)
-      if (workspaces.has(workspace)) return
-
-      registerContext(workspace)
-      const root = join(workspace, '.larify')
-      const disposeDiagnostics = registerFileDiagnosticsProvider(
-        createContextDiagnosticsProvider(root, (file, name) =>
-          worker.duplicateName(workspace, file, name)
-        )
-      )
-      const disposable: Disposable = {
-        async dispose() {
-          disposeDiagnostics()
-          await worker.close(workspace)
-        }
-      }
-      workspaces.set(workspace, disposable)
-      void worker.open(workspace).catch((error) => {
-        console.error('[context:open]', error)
-        if (workspaces.get(workspace) !== disposable) return
-        disposeDiagnostics()
-        workspaces.delete(workspace)
-      })
-    })
-
+const plugin: Plugin = {
+  manifest: { id: 'context' },
+  async activate(context) {
+    const { ContextWorker } = await import('./worker-client')
+    const worker = new ContextWorker(() => context.registry.get(embeddingWorkerToken))
+    const root = memoryRootPath()
+    context.registry.register(contextWorkerToken, worker)
     context.subscriptions.push({
-      async dispose() {
-        await Promise.all([...workspaces.values()].map((workspace) => workspace.dispose()))
-        workspaces.clear()
-        await worker.dispose()
-      }
+      dispose: () => context.registry.dispose(contextWorkerToken)
     })
+    const disposeDiagnostics = registerFileDiagnosticsProvider(
+      createContextDiagnosticsProvider(root, (file, name) => worker.duplicateName(file, name))
+    )
+    context.subscriptions.push({ dispose: disposeDiagnostics })
+    await worker.open()
   }
 }
 
-export default extension
+export default plugin

@@ -1,5 +1,4 @@
 import type { Worker } from 'node:worker_threads'
-import { resolve } from 'node:path'
 import type { EmbeddingWorker } from '../../embedding/main/worker-client'
 import type { ContextDocument } from './document'
 import type { Node } from './graph'
@@ -9,8 +8,9 @@ import type { WorkerCommand, WorkerNotification, WorkerResponse } from './worker
 export class ContextWorker {
   private worker?: Worker
   private nextId = 0
-  private readonly active = new Set<string>()
-  private readonly syncing = new Set<string>()
+  private active = false
+  private syncing = false
+  private syncRequested = false
   private readonly pending = new Map<
     number,
     {
@@ -21,39 +21,34 @@ export class ContextWorker {
 
   constructor(private readonly getEmbeddings?: () => EmbeddingWorker | undefined) {}
 
-  async open(cwd: string): Promise<void> {
-    this.active.add(resolve(cwd))
-    await this.send({ type: 'open', cwd })
-    this.updateEmbeddings(cwd)
+  async open(): Promise<void> {
+    this.active = true
+    await this.send({ type: 'open' })
+    this.updateEmbeddings()
   }
 
-  async search(cwd: string, query: string, limit?: number): Promise<Node[]> {
+  async search(query: string, limit?: number): Promise<Node[]> {
     if (!query.trim() || (limit !== undefined && limit <= 0)) return []
-    this.active.add(resolve(cwd))
+    this.active = true
     const embeddings = this.getEmbeddings?.()
     if (embeddings) {
-      this.updateEmbeddings(cwd)
+      this.updateEmbeddings()
       try {
         const vector = await embeddings.embedQuery(query)
-        return ((await this.send({ type: 'search', cwd, query, vector, limit })) ?? []) as Node[]
+        return ((await this.send({ type: 'search', query, vector, limit })) ?? []) as Node[]
       } catch (error) {
         console.error('[context:embedding]', error)
       }
     }
-    return ((await this.send({ type: 'search', cwd, query, limit })) ?? []) as Node[]
+    return ((await this.send({ type: 'search', query, limit })) ?? []) as Node[]
   }
 
-  async duplicateName(cwd: string, file: string, name: string): Promise<boolean> {
-    return Boolean(await this.send({ type: 'duplicateName', cwd, file, name }))
-  }
-
-  async close(cwd: string): Promise<void> {
-    this.active.delete(resolve(cwd))
-    await this.send({ type: 'close', cwd })
+  async duplicateName(file: string, name: string): Promise<boolean> {
+    return Boolean(await this.send({ type: 'duplicateName', file, name }))
   }
 
   async dispose(): Promise<void> {
-    this.active.clear()
+    this.active = false
     const worker = this.worker
     if (!worker) return
     try {
@@ -67,31 +62,37 @@ export class ContextWorker {
     }
   }
 
-  private async syncEmbeddings(cwd: string, embeddings: EmbeddingWorker): Promise<void> {
-    const workspace = resolve(cwd)
+  private async syncEmbeddings(embeddings: EmbeddingWorker): Promise<void> {
     while (true) {
-      if (!this.active.has(workspace)) return
-      const pending = (await this.send({ type: 'pending-embedding', cwd })) as
+      if (!this.active) return
+      const pending = (await this.send({ type: 'pending-embedding' })) as
         ContextDocument | undefined
       if (!pending) return
       const { node, content, hash } = pending
       const { name, description, uri } = node
-      if (!this.active.has(workspace)) return
+      if (!this.active) return
       const vectors = await embeddings.embedMarkdown({ name, description, content })
-      if (!this.active.has(workspace)) return
+      if (!this.active) return
       if (!vectors.length) throw new Error(`No embeddings generated for ${uri}.`)
-      await this.send({ type: 'set-embeddings', cwd, uri, hash, vectors })
+      await this.send({ type: 'set-embeddings', uri, hash, vectors })
     }
   }
 
-  private updateEmbeddings(cwd: string): void {
-    const workspace = resolve(cwd)
+  private updateEmbeddings(): void {
     const embeddings = this.getEmbeddings?.()
-    if (!embeddings || !this.active.has(workspace) || this.syncing.has(workspace)) return
-    this.syncing.add(workspace)
-    void this.syncEmbeddings(cwd, embeddings)
+    if (!embeddings || !this.active) return
+    if (this.syncing) {
+      this.syncRequested = true
+      return
+    }
+    this.syncing = true
+    this.syncRequested = false
+    void this.syncEmbeddings(embeddings)
       .catch((error) => console.error('[context:embedding]', error))
-      .finally(() => this.syncing.delete(workspace))
+      .finally(() => {
+        this.syncing = false
+        if (this.syncRequested) this.updateEmbeddings()
+      })
   }
 
   private send(request: WorkerCommand): Promise<Node[] | ContextDocument | boolean | undefined> {
@@ -112,7 +113,7 @@ export class ContextWorker {
     const worker = createWorker({})
     worker.on('message', (response: WorkerResponse | WorkerNotification) => {
       if ('type' in response) {
-        this.updateEmbeddings(response.cwd)
+        this.updateEmbeddings()
         return
       }
       const pending = this.pending.get(response.id)

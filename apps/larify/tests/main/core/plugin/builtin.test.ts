@@ -6,6 +6,7 @@ describe('discoverBuiltinPlugins', () => {
     expect(discoverBuiltinPlugins().map(({ manifest }) => manifest.id)).toEqual([
       'agent',
       'embedding',
+      'context',
       'fs',
       'terminal',
       'browser',

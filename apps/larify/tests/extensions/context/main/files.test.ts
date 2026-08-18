@@ -105,13 +105,15 @@ describe('context files', () => {
     expect(resolveContextLink(root, file, '../src/')).toBe(source)
   })
 
-  it('rejects paths outside the workspace, external URLs, anchors, and invalid encodings', () => {
+  it('allows arbitrary local paths but rejects external URLs, anchors, and invalid encodings', () => {
     const workspace = createRoot()
     const root = join(workspace, '.larify')
     const file = join(root, 'index.md')
     mkdirSync(root)
 
-    expect(resolveContextLink(root, file, '../../outside.md')).toBeUndefined()
+    expect(resolveContextLink(root, file, '../../outside.md')).toBe(
+      resolve(workspace, '..', 'outside.md')
+    )
     expect(resolveContextLink(root, file, 'https://example.com')).toBeUndefined()
     expect(resolveContextLink(root, file, '#section')).toBeUndefined()
     expect(resolveContextLink(root, file, '%E0%A4%A')).toBeUndefined()

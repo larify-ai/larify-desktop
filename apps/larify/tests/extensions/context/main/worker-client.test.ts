@@ -35,12 +35,12 @@ beforeEach(() => {
 describe('ContextWorker', () => {
   it('resolves responses from one shared worker', async () => {
     const context = new ContextWorker()
-    const opened = context.open('workspace')
+    const opened = context.open()
     const worker = WorkerMock.instances[0]
     worker.emit('message', { id: 0 })
     await opened
 
-    const searched = context.search('workspace', 'audio')
+    const searched = context.search('audio')
     worker.emit('message', {
       id: 1,
       result: [{ name: 'Audio', description: 'Audio', uri: 'file:///audio.md' }]
@@ -59,20 +59,18 @@ describe('ContextWorker', () => {
       embedQuery: vi.fn(async () => [0, 1])
     }
     const context = new ContextWorker(() => embeddings as never)
-    const searched = context.search('workspace', 'audio', 5)
+    const searched = context.search('audio', 5)
     const worker = WorkerMock.instances[0]
 
     expect(worker.postMessage).toHaveBeenCalledWith({
       id: 0,
-      type: 'pending-embedding',
-      cwd: 'workspace'
+      type: 'pending-embedding'
     })
 
     await vi.waitFor(() =>
       expect(worker.postMessage).toHaveBeenCalledWith({
         id: 1,
         type: 'search',
-        cwd: 'workspace',
         query: 'audio',
         vector: [0, 1],
         limit: 5
@@ -101,7 +99,6 @@ describe('ContextWorker', () => {
       expect(worker.postMessage).toHaveBeenCalledWith({
         id: 2,
         type: 'set-embeddings',
-        cwd: 'workspace',
         uri: 'file:///audio.md',
         hash: 'hash',
         vectors: [
@@ -121,7 +118,7 @@ describe('ContextWorker', () => {
   it('updates embeddings after a context file changes', async () => {
     const embeddings = { embedMarkdown: vi.fn(), embedQuery: vi.fn() }
     const context = new ContextWorker(() => embeddings as never)
-    const opened = context.open('workspace')
+    const opened = context.open()
     const worker = WorkerMock.instances[0]
 
     worker.emit('message', { id: 0 })
@@ -132,7 +129,7 @@ describe('ContextWorker', () => {
     worker.emit('message', { id: 1 })
     await new Promise((resolve) => setTimeout(resolve, 0))
 
-    worker.emit('message', { type: 'changed', cwd: 'workspace' })
+    worker.emit('message', { type: 'changed' })
     await vi.waitFor(() =>
       expect(worker.postMessage).toHaveBeenCalledWith(
         expect.objectContaining({ id: 2, type: 'pending-embedding' })
@@ -141,14 +138,33 @@ describe('ContextWorker', () => {
     worker.emit('message', { id: 2 })
   })
 
-  it('does not write embeddings after a workspace closes', async () => {
+  it('rechecks pending embeddings when a change arrives as synchronization finishes', async () => {
+    const embeddings = { embedMarkdown: vi.fn(), embedQuery: vi.fn() }
+    const context = new ContextWorker(() => embeddings as never)
+    const opened = context.open()
+    const worker = WorkerMock.instances[0]
+
+    worker.emit('message', { id: 0 })
+    await opened
+    expect(worker.postMessage).toHaveBeenCalledWith({ id: 1, type: 'pending-embedding' })
+
+    worker.emit('message', { id: 1 })
+    worker.emit('message', { type: 'changed' })
+
+    await vi.waitFor(() =>
+      expect(worker.postMessage).toHaveBeenCalledWith({ id: 2, type: 'pending-embedding' })
+    )
+    worker.emit('message', { id: 2 })
+  })
+
+  it('does not write embeddings after disposal', async () => {
     let finishEmbedding!: (vectors: number[][]) => void
     const embeddings = {
       embedMarkdown: vi.fn(() => new Promise<number[][]>((resolve) => (finishEmbedding = resolve))),
       embedQuery: vi.fn(async () => [1, 0])
     }
     const context = new ContextWorker(() => embeddings as never)
-    const searched = context.search('workspace', 'audio')
+    const searched = context.search('audio')
     const worker = WorkerMock.instances[0]
 
     worker.emit('message', {
@@ -172,7 +188,7 @@ describe('ContextWorker', () => {
     await searched
     await vi.waitFor(() => expect(embeddings.embedMarkdown).toHaveBeenCalledOnce())
 
-    const closed = context.close('workspace')
+    const closed = context.dispose()
     worker.emit('message', { id: 2 })
     await closed
     finishEmbedding([[1, 0]])
@@ -190,7 +206,7 @@ describe('ContextWorker', () => {
       embedQuery: vi.fn(async () => [1, 0])
     }
     const context = new ContextWorker(() => embeddings as never)
-    const searched = context.search('workspace', 'audio')
+    const searched = context.search('audio')
     const worker = WorkerMock.instances[0]
 
     worker.emit('message', {
@@ -228,7 +244,7 @@ describe('ContextWorker', () => {
     }
     const log = vi.spyOn(console, 'error').mockImplementation(() => {})
     const context = new ContextWorker(() => embeddings as never)
-    const searched = context.search('workspace', 'audio')
+    const searched = context.search('audio')
     const worker = WorkerMock.instances[0]
 
     worker.emit('message', {
@@ -239,7 +255,6 @@ describe('ContextWorker', () => {
       expect(worker.postMessage).toHaveBeenCalledWith({
         id: 1,
         type: 'search',
-        cwd: 'workspace',
         query: 'audio',
         limit: undefined
       })
@@ -257,8 +272,8 @@ describe('ContextWorker', () => {
       embedQuery: vi.fn(async () => [1, 0])
     }
     const context = new ContextWorker(() => embeddings as never)
-    const first = context.search('workspace', 'first')
-    const second = context.search('workspace', 'second')
+    const first = context.search('first')
+    const second = context.search('second')
     const worker = WorkerMock.instances[0]
     const document = {
       node: {
@@ -295,7 +310,7 @@ describe('ContextWorker', () => {
 
   it('checks duplicate names through the worker', async () => {
     const context = new ContextWorker()
-    const duplicate = context.duplicateName('workspace', 'subject.md', 'Subject')
+    const duplicate = context.duplicateName('subject.md', 'Subject')
     const worker = WorkerMock.instances[0]
     worker.emit('message', { id: 0, result: true })
 
@@ -303,7 +318,6 @@ describe('ContextWorker', () => {
     expect(worker.postMessage).toHaveBeenCalledWith({
       id: 0,
       type: 'duplicateName',
-      cwd: 'workspace',
       file: 'subject.md',
       name: 'Subject'
     })
@@ -311,19 +325,18 @@ describe('ContextWorker', () => {
 
   it('returns defaults for empty search and duplicate-name responses', async () => {
     const context = new ContextWorker()
-    const search = context.search('workspace', 'audio', 5)
+    const search = context.search('audio', 5)
     const worker = WorkerMock.instances[0]
     expect(worker.postMessage).toHaveBeenCalledWith({
       id: 0,
       type: 'search',
-      cwd: 'workspace',
       query: 'audio',
       limit: 5
     })
     worker.emit('message', { id: 0 })
     await expect(search).resolves.toEqual([])
 
-    const duplicate = context.duplicateName('workspace', 'subject.md', 'Subject')
+    const duplicate = context.duplicateName('subject.md', 'Subject')
     worker.emit('message', { id: 1 })
     await expect(duplicate).resolves.toBe(false)
   })
@@ -332,16 +345,16 @@ describe('ContextWorker', () => {
     const embeddings = { embedMarkdown: vi.fn(), embedQuery: vi.fn() }
     const context = new ContextWorker(() => embeddings as never)
 
-    await expect(context.search('workspace', '   ')).resolves.toEqual([])
-    await expect(context.search('workspace', 'audio', 0)).resolves.toEqual([])
+    await expect(context.search('   ')).resolves.toEqual([])
+    await expect(context.search('audio', 0)).resolves.toEqual([])
     expect(WorkerMock.instances).toHaveLength(0)
     expect(embeddings.embedQuery).not.toHaveBeenCalled()
   })
 
   it('matches concurrent requests to out-of-order responses', async () => {
     const context = new ContextWorker()
-    const first = context.search('workspace', 'first')
-    const second = context.search('workspace', 'second')
+    const first = context.search('first')
+    const second = context.search('second')
     const worker = WorkerMock.instances[0]
 
     worker.emit('message', {
@@ -361,34 +374,17 @@ describe('ContextWorker', () => {
     ])
   })
 
-  it('sends close requests and propagates response errors', async () => {
-    const context = new ContextWorker()
-    const closed = context.close('workspace')
-    const worker = WorkerMock.instances[0]
-    expect(worker.postMessage).toHaveBeenCalledWith({
-      id: 0,
-      type: 'close',
-      cwd: 'workspace'
-    })
-    worker.emit('message', { id: 0 })
-    await expect(closed).resolves.toBeUndefined()
-
-    const close = context.close('workspace')
-    worker.emit('message', { id: 1, error: 'close failed' })
-    await expect(close).rejects.toThrow('close failed')
-  })
-
   it('rejects a request when posting fails', async () => {
     WorkerMock.postError = new Error('post failed')
     const context = new ContextWorker()
-    const request = context.open('workspace')
+    const request = context.open()
 
     await expect(request).rejects.toThrow('post failed')
   })
 
   it('ignores responses for unknown requests', async () => {
     const context = new ContextWorker()
-    const request = context.open('workspace')
+    const request = context.open()
     const worker = WorkerMock.instances[0]
 
     worker.emit('message', { id: 99 })
@@ -405,7 +401,7 @@ describe('ContextWorker', () => {
 
   it('terminates the worker after successful disposal', async () => {
     const context = new ContextWorker()
-    const opened = context.open('workspace')
+    const opened = context.open()
     const worker = WorkerMock.instances[0]
     worker.emit('message', { id: 0 })
     await opened
@@ -418,7 +414,7 @@ describe('ContextWorker', () => {
 
   it('terminates the worker when disposal fails', async () => {
     const context = new ContextWorker()
-    const opened = context.open('workspace')
+    const opened = context.open()
     const worker = WorkerMock.instances[0]
     worker.emit('message', { id: 0 })
     await opened
@@ -434,7 +430,7 @@ describe('ContextWorker', () => {
   it('clears the worker even when termination fails', async () => {
     WorkerMock.terminateError = new Error('terminate failed')
     const context = new ContextWorker()
-    const opened = context.open('workspace')
+    const opened = context.open()
     const first = WorkerMock.instances[0]
     first.emit('message', { id: 0 })
     await opened
@@ -444,7 +440,7 @@ describe('ContextWorker', () => {
     await expect(disposal).rejects.toThrow('terminate failed')
 
     WorkerMock.terminateError = undefined
-    const reopened = context.open('workspace')
+    const reopened = context.open()
     const second = WorkerMock.instances[1]
     second.emit('message', { id: 2 })
     await reopened
@@ -453,7 +449,7 @@ describe('ContextWorker', () => {
 
   it('does not clear a replacement worker when the previous worker finishes terminating', async () => {
     const context = new ContextWorker()
-    const opened = context.open('workspace')
+    const opened = context.open()
     const first = WorkerMock.instances[0]
     first.emit('message', { id: 0 })
     await opened
@@ -467,14 +463,14 @@ describe('ContextWorker', () => {
     await vi.waitFor(() => expect(first.terminate).toHaveBeenCalledOnce())
     first.emit('exit', 0)
 
-    const reopened = context.open('workspace')
+    const reopened = context.open()
     const second = WorkerMock.instances[1]
     second.emit('message', { id: 2 })
     await reopened
     finishTermination()
     await disposal
 
-    const search = context.search('workspace', 'audio')
+    const search = context.search('audio')
     second.emit('message', { id: 3, result: [] })
     await search
     expect(WorkerMock.instances).toHaveLength(2)
@@ -482,8 +478,8 @@ describe('ContextWorker', () => {
 
   it('rejects all pending requests when the worker errors', async () => {
     const context = new ContextWorker()
-    const first = context.open('first')
-    const second = context.open('second')
+    const first = context.open()
+    const second = context.open()
     const worker = WorkerMock.instances[0]
     const firstRejection = expect(first).rejects.toThrow('worker failed')
     const secondRejection = expect(second).rejects.toThrow('worker failed')
@@ -493,7 +489,7 @@ describe('ContextWorker', () => {
     await firstRejection
     await secondRejection
 
-    const reopened = context.open('third')
+    const reopened = context.open()
     const replacement = WorkerMock.instances[1]
     worker.emit('error', new Error('late worker error'))
     replacement.emit('message', { id: 2 })
@@ -502,7 +498,7 @@ describe('ContextWorker', () => {
 
   it('rejects pending requests when the worker exits', async () => {
     const context = new ContextWorker()
-    const request = context.open('workspace')
+    const request = context.open()
     const rejection = expect(request).rejects.toThrow('exited with code 1')
     const worker = WorkerMock.instances[0]
     worker.emit('exit', 1)
@@ -511,13 +507,13 @@ describe('ContextWorker', () => {
 
   it('starts a new worker after a normal exit', async () => {
     const context = new ContextWorker()
-    const opened = context.open('workspace')
+    const opened = context.open()
     const first = WorkerMock.instances[0]
     first.emit('message', { id: 0 })
     await opened
     first.emit('exit', 0)
 
-    const reopened = context.open('workspace')
+    const reopened = context.open()
     const second = WorkerMock.instances[1]
     second.emit('message', { id: 1 })
     await reopened

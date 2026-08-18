@@ -1,13 +1,18 @@
 import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { ensureLarifyPath } from '../../../main/utils/app-paths'
 import { readContextDocument, type ContextDocument } from './document'
 import { isMarkdown, isWithin, markdownFiles, markdownLinks, resolveContextLink } from './files'
 import { GraphIndex } from './graph'
-import { workspaceIndexPath } from './workspace'
 
-export function buildContextGraph(cwd: string, database = workspaceIndexPath(cwd)): GraphIndex {
-  const root = join(resolve(cwd), '.larify')
+export const memoryRootPath = (): string => ensureLarifyPath('memory')
+export const memoryIndexPath = (): string => join(ensureLarifyPath('indexes'), 'memory.db')
+
+export function buildContextGraph(
+  root = memoryRootPath(),
+  database = memoryIndexPath()
+): GraphIndex {
   const graph = new GraphIndex(database)
   try {
     indexContext(root, graph)

@@ -2,18 +2,16 @@ import type { Node } from './graph'
 import type { ContextDocument } from './document'
 
 export type WorkerCommand =
-  | { type: 'open'; cwd: string }
-  | { type: 'search'; cwd: string; query: string; vector?: number[]; limit?: number }
-  | { type: 'pending-embedding'; cwd: string }
+  | { type: 'open' }
+  | { type: 'search'; query: string; vector?: number[]; limit?: number }
+  | { type: 'pending-embedding' }
   | {
       type: 'set-embeddings'
-      cwd: string
       uri: string
       hash: string
       vectors: number[][]
     }
-  | { type: 'duplicateName'; cwd: string; file: string; name: string }
-  | { type: 'close'; cwd: string }
+  | { type: 'duplicateName'; file: string; name: string }
   | { type: 'dispose' }
 
 export type WorkerRequest = WorkerCommand & { id: number }
@@ -26,5 +24,4 @@ export interface WorkerResponse {
 
 export interface WorkerNotification {
   type: 'changed'
-  cwd: string
 }

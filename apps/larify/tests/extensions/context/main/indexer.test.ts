@@ -36,7 +36,7 @@ describe('context graph indexer', () => {
     writeFileSync(a, markdown('A', '[B](b.md)'))
     writeFileSync(b, markdown('B'))
 
-    const graph = buildContextGraph(workspace, ':memory:')
+    const graph = buildContextGraph(root, ':memory:')
     expect(graph.nodes().map(({ name }) => name)).toEqual(['A', 'B'])
     expect(graph.edges()).toEqual([
       {
@@ -88,7 +88,7 @@ describe('context graph indexer', () => {
     writeFileSync(join(root, 'b.md'), markdown('same'))
     writeFileSync(join(root, 'invalid.md'), '# Missing metadata')
 
-    const graph = buildContextGraph(workspace, ':memory:')
+    const graph = buildContextGraph(root, ':memory:')
 
     expect(graph.nodes()).toHaveLength(1)
     expect(graph.nodes()[0].name).toBe('Same')
@@ -103,7 +103,7 @@ describe('context graph indexer', () => {
     const b = join(root, 'b.md')
     writeFileSync(a, markdown('A'))
     writeFileSync(b, markdown('B'))
-    const graph = buildContextGraph(workspace, ':memory:')
+    const graph = buildContextGraph(root, ':memory:')
 
     writeFileSync(b, markdown('A'))
     updateContext(root, [b], graph)
@@ -126,7 +126,7 @@ describe('context graph indexer', () => {
     const a = join(root, 'a.md')
     const b = join(root, 'b.md')
     writeFileSync(a, markdown('A', '[B](b.md)'))
-    const graph = buildContextGraph(workspace, ':memory:')
+    const graph = buildContextGraph(root, ':memory:')
     expect(graph.edges()).toEqual([])
 
     writeFileSync(b, markdown('B'))
@@ -149,7 +149,7 @@ describe('context graph indexer', () => {
     writeFileSync(join(domain, 'index.md'), markdown('Domain'))
     writeFileSync(join(workspace, 'source.ts'), 'export {}')
 
-    const graph = buildContextGraph(workspace, ':memory:')
+    const graph = buildContextGraph(root, ':memory:')
 
     expect(graph.edges()).toEqual([{ source: 'Index', target: 'Domain' }])
     graph.close()
@@ -176,7 +176,7 @@ describe('context graph indexer', () => {
     writeFileSync(join(root, 'note.txt'), 'text')
     writeFileSync(join(workspace, 'outside.md'), markdown('Outside'))
 
-    const graph = buildContextGraph(workspace, ':memory:')
+    const graph = buildContextGraph(root, ':memory:')
 
     expect(graph.edges()).toEqual([{ source: 'Index', target: 'Internal' }])
     graph.close()
@@ -190,7 +190,7 @@ describe('context graph indexer', () => {
     const b = join(root, 'b.md')
     writeFileSync(a, markdown('A'))
     writeFileSync(b, markdown('B'))
-    const graph = buildContextGraph(workspace, ':memory:')
+    const graph = buildContextGraph(root, ':memory:')
 
     writeFileSync(a, markdown('B'))
     writeFileSync(b, markdown('A'))
@@ -202,8 +202,8 @@ describe('context graph indexer', () => {
   })
 
   it('builds an empty graph when the context directory is absent', () => {
-    const workspace = createRoot()
-    const graph = buildContextGraph(workspace, ':memory:')
+    const root = join(createRoot(), 'missing')
+    const graph = buildContextGraph(root, ':memory:')
 
     expect(graph.nodes()).toEqual([])
     expect(graph.edges()).toEqual([])
@@ -211,11 +211,11 @@ describe('context graph indexer', () => {
   })
 
   it('closes the graph when initial indexing fails', () => {
-    const workspace = createRoot()
-    writeFileSync(join(workspace, '.larify'), 'not a directory')
+    const root = join(createRoot(), 'memory')
+    writeFileSync(root, 'not a directory')
     const close = vi.spyOn(GraphIndex.prototype, 'close')
 
-    expect(() => buildContextGraph(workspace, ':memory:')).toThrow()
+    expect(() => buildContextGraph(root, ':memory:')).toThrow()
     expect(close).toHaveBeenCalledOnce()
     close.mockRestore()
   })

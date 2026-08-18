@@ -3,20 +3,20 @@ import { checkForUpdates, type UpdateChecker } from '../../../src/main/update/se
 
 describe('checkForUpdates', () => {
   it('does not check from a development build', async () => {
-    const updater: UpdateChecker = { checkForUpdatesAndNotify: vi.fn() }
+    const updater: UpdateChecker = { checkForUpdates: vi.fn() }
 
     await checkForUpdates(false, updater)
 
-    expect(updater.checkForUpdatesAndNotify).not.toHaveBeenCalled()
+    expect(updater.checkForUpdates).not.toHaveBeenCalled()
   })
 
-  it('checks and notifies from a packaged build', async () => {
+  it('checks silently from a packaged build', async () => {
     const updater: UpdateChecker = {
-      checkForUpdatesAndNotify: vi.fn().mockResolvedValue(undefined)
+      checkForUpdates: vi.fn().mockResolvedValue(undefined)
     }
 
     await checkForUpdates(true, updater)
 
-    expect(updater.checkForUpdatesAndNotify).toHaveBeenCalledOnce()
+    expect(updater.checkForUpdates).toHaveBeenCalledOnce()
   })
 })

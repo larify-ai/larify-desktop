@@ -2,7 +2,7 @@ import electronUpdater, { type AppUpdater } from 'electron-updater'
 import type { Application } from '../app/application'
 
 export interface UpdateChecker {
-  checkForUpdatesAndNotify(): Promise<unknown>
+  checkForUpdates(): Promise<unknown>
 }
 
 function getAutoUpdater(): AppUpdater {
@@ -14,7 +14,7 @@ export async function checkForUpdates(
   updater?: UpdateChecker
 ): Promise<void> {
   if (!isPackaged) return
-  await (updater ?? getAutoUpdater()).checkForUpdatesAndNotify()
+  await (updater ?? getAutoUpdater()).checkForUpdates()
 }
 
 export function registerUpdate(application: Application): void {

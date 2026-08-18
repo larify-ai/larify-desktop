@@ -34,6 +34,8 @@ export default defineConfig({
       alias: { '@shared': resolve('src/shared') }
     },
     build: {
+      minify: true,
+      sourcemap: false,
       rollupOptions: {
         external: ['canvas']
       }
@@ -42,6 +44,10 @@ export default defineConfig({
   preload: {
     resolve: {
       alias: { '@shared': resolve('src/shared') }
+    },
+    build: {
+      minify: true,
+      sourcemap: false
     }
   },
   renderer: {
@@ -53,6 +59,8 @@ export default defineConfig({
     },
     plugins: [vscodeDiffBrowser(), react(), tailwindcss()],
     build: {
+      minify: true,
+      sourcemap: false,
       rollupOptions: {
         input: {
           index: resolve('src/renderer/index.html')

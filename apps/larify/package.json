@@ -1,6 +1,6 @@
 {
   "name": "larify",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "description": "Self-driving AI for embedded product delivery",
   "author": "InfAGI",
   "private": true,
@@ -96,6 +96,7 @@
     "path-unified": "^0.2.0",
     "radix-ui": "^1.6.2",
     "rc-tree": "^5.13.1",
+    "react-resizable-panels": "^4.12.3",
     "react-syntax-highlighter": "^16.1.0",
     "react-virtuoso": "4.18.11",
     "shiki": "^3.23.0",
@@ -105,6 +106,7 @@
     "tldts": "^7.4.10",
     "tw-shimmer": "^0.4.11",
     "unist-util-visit": "^5.1.0",
+    "use-stick-to-bottom": "^1.1.6",
     "vscode-languageserver-protocol": "^3.18.2",
     "which": "^5.0.0",
     "zustand": "^5.0.14"

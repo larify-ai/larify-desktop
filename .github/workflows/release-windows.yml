@@ -11,6 +11,8 @@ permissions:
 jobs:
   release:
     runs-on: windows-latest
+    env:
+      NODE_OPTIONS: --max-old-space-size=4096
     steps:
       - name: Check out repository
         uses: actions/checkout@v4

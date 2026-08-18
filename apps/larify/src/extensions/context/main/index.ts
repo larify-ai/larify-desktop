@@ -19,7 +19,6 @@ const plugin: Plugin = {
       createContextDiagnosticsProvider(root, (file, name) => worker.duplicateName(file, name))
     )
     context.subscriptions.push({ dispose: disposeDiagnostics })
-    await worker.open()
   }
 }
 

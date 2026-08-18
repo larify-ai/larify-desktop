@@ -1,6 +1,5 @@
-import { mkdirSync } from 'node:fs'
-import { dirname } from 'node:path'
-import { DatabaseSync } from 'node:sqlite'
+import type { DatabaseSync } from 'node:sqlite'
+import { openDatabase, transaction } from '../../../main/core/sqlite'
 import { searchQuery, tokenize } from './tokenizer'
 
 export interface Node {
@@ -18,13 +17,12 @@ export class GraphIndex {
   private readonly database: DatabaseSync
 
   constructor(path: string) {
-    mkdirSync(dirname(path), { recursive: true })
-    this.database = new DatabaseSync(path)
+    this.database = openDatabase(path)
     this.initialize()
   }
 
   upsert(node: Node, content: string, hash: string): boolean {
-    return this.transaction(() => {
+    return transaction(this.database, () => {
       if (this.hasName(node.name, node.uri)) return false
       const id = this.saveNode(node, hash)
       if (id !== undefined) {
@@ -36,7 +34,7 @@ export class GraphIndex {
   }
 
   replaceEdges(source: string, targets: Iterable<string>): void {
-    this.transaction(() => {
+    transaction(this.database, () => {
       this.database.prepare('DELETE FROM edges WHERE source = ?').run(source)
       const insert = this.database.prepare(
         'INSERT OR IGNORE INTO edges(source, target) VALUES (?, ?)'
@@ -46,12 +44,12 @@ export class GraphIndex {
   }
 
   delete(uri: string): void {
-    this.transaction(() => this.deleteNode(uri))
+    transaction(this.database, () => this.deleteNode(uri))
   }
 
   deleteMissing(uris: Iterable<string>): void {
     const retained = new Set(uris)
-    this.transaction(() => {
+    transaction(this.database, () => {
       for (const { uri } of this.database.prepare('SELECT uri FROM nodes').all() as {
         uri: string
       }[]) {
@@ -118,7 +116,7 @@ export class GraphIndex {
     if (!this.database.prepare('SELECT 1 FROM nodes WHERE uri = ? AND hash = ?').get(uri, hash)) {
       return
     }
-    this.transaction(() => {
+    transaction(this.database, () => {
       this.database.prepare('DELETE FROM embeddings WHERE uri = ?').run(uri)
       const insert = this.database.prepare('INSERT INTO embeddings(uri, vector) VALUES (?, ?)')
       for (const vector of vectors) {
@@ -384,18 +382,6 @@ export class GraphIndex {
       .prepare('DELETE FROM nodes WHERE uri = ? RETURNING id')
       .get(uri) as { id: number } | undefined
     if (deleted) this.database.prepare('DELETE FROM nodes_fts WHERE rowid = ?').run(deleted.id)
-  }
-
-  private transaction<T>(action: () => T): T {
-    this.database.exec('BEGIN IMMEDIATE')
-    try {
-      const result = action()
-      this.database.exec('COMMIT')
-      return result
-    } catch (error) {
-      this.database.exec('ROLLBACK')
-      throw error
-    }
   }
 }
 

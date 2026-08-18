@@ -3,6 +3,7 @@ import type { PluginHost } from '../../../main/core/plugin/host'
 import { pluginHostToken } from '../../../main/core/plugin/service'
 import { createPluginTools } from './plugin-tools'
 import { askUserTool } from './ask-user'
+import { createSearchMemoryTool } from './search-memory'
 
 const plugin: Plugin = {
   manifest: {
@@ -17,6 +18,7 @@ const plugin: Plugin = {
       context.registerTool(name, tool)
     }
     context.registerTool('ask_user', askUserTool)
+    context.registerTool('search_memory', createSearchMemoryTool(context.registry))
   }
 }
 

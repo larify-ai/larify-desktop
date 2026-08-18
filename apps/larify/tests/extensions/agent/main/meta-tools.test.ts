@@ -1,15 +1,20 @@
 import { asSchema, tool } from 'ai'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import agentPlugin from '../../../../src/extensions/agent/main'
+import { createSearchMemoryTool } from '../../../../src/extensions/agent/main/search-memory'
+import { contextWorkerToken } from '../../../../src/extensions/context/main/service'
 import { Registry } from '../../../../src/shared/infra/registry'
 import { PluginHost, pluginHostToken } from '../../../../src/main/core/plugin'
 import type { Tool } from '../../../../src/main/core/plugin/protocol'
 
-async function createHost(): Promise<PluginHost> {
+type Memory = { search: ReturnType<typeof vi.fn> }
+
+async function createHost(memory?: Memory): Promise<PluginHost> {
   const registry = new Registry()
   const host = new PluginHost(registry)
   registry.register(pluginHostToken, host)
+  if (memory) registry.register(contextWorkerToken, memory)
   await host.activate({
     manifest: { id: 'demo', description: 'Demo plugin' },
     activate(context) {
@@ -33,8 +38,8 @@ async function createHost(): Promise<PluginHost> {
   return host
 }
 
-async function createTools(): Promise<Record<string, Tool>> {
-  return Object.fromEntries((await createHost()).getTools('agent')!)
+async function createTools(memory?: Memory): Promise<Record<string, Tool>> {
+  return Object.fromEntries((await createHost(memory)).getTools('agent')!)
 }
 
 async function run(tool: Tool, input: unknown, context = {}): Promise<unknown> {
@@ -59,6 +64,48 @@ describe('meta tools', () => {
     })
     expect(schema.required).toContain('message')
     expect(schema.required).not.toContain('options')
+  })
+
+  it('searches shared memory without a workspace argument', async () => {
+    const search = vi.fn().mockResolvedValue([{ name: 'Audio' }])
+    const tool = (await createTools({ search })).agent_search_memory
+
+    await expect(run(tool, { query: 'audio' })).resolves.toEqual([{ name: 'Audio' }])
+    await run(tool, { query: 'bluetooth', limit: 5 })
+
+    expect(search).toHaveBeenNthCalledWith(1, 'audio', 100)
+    expect(search).toHaveBeenNthCalledWith(2, 'bluetooth', 5)
+  })
+
+  it('exposes a query-only memory schema with an optional bounded limit', async () => {
+    const schema = await asSchema((await createTools()).agent_search_memory.inputSchema).jsonSchema
+
+    expect(schema.required).toEqual(expect.arrayContaining(['query', 'toolCallTitle']))
+    expect(schema.required).not.toContain('limit')
+    expect(schema.properties).not.toHaveProperty('cwd')
+    expect(schema.properties?.limit).toMatchObject({
+      type: 'integer',
+      exclusiveMinimum: 0,
+      maximum: 200,
+      default: 100
+    })
+  })
+
+  it('reports unavailable memory search', async () => {
+    const tool = (await createTools()).agent_search_memory
+
+    await expect(run(tool, { query: 'audio' })).rejects.toThrow('Memory search is unavailable.')
+  })
+
+  it('finds memory registered after the Agent tool was created', async () => {
+    const registry = new Registry()
+    const tool = createSearchMemoryTool(registry)
+    const search = vi.fn().mockResolvedValue(['result'])
+
+    registry.register(contextWorkerToken, { search })
+
+    await expect(run(tool, { query: 'audio' })).resolves.toEqual(['result'])
+    expect(search).toHaveBeenCalledWith('audio', 100)
   })
 
   it('discovers plugins and their non-eager capabilities', async () => {

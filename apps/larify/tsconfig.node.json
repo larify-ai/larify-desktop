@@ -12,9 +12,7 @@
   ],
   "exclude": [
     "src/main/core/extension/**/*",
-    "src/extensions/nest/**/*",
-    "src/extensions/performance/**/*",
-    "src/extensions/shell/**/*"
+    "src/extensions/nest/**/*"
   ],
   "compilerOptions": {
     "composite": true,

@@ -10,11 +10,6 @@
     "src/main/core/model/config.ts",
     "src/preload/*.d.ts"
   ],
-  "exclude": [
-    "src/extensions/performance/renderer/**/*",
-    "src/extensions/settings/renderer/**/*",
-    "src/extensions/shell/renderer/**/*"
-  ],
   "compilerOptions": {
     "composite": true,
     "jsx": "react-jsx",

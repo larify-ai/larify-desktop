@@ -10,6 +10,13 @@
     "src/extensions/*/loop/**/*",
     "src/extensions/*/utils/**/*"
   ],
+  "exclude": [
+    "src/main/core/extension/**/*",
+    "src/extensions/context/**/*",
+    "src/extensions/nest/**/*",
+    "src/extensions/performance/**/*",
+    "src/extensions/shell/**/*"
+  ],
   "compilerOptions": {
     "composite": true,
     "types": ["electron-vite/node"],

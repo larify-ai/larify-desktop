@@ -34,6 +34,17 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Ensure public release tag
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          gh api "repos/larify-ai/larify-desktop/git/ref/tags/${{ github.ref_name }}" 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            $sha = gh api repos/larify-ai/larify-desktop/git/ref/heads/main --jq '.object.sha'
+            gh api --method POST repos/larify-ai/larify-desktop/git/refs -f ref="refs/tags/${{ github.ref_name }}" -f sha=$sha
+          }
+
       - name: Build and publish Windows release
         run: npm run release:win --workspace apps/larify
         env:

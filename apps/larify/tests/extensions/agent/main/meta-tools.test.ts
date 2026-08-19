@@ -125,16 +125,19 @@ describe('meta tools', () => {
     expect(search).toHaveBeenCalledWith('audio', 100)
   })
 
-  it('discovers plugins and their non-eager capabilities', async () => {
+  it('discovers plugins and all of their capabilities including eager', async () => {
     const tools = await createTools()
 
     await expect(run(tools.agent_list_plugins, {})).resolves.toEqual([
+      { name: 'agent', description: 'List plugins, list tools, list skills, read schemas, ask user, search memory, and reset context. (7 tools, 0 skills)' },
       { name: 'demo', description: 'Demo plugin (2 tools, 2 skills)' }
     ])
     await expect(run(tools.agent_list_tools, { plugin_names: ['demo'] })).resolves.toEqual([
+      { tool_name: 'demo_eager' },
       { tool_name: 'demo_lazy', description: 'Lazy tool' }
     ])
     await expect(run(tools.agent_list_skills, { plugin_names: ['demo'] })).resolves.toEqual([
+      { description: 'Eager skill', path: 'eager/SKILL.md' },
       { description: 'Lazy skill', path: 'lazy/SKILL.md' }
     ])
   })
@@ -169,7 +172,7 @@ describe('meta tools', () => {
     )
   })
 
-  it('hides plugins without discoverable contributions', async () => {
+  it('lists every plugin regardless of eager contributions', async () => {
     const host = await createHost()
     await host.activate({
       manifest: { id: 'empty' },
@@ -186,7 +189,10 @@ describe('meta tools', () => {
     const tools = Object.fromEntries(host.getTools('agent')!)
 
     await expect(run(tools.agent_list_plugins, {})).resolves.toEqual([
-      { name: 'demo', description: 'Demo plugin (2 tools, 2 skills)' }
+      { name: 'agent', description: 'List plugins, list tools, list skills, read schemas, ask user, search memory, and reset context. (7 tools, 0 skills)' },
+      { name: 'demo', description: 'Demo plugin (2 tools, 2 skills)' },
+      { name: 'eager-only', description: '(1 tools, 0 skills)' },
+      { name: 'empty', description: '(0 tools, 0 skills)' }
     ])
   })
 })

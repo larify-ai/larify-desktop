@@ -7,13 +7,6 @@ const pluginNamesSchema = z
   .object({ plugin_names: z.array(z.string()).min(1).describe('Plugin names') })
   .strict()
 
-function hasDiscoverableContributions(
-  tools: ReadonlyMap<string, Tool>,
-  skills: ReadonlyMap<string, Skill>
-): boolean {
-  return [...tools.values(), ...skills.values()].some(({ metadata }) => metadata?.eager !== true)
-}
-
 function describePlugin(description: string | undefined, tools: number, skills: number): string {
   return `${description ? `${description} ` : ''}(${tools} tools, ${skills} skills)`
 }
@@ -32,7 +25,6 @@ function createListPluginsTool(host: PluginHost): Tool {
       for (const { id, description } of host.listPlugins()) {
         const tools = host.getTools(id) ?? new Map()
         const skills = host.getSkills(id) ?? new Map()
-        if (!hasDiscoverableContributions(tools, skills)) continue
         result.push({
           name: id,
           description: describePlugin(description, tools.size, skills.size)
@@ -53,7 +45,6 @@ function createListToolsTool(host: PluginHost): Tool {
         const tools = host.getTools(plugin)
         if (!tools) throw new Error(`Plugin "${plugin}" not found.`)
         return [...tools]
-          .filter(([, tool]) => tool.metadata?.eager !== true)
           .map(([tool_name, tool]) => ({
             tool_name,
             ...(typeof tool.description === 'string' && { description: tool.description })
@@ -72,7 +63,6 @@ function createListSkillsTool(host: PluginHost): Tool {
         const skills = host.getSkills(plugin)
         if (!skills) throw new Error(`Plugin "${plugin}" not found.`)
         return [...skills.values()]
-          .filter((skill) => skill.metadata?.eager !== true)
           .map(({ path, description }) => ({ path, description }))
       })
   })

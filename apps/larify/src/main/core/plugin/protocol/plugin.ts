@@ -1,7 +1,6 @@
 import type { Disposable } from '@shared/infra/disposable'
 import type { Registry } from '@shared/infra/registry'
 import type { Manifest } from './manifest'
-import type { Skill } from './skill'
 import type { Tool } from './tool'
 
 export interface PluginContext {
@@ -10,7 +9,6 @@ export interface PluginContext {
   readonly subscriptions: Disposable[]
 
   registerTool(name: string, tool: Tool): void
-  registerSkill(name: string, skill: Skill): void
 }
 
 export interface Plugin {

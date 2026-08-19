@@ -1,13 +1,46 @@
 import { describe, expect, it, vi } from 'vitest'
+import { join } from 'node:path'
 import { z } from 'zod'
 import type { AgentOptions } from '../../../../src/main/core/agent/engine'
 import { createAgentRuntime } from '../../../../src/main/core/agent/runtime'
-import { PluginHost, defineTool } from '../../../../src/main/core/plugin'
+import {
+  FilesystemSkillDiscovery,
+  PluginHost,
+  defineTool
+} from '../../../../src/main/core/plugin'
 import { Registry } from '../../../../src/shared/infra/registry'
 
 describe('createAgentRuntime', () => {
+  it('loads the bundled agent skill into the runtime prompt', async () => {
+    const host = new PluginHost(new Registry(), new FilesystemSkillDiscovery())
+    await host.activate({ manifest: { id: 'agent' }, activate: () => undefined })
+
+    const runtime = createAgentRuntime({ sessionId: 'session', cwd: 'cwd' }, host)
+
+    expect(runtime.system).toContain('agent_task-representation')
+    expect(runtime.system).toContain(join('task-representation', 'SKILL.md'))
+  })
+
   it('assembles plugin tools and their session context', async () => {
-    const host = new PluginHost(new Registry())
+    const host = new PluginHost(new Registry(), {
+      discover: (pluginId) => {
+        if (pluginId === 'files') {
+          return [
+            {
+              name: 'review',
+              path: 'review/SKILL.md',
+              description: 'Review',
+              metadata: { eager: true }
+            },
+            { name: 'optional', path: 'optional/SKILL.md', description: 'Optional' }
+          ]
+        }
+        if (pluginId === 'lazy') {
+          return [{ name: 'optional', path: 'lazy/SKILL.md', description: 'Lazy only' }]
+        }
+        return []
+      }
+    })
     await host.activate({
       manifest: { id: 'files' },
       activate(context) {
@@ -28,25 +61,11 @@ describe('createAgentRuntime', () => {
             execute: () => undefined
           })
         )
-        context.registerSkill('review', {
-          path: 'review/SKILL.md',
-          description: 'Review',
-          metadata: { eager: true }
-        })
-        context.registerSkill('optional', {
-          path: 'optional/SKILL.md',
-          description: 'Optional'
-        })
       }
     })
     await host.activate({
       manifest: { id: 'lazy' },
-      activate(context) {
-        context.registerSkill('optional', {
-          path: 'lazy/SKILL.md',
-          description: 'Lazy only'
-        })
-      }
+      activate: () => undefined
     })
     const runtime = createAgentRuntime({ sessionId: 'session', cwd: 'cwd' }, host)
 
@@ -71,6 +90,29 @@ describe('createAgentRuntime', () => {
     )
 
     expect(runtime.stopWhen).toBeTypeOf('function')
+  })
+
+  it('refreshes file-discovered skills for every runtime', async () => {
+    let description = 'First version'
+    const host = new PluginHost(new Registry(), {
+      discover: () => [
+        {
+          name: 'dynamic',
+          path: 'dynamic/SKILL.md',
+          description,
+          metadata: { eager: true }
+        }
+      ]
+    })
+    await host.activate({ manifest: { id: 'agent' }, activate: () => undefined })
+
+    const first = createAgentRuntime({ sessionId: 'first', cwd: 'cwd' }, host)
+    description = 'Second version'
+    const second = createAgentRuntime({ sessionId: 'second', cwd: 'cwd' }, host)
+
+    expect(first.system).toContain('First version')
+    expect(second.system).toContain('Second version')
+    expect(second.system).not.toContain('First version')
   })
 
   it('uses a custom stop condition', () => {

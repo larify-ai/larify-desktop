@@ -1,7 +1,16 @@
 import { describe, expect, it, vi } from 'vitest'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { z } from 'zod'
 import { defineService, Registry } from '../../../../src/shared/infra/registry'
-import { defineTool, PluginHost, type Plugin, type Tool } from '../../../../src/main/core/plugin'
+import {
+  defineTool,
+  FilesystemSkillDiscovery,
+  PluginHost,
+  type Plugin,
+  type Tool
+} from '../../../../src/main/core/plugin'
 
 const tool = (description: string): Tool =>
   defineTool({ description, inputSchema: z.object({}), execute: () => undefined })
@@ -11,7 +20,6 @@ describe('PluginHost', () => {
     const registry = new Registry()
     const token = defineService()
     const testTool = tool('test tool')
-    const skill = { path: 'test.md', description: 'test skill' }
     registry.register(token, { application: true })
     const plugin: Plugin = {
       manifest: { id: 'test', displayName: 'Test' },
@@ -19,7 +27,6 @@ describe('PluginHost', () => {
         expect(context.manifest).toBe(this.manifest)
         expect(context.registry.get(token)).toEqual({ application: true })
         context.registerTool('run', testTool)
-        context.registerSkill('review', skill)
       }
     }
     const host = new PluginHost(registry)
@@ -28,7 +35,174 @@ describe('PluginHost', () => {
 
     expect(host.listPlugins()).toEqual([{ id: 'test', displayName: 'Test' }])
     expect(host.getTools('test')?.get('test_run')?.description).toBe('test tool')
-    expect(host.getSkills('test')?.get('test_review')).toBe(skill)
+  })
+
+  it('discovers skills under the activated plugin and lets user skills override bundled ones', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'larify-skills-'))
+    const bundled = join(root, 'bundled', 'plugins', 'browser', 'skills', 'research')
+    const user = join(root, 'user', 'plugins', 'browser', 'skills', 'research')
+    try {
+      mkdirSync(bundled, { recursive: true })
+      mkdirSync(user, { recursive: true })
+      writeFileSync(
+        join(bundled, 'SKILL.md'),
+        '---\nname: research\ndescription: Bundled research\neager: true\n---\n'
+      )
+      writeFileSync(
+        join(user, 'SKILL.md'),
+        '---\nname: research\ndescription: User research\n---\n'
+      )
+      const host = new PluginHost(
+        new Registry(),
+        new FilesystemSkillDiscovery(() => [
+          join(root, 'bundled', 'plugins', 'browser', 'skills'),
+          join(root, 'user', 'plugins', 'browser', 'skills')
+        ])
+      )
+
+      await host.activate({ manifest: { id: 'browser' }, activate: () => undefined })
+      host.refreshSkills()
+
+      expect(host.getSkills('browser')?.get('browser_research')).toMatchObject({
+        path: join(user, 'SKILL.md'),
+        description: 'User research'
+      })
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('lets an identical user skill override the bundled file path', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'larify-skills-'))
+    const bundled = join(root, 'bundled', 'same')
+    const user = join(root, 'user', 'same')
+    const source = '---\nname: same\ndescription: Same content\n---\n'
+    try {
+      mkdirSync(bundled, { recursive: true })
+      mkdirSync(user, { recursive: true })
+      writeFileSync(join(bundled, 'SKILL.md'), source)
+      writeFileSync(join(user, 'SKILL.md'), source)
+      const host = new PluginHost(
+        new Registry(),
+        new FilesystemSkillDiscovery(() => [join(root, 'bundled'), join(root, 'user')])
+      )
+      await host.activate({ manifest: { id: 'agent' }, activate: () => undefined })
+
+      host.refreshSkills()
+
+      expect(host.getSkills('agent')?.get('agent_same')?.path).toBe(join(user, 'SKILL.md'))
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps a plugin active when one discovered skill is invalid', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'larify-skills-'))
+    const skills = join(root, 'plugins', 'browser', 'skills')
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      mkdirSync(join(skills, 'valid'), { recursive: true })
+      mkdirSync(join(skills, 'invalid'), { recursive: true })
+      writeFileSync(
+        join(skills, 'valid', 'SKILL.md'),
+        '---\nname: valid\ndescription: Valid\n---\n'
+      )
+      writeFileSync(join(skills, 'invalid', 'SKILL.md'), '# missing frontmatter')
+      const host = new PluginHost(new Registry(), new FilesystemSkillDiscovery(() => [skills]))
+
+      await host.activate({ manifest: { id: 'browser' }, activate: () => undefined })
+      host.refreshSkills()
+
+      expect(host.has('browser')).toBe(true)
+      expect(host.getSkills('browser')?.get('browser_valid')).toMatchObject({
+        description: 'Valid'
+      })
+      expect(warning).toHaveBeenCalledOnce()
+    } finally {
+      warning.mockRestore()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects a skill with unclosed frontmatter without disabling its plugin', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'larify-skills-'))
+    const skillDirectory = join(root, 'unclosed')
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      mkdirSync(skillDirectory, { recursive: true })
+      writeFileSync(
+        join(skillDirectory, 'SKILL.md'),
+        '---\nname: unclosed\ndescription: Missing closing delimiter\n'
+      )
+      const host = new PluginHost(new Registry(), new FilesystemSkillDiscovery(() => [root]))
+      await host.activate({ manifest: { id: 'agent' }, activate: () => undefined })
+
+      host.refreshSkills()
+
+      expect(host.has('agent')).toBe(true)
+      expect(host.getSkills('agent')).toEqual(new Map())
+      expect(warning).toHaveBeenCalledOnce()
+    } finally {
+      warning.mockRestore()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps a plugin active when a skill directory is unreadable', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'larify-skills-'))
+    const unreadable = join(root, 'not-a-directory')
+    const valid = join(root, 'valid')
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      writeFileSync(unreadable, '')
+      mkdirSync(join(valid, 'skill'), { recursive: true })
+      writeFileSync(
+        join(valid, 'skill', 'SKILL.md'),
+        '---\nname: directory-valid\ndescription: Readable directory\n---\n'
+      )
+      const host = new PluginHost(
+        new Registry(),
+        new FilesystemSkillDiscovery(() => [unreadable, valid])
+      )
+
+      await host.activate({ manifest: { id: 'browser' }, activate: () => undefined })
+      host.refreshSkills()
+
+      expect(host.has('browser')).toBe(true)
+      expect([...host.getSkills('browser')!.keys()]).toEqual(['browser_directory-valid'])
+      expect(warning).toHaveBeenCalledOnce()
+    } finally {
+      warning.mockRestore()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('refreshes discovered skills from disk without reactivating the plugin', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'larify-skills-'))
+    const skillDirectory = join(root, 'plugins', 'agent', 'skills', 'dynamic')
+    const skillPath = join(skillDirectory, 'SKILL.md')
+    const activate = vi.fn()
+    try {
+      mkdirSync(skillDirectory, { recursive: true })
+      writeFileSync(skillPath, '---\nname: first\ndescription: First\n---\n')
+      const host = new PluginHost(
+        new Registry(),
+        new FilesystemSkillDiscovery(() => [join(root, 'plugins', 'agent', 'skills')])
+      )
+      await host.activate({ manifest: { id: 'agent' }, activate })
+
+      host.refreshSkills()
+      expect(host.getSkills('agent')?.has('agent_first')).toBe(true)
+
+      writeFileSync(skillPath, '---\nname: second\ndescription: Second\n---\n')
+      host.refreshSkills()
+
+      expect(host.getSkills('agent')?.has('agent_first')).toBe(false)
+      expect(host.getSkills('agent')?.has('agent_second')).toBe(true)
+      expect(activate).toHaveBeenCalledOnce()
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 
   it('disposes subscriptions in reverse order on deactivation', async () => {
@@ -134,7 +308,7 @@ describe('PluginHost', () => {
 
   it('leaves a plugin inactive when reload fails', async () => {
     const host = new PluginHost(new Registry())
-    await host.activate({ manifest: { id: 'test' }, activate() {} })
+    await host.activate({ manifest: { id: 'test' }, activate: () => undefined })
 
     await expect(
       host.reload({
@@ -170,8 +344,6 @@ describe('PluginHost', () => {
       activate(context) {
         context.registerTool('z', tool('z'))
         context.registerTool('a', tool('a'))
-        context.registerSkill('z', { path: 'z.md', description: 'z' })
-        context.registerSkill('a', { path: 'a.md', description: 'a' })
       }
     })
 
@@ -180,11 +352,15 @@ describe('PluginHost', () => {
 
     expect(host.listPlugins().map(({ id }) => id)).toEqual(['a', 'z'])
     expect([...host.getTools('a')!.keys()]).toEqual(['a_a', 'a_z'])
-    expect([...host.getSkills('z')!.keys()]).toEqual(['z_a', 'z_z'])
   })
 
   it('returns readonly plugin contributions', async () => {
-    const host = new PluginHost(new Registry())
+    const host = new PluginHost(new Registry(), {
+      discover: () => [
+        { name: 'lazy', path: 'lazy.md', description: 'lazy' },
+        { name: 'eager', path: 'eager.md', description: 'eager', metadata: { eager: true } }
+      ]
+    })
     await host.activate({
       manifest: { id: 'test' },
       activate(context) {
@@ -198,14 +374,9 @@ describe('PluginHost', () => {
             execute: () => undefined
           })
         )
-        context.registerSkill('lazy', { path: 'lazy.md', description: 'lazy' })
-        context.registerSkill('eager', {
-          path: 'eager.md',
-          description: 'eager',
-          metadata: { eager: true }
-        })
       }
     })
+    host.refreshSkills()
 
     const tools = host.getTools('test')
     const skills = host.getSkills('test')

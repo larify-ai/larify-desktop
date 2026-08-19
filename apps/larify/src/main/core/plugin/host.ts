@@ -2,6 +2,7 @@ import type { Disposable } from '@shared/infra/disposable'
 import type { Registry } from '@shared/infra/registry'
 import type { Manifest, Plugin, PluginContext, Skill, Tool } from './protocol'
 import { wrapTool } from './protocol'
+import type { SkillDiscovery } from './skill-discovery'
 
 interface RegisteredPlugin {
   manifest: Manifest
@@ -17,7 +18,10 @@ function sortMap<T>(values: Iterable<readonly [string, T]>): Map<string, T> {
 export class PluginHost {
   private readonly plugins = new Map<string, RegisteredPlugin>()
 
-  constructor(private readonly registry: Registry) {}
+  constructor(
+    private readonly registry: Registry,
+    private readonly skillDiscovery?: SkillDiscovery
+  ) {}
 
   has(id: string): boolean {
     return this.plugins.has(id)
@@ -37,6 +41,14 @@ export class PluginHost {
     return this.plugins.get(pluginId)?.skills
   }
 
+  refreshSkills(): void {
+    for (const [id, registered] of this.plugins) {
+      registered.skills = sortMap(
+        (this.skillDiscovery?.discover(id) ?? []).map((skill) => [`${id}_${skill.name}`, skill])
+      )
+    }
+  }
+
   async activate(plugin: Plugin): Promise<void> {
     const { id } = plugin.manifest
     if (this.plugins.has(id)) throw new Error(`Plugin already active: ${id}`)
@@ -51,7 +63,6 @@ export class PluginHost {
     try {
       await plugin.activate(this.createContext(registered))
       registered.tools = sortMap(registered.tools)
-      registered.skills = sortMap(registered.skills)
     } catch (error) {
       if (this.plugins.get(id) === registered) this.plugins.delete(id)
       await this.disposeSubscriptions(registered.subscriptions)
@@ -83,9 +94,7 @@ export class PluginHost {
       registry: this.registry,
       subscriptions: registered.subscriptions,
       registerTool: (name, tool) =>
-        registered.tools.set(`${registered.manifest.id}_${name}`, wrapTool(tool)),
-      registerSkill: (name, skill) =>
-        registered.skills.set(`${registered.manifest.id}_${name}`, skill)
+        registered.tools.set(`${registered.manifest.id}_${name}`, wrapTool(tool))
     }
   }
 

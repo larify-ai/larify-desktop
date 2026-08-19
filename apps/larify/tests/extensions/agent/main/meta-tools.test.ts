@@ -12,7 +12,20 @@ type Memory = { search: ReturnType<typeof vi.fn> }
 
 async function createHost(memory?: Memory): Promise<PluginHost> {
   const registry = new Registry()
-  const host = new PluginHost(registry)
+  const host = new PluginHost(registry, {
+    discover: (pluginId) =>
+      pluginId === 'demo'
+        ? [
+            {
+              name: 'eager',
+              path: 'eager/SKILL.md',
+              description: 'Eager skill',
+              metadata: { eager: true }
+            },
+            { name: 'lazy', path: 'lazy/SKILL.md', description: 'Lazy skill' }
+          ]
+        : []
+  })
   registry.register(pluginHostToken, host)
   if (memory) registry.register(contextWorkerToken, memory)
   await host.activate({
@@ -23,18 +36,10 @@ async function createHost(memory?: Memory): Promise<PluginHost> {
         'lazy',
         tool({ description: 'Lazy tool', inputSchema: z.object({ value: z.string() }) })
       )
-      context.registerSkill('eager', {
-        path: 'eager/SKILL.md',
-        description: 'Eager skill',
-        metadata: { eager: true }
-      })
-      context.registerSkill('lazy', {
-        path: 'lazy/SKILL.md',
-        description: 'Lazy skill'
-      })
     }
   })
   await host.activate(agentPlugin)
+  host.refreshSkills()
   return host
 }
 
@@ -164,11 +169,6 @@ describe('meta tools', () => {
       manifest: { id: 'eager-only' },
       activate(context) {
         context.registerTool('tool', tool({ metadata: { eager: true }, inputSchema: z.object({}) }))
-        context.registerSkill('skill', {
-          path: 'skill/SKILL.md',
-          description: 'Eager skill',
-          metadata: { eager: true }
-        })
       }
     })
     const tools = Object.fromEntries(host.getTools('agent')!)

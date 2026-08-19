@@ -53,6 +53,7 @@ function collectPromptContext(host: PluginHost): {
 }
 
 export function createAgentRuntime(input: AgentRuntimeInput, host: PluginHost): AgentOptions {
+  host.refreshSkills()
   const config = isAgentModelConfig(input.modelConfig) ? input.modelConfig : defaultModelConfig
   const tools = collectTools(host)
   return {

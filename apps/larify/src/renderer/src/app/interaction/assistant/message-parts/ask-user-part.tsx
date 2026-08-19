@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Check } from 'lucide-react'
+import { MessageResponse } from '@renderer/components/ai-elements/message'
 import { Button } from '@renderer/components/ui/button'
 import { Textarea } from '@renderer/components/ui/textarea'
 import { cn } from '@renderer/lib/utils'
@@ -53,10 +54,12 @@ export function AskUserPart({
   const answers =
     output && typeof output === 'object' ? (output as { answers?: unknown }).answers : undefined
 
+  const messageNode = <MessageResponse isAnimating={false}>{input.message}</MessageResponse>
+
   if (isStringArray(answers)) {
     return (
       <div className="space-y-3">
-        <p className="text-sm leading-5">{input.message}</p>
+        {messageNode}
         <div className="flex flex-wrap gap-2">
           {answers.map((answer, index) => (
             <span key={index} className="rounded-md bg-primary/10 px-2.5 py-1.5 text-sm">
@@ -82,7 +85,7 @@ export function AskUserPart({
 
   return (
     <div className="space-y-3">
-      <p className="text-sm leading-5">{input.message}</p>
+      {messageNode}
       {options?.length ? (
         <div className="grid gap-1.5">
           {options.map(({ label, description }) => {

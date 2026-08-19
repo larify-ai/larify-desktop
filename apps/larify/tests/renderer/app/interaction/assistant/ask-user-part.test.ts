@@ -100,6 +100,18 @@ describe('AskUserPart', () => {
     expect(container.querySelector('button')).toBeNull()
   })
 
+  it('renders the message as markdown', async () => {
+    await render({
+      input: { message: 'Choose **a mode** or `code`', options: [{ label: 'Fast' }] },
+      onSubmit: vi.fn()
+    })
+
+    const html = container.innerHTML
+    expect(html).toContain('data-streamdown="strong"')
+    expect(html).toContain('<span class="font-semibold" data-streamdown="strong">a mode</span>')
+    expect(html).toContain('data-streamdown="inline-code"')
+  })
+
   it('ignores incomplete or invalid streamed input', async () => {
     await render({
       input: { message: 'Choose modes', multiple: 'yes' },

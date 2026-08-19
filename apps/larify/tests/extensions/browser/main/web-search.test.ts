@@ -2,6 +2,7 @@ import { JSDOM } from 'jsdom'
 import { describe, expect, it, vi } from 'vitest'
 import {
   buildBingSearchUrl,
+  buildParseSearchPageScript,
   executeWebSearch,
   normalizeWhitespace,
   parseSearchPage,
@@ -176,6 +177,102 @@ describe('web search', () => {
       })
     ).toEqual({ results: [] })
     expect(() => parseSearchPage({ ...selectors, result: '[' })).toThrow()
+
+    vi.unstubAllGlobals()
+  })
+
+  // Regression guard for the minified-build bug that produced `ReferenceError: Fn is not
+  // defined` (the injected script referenced a minified helper name that was out of scope).
+  // These asserts ensure the injected script stays self-contained and matches the exported
+  // parsing helpers.
+  it('builds a self-contained script that parses a page without external references', () => {
+    const dom = new JSDOM(
+      `<body>
+        <ol id="b_results">
+          <li class="b_algo"><h2><a href="https://example.com/docs">  Example   Docs </a></h2><div class="b_caption"><p> Useful   documentation. </p></div></li>
+          <li class="b_algo"><h2><a href="https://example.com/docs">Duplicate</a></h2></li>
+          <li class="b_algo"><h2>No link</h2></li>
+        </ol>
+        <a class="sb_pagN" href="/search?q=test&amp;first=10&amp;FPIG=abc">Next</a>
+      </body>`,
+      { url: 'https://www.bing.com/search?q=test' }
+    )
+    vi.stubGlobal('document', dom.window.document)
+
+    const script = buildParseSearchPageScript(selectors)
+
+    // The serialized script must not splice in module function sources via .toString()
+    // (that pattern was the root cause of the `Fn is not defined` failure).
+    expect(script).not.toMatch(/\.toString\(\)/)
+    // It must not reference bare module helper names either (e.g. compressed `Fn(`).
+    expect(script).not.toMatch(/(?<![\w$.])Fn\s*\(/)
+
+    // It must be fully self-contained: evaluating it in a fresh scope parses the page.
+    const parsed = eval(script)
+    expect(parsed).toEqual({
+      results: [
+        {
+          title: 'Example Docs',
+          url: 'https://example.com/docs',
+          snippet: 'Useful documentation.'
+        }
+      ],
+      nextPageUrl: 'https://www.bing.com/search?q=test&first=10&FPIG=abc'
+    })
+
+    vi.unstubAllGlobals()
+  })
+
+  it('injected script parsing matches the exported parsing helpers', () => {
+    const dom = new JSDOM(
+      `<ol id="b_results">
+        <li class="b_algo"><h2><a href="https://example.com/docs">Doc</a></h2><div class="b_caption"><p>A snippet.</p></div></li>
+        <li><h2><a href="https://example.org">Org</a></h2></li>
+      </ol>`,
+      { url: 'https://www.bing.com/search?q=test' }
+    )
+    vi.stubGlobal('document', dom.window.document)
+
+    const fromInjected = eval(buildParseSearchPageScript(selectors))
+    const fromExport = parseSearchPage(selectors)
+    expect(fromInjected).toEqual(fromExport)
+
+    vi.unstubAllGlobals()
+  })
+
+  it('executes the real injected script end-to-end and parses a page', async () => {
+    const dom = new JSDOM(
+      `<body>
+        <ol id="b_results">
+          <li class="b_algo"><h2><a href="https://example.com/docs">  Example   Docs </a></h2><div class="b_caption"><p> Useful   documentation. </p></div></li>
+          <li class="b_algo"><h2><a href="https://example.com/docs">Duplicate</a></h2></li>
+        </ol>
+        <a class="sb_pagN" href="/search?q=test&amp;first=10&amp;FPIG=abc">Next</a>
+      </body>`,
+      { url: 'https://www.bing.com/search?q=test' }
+    )
+    vi.stubGlobal('document', dom.window.document)
+
+    // Simulate the real temporary tab: evalJs really evaluates the injected search script.
+    const evalJs = vi.fn(async (script: string) => eval(script))
+    const service = serviceWithTemporaryTab({ waitForNavigation: vi.fn(async () => undefined), evalJs })
+
+    await expect(
+      executeWebSearch(
+        service,
+        { query: 'test', selectors },
+        { sessionId: 'session-1', cwd: 'D:\\Workspace' }
+      )
+    ).resolves.toEqual({
+      results: [
+        {
+          title: 'Example Docs',
+          url: 'https://example.com/docs',
+          snippet: 'Useful documentation.'
+        }
+      ],
+      nextPageUrl: 'https://www.bing.com/search?q=test&first=10&FPIG=abc'
+    })
 
     vi.unstubAllGlobals()
   })

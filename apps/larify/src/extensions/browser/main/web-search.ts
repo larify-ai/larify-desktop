@@ -85,11 +85,34 @@ export function parseSearchPage(selectors: WebSearchSelectors): WebSearchRespons
   return { results, ...(nextPageUrl && { nextPageUrl }) }
 }
 
-function buildParseSearchPageScript(selectors: WebSearchSelectors): string {
+export function buildParseSearchPageScript(selectors: WebSearchSelectors): string {
+  // IMPORTANT: This script is injected into the search page and MUST stay self-contained.
+  // Never reference module-level identifiers or use `Function.prototype.toString` here:
+  // minifiers rename those identifiers, and the serialized script would then throw
+  // e.g. `ReferenceError: Fn is not defined` in compressed builds.
   return `(() => {
-    const normalizeWhitespace = ${normalizeWhitespace.toString()}
-    const parseSearchResult = ${parseSearchResult.toString()}
-    const parseSearchPage = ${parseSearchPage.toString()}
+    const normalizeWhitespace = (value) => {
+      return (value == null ? '' : String(value)).replace(/\\s+/g, ' ').trim()
+    }
+    const parseSearchResult = (item, selectors) => {
+      const text = (selector) => normalizeWhitespace(item.querySelector(selector)?.textContent)
+      const title = text(selectors.title)
+      const url = item.querySelector(selectors.link)?.href
+      if (!title || !url) return undefined
+      const snippet = text(selectors.snippet)
+      return { title, url, ...(snippet ? { snippet } : {}) }
+    }
+    const parseSearchPage = (selectors) => {
+      const seenUrls = new Set()
+      const results = Array.from(document.querySelectorAll(selectors.result)).flatMap((item) => {
+        const result = parseSearchResult(item, selectors)
+        if (!result || seenUrls.has(result.url)) return []
+        seenUrls.add(result.url)
+        return [result]
+      })
+      const nextPageUrl = document.querySelector(selectors.nextPage)?.href || undefined
+      return { results, ...(nextPageUrl ? { nextPageUrl } : {}) }
+    }
     return parseSearchPage(${JSON.stringify(selectors)})
   })()`
 }

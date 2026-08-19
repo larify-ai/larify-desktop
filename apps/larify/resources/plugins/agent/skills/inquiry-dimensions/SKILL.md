@@ -36,3 +36,7 @@ The following questions define how to inquire into any subject recursively at an
 # Recursion Principle
 
 Apply every inquiry recursively — for example, causes of causes, prerequisites of prerequisites, decompositions of decompositions, and further reductions in uncertainty, complexity, and cost / risk — until reaching first principles or further improvement is impossible.
+
+# Prioritization
+
+Prioritize tasks to maximize the rate of increasing epistemic breadth and depth and reducing epistemic opacity, while reducing practical uncertainty, complexity, and cost / risk.

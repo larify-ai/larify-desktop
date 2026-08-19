@@ -71,6 +71,18 @@ describe('meta tools', () => {
     expect(schema.required).not.toContain('options')
   })
 
+  it('requests a context reset with a handoff', async () => {
+    const requestContextReset = vi.fn()
+    const tool = (await createTools()).agent_reset_context
+    const schema = await asSchema(tool.inputSchema).jsonSchema
+
+    await expect(run(tool, { handoff: 'Continue from task.md.' }, { requestContextReset })).resolves.toBe(
+      'Context reset requested.'
+    )
+    expect(requestContextReset).toHaveBeenCalledWith('Continue from task.md.')
+    expect(schema.required).toEqual(expect.arrayContaining(['handoff', 'toolCallTitle']))
+  })
+
   it('searches shared memory without a workspace argument', async () => {
     const search = vi.fn().mockResolvedValue([{ name: 'Audio' }])
     const tool = (await createTools({ search })).agent_search_memory

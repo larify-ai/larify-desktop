@@ -1,10 +1,12 @@
 import type { UIMessage, UIMessageChunk } from 'ai'
+import { randomUUID } from 'node:crypto'
 import type { SessionStore } from '../session'
 import type { AgentOptions } from './engine'
 import { runStoredAgentSession } from './persist'
 import { AgentReview, FileChangeTracker, reviewChunk } from './review'
 
 const reviewTools = new Set(['fs_edit', 'fs_write'])
+const resetContextTool = 'agent_reset_context'
 
 export interface AgentWorkerInput {
   sessionId: string
@@ -39,6 +41,7 @@ export class AgentWorker {
         if (!controller.signal.aborted) this.sink.chunk(chunk)
       })
       const fileChanges = new FileChangeTracker()
+      let handoff: string | undefined
       const toolsContext = Object.fromEntries(
         Object.entries(input.runtime.toolsContext).map(([name, context]) => [
           name,
@@ -50,46 +53,79 @@ export class AgentWorker {
             : context
         ])
       )
-      review = activeReview
-      const reviewToolCalls = new Set<string>()
-      const response = await runStoredAgentSession(this.sessions, {
-        sessionId: input.sessionId,
-        cwd: input.cwd,
-        message: input.message,
-        options: { ...input.runtime, toolsContext, abortSignal: controller.signal },
-        onTitle: (title) => {
-          if (!controller.signal.aborted) this.sink.title?.(title)
-        },
-        onChunk: (chunk) => {
-          if (controller.signal.aborted) return
-          this.sink.chunk(chunk)
-          if (
-            (chunk.type === 'tool-input-start' || chunk.type === 'tool-input-available') &&
-            reviewTools.has(chunk.toolName)
-          ) {
-            reviewToolCalls.add(chunk.toolCallId)
-          } else if (
-            chunk.type === 'tool-output-available' &&
-            !chunk.preliminary &&
-            reviewToolCalls.delete(chunk.toolCallId)
-          ) {
-            const output = chunk.output
-            const tracked =
-              output &&
-              typeof output === 'object' &&
-              typeof (output as { path?: unknown }).path === 'string'
-                ? fileChanges.result((output as { path: string }).path)
-                : undefined
-            if (tracked) activeReview.update(tracked)
-          } else if (
-            chunk.type === 'tool-input-error' ||
-            chunk.type === 'tool-output-error' ||
-            chunk.type === 'tool-output-denied'
-          ) {
-            reviewToolCalls.delete(chunk.toolCallId)
+      const resetContext = toolsContext[resetContextTool]
+      if (resetContext) {
+        toolsContext[resetContextTool] = {
+          ...(resetContext as Record<string, unknown>),
+          requestContextReset: (value: string) => {
+            handoff = value
           }
         }
-      })
+      }
+      review = activeReview
+      const reviewToolCalls = new Set<string>()
+      const originalStopWhen = input.runtime.stopWhen
+      const runOnce = (message: UIMessage): Promise<UIMessage | undefined> =>
+        runStoredAgentSession(this.sessions, {
+          sessionId: input.sessionId,
+          cwd: input.cwd,
+          message,
+          options: {
+            ...input.runtime,
+            toolsContext,
+            abortSignal: controller.signal,
+            stopWhen: async (options) =>
+              handoff !== undefined || (originalStopWhen ? await originalStopWhen(options) : false)
+          },
+          onTitle: (title) => {
+            if (!controller.signal.aborted) this.sink.title?.(title)
+          },
+          onChunk: (chunk) => {
+            if (controller.signal.aborted) return
+            this.sink.chunk(chunk)
+            if (
+              (chunk.type === 'tool-input-start' || chunk.type === 'tool-input-available') &&
+              reviewTools.has(chunk.toolName)
+            ) {
+              reviewToolCalls.add(chunk.toolCallId)
+            } else if (
+              chunk.type === 'tool-output-available' &&
+              !chunk.preliminary &&
+              reviewToolCalls.delete(chunk.toolCallId)
+            ) {
+              const output = chunk.output
+              const tracked =
+                output &&
+                typeof output === 'object' &&
+                typeof (output as { path?: unknown }).path === 'string'
+                  ? fileChanges.result((output as { path: string }).path)
+                  : undefined
+              if (tracked) activeReview.update(tracked)
+            } else if (
+              chunk.type === 'tool-input-error' ||
+              chunk.type === 'tool-output-error' ||
+              chunk.type === 'tool-output-denied'
+            ) {
+              reviewToolCalls.delete(chunk.toolCallId)
+            }
+          }
+        })
+      let response = await runOnce(input.message)
+      while (handoff) {
+        if (controller.signal.aborted) return
+        const message: UIMessage = {
+          id: randomUUID(),
+          role: 'user',
+          metadata: { compaction: true },
+          parts: [
+            ...input.message.parts,
+            { type: 'text', text: `# Handoff\n\n${handoff}` }
+          ]
+        }
+        handoff = undefined
+        this.sessions.saveStart(input.sessionId, message)
+        response = await runOnce(message)
+      }
       if (controller.signal.aborted) return
       const snapshot = activeReview.finish()
       if (snapshot && response) {

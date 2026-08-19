@@ -237,10 +237,14 @@ export function AssistantMessageList({
         computeItemKey={(index) => item(index)?.id ?? index}
         itemContent={(index) => {
           const message = item(index)
+          const joinsPrevious =
+            message?.role === 'assistant' && item(index - 1)?.role === 'assistant'
+          const joinsNext =
+            message?.role === 'assistant' && item(index + 1)?.role === 'assistant'
           return message ? (
             <div
               ref={index === totalCount - 1 ? followGrowingMessage : undefined}
-              className={`mx-auto w-[calc(100%-var(--larify-scrollbar-size))] max-w-4xl min-w-0 translate-x-[calc(var(--larify-scrollbar-size)/2)] px-6 pt-3 ${index === totalCount - 1 ? 'pb-30' : 'pb-3'}`}
+              className={`mx-auto w-[calc(100%-var(--larify-scrollbar-size))] max-w-4xl min-w-0 translate-x-[calc(var(--larify-scrollbar-size)/2)] px-6 ${joinsPrevious ? 'pt-0' : 'pt-3'} ${joinsNext ? 'pb-0' : index === totalCount - 1 ? 'pb-30' : 'pb-3'}`}
               data-message-index={index}
             >
               <Message

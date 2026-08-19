@@ -1,15 +1,15 @@
 ---
-name: context-representation
-description: How context is represented.
+name: memory-representation
+description: How memory is represented, e.g. semantic memory, procedural memory, etc.
 eager: true
 ---
 
 # Directory Structure
 
-Organize context as a recursive hierarchy of domains:
+Organize memory as a recursive hierarchy of domains:
 
 ```
-<cwd>/.larify/
+~/.larify/memory/
   index.md
   <domain>/
     index.md
@@ -58,9 +58,9 @@ description: <what it covers and when to use it>
 
 # Version Control
 
-- Track context in the current Git repository.
-- Commit every context update as a checkpoint.
-- Track large context assets through Git LFS.
+- Track memory in a Git repository.
+- Commit every update as a checkpoint.
+- Track large assets through Git LFS.
 
 # Constraints
 

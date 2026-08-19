@@ -28,7 +28,10 @@ const input = {
 
 function createWorker(): {
   worker: AgentWorker
-  sessions: { saveMessages: ReturnType<typeof vi.fn> }
+  sessions: {
+    saveMessages: ReturnType<typeof vi.fn>
+    saveStart: ReturnType<typeof vi.fn>
+  }
   sink: {
     chunk: ReturnType<typeof vi.fn>
     title: ReturnType<typeof vi.fn>
@@ -37,7 +40,7 @@ function createWorker(): {
   }
 } {
   const sink = { chunk: vi.fn(), title: vi.fn(), error: vi.fn(), end: vi.fn() }
-  const sessions = { saveMessages: vi.fn() }
+  const sessions = { saveMessages: vi.fn(), saveStart: vi.fn() }
   return {
     worker: new AgentWorker(sessions as never, sink),
     sessions,
@@ -188,6 +191,45 @@ describe('AgentWorker', () => {
     expect(sink.chunk).toHaveBeenCalledWith(chunk)
     expect(sink.end).toHaveBeenCalledOnce()
     expect(sink.error).not.toHaveBeenCalled()
+  })
+
+  it('starts a new stored run from the handoff after reset', async () => {
+    const runtime = {
+      toolsContext: {
+        agent_reset_context: { sessionId: 'session', cwd: '/workspace' }
+      }
+    } as never
+    mocks.run
+      .mockImplementationOnce(async (_sessions, request) => {
+        request.options.toolsContext.agent_reset_context.requestContextReset(
+          'Continue from ~/.larify/tasks/demo/task.md.'
+        )
+        await expect(request.options.stopWhen({ steps: [] })).resolves.toBe(true)
+        return undefined
+      })
+      .mockResolvedValueOnce(undefined)
+    const { worker, sessions, sink } = createWorker()
+
+    await worker.run({ ...input, runtime })
+
+    expect(mocks.run).toHaveBeenCalledTimes(2)
+    const nextMessage = mocks.run.mock.calls[1][1].message
+    expect(nextMessage).toMatchObject({
+      role: 'user',
+      metadata: { compaction: true },
+      parts: [
+        {
+          type: 'text',
+          text: 'hello'
+        },
+        {
+          type: 'text',
+          text: '# Handoff\n\nContinue from ~/.larify/tasks/demo/task.md.'
+        }
+      ]
+    })
+    expect(sessions.saveStart).toHaveBeenCalledWith('session', nextMessage)
+    expect(sink.end).toHaveBeenCalledOnce()
   })
 
   it('forwards generated titles while running', async () => {

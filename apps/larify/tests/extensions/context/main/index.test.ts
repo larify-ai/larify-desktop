@@ -8,6 +8,9 @@ const mocks = vi.hoisted(() => ({
   duplicateName: vi.fn<() => Promise<boolean>>(),
   disposeDiagnostics: vi.fn(),
   registerDiagnostics: vi.fn(),
+  openGit: vi.fn(),
+  checkIsRepo: vi.fn<() => Promise<boolean>>(),
+  initGit: vi.fn<() => Promise<void>>(),
   createDiagnostics: vi.fn(() => ({ matches: vi.fn(), provide: vi.fn() }))
 }))
 
@@ -25,6 +28,9 @@ vi.mock('../../../../src/extensions/context/main/indexer', () => ({
 vi.mock('../../../../src/extensions/context/main/diagnostics', () => ({
   createContextDiagnosticsProvider: mocks.createDiagnostics
 }))
+vi.mock('../../../../src/main/core/git', () => ({
+  gitService: { open: mocks.openGit }
+}))
 vi.mock('../../../../src/extensions/fs/main/diagnostics', () => ({
   registerFileDiagnosticsProvider: mocks.registerDiagnostics
 }))
@@ -36,6 +42,12 @@ describe('context plugin', () => {
     vi.clearAllMocks()
     mocks.dispose.mockResolvedValue()
     mocks.duplicateName.mockResolvedValue(false)
+    mocks.checkIsRepo.mockResolvedValue(true)
+    mocks.initGit.mockResolvedValue()
+    mocks.openGit.mockResolvedValue({
+      checkIsRepo: mocks.checkIsRepo,
+      init: mocks.initGit
+    })
     mocks.registerDiagnostics.mockReturnValue(mocks.disposeDiagnostics)
   })
 
@@ -44,6 +56,8 @@ describe('context plugin', () => {
     const host = new PluginHost(registry)
 
     await host.activate(plugin)
+    expect(mocks.openGit).toHaveBeenCalledWith('memory')
+    expect(mocks.initGit).not.toHaveBeenCalled()
     expect(registry.get(contextWorkerToken)).toBeDefined()
     expect(mocks.createDiagnostics).toHaveBeenCalledWith('memory', expect.any(Function))
 
@@ -51,6 +65,15 @@ describe('context plugin', () => {
     expect(mocks.disposeDiagnostics).toHaveBeenCalledOnce()
     expect(mocks.dispose).toHaveBeenCalledOnce()
     expect(registry.get(contextWorkerToken)).toBeUndefined()
+  })
+
+  it('initializes the memory Git repository when it is missing', async () => {
+    mocks.checkIsRepo.mockResolvedValue(false)
+    const host = new PluginHost(new Registry())
+
+    await host.activate(plugin)
+
+    expect(mocks.initGit).toHaveBeenCalledOnce()
   })
 
   it('does not register diagnostics when the context service is occupied', async () => {

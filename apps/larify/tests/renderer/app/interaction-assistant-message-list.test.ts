@@ -523,6 +523,26 @@ describe('interaction assistant message list', () => {
     expect(container.firstElementChild?.getAttribute('data-message-index')).toBe('0')
   })
 
+  it('visually joins consecutive assistant messages without merging their data', async () => {
+    const user: UIMessage = {
+      id: 'user',
+      role: 'user',
+      parts: [{ type: 'text', text: 'next request' }]
+    }
+    await render({
+      messages: [message('first'), message('second'), user],
+      recentStart: 0
+    })
+
+    const props = captured.props as VirtuosoProps
+    expect(props.itemContent(0).props.className).toContain('pb-0')
+    expect(props.itemContent(1).props.className).toContain('pt-0')
+    expect(props.itemContent(1).props.className).toContain('pb-3')
+    expect(props.itemContent(2).props.className).toContain('pt-3')
+    expect(props.computeItemKey(0)).toBe('first')
+    expect(props.computeItemKey(1)).toBe('second')
+  })
+
   it('reserves the rounded composer overlap inside the final message', async () => {
     await render({
       messages: [message('latest')],

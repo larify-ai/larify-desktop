@@ -42,5 +42,5 @@ Append each event chronologically under `# Events`:
 
 ### References
 
-<links to related `<subject>.md` files under `<cwd>/.larify/`>
+<links to related files under `~/.larify/memory/`>
 ```

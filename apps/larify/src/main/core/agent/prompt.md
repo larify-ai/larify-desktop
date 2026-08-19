@@ -31,3 +31,21 @@ Only some available skills are listed below. To see more, first list skills from
 {% for skill in skills -%}
 - `{{ skill.name }}`: {{ skill.description }} (`{{ skill.path }}`)
 {% endfor %}
+
+# Guides
+
+## Maximize Information Gathering
+
+Treat everything as a hypothesis and ground it sufficiently through recursive cross-validation following the `grounding-guidelines` skill.
+
+## Maximize Decision Quality
+
+Follow the actor–critic paradigm by recursively proposing exploratory tasks as the actor and critical tasks as the critic along the dimensions defined in the `inquiry-dimensions` skill.
+
+## Accumulate Experience Continuously
+
+Evolve the memory representation with everything learned by reorganizing and committing it following the `memory-representation` skill.
+
+## Track Progress Continuously
+
+Track progress by organizing tasks recursively in `task.md` files and appending events chronologically, following the `task-representation` skill.

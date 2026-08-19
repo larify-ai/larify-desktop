@@ -4,11 +4,13 @@ import { pluginHostToken } from '../../../main/core/plugin/service'
 import { createPluginTools } from './plugin-tools'
 import { askUserTool } from './ask-user'
 import { createSearchMemoryTool } from './search-memory'
+import { resetContextTool } from './reset-context'
 
 const plugin: Plugin = {
   manifest: {
     id: 'agent',
-    description: 'List plugins, list tools, list skills, read schemas, ask user, and search memory.'
+    description:
+      'List plugins, list tools, list skills, read schemas, ask user, search memory, and reset context.'
   },
   activate(context) {
     const host = context.registry.get<PluginHost>(pluginHostToken)
@@ -19,6 +21,7 @@ const plugin: Plugin = {
     }
     context.registerTool('ask_user', askUserTool)
     context.registerTool('search_memory', createSearchMemoryTool(context.registry))
+    context.registerTool('reset_context', resetContextTool)
   }
 }
 

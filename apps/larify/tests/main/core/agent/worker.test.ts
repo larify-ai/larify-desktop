@@ -1,4 +1,5 @@
 import type { UIMessage, UIMessageChunk } from 'ai'
+import { resolve } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({ run: vi.fn() }))
@@ -17,13 +18,17 @@ const input = {
     role: 'user',
     parts: [{ type: 'text', text: 'hello' }]
   } as UIMessage,
-  runtime: {} as never
+  runtime: {
+    toolsContext: {
+      fs_edit: { sessionId: 'session', cwd: '/workspace' },
+      fs_write: { sessionId: 'session', cwd: '/workspace' }
+    }
+  } as never
 }
 
 function createWorker(): {
   worker: AgentWorker
   sessions: { saveMessages: ReturnType<typeof vi.fn> }
-  snapshots: { start: ReturnType<typeof vi.fn>; compare: ReturnType<typeof vi.fn> }
   sink: {
     chunk: ReturnType<typeof vi.fn>
     title: ReturnType<typeof vi.fn>
@@ -33,14 +38,9 @@ function createWorker(): {
 } {
   const sink = { chunk: vi.fn(), title: vi.fn(), error: vi.fn(), end: vi.fn() }
   const sessions = { saveMessages: vi.fn() }
-  const snapshots = {
-    start: vi.fn().mockResolvedValue(null),
-    compare: vi.fn().mockResolvedValue(null)
-  }
   return {
-    worker: new AgentWorker(sessions as never, snapshots as never, sink),
+    worker: new AgentWorker(sessions as never, sink),
     sessions,
-    snapshots,
     sink
   }
 }
@@ -48,55 +48,131 @@ function createWorker(): {
 beforeEach(() => vi.clearAllMocks())
 
 describe('AgentWorker', () => {
-  it('updates a live review only after successful fs_write and fs_edit calls', async () => {
-    vi.useFakeTimers()
-    try {
-      let emit!: (chunk: UIMessageChunk) => void
-      let complete!: () => void
-      mocks.run.mockImplementation(
-        (_sessions, request) =>
-          new Promise<UIMessage | undefined>((resolve) => {
-            emit = request.onChunk
-            complete = () => resolve(undefined)
-          })
-      )
-      const { worker, snapshots } = createWorker()
-      snapshots.start.mockResolvedValue({ tree: 'before' })
-      const running = worker.run(input)
-      await vi.waitFor(() => expect(emit).toBeDefined())
-
-      emit({ type: 'tool-input-start', toolCallId: 'read', toolName: 'fs_read' } as UIMessageChunk)
-      emit({ type: 'tool-output-available', toolCallId: 'read', output: 'text' } as UIMessageChunk)
-      emit({
-        type: 'tool-input-available',
-        toolCallId: 'write',
-        toolName: 'fs_write',
-        input: {}
+  it('streams one net patch for repeated edits to the same file', async () => {
+    const path = '/workspace/file.ts'
+    const runtime = {
+      toolsContext: {
+        fs_edit: { sessionId: 'session', cwd: '/workspace' }
+      }
+    } as never
+    mocks.run.mockImplementation(async (_sessions, request) => {
+      const context = request.options.toolsContext.fs_edit as {
+        trackFileChange: (mutation: { path: string; before: string; after: string }) => void
+      }
+      context.trackFileChange({ path, before: 'const value = 1\n', after: 'const value = 2\n' })
+      request.onChunk({
+        type: 'tool-input-start',
+        toolCallId: 'first',
+        toolName: 'fs_edit'
       } as UIMessageChunk)
-      emit({
+      request.onChunk({
         type: 'tool-output-available',
-        toolCallId: 'write',
-        output: 'pending',
-        preliminary: true
+        toolCallId: 'first',
+        output: { kind: 'diff', path, patch: '-const value = 1\n+const value = 2' }
       } as UIMessageChunk)
-      await vi.advanceTimersByTimeAsync(200)
-      expect(snapshots.compare).not.toHaveBeenCalled()
+      context.trackFileChange({ path, before: 'const value = 2\n', after: 'const value = 3\n' })
+      request.onChunk({
+        type: 'tool-input-start',
+        toolCallId: 'second',
+        toolName: 'fs_edit'
+      } as UIMessageChunk)
+      request.onChunk({
+        type: 'tool-output-available',
+        toolCallId: 'second',
+        output: { kind: 'diff', path, patch: '-const value = 2\n+const value = 3' }
+      } as UIMessageChunk)
+      return undefined
+    })
+    const { worker, sink } = createWorker()
 
-      emit({ type: 'tool-output-available', toolCallId: 'write', output: 'done' } as UIMessageChunk)
-      await vi.advanceTimersByTimeAsync(200)
-      expect(snapshots.compare).toHaveBeenCalledOnce()
+    await worker.run({ ...input, runtime })
 
-      emit({ type: 'tool-input-start', toolCallId: 'edit', toolName: 'fs_edit' } as UIMessageChunk)
-      emit({ type: 'tool-output-error', toolCallId: 'edit', errorText: 'failed' } as UIMessageChunk)
-      await vi.advanceTimersByTimeAsync(200)
-      expect(snapshots.compare).toHaveBeenCalledOnce()
+    const reviewUpdates = sink.chunk.mock.calls
+      .map(([chunk]) => chunk)
+      .filter((chunk) => chunk.type === 'data-git-snapshot')
+    expect(reviewUpdates).toHaveLength(2)
+    expect(reviewUpdates.at(-1)).toMatchObject({
+      data: {
+        files: [
+          {
+            path: 'file.ts',
+            additions: 1,
+            deletions: 1,
+            patch: expect.stringContaining('-const value = 1')
+          }
+        ]
+      }
+    })
+    expect(reviewUpdates.at(-1).data.files[0].patch).toContain('+const value = 3')
+    expect(reviewUpdates.at(-1).data.files[0].patch).not.toContain('const value = 2')
+  })
 
-      complete()
-      await running
-      expect(snapshots.compare).toHaveBeenCalledTimes(2)
-    } finally {
-      vi.useRealTimers()
-    }
+  it('updates a live review only after successful fs_write and fs_edit calls', async () => {
+    let emit!: (chunk: UIMessageChunk) => void
+    let complete!: () => void
+    let trackFileChange!: (mutation: {
+      path: string
+      before: string | null
+      after: string
+    }) => void
+    mocks.run.mockImplementation(
+      (_sessions, request) =>
+        new Promise<UIMessage | undefined>((resolve) => {
+          emit = request.onChunk
+          trackFileChange = request.options.toolsContext.fs_write.trackFileChange
+          complete = () => resolve(undefined)
+        })
+    )
+    const { worker, sink } = createWorker()
+    const running = worker.run(input)
+    await vi.waitFor(() => expect(emit).toBeDefined())
+
+    emit({ type: 'tool-input-start', toolCallId: 'read', toolName: 'fs_read' } as UIMessageChunk)
+    emit({ type: 'tool-output-available', toolCallId: 'read', output: 'text' } as UIMessageChunk)
+    trackFileChange({ path: '/workspace/file.ts', before: null, after: 'new\n' })
+    emit({
+      type: 'tool-input-available',
+      toolCallId: 'write',
+      toolName: 'fs_write',
+      input: {}
+    } as UIMessageChunk)
+    emit({
+      type: 'tool-output-available',
+      toolCallId: 'write',
+      output: 'pending',
+      preliminary: true
+    } as UIMessageChunk)
+    expect(sink.chunk).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'data-git-snapshot' })
+    )
+
+    emit({
+      type: 'tool-output-available',
+      toolCallId: 'write',
+      output: { kind: 'diff', path: '/workspace/file.ts', patch: '--- a/file.ts\n+++ b/file.ts\n@@ -0,0 +1 @@\n+new' }
+    } as UIMessageChunk)
+    expect(sink.chunk).toHaveBeenCalledWith({
+      type: 'data-git-snapshot',
+      id: 'review',
+      data: {
+        root: resolve('/workspace'),
+        files: [
+          {
+            path: 'file.ts',
+            patch: expect.stringContaining('+new'),
+            additions: 1,
+            deletions: 0,
+            binary: false
+          }
+        ]
+      }
+    })
+
+    emit({ type: 'tool-input-start', toolCallId: 'edit', toolName: 'fs_edit' } as UIMessageChunk)
+    emit({ type: 'tool-output-error', toolCallId: 'edit', errorText: 'failed' } as UIMessageChunk)
+
+    complete()
+    await running
   })
 
   it('forwards chunks and ends after successful execution', async () => {
@@ -137,46 +213,53 @@ describe('AgentWorker', () => {
     expect(sink.end).not.toHaveBeenCalled()
   })
 
-  it('cancels a pending review update after an execution error', async () => {
-    vi.useFakeTimers()
-    try {
-      const error = new Error('failed')
-      mocks.run.mockImplementation(async (_sessions, request) => {
-        request.onChunk({
-          type: 'tool-output-available',
-          toolCallId: 'call',
-          output: 'done'
-        } as UIMessageChunk)
-        throw error
-      })
-      const { worker, snapshots, sink } = createWorker()
-      snapshots.start.mockResolvedValue({ tree: 'before' })
-
-      await worker.run(input)
-      await vi.advanceTimersByTimeAsync(200)
-
-      expect(sink.error).toHaveBeenCalledWith(error)
-      expect(snapshots.compare).not.toHaveBeenCalled()
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it('streams and persists the final review snapshot', async () => {
+  it('streams and persists successful tool diffs', async () => {
     const response: UIMessage = { id: 'assistant', role: 'assistant', parts: [] }
-    const snapshot = {
-      files: [{ additions: 1, deletions: 0, path: 'file.ts', patch: '+change' }],
-      root: '/workspace'
-    }
-    mocks.run.mockResolvedValue(response)
-    const { worker, sessions, snapshots, sink } = createWorker()
-    snapshots.start.mockResolvedValue({ tree: 'before' })
-    snapshots.compare.mockResolvedValue(snapshot)
+    mocks.run.mockImplementation(async (_sessions, request) => {
+      request.options.toolsContext.fs_write.trackFileChange({
+        path: '/workspace/file.ts',
+        before: null,
+        after: 'change\n'
+      })
+      request.onChunk({
+        type: 'tool-input-start',
+        toolCallId: 'write',
+        toolName: 'fs_write'
+      } as UIMessageChunk)
+      request.onChunk({
+        type: 'tool-output-available',
+        toolCallId: 'write',
+        output: {
+          kind: 'diff',
+          path: '/workspace/file.ts',
+          patch: '--- a/file.ts\n+++ b/file.ts\n@@ -0,0 +1 @@\n+change'
+        }
+      } as UIMessageChunk)
+      return response
+    })
+    const { worker, sessions, sink } = createWorker()
 
     await worker.run(input)
 
-    const part = { type: 'data-git-snapshot', id: 'review', data: snapshot }
-    expect(sink.chunk).toHaveBeenCalledWith(part)
+    const part = sink.chunk.mock.calls
+      .map(([chunk]) => chunk)
+      .find((chunk) => chunk.type === 'data-git-snapshot')
+    expect(part).toMatchObject({
+      type: 'data-git-snapshot',
+      id: 'review',
+      data: {
+        root: resolve('/workspace'),
+        files: [
+          {
+            additions: 1,
+            deletions: 0,
+            path: 'file.ts',
+            patch: expect.stringContaining('+change'),
+            binary: false
+          }
+        ]
+      }
+    })
     expect(sessions.saveMessages).toHaveBeenCalledWith('session', [{ ...response, parts: [part] }])
   })
 
@@ -187,11 +270,7 @@ describe('AgentWorker', () => {
       )
       return undefined
     })
-    const { worker, sessions, snapshots, sink } = createWorker()
-    snapshots.start.mockResolvedValue({ tree: 'before' })
-    snapshots.compare.mockResolvedValue({
-      files: [{ additions: 1, deletions: 0, path: 'cancelled.ts', patch: '+cancelled' }]
-    })
+    const { worker, sessions, sink } = createWorker()
 
     const running = worker.run(input)
     await vi.waitFor(() => expect(mocks.run).toHaveBeenCalledOnce())
@@ -201,28 +280,9 @@ describe('AgentWorker', () => {
     await running
     expect(sink.end).toHaveBeenCalledOnce()
     expect(sink.error).not.toHaveBeenCalled()
-    expect(snapshots.compare).not.toHaveBeenCalled()
     expect(sessions.saveMessages).not.toHaveBeenCalled()
   })
 
-  it('does not start the agent session when cancelled during snapshot setup', async () => {
-    let resolveStart!: (value: { tree: string }) => void
-    const start = new Promise<{ tree: string }>((resolve) => {
-      resolveStart = resolve
-    })
-    const { worker, snapshots, sink } = createWorker()
-    snapshots.start.mockReturnValue(start)
-
-    const running = worker.run(input)
-    await vi.waitFor(() => expect(snapshots.start).toHaveBeenCalledOnce())
-    worker.cancel()
-    resolveStart({ tree: 'before' })
-    await running
-
-    expect(mocks.run).not.toHaveBeenCalled()
-    expect(snapshots.compare).not.toHaveBeenCalled()
-    expect(sink.end).toHaveBeenCalledOnce()
-  })
 
   it('ignores chunks emitted after cancellation', async () => {
     let emit!: (chunk: UIMessageChunk) => void

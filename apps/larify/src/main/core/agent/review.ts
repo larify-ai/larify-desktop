@@ -1,7 +1,10 @@
+import { isAbsolute, relative, resolve } from 'node:path'
 import type { UIMessageChunk } from 'ai'
-import { GitSnapshotService, type GitSnapshotPartData } from '../git/snapshot'
+import { createTwoFilesPatch, diffLines } from 'diff'
+import { isPathInside } from '../../utils/path'
+import type { GitSnapshotFile, GitSnapshotPartData } from '../git/snapshot'
+import type { FileMutation } from '../plugin/protocol'
 
-const updateDelay = 150
 const reviewPartId = 'review'
 
 export const reviewChunk = (data: GitSnapshotPartData | null): UIMessageChunk => ({
@@ -10,67 +13,99 @@ export const reviewChunk = (data: GitSnapshotPartData | null): UIMessageChunk =>
   data
 })
 
+interface TrackedFileChange {
+  additions: number
+  binary: false
+  deletions: number
+  path: string
+  patch: string | null
+}
+
+function displayPath(root: string, path: string): string {
+  if (!isAbsolute(path)) return path
+  const relativePath = relative(root, path)
+  return relativePath && isPathInside(root, path) ? relativePath : path
+}
+
+function fileKey(path: string): string {
+  const normalized = resolve(path)
+  return process.platform === 'win32' ? normalized.toLowerCase() : normalized
+}
+
+/** Keeps the first content seen for each file and diffs it against the latest write. */
+export class FileChangeTracker {
+  private readonly files = new Map<string, { original: string | null; current: string }>()
+
+  update({ path, before, after }: FileMutation): void {
+    const key = fileKey(path)
+    const existing = this.files.get(key)
+    const original = existing ? existing.original : before
+    this.files.set(key, { original, current: after })
+  }
+
+  result(path: string): TrackedFileChange | undefined {
+    const file = this.files.get(fileKey(path))
+    if (!file) return undefined
+    if (file.original !== null && file.original === file.current) {
+      return { path, patch: null, additions: 0, deletions: 0, binary: false }
+    }
+    const before = file.original ?? ''
+    const changes = diffLines(before, file.current)
+    return {
+      path,
+      patch: createTwoFilesPatch(path, path, before, file.current, '', '', {
+        context: 3
+      }),
+      additions: changes.reduce(
+        (total, change) => total + (change.added ? (change.count ?? 0) : 0),
+        0
+      ),
+      deletions: changes.reduce(
+        (total, change) => total + (change.removed ? (change.count ?? 0) : 0),
+        0
+      ),
+      binary: false
+    }
+  }
+}
+
+/** Tracks only successful file mutation tool results for one agent response. */
 export class AgentReview {
+  private readonly files = new Map<string, GitSnapshotFile>()
   private active = true
-  private timer?: ReturnType<typeof setTimeout>
-  private updating?: Promise<void>
-  private pending = false
-  private visible = false
 
   constructor(
-    private readonly snapshots: GitSnapshotService,
-    private readonly start: Awaited<ReturnType<GitSnapshotService['start']>>,
+    private readonly root: string,
     private readonly emit: (chunk: UIMessageChunk) => void
   ) {}
 
-  update(): void {
+  update(change: TrackedFileChange): void {
     if (!this.active) return
-    if (this.timer) clearTimeout(this.timer)
-    this.timer = setTimeout(() => {
-      this.timer = undefined
-      if (this.updating) {
-        this.pending = true
-        return
-      }
-      this.updating = this.compare().finally(() => {
-        this.updating = undefined
-        if (this.pending) {
-          this.pending = false
-          this.update()
-        }
-      })
-    }, updateDelay)
+    const key = fileKey(change.path)
+    const path = displayPath(this.root, change.path)
+    if (change.patch === null) {
+      this.files.delete(key)
+      this.emit(reviewChunk(this.data()))
+      return
+    }
+    this.files.set(key, {
+      ...change,
+      path,
+      patch: change.patch
+    })
+    this.emit(reviewChunk(this.data()))
   }
 
-  async finish(): Promise<GitSnapshotPartData | null> {
-    if (!this.active) return null
-    if (this.timer) clearTimeout(this.timer)
-    this.timer = undefined
-    this.pending = false
-    await this.updating
-    if (!this.active) return null
-    const data = await this.snapshots.compare(this.start)
-    if (!this.active) return null
-    this.publish(data)
-    return data
+  finish(): GitSnapshotPartData | null {
+    return this.data()
   }
 
   dispose(): void {
     this.active = false
-    if (this.timer) clearTimeout(this.timer)
-    this.timer = undefined
-    this.pending = false
   }
 
-  private async compare(): Promise<void> {
-    const data = await this.snapshots.compare(this.start)
-    if (!this.active) return
-    this.publish(data)
-  }
-
-  private publish(data: GitSnapshotPartData | null): void {
-    if (!data && !this.visible) return
-    this.visible = data !== null
-    this.emit(reviewChunk(data))
+  private data(): GitSnapshotPartData | null {
+    const files = [...this.files.values()]
+    return files.length ? { files, root: resolve(this.root) } : null
   }
 }

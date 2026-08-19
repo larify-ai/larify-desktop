@@ -3,9 +3,11 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   CHANGES_NAVIGATION_EVENT,
+  changesRootForFile,
   peekChangesNavigation,
   requestChangesNavigation,
   resolveChangesPath,
+  sameChangesPath,
   takeChangesNavigation
 } from '../../../../src/extensions/workspace/renderer/changes/changes-navigation'
 
@@ -18,6 +20,17 @@ describe('changes navigation', () => {
     )
     expect(resolveChangesPath('/项目', '目录/文件.ts')).toBe('/项目/目录/文件.ts')
     expect(resolveChangesPath('/项目', '/其他/文件.ts')).toBe('/其他/文件.ts')
+  })
+
+  it('uses the containing directory as the root for files outside the workspace', () => {
+    expect(changesRootForFile('D:\\repo', 'src/file.ts')).toBe('D:\\repo')
+    expect(changesRootForFile('D:\\repo', 'E:\\other\\file.ts')).toBe('E:\\other')
+    expect(changesRootForFile('/repo', '/other/file.ts')).toBe('/other')
+  })
+
+  it('compares paths using the workspace platform rules', () => {
+    expect(sameChangesPath('D:\\repo', 'D:\\repo\\File.ts', 'd:\\REPO\\file.ts')).toBe(true)
+    expect(sameChangesPath('/repo', '/repo/File.ts', '/repo/file.ts')).toBe(false)
   })
 
   it('keeps the latest pending selection and emits it', () => {

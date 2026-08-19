@@ -69,7 +69,7 @@ const tabIdInputSchema = z.object({ id: idSchema }).strict()
 const snapshotSchema = z
   .object({
     id: idSchema,
-    interactive: z.boolean().default(true).describe("Only interactive elements."),
+    interactive: z.boolean().default(false).describe("Only interactive elements."),
     includeUrls: z.boolean().default(false).describe("Include href URLs for links."),
     compact: z.boolean().default(false).describe("Remove empty structural elements."),
     depth: z.number().int().positive().optional().describe("Limit tree depth."),

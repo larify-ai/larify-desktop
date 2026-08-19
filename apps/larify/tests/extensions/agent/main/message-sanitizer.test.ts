@@ -78,6 +78,85 @@ describe('message sanitizer', () => {
     expect(sanitizeMessages([message])).toEqual([message])
   })
 
+  it('drops a pending ask-user call when it is no longer the last message', () => {
+    const assistant = {
+      id: 'assistant-1',
+      role: 'assistant',
+      parts: [
+        { type: 'text', text: 'Choose a mode.' },
+        {
+          type: 'tool-agent_ask_user',
+          toolCallId: 'call-1',
+          state: 'input-available',
+          input: { message: 'Continue?', options: [{ label: 'Yes' }] }
+        }
+      ]
+    } as UIMessage
+    const user = {
+      id: 'user-2',
+      role: 'user',
+      parts: [{ type: 'text', text: 'Do something else instead.' }]
+    } as UIMessage
+
+    expect(sanitizeMessages([assistant, user])).toEqual([
+      { ...assistant, parts: [assistant.parts[0]] },
+      user
+    ])
+  })
+
+  it('drops a superseded dynamic ask-user call', () => {
+    const assistant = {
+      id: 'assistant-1',
+      role: 'assistant',
+      parts: [
+        {
+          type: 'dynamic-tool',
+          toolName: 'agent_ask_user',
+          toolCallId: 'call-1',
+          state: 'input-available',
+          input: { message: 'Continue?', options: [{ label: 'Yes' }] }
+        }
+      ]
+    } as UIMessage
+    const user = {
+      id: 'user-2',
+      role: 'user',
+      parts: [{ type: 'text', text: 'New request' }]
+    } as UIMessage
+
+    expect(sanitizeMessages([assistant, user])).toEqual([user])
+  })
+
+  it('converts history after removing a superseded ask-user call', async () => {
+    const tools = { agent_ask_user: { inputSchema: {} as never } } as unknown as ToolSet
+    const messages = [
+      {
+        id: 'assistant-1',
+        role: 'assistant',
+        parts: [
+          {
+            type: 'tool-agent_ask_user',
+            toolCallId: 'call-1',
+            state: 'input-available',
+            input: { message: 'Continue?', options: [{ label: 'Yes' }] }
+          }
+        ]
+      },
+      {
+        id: 'user-2',
+        role: 'user',
+        parts: [{ type: 'text', text: 'New request' }]
+      }
+    ] as UIMessage[]
+
+    const prepared = await prepareMessages(messages)
+
+    expect(prepared).toEqual([messages[1]])
+    await expect(toModelMessages(prepared, tools)).resolves.toEqual([
+      { role: 'user', content: [{ type: 'text', text: 'New request' }] }
+    ])
+  })
+
   it('keeps dynamic ask-user calls while waiting for user input', () => {
     const message = {
       id: 'assistant-1',

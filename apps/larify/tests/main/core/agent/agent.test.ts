@@ -2,7 +2,6 @@ import type { UIMessage } from 'ai'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
-  toModel: vi.fn(),
   run: vi.fn(),
   runtime: vi.fn(),
   workspace: 'default-workspace'
@@ -13,12 +12,6 @@ vi.mock('../../../../src/main/core/agent/persist', () => ({
 }))
 vi.mock('../../../../src/main/core/agent/runtime', () => ({
   createAgentRuntime: mocks.runtime
-}))
-vi.mock('../../../../src/main/core/git/snapshot', () => ({
-  GitSnapshotService: class {
-    start = vi.fn().mockResolvedValue(null)
-    compare = vi.fn().mockResolvedValue(null)
-  }
 }))
 vi.mock('../../../../src/main/utils/app-paths', () => ({
   larifyWorkspacePath: () => mocks.workspace
@@ -42,9 +35,8 @@ const pluginHost = {}
 beforeEach(() => {
   vi.clearAllMocks()
   sessions.loadMessages.mockReturnValue([])
-  mocks.toModel.mockResolvedValue([])
   mocks.run.mockResolvedValue(undefined)
-  mocks.runtime.mockReturnValue({ system: 'runtime' })
+  mocks.runtime.mockReturnValue({ system: 'runtime', toolsContext: {} })
 })
 
 describe('Agent', () => {

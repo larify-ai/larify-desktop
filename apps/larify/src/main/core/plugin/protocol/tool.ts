@@ -4,6 +4,14 @@ import type { Metadata } from './metadata'
 
 export type Tool = AiTool
 
+export interface FileMutation {
+  path: string
+  before: string | null
+  after: string
+}
+
+export type TrackFileChange = (mutation: FileMutation) => void
+
 export function wrapTool(tool: Tool): Tool {
   const execute = tool.execute
   if (!(tool.inputSchema instanceof z.ZodObject)) {
@@ -36,7 +44,10 @@ export function wrapTool(tool: Tool): Tool {
 
 export const toolContextSchema = z.object({
   sessionId: z.string(),
-  cwd: z.string()
+  cwd: z.string(),
+  trackFileChange: z
+    .custom<TrackFileChange>((value) => typeof value === 'function')
+    .optional()
 })
 
 export type ToolContext = z.infer<typeof toolContextSchema>

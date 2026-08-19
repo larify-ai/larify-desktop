@@ -7,7 +7,11 @@ import { MessageView } from './message-view'
 import { messagePageSize } from './session-messages'
 import { useViewportBottomAnchor } from './use-viewport-bottom-anchor'
 
-const Message = memo(MessageView)
+const Message = memo(
+  MessageView,
+  (previous, next) =>
+    !next.streaming && previous.streaming === next.streaming && previous.message === next.message
+)
 const pageBuffer = 1
 const estimatedMessageHeight = 80
 const leaveBottomThreshold = 32
@@ -39,6 +43,7 @@ export function AssistantMessageList({
   active = true,
   messages,
   live = false,
+  followRequest = 0,
   recentStart,
   olderMessages,
   onLoadRange
@@ -46,6 +51,7 @@ export function AssistantMessageList({
   active?: boolean
   messages: UIMessage[]
   live?: boolean
+  followRequest?: number
   recentStart: number
   olderMessages: Map<number, UIMessage>
   onLoadRange: (firstPage: number, lastPage: number) => void
@@ -81,6 +87,18 @@ export function AssistantMessageList({
   useEffect(() => {
     if (live && scrollMode.current === 'following') list.current?.autoscrollToBottom()
   }, [live, messages])
+
+  useLayoutEffect(() => {
+    if (followRequest === 0) return
+    scrollMode.current = 'following'
+    const followBottom = (): void => {
+      list.current?.autoscrollToBottom()
+      scrollViewportToBottom()
+    }
+    followBottom()
+    const frame = requestAnimationFrame(followBottom)
+    return () => cancelAnimationFrame(frame)
+  }, [followRequest, scrollViewportToBottom])
 
   useEffect(
     () => () => {
@@ -225,7 +243,10 @@ export function AssistantMessageList({
               className={`mx-auto w-[calc(100%-var(--larify-scrollbar-size))] max-w-4xl min-w-0 translate-x-[calc(var(--larify-scrollbar-size)/2)] px-6 pt-3 ${index === totalCount - 1 ? 'pb-30' : 'pb-3'}`}
               data-message-index={index}
             >
-              <Message message={message} streaming={live && message.id === messages.at(-1)?.id} />
+              <Message
+                message={message}
+                streaming={live && index === totalCount - 1 && message.role === 'assistant'}
+              />
             </div>
           ) : (
             <ScrollPlaceholder height={estimatedMessageHeight} index={index} />

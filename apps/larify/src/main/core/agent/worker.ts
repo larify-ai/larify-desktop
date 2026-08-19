@@ -2,8 +2,7 @@ import type { UIMessage, UIMessageChunk } from 'ai'
 import type { SessionStore } from '../session'
 import type { AgentOptions } from './engine'
 import { runStoredAgentSession } from './persist'
-import { GitSnapshotService } from '../git/snapshot'
-import { AgentReview, reviewChunk } from './review'
+import { AgentReview, FileChangeTracker, reviewChunk } from './review'
 
 const reviewTools = new Set(['fs_edit', 'fs_write'])
 
@@ -27,7 +26,6 @@ export class AgentWorker {
 
   constructor(
     private readonly sessions: SessionStore,
-    private readonly snapshots: GitSnapshotService,
     private readonly sink: AgentSink
   ) {}
 
@@ -37,18 +35,28 @@ export class AgentWorker {
     this.controller = controller
     let review: AgentReview | undefined
     try {
-      const start = await this.snapshots.start(input.cwd)
-      if (controller.signal.aborted) return
-      const activeReview = new AgentReview(this.snapshots, start, (chunk) => {
+      const activeReview = new AgentReview(input.cwd, (chunk) => {
         if (!controller.signal.aborted) this.sink.chunk(chunk)
       })
+      const fileChanges = new FileChangeTracker()
+      const toolsContext = Object.fromEntries(
+        Object.entries(input.runtime.toolsContext).map(([name, context]) => [
+          name,
+          reviewTools.has(name)
+            ? {
+                ...(context as Record<string, unknown>),
+                trackFileChange: fileChanges.update.bind(fileChanges)
+              }
+            : context
+        ])
+      )
       review = activeReview
       const reviewToolCalls = new Set<string>()
       const response = await runStoredAgentSession(this.sessions, {
         sessionId: input.sessionId,
         cwd: input.cwd,
         message: input.message,
-        options: { ...input.runtime, abortSignal: controller.signal },
+        options: { ...input.runtime, toolsContext, abortSignal: controller.signal },
         onTitle: (title) => {
           if (!controller.signal.aborted) this.sink.title?.(title)
         },
@@ -65,7 +73,14 @@ export class AgentWorker {
             !chunk.preliminary &&
             reviewToolCalls.delete(chunk.toolCallId)
           ) {
-            activeReview.update()
+            const output = chunk.output
+            const tracked =
+              output &&
+              typeof output === 'object' &&
+              typeof (output as { path?: unknown }).path === 'string'
+                ? fileChanges.result((output as { path: string }).path)
+                : undefined
+            if (tracked) activeReview.update(tracked)
           } else if (
             chunk.type === 'tool-input-error' ||
             chunk.type === 'tool-output-error' ||
@@ -76,7 +91,7 @@ export class AgentWorker {
         }
       })
       if (controller.signal.aborted) return
-      const snapshot = await activeReview.finish()
+      const snapshot = activeReview.finish()
       if (snapshot && response) {
         response.parts.push(reviewChunk(snapshot) as (typeof response.parts)[number])
         this.sessions.saveMessages(input.sessionId, [response])

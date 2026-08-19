@@ -150,6 +150,66 @@ describe('interaction assistant message list', () => {
     expect((captured.props as VirtuosoProps).totalCount).toBe(5001)
   })
 
+  it('re-renders a streaming message when the chat mutates its existing object', async () => {
+    const streamingMessage = message('partial')
+    const itemContainer = document.createElement('div')
+    document.body.append(itemContainer)
+    const itemRoot = createRoot(itemContainer)
+    try {
+      await render({ messages: [streamingMessage], recentStart: 0, live: true })
+      await act(async () => itemRoot.render((captured.props as VirtuosoProps).itemContent(0)))
+      expect(itemContainer.textContent).toContain('partial')
+
+      const textPart = streamingMessage.parts[0]
+      if (textPart.type !== 'text') throw new Error('expected a text part')
+      textPart.text = 'complete streamed text'
+      await render({ messages: [streamingMessage], recentStart: 0, live: true })
+      await act(async () => itemRoot.render((captured.props as VirtuosoProps).itemContent(0)))
+
+      expect(itemContainer.textContent).toContain('complete streamed text')
+    } finally {
+      await act(async () => itemRoot.unmount())
+      itemContainer.remove()
+    }
+  })
+
+  it('waits for an assistant message before marking streaming content', async () => {
+    const assistant = message('assistant')
+    const user: UIMessage = {
+      id: 'user',
+      role: 'user',
+      parts: [{ type: 'text', text: 'next request' }]
+    }
+    await render({ messages: [assistant, user], recentStart: 0, live: true })
+
+    const props = captured.props as VirtuosoProps
+    expect(props.itemContent(0).props.children.props.streaming).toBe(false)
+    expect(props.itemContent(1).props.children.props.streaming).toBe(false)
+
+    const response = message('response')
+    await render({ messages: [assistant, user, response], recentStart: 0, live: true })
+    const updated = captured.props as VirtuosoProps
+    expect(updated.itemContent(0).props.children.props.streaming).toBe(false)
+    expect(updated.itemContent(2).props.children.props.streaming).toBe(true)
+  })
+
+  it('resumes following after a tool output is submitted', async () => {
+    const props = { messages: [message('latest')], recentStart: 0 }
+    await render(props)
+    act(() => (captured.props as VirtuosoProps).atBottomStateChange(true))
+    const scroller = createScroller(100)
+    container.firstElementChild?.append(scroller)
+    act(() => (captured.props as VirtuosoProps).scrollerRef(scroller))
+    scroller.scrollTop = 50
+    act(() => scroller.dispatchEvent(new Event('scroll')))
+    await act(() => new Promise((resolve) => setTimeout(resolve, 2)))
+    captured.autoscrollToBottom.mockClear()
+
+    await render({ ...props, followRequest: 1 })
+
+    expect(captured.autoscrollToBottom).toHaveBeenCalled()
+  })
+
   it('scrolls to the bottom when a mounted conversation becomes active', async () => {
     await render({
       active: false,
@@ -485,6 +545,7 @@ async function render({
   messages,
   recentStart,
   live = false,
+  followRequest = 0,
   olderMessages = new Map(),
   onLoadRange = vi.fn()
 }: {
@@ -492,6 +553,7 @@ async function render({
   messages: UIMessage[]
   recentStart: number
   live?: boolean
+  followRequest?: number
   olderMessages?: Map<number, UIMessage>
   onLoadRange?: (firstPage: number, lastPage: number) => void
 }): Promise<void> {
@@ -501,6 +563,7 @@ async function render({
         active,
         messages,
         live,
+        followRequest,
         recentStart,
         olderMessages,
         onLoadRange

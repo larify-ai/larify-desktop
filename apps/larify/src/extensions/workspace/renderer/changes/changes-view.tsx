@@ -17,6 +17,7 @@ import {
   CHANGES_NAVIGATION_EVENT,
   peekChangesNavigation,
   resolveChangesPath,
+  sameChangesPath,
   takeChangesNavigation,
   type ChangesNavigationRequest
 } from './changes-navigation'
@@ -51,7 +52,9 @@ export function ChangesView({
   const entries = useMemo(() => (root ? createGitChangeTree(root, statuses) : []), [root, statuses])
   const hasChanges = changes.length > 0
   const requestedPath = selected && root ? resolveChangesPath(root, selected) : selected
-  const current = changes.find((status) => status.path === requestedPath) ?? changes[0] ?? null
+  const current = selected
+    ? changes.find((status) => root && sameChangesPath(root, status.path, requestedPath!)) ?? null
+    : changes[0] ?? null
   const selectedPath = current?.path ?? null
   const previewActive = active && (workbenchState.visible || workbenchState.animating)
 
@@ -167,6 +170,10 @@ export function ChangesView({
         <div className="grid h-full place-items-center text-sm text-muted-foreground">{error}</div>
       ) : loading ? (
         <div className="h-full" />
+      ) : selected ? (
+        <div className="grid h-full place-items-center text-sm text-muted-foreground">
+          无法定位该变更文件
+        </div>
       ) : (
         <div className="grid h-full place-items-center text-sm text-muted-foreground">暂无变更</div>
       )}

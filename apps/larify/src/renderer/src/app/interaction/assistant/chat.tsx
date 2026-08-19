@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useChat, type Chat } from '@ai-sdk/react'
 import type { UIMessage } from 'ai'
 import { AssistantMessageList } from './message-list'
@@ -53,8 +53,10 @@ export function AssistantChat({
   const started = messages.length > 0
   const history = useMemo(() => inputHistory(messages), [messages])
   const titleCreated = useRef(Boolean(title))
+  const [followRequest, setFollowRequest] = useState(0)
   const submitToolOutput = useCallback(
     (tool: string, toolCallId: string, output: unknown) => {
+      setFollowRequest((current) => current + 1)
       void addToolOutput({ tool, toolCallId, output })
     },
     [addToolOutput]
@@ -73,6 +75,7 @@ export function AssistantChat({
           active={active}
           messages={messages}
           live={running}
+          followRequest={followRequest}
           recentStart={recentStart}
           olderMessages={olderMessages}
           onLoadRange={onLoadRange}

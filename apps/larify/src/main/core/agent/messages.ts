@@ -9,9 +9,10 @@ import {
 
 type MessagePart = UIMessage['parts'][number]
 
-function shouldKeepPart(part: MessagePart): boolean {
+function shouldKeepPart(part: MessagePart, keepPendingAskUser: boolean): boolean {
   if (!isToolUIPart(part)) return true
   if (
+    keepPendingAskUser &&
     part.state === 'input-available' &&
     (part.type === 'tool-agent_ask_user' ||
       (part.type === 'dynamic-tool' && part.toolName === 'agent_ask_user'))
@@ -25,9 +26,9 @@ function shouldKeepPart(part: MessagePart): boolean {
   )
 }
 
-function sanitizeMessage(message: UIMessage): UIMessage | undefined {
+function sanitizeMessage(message: UIMessage, keepPendingAskUser: boolean): UIMessage | undefined {
   if (message.role !== 'assistant') return message
-  const parts = message.parts.filter(shouldKeepPart)
+  const parts = message.parts.filter((part) => shouldKeepPart(part, keepPendingAskUser))
   return parts.length ? { ...message, parts } : undefined
 }
 
@@ -55,7 +56,9 @@ function replaceFilesWithPaths(message: UIMessage): UIMessage {
 }
 
 export function sanitizeMessages(messages: UIMessage[]): UIMessage[] {
-  return messages.flatMap((message) => sanitizeMessage(message) ?? [])
+  return messages.flatMap(
+    (message, index) => sanitizeMessage(message, index === messages.length - 1) ?? []
+  )
 }
 
 export async function prepareMessages(messages: UIMessage[]): Promise<UIMessage[]> {

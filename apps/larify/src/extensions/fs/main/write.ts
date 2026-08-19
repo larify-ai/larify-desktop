@@ -56,6 +56,7 @@ export const writeFileTool = defineTool({
       const diagnostics = formatFileDiagnostics(await provideFileDiagnostics(target))
 
       const type = oldContent === null ? 'create' : 'update'
+      ctx.trackFileChange?.({ path: target, before: oldContent, after: content })
       const patch = createTwoFilesPatch(target, target, oldContent ?? '', content, '', '', {
         context: 3
       })

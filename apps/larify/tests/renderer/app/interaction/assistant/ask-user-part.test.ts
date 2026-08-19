@@ -45,6 +45,13 @@ describe('AskUserPart', () => {
     expect(onSubmit).toHaveBeenCalledWith(['Safe', 'Extra checks'])
   })
 
+  it('does not highlight the free-text border on focus', async () => {
+    await render({ input: { message: 'Anything else?' }, onSubmit: vi.fn() })
+
+    expect(container.querySelector('textarea')?.className).toContain('focus-visible:border-input')
+    expect(container.querySelector('textarea')?.className).toContain('focus-visible:ring-0')
+  })
+
   it('supports selecting and deselecting multiple options', async () => {
     const onSubmit = vi.fn()
     await render({

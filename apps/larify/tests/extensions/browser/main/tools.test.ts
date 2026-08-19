@@ -202,7 +202,7 @@ describe("browser toolkit", () => {
   it("uses interaction-focused snapshot defaults", () => {
     expect(parseToolInput("snapshot", { id: 1 }).data).toMatchObject({
       id: 1,
-      interactive: true,
+      interactive: false,
       includeUrls: false,
       compact: false,
     })

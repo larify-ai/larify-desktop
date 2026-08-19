@@ -57,6 +57,16 @@ describe('interaction assistant message part', () => {
     ])
   })
 
+  it('uses the text part state when it is available', () => {
+    render({ type: 'text', text: 'part streaming', state: 'streaming' })
+    render({ type: 'text', text: 'part done', state: 'done' }, true)
+
+    expect(harness.responseProps).toEqual([
+      expect.objectContaining({ children: 'part streaming', isAnimating: true }),
+      expect.objectContaining({ children: 'part done', isAnimating: false })
+    ])
+  })
+
   it('does not mount markdown rendering for empty text', () => {
     expect(render({ type: 'text', text: '' })).toBe('')
     expect(harness.responseProps).toHaveLength(0)

@@ -126,7 +126,7 @@ export function AskUserPart({
         value={note}
         onChange={(event) => setNote(event.currentTarget.value)}
         placeholder={options?.length ? '其他或补充说明（可选）' : '请输入回答'}
-        className="min-h-16 resize-none text-sm"
+        className="min-h-16 resize-none text-sm focus-visible:border-input focus-visible:ring-0"
       />
       <div className="flex justify-end">
         <Button

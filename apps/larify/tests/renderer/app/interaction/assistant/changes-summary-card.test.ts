@@ -9,6 +9,8 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true
 const { requestChangesNavigation } = vi.hoisted(() => ({ requestChangesNavigation: vi.fn() }))
 
 vi.mock('../../../../../src/extensions/workspace/renderer/changes/changes-navigation', () => ({
+  changesRootForFile: (root: string, file: string) =>
+    file === 'E:\\other\\outside.ts' ? 'E:\\other' : root,
   requestChangesNavigation
 }))
 
@@ -121,6 +123,34 @@ describe('ChangesSummaryCard', () => {
 
     expect(requestChangesNavigation).toHaveBeenCalledWith({
       path: 'image.png',
+      resourceId: 42
+    })
+  })
+
+  it('opens an outside file in a scoped changes workbench', async () => {
+    await act(async () => {
+      root.render(
+        createElement(ChangesSummaryCard, {
+          additions: 1,
+          deletions: 0,
+          files: [
+            {
+              additions: 1,
+              deletions: 0,
+              patch: '+outside',
+              path: 'E:\\other\\outside.ts'
+            }
+          ],
+          root: 'D:\\repo'
+        })
+      )
+    })
+
+    act(() => container.querySelectorAll('button')[1].click())
+    expect(openRequest?.options).toEqual({ root: 'E:\\other' })
+    act(() => openRequest?.onOpen?.(42))
+    expect(requestChangesNavigation).toHaveBeenCalledWith({
+      path: 'E:\\other\\outside.ts',
       resourceId: 42
     })
   })

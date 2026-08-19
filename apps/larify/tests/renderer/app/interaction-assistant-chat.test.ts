@@ -109,12 +109,13 @@ describe('AssistantChat', () => {
     expect(mocks.sendMessage).toHaveBeenCalledWith({ text: 'hello', files: [] })
     expect(mocks.stop).toHaveBeenCalledOnce()
 
-    mocks.toolOutput?.('agent_ask_user', 'call-1', ['Safe'])
+    await act(async () => mocks.toolOutput?.('agent_ask_user', 'call-1', ['Safe']))
     expect(mocks.addToolOutput).toHaveBeenCalledWith({
       tool: 'agent_ask_user',
       toolCallId: 'call-1',
       output: ['Safe']
     })
+    expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ followRequest: 1 }))
 
     onHeadingChange.mockClear()
     await act(async () =>
@@ -148,6 +149,34 @@ describe('AssistantChat', () => {
     root = null
 
     expect(onHeadingChange).not.toHaveBeenCalledWith(null)
+  })
+
+  it('requests bottom following after every tool output', async () => {
+    await act(async () =>
+      root?.render(
+        createElement(AssistantChat, {
+          chat: { id: 'session' } as never,
+          cwd: '',
+          onCwdChange: vi.fn(),
+          onHeadingChange: vi.fn()
+        })
+      )
+    )
+
+    await act(async () => mocks.toolOutput?.('agent_ask_user', 'call-1', ['First']))
+    await act(async () => mocks.toolOutput?.('agent_ask_user', 'call-2', ['Second']))
+
+    expect(mocks.addToolOutput).toHaveBeenNthCalledWith(1, {
+      tool: 'agent_ask_user',
+      toolCallId: 'call-1',
+      output: ['First']
+    })
+    expect(mocks.addToolOutput).toHaveBeenNthCalledWith(2, {
+      tool: 'agent_ask_user',
+      toolCallId: 'call-2',
+      output: ['Second']
+    })
+    expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ followRequest: 2 }))
   })
 
   it('does not create a heading for an empty session', async () => {

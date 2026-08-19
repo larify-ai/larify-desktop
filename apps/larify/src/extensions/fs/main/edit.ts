@@ -63,6 +63,7 @@ export const editFileTool = defineTool({
       markRead(ctx.sessionId, target, (await stat(target)).mtimeMs)
       const diagnostics = formatFileDiagnostics(await provideFileDiagnostics(target))
 
+      ctx.trackFileChange?.({ path: target, before: content, after: updated })
       const patch = createTwoFilesPatch(target, target, content, updated, '', '', { context: 3 })
       return {
         kind: 'diff' as const,

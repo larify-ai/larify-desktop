@@ -10,8 +10,25 @@ export const CHANGES_NAVIGATION_EVENT = 'larify:changes-navigation'
 
 const pending = new Map<number, ChangesNavigationRequest>()
 
+const pathForRoot = (root: string) =>
+  /^(?:[a-z]:[\\/]|\\\\)/i.test(root) ? win32Path : posixPath
+
 export const resolveChangesPath = (root: string, file: string): string =>
-  (/^(?:[a-z]:[\\/]|\\\\)/i.test(root) ? win32Path : posixPath).resolve(root, file)
+  pathForRoot(root).resolve(root, file)
+
+export function sameChangesPath(root: string, left: string, right: string): boolean {
+  const path = pathForRoot(root)
+  return path.relative(path.resolve(root, left), path.resolve(root, right)) === ''
+}
+
+export function changesRootForFile(root: string, file: string): string {
+  const path = pathForRoot(root)
+  const target = path.resolve(root, file)
+  const relative = path.relative(root, target)
+  const inside =
+    relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)
+  return inside ? root : path.dirname(target)
+}
 
 export function peekChangesNavigation(resourceId: number): ChangesNavigationRequest | null {
   return pending.get(resourceId) ?? null

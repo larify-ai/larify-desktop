@@ -1,5 +1,8 @@
 import { ChangesIcon } from '../../../../../extensions/workspace/renderer/changes/changes-icon'
-import { requestChangesNavigation } from '../../../../../extensions/workspace/renderer/changes/changes-navigation'
+import {
+  changesRootForFile,
+  requestChangesNavigation
+} from '../../../../../extensions/workspace/renderer/changes/changes-navigation'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '../../../components/ui/hover-card'
 import type { ChangeSummary } from './change-summary'
 import { ReviewHoverDiff } from './review-hover-diff'
@@ -11,6 +14,7 @@ export function ChangesSummaryCard({
   root
 }: ChangeSummary): React.JSX.Element {
   const openChanges = (selectedPath?: string): void => {
+    const targetRoot = root && selectedPath ? changesRootForFile(root, selectedPath) : root
     window.dispatchEvent(
       new CustomEvent('larify:workbench-open', {
         detail: {
@@ -21,7 +25,7 @@ export function ChangesSummaryCard({
                   resourceId
                 })
             : undefined,
-          options: root ? { root } : undefined,
+          options: targetRoot ? { root: targetRoot } : undefined,
           rendererId: 'changes'
         }
       })

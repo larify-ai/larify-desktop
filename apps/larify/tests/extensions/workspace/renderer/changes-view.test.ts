@@ -248,7 +248,7 @@ describe('ChangesView', () => {
     expect(container.querySelector('[data-testid="navigator"]')).toBeNull()
   })
 
-  it('falls back to the first change when the selected change disappears', async () => {
+  it('does not open another file when the selected change disappears', async () => {
     const first = status('D:\\workspace\\first.ts')
     const second = status('D:\\workspace\\second.ts')
     h.statuses = [first, second]
@@ -263,11 +263,10 @@ describe('ChangesView', () => {
 
     h.statuses = [first]
     await render()
-    expect(container.querySelector('[data-testid="diff"]')?.getAttribute('data-path')).toBe(
-      first.path
-    )
+    expect(container.querySelector('[data-testid="diff"]')).toBeNull()
+    expect(container.textContent).toContain('无法定位该变更文件')
 
-    expect(updateTab).toHaveBeenLastCalledWith({ title: '变更', tooltip: first.path })
+    expect(updateTab).toHaveBeenLastCalledWith({ title: '变更', tooltip: '全部变更' })
   })
 
   it('selects a changed file requested by a card', async () => {
@@ -281,6 +280,37 @@ describe('ChangesView', () => {
     expect(container.querySelector('[data-testid="diff"]')?.getAttribute('data-path')).toBe(
       second.path
     )
+  })
+
+  it('selects a Windows change when the requested path uses different casing', async () => {
+    const changed = status('D:\\workspace\\File.ts')
+    h.statuses = [changed]
+    requestChangesNavigation({ path: 'd:\\WORKSPACE\\file.ts', resourceId: 7 })
+
+    await render()
+
+    expect(container.querySelector('[data-testid="diff"]')?.getAttribute('data-path')).toBe(
+      changed.path
+    )
+  })
+
+  it('does not report a selected file as missing while changes are loading', async () => {
+    h.loading = true
+    requestChangesNavigation({ path: 'pending.ts', resourceId: 7 })
+
+    await render()
+
+    expect(container.textContent).not.toContain('无法定位该变更文件')
+  })
+
+  it('shows a status error before reporting a selected file as missing', async () => {
+    h.error = 'status failed'
+    requestChangesNavigation({ path: 'pending.ts', resourceId: 7 })
+
+    await render()
+
+    expect(container.textContent).toContain('status failed')
+    expect(container.textContent).not.toContain('无法定位该变更文件')
   })
 
   it('resolves a card path from the workspace root instead of cwd', async () => {

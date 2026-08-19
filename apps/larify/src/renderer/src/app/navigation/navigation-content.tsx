@@ -1,4 +1,4 @@
-import { BookOpenIcon, BoxIcon, MessageCirclePlusIcon } from 'lucide-react'
+import { BookOpenIcon, LayoutGridIcon, MessageCirclePlusIcon } from 'lucide-react'
 import { useAssistantSessions } from '../interaction/assistant/sessions-context'
 import { NavigationAction } from './navigation-action'
 import { Workspace } from './workspace'
@@ -14,7 +14,7 @@ export function NavigationContent(): React.JSX.Element {
         <NavigationAction icon={MessageCirclePlusIcon} onClick={() => sessions.create()}>
           新建任务
         </NavigationAction>
-        <NavigationAction icon={BoxIcon}>百宝箱</NavigationAction>
+        <NavigationAction icon={LayoutGridIcon}>百宝箱</NavigationAction>
         <NavigationAction icon={BookOpenIcon} iconClassName="size-[17px]">
           知识库
         </NavigationAction>

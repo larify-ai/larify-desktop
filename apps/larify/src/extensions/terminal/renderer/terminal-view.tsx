@@ -14,6 +14,12 @@ import '@xterm/xterm/css/xterm.css'
 import './terminal-view.css'
 
 const RESIZE_DEBOUNCE_MS = 100
+// Never shrink the terminal below these defaults. fit() below skips resizing
+// when the container would force a dimension under the defaults (e.g. while the
+// workbench is collapsed / measuring an invisible pane), so a too-small resize
+// that makes output wrap/truncate (git diff pager etc.) is avoided.
+const MIN_COLS = 80
+const MIN_ROWS = 24
 
 const readCssVar = (name: string): string =>
   getComputedStyle(document.documentElement).getPropertyValue(name).trim()
@@ -99,9 +105,17 @@ export function TerminalView({
     }
   }, [sessionId, terminalId])
 
+  // Only apply a fit that keeps the terminal at (or above) the default
+  // dimensions. When the container is collapsed / too small to hold them, we
+  // keep the current (larger) size instead of shrinking, so output is not
+  // wrapped/truncated.
   const fit = useCallback((): void => {
     try {
-      fitRef.current?.fit()
+      const fitAddon = fitRef.current
+      const dims = fitAddon?.proposeDimensions()
+      if (!dims || isNaN(dims.cols) || isNaN(dims.rows)) return
+      if (dims.cols < MIN_COLS || dims.rows < MIN_ROWS) return
+      fitAddon.fit()
     } catch {
       // The pane can be measured while it is collapsing.
     }
@@ -216,7 +230,7 @@ export function TerminalView({
     }
     container.addEventListener('contextmenu', handleContextMenu)
 
-    fitAddon.fit()
+    fit()
     void window.bridge
       .invoke('terminal:snapshot', sessionId, terminalId)
       .then((value) => {

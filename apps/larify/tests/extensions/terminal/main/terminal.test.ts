@@ -490,11 +490,15 @@ describe('Terminal', () => {
     const terminal = new Terminal(1, { shell: 'sh', cwd })
 
     terminal.write('echo hello\r')
-    terminal.resize(0, -5)
+    terminal.resize(120, 40) // grown fine
+    terminal.resize(0, -5) // too small -> clamped back to defaults
+    terminal.resize(5, 6) // still too small -> kept at defaults
 
     expect(fakePty.write).toHaveBeenCalledWith('echo hello\r')
-    expect(fakePty.resize).toHaveBeenCalledWith(1, 1)
-    expect(await terminal.snapshot()).toMatchObject({ cols: 1, rows: 1 })
+    // The large resize applies; the too-small ones clamp back to the defaults.
+    expect(fakePty.resize).toHaveBeenCalledWith(120, 40)
+    expect(fakePty.resize).toHaveBeenCalledWith(80, 24)
+    expect(await terminal.snapshot()).toMatchObject({ cols: 80, rows: 24 })
   })
 
   it('delays exit until the final data flush window passes', async () => {

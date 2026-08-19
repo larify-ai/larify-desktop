@@ -15,6 +15,11 @@ const EXIT_FLUSH_MS = 250
 const HEADLESS_FLUSH_TIMEOUT_MS = 5000
 const SCROLLBACK = 10000
 const VSCODE_SHELL_INTEGRATION_OSC = 633
+// Terminals may be grown by fit(), but never shrink below these defaults:
+// a too-small resize wraps/truncates output (e.g. git diff pager) and makes
+// the agent snapshot miss content, so keep both dimensions at the defaults.
+const MIN_COLS = 80
+const MIN_ROWS = 24
 
 export interface ShellCommandFinishedEvent {
   exitCode?: number
@@ -251,8 +256,8 @@ export class Terminal {
 
   resize(cols: number, rows: number): void {
     if (this.exited) return
-    const nextCols = Math.max(cols, 1)
-    const nextRows = Math.max(rows, 1)
+    const nextCols = Math.max(cols, MIN_COLS)
+    const nextRows = Math.max(rows, MIN_ROWS)
     if (nextCols === this.cols && nextRows === this.rows) return
     try {
       this.pty.resize(nextCols, nextRows)

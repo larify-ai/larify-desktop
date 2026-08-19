@@ -7,6 +7,7 @@ import { isMarkdown, isWithin, markdownFiles, markdownLinks, resolveContextLink 
 import { GraphIndex } from './graph'
 
 export const memoryRootPath = (): string => ensureLarifyPath('memory')
+export const tasksRootPath = (): string => ensureLarifyPath('tasks')
 export const memoryIndexPath = (): string => join(ensureLarifyPath('indexes'), 'memory.db')
 
 export function buildContextGraph(

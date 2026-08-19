@@ -11,7 +11,8 @@ const mocks = vi.hoisted(() => ({
   openGit: vi.fn(),
   checkIsRepo: vi.fn<() => Promise<boolean>>(),
   initGit: vi.fn<() => Promise<void>>(),
-  createDiagnostics: vi.fn(() => ({ matches: vi.fn(), provide: vi.fn() }))
+  createDiagnostics: vi.fn(() => ({ matches: vi.fn(), provide: vi.fn() })),
+  createTaskDiagnostics: vi.fn(() => ({ matches: vi.fn(), provide: vi.fn() }))
 }))
 
 vi.mock('../../../../src/extensions/context/main/worker-client', async () => {
@@ -23,10 +24,14 @@ vi.mock('../../../../src/extensions/context/main/worker-client', async () => {
   }
 })
 vi.mock('../../../../src/extensions/context/main/indexer', () => ({
-  memoryRootPath: () => 'memory'
+  memoryRootPath: () => 'memory',
+  tasksRootPath: () => 'tasks'
 }))
 vi.mock('../../../../src/extensions/context/main/diagnostics', () => ({
   createContextDiagnosticsProvider: mocks.createDiagnostics
+}))
+vi.mock('../../../../src/extensions/context/main/task-diagnostics', () => ({
+  createTaskDiagnosticsProvider: mocks.createTaskDiagnostics
 }))
 vi.mock('../../../../src/main/core/git', () => ({
   gitService: { open: mocks.openGit }
@@ -60,9 +65,11 @@ describe('context plugin', () => {
     expect(mocks.initGit).not.toHaveBeenCalled()
     expect(registry.get(contextWorkerToken)).toBeDefined()
     expect(mocks.createDiagnostics).toHaveBeenCalledWith('memory', expect.any(Function))
+    expect(mocks.createTaskDiagnostics).toHaveBeenCalledWith('tasks')
+    expect(mocks.registerDiagnostics).toHaveBeenCalledTimes(2)
 
     await host.deactivate('context')
-    expect(mocks.disposeDiagnostics).toHaveBeenCalledOnce()
+    expect(mocks.disposeDiagnostics).toHaveBeenCalledTimes(2)
     expect(mocks.dispose).toHaveBeenCalledOnce()
     expect(registry.get(contextWorkerToken)).toBeUndefined()
   })

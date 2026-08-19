@@ -44,16 +44,24 @@ async function metadataDiagnostics(
     return [diagnostic('Invalid YAML frontmatter.')]
   }
 
-  const diagnostics = ['name', 'description'].flatMap((field) =>
-    typeof data[field] === 'string' && data[field].trim()
-      ? []
-      : [diagnostic(`Missing frontmatter field: ${field}.`)]
-  )
+  const diagnostics = requiredFieldDiagnostics(data, ['name', 'description'])
   const name = typeof data.name === 'string' ? data.name.trim() : ''
   if (name && (await isDuplicate(file, name, duplicateName))) {
     diagnostics.push(diagnostic(`Name must be unique: ${name}.`))
   }
   return diagnostics
+}
+
+/** 校验 frontmatter 中给定字段是否为非空字符串，缺失或为空时各生成一条诊断。 */
+export function requiredFieldDiagnostics(
+  data: Record<string, unknown>,
+  fields: string[]
+): Diagnostic[] {
+  return fields.flatMap((field) =>
+    typeof data[field] === 'string' && data[field].trim()
+      ? []
+      : [diagnostic(`Missing frontmatter field: ${field}.`)]
+  )
 }
 
 async function isDuplicate(
@@ -92,6 +100,6 @@ function isExternalUrl(url: string): boolean {
   return new URL(url).protocol.length > 2
 }
 
-function diagnostic(message: string): Diagnostic {
+export function diagnostic(message: string): Diagnostic {
   return { range: Range.create(0, 0, 0, 1), severity: DiagnosticSeverity.Error, message }
 }

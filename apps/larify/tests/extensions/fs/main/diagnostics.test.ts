@@ -115,7 +115,7 @@ describe('file diagnostics', () => {
           ]
         }
       ])
-    ).toBe('\n\nDiagnostics:\n- Line 1: Split this document.')
+    ).toBe('\n\nDiagnostics:\n- Error: Split this document.')
   })
 
   it('formats empty diagnostics as empty output', () => {
@@ -132,10 +132,10 @@ describe('file diagnostics', () => {
           content: '# Subject'
         })
 
-        expect(result.diagnostics).toBe('\n\nDiagnostics:\n- Line 1 Warning: Split this document.')
+        expect(result.diagnostics).toBe('\n\nDiagnostics:\n- Warning: Split this document.')
         expect(writeFileTool.toModelOutput?.({ output: result } as never)).toEqual({
           type: 'text',
-          value: `${result.summary}\n\nDiagnostics:\n- Line 1 Warning: Split this document.`
+          value: `${result.summary}\n\nDiagnostics:\n- Warning: Split this document.`
         })
       })
     } finally {
@@ -158,10 +158,10 @@ describe('file diagnostics', () => {
           replace_all: false
         })
 
-        expect(result.diagnostics).toBe('\n\nDiagnostics:\n- Line 1 Warning: Split this document.')
+        expect(result.diagnostics).toBe('\n\nDiagnostics:\n- Warning: Split this document.')
         expect(editFileTool.toModelOutput?.({ output: result } as never)).toEqual({
           type: 'text',
-          value: `${result.summary}\n\nDiagnostics:\n- Line 1 Warning: Split this document.`
+          value: `${result.summary}\n\nDiagnostics:\n- Warning: Split this document.`
         })
       })
     } finally {

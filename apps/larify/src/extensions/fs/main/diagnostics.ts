@@ -42,9 +42,8 @@ export function formatFileDiagnostics(results: PublishDiagnosticsParams[] = []):
 }
 
 function formatDiagnostic(diagnostic: Diagnostic): string {
-  const { line } = diagnostic.range.start
   const severity = Object.entries(DiagnosticSeverity).find(
     ([, value]) => value === diagnostic.severity
   )?.[0]
-  return `- Line ${line + 1}${severity ? ` ${severity}` : ''}: ${diagnostic.message}`
+  return `- ${severity ?? 'Error'}: ${diagnostic.message}`
 }

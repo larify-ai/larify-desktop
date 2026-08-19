@@ -3,8 +3,9 @@ import { gitService } from '../../../main/core/git'
 import { embeddingWorkerToken } from '../../embedding/main/service'
 import { registerFileDiagnosticsProvider } from '../../fs/main/diagnostics'
 import { createContextDiagnosticsProvider } from './diagnostics'
-import { memoryRootPath } from './indexer'
+import { memoryRootPath, tasksRootPath } from './indexer'
 import { contextWorkerToken } from './service'
+import { createTaskDiagnosticsProvider } from './task-diagnostics'
 
 const plugin: Plugin = {
   manifest: { id: 'context' },
@@ -22,6 +23,11 @@ const plugin: Plugin = {
       createContextDiagnosticsProvider(root, (file, name) => worker.duplicateName(file, name))
     )
     context.subscriptions.push({ dispose: disposeDiagnostics })
+
+    const disposeTaskDiagnostics = registerFileDiagnosticsProvider(
+      createTaskDiagnosticsProvider(tasksRootPath())
+    )
+    context.subscriptions.push({ dispose: disposeTaskDiagnostics })
   }
 }
 

@@ -15,7 +15,7 @@ export function NavigationContent(): React.JSX.Element {
           新建任务
         </NavigationAction>
         <NavigationAction icon={LayoutGridIcon}>百宝箱</NavigationAction>
-        <NavigationAction icon={BookOpenIcon} iconClassName="size-[17px]">
+        <NavigationAction icon={BookOpenIcon}>
           知识库
         </NavigationAction>
       </nav>

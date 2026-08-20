@@ -120,7 +120,6 @@ describe('MonacoDiff', () => {
         originalModelPath: 'git-original:D:\\workspace\\file.ts',
         options: expect.objectContaining({
           compactMode: true,
-          experimental: { useTrueInlineView: true },
           glyphMargin: false,
           lineDecorationsWidth: 8,
           lineNumbersMinChars: 4,
@@ -163,7 +162,6 @@ describe('MonacoDiff', () => {
       expect.objectContaining({
         options: expect.objectContaining({
           compactMode: false,
-          experimental: { useTrueInlineView: true },
           lineNumbersMinChars: 2,
           renderSideBySide: true
         })

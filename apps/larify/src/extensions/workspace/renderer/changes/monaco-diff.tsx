@@ -15,7 +15,6 @@ const options = {
   contextmenu: false,
   diffAlgorithm: 'advanced',
   enableSplitViewResizing: true,
-  experimental: { useTrueInlineView: true },
   glyphMargin: false,
   lightbulb: { enabled: editor.ShowLightbulbIconMode.Off },
   lineDecorationsWidth: 8,

@@ -130,6 +130,41 @@ describe('interaction assistant message view', () => {
     expect(markup).not.toContain('等待回答')
   })
 
+  it('does not create a message container for invalid tool input', () => {
+    expect(
+      render(
+        message([
+          {
+            type: 'tool-fs_grep',
+            toolCallId: 'call-1',
+            state: 'output-error',
+            input: undefined,
+            rawInput: { pattern: 'value' },
+            errorText: 'Invalid input'
+          }
+        ])
+      )
+    ).toBe('')
+  })
+
+  it('creates a message container for validated live tool input', () => {
+    const markup = render(
+      message([
+        {
+          type: 'dynamic-tool',
+          toolName: 'fs_read',
+          toolCallId: 'call-1',
+          state: 'output-available',
+          input: { toolCallTitle: 'Read file', path: 'a.txt' },
+          rawInput: undefined,
+          output: 'done'
+        }
+      ])
+    )
+
+    expect(markup).toContain('Read file')
+  })
+
   it('keeps user attachments aligned with user content', () => {
     const markup = render(
       message(

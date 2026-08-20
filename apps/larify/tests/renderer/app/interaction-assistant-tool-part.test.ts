@@ -1,7 +1,7 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { DynamicToolUIPart } from 'ai'
+import type { ToolPart as ToolPartValue } from '../../../src/renderer/src/components/ai-elements/tool'
 
 const captured = vi.hoisted(() => ({
   tool: undefined as Record<string, unknown> | undefined,
@@ -91,20 +91,33 @@ describe('interaction assistant tool part', () => {
     expect(captured.header?.title).toBe('fs_read')
   })
 
-  it('uses raw input metadata when tool input validation fails', () => {
+  it('does not show a tool card when input validation fails', () => {
     render({
       errorText: 'Invalid input',
+      input: undefined,
       rawInput: { toolCallTitle: '查询计数器数值', selector: '#count' },
       state: 'output-error',
       toolCallId: 'call-1',
-      toolName: 'browser_query_element',
+      type: 'tool-browser_query_element'
+    })
+
+    expect(captured.header).toBeUndefined()
+    expect(captured.input).toBeUndefined()
+  })
+
+  it('shows a validated live tool part when raw input is undefined', () => {
+    render({
+      input: { toolCallTitle: 'Read file', path: 'a.txt' },
+      rawInput: undefined,
+      state: 'output-available',
+      toolCallId: 'call-1',
+      toolName: 'fs_read',
       type: 'dynamic-tool'
     })
 
-    expect(captured.header?.title).toBe('查询计数器数值')
-    expect(captured.input).toEqual({
-      name: 'browser_query_element',
-      args: { selector: '#count' }
+    expect(captured.header).toMatchObject({
+      state: 'output-available',
+      title: 'Read file'
     })
   })
 
@@ -120,7 +133,7 @@ describe('interaction assistant tool part', () => {
     expect(captured.header).toBeUndefined()
   })
 
-  it('does not show an incomplete ask-user form while its input is streaming', () => {
+  it('does not show ask-user while its input is streaming', () => {
     render({
       input: {
         toolCallTitle: '等待用户回答',
@@ -133,8 +146,8 @@ describe('interaction assistant tool part', () => {
       type: 'dynamic-tool'
     })
 
-    expect(captured.header).toMatchObject({ statusLabel: '等待回答' })
-    expect(captured.tool?.defaultOpen).toBe(false)
+    expect(captured.header).toBeUndefined()
+    expect(captured.tool).toBeUndefined()
     expect(captured.question).toBeUndefined()
   })
 
@@ -158,8 +171,6 @@ describe('interaction assistant tool part', () => {
   })
 })
 
-function render(
-  part: DynamicToolUIPart | (Omit<DynamicToolUIPart, 'input'> & { rawInput: unknown })
-): void {
-  renderToStaticMarkup(createElement(ToolPart, { part }))
+function render(part: unknown): void {
+  renderToStaticMarkup(createElement(ToolPart, { part: part as ToolPartValue }))
 }

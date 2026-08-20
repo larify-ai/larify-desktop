@@ -8,6 +8,7 @@ import {
   type ToolPart as Part
 } from '@renderer/components/ai-elements/tool'
 import { AskUserPart } from './ask-user-part'
+import { isVisibleToolPart } from './tool-visibility'
 import { useToolOutput } from '../tool-output'
 
 function toolInput(input: unknown): { title?: string; args: unknown } {
@@ -19,18 +20,16 @@ function toolInput(input: unknown): { title?: string; args: unknown } {
 }
 
 export function ToolPart({ part }: { part: Part }): React.JSX.Element | null {
-  const name = getToolName(part)
   const onToolOutput = useToolOutput()
-  const input = part.input ?? ('rawInput' in part ? part.rawInput : undefined)
-  const { title, args } = toolInput(input)
+  if (!isVisibleToolPart(part)) return null
+
+  const name = getToolName(part)
+  const { title, args } = toolInput(part.input)
   const metadata = part.toolMetadata as { icon?: unknown } | undefined
   const icon = typeof metadata?.icon === 'string' ? metadata.icon : undefined
 
-  if (part.state === 'input-streaming' && !title) return null
-
   if (name === 'agent_ask_user') {
     const asking = part.state === 'input-available'
-    const waiting = part.state === 'input-streaming' || asking
     const showQuestion = part.state === 'input-available' || part.state === 'output-available'
     return (
       <Tool key={asking ? 'asking' : 'settled'} defaultOpen={asking}>
@@ -41,7 +40,7 @@ export function ToolPart({ part }: { part: Part }): React.JSX.Element | null {
           title={title ?? name}
           icon={icon}
           state={part.state}
-          statusLabel={waiting ? '等待回答' : undefined}
+          statusLabel={asking ? '等待回答' : undefined}
         />
         <ToolContent className="space-y-3 p-3 pt-1">
           {showQuestion ? (

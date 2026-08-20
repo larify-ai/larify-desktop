@@ -2,6 +2,7 @@ import { isFileUIPart, isToolUIPart, type UIMessage } from 'ai'
 import { Message, MessageContent } from '@renderer/components/ai-elements/message'
 import { FileAttachments } from './message-parts/file-attachments'
 import { MessagePart } from './message-parts/message-part'
+import { isVisibleToolPart } from './message-parts/tool-visibility'
 import { UserMessageContent } from './message-parts/user-message-content'
 import { summarizeMessageChanges } from './change-summary'
 import { ChangesSummaryCard } from './changes-summary-card'
@@ -19,7 +20,7 @@ export function MessageView({
     (part) =>
       (part.type === 'text' && Boolean(part.text)) ||
       (part.type === 'reasoning' && Boolean(part.text)) ||
-      isToolUIPart(part)
+      (isToolUIPart(part) && isVisibleToolPart(part))
   )
   if (!files.length && !hasContent && !changeSummary) return null
 

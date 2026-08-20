@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { workspaceClient } from '../workspace-client'
+import { previewErrorMessage } from './preview-error'
 
 export function useWorkspaceTextFile(
   resourceId: number,
@@ -20,9 +21,7 @@ export function useWorkspaceTextFile(
       void workspaceClient.readFile(resourceId, path).then(
         (content) => active && current === request && setState({ content, key }),
         (reason: unknown) =>
-          active &&
-          current === request &&
-          setState({ error: reason instanceof Error ? reason.message : String(reason), key })
+          active && current === request && setState({ error: previewErrorMessage(reason), key })
       )
     }
     load()

@@ -18,6 +18,11 @@ import {
   workspaceMarkdownOpenExternalEvent,
   workspaceMarkdownOpenFileEvent
 } from './preview/markdown-navigation'
+import {
+  WORKSPACE_NAVIGATION_EVENT,
+  takeWorkspaceNavigation,
+  type WorkspaceNavigationRequest
+} from './workspace-navigation'
 
 const loadFilePreview = async (): Promise<{
   default: typeof import('./preview/file-preview').FilePreview
@@ -49,40 +54,51 @@ export function WorkspaceView({
   const navigatorOpenRef = useRef(navigatorOpen)
   const navigatorWidthRef = useRef(navigatorWidth)
   const releasePreviewFrameRef = useRef<number | null>(null)
-  const browserRequestRef = useRef(0)
-  const revealRequestRef = useRef(0)
+  const navigationRequestRef = useRef(0)
   const [revealPath, setRevealPath] = useState<string | null>(null)
   const [target, setTarget] = useState<{ hash: string } | undefined>()
   const { entries, loadDirectory, revealFile, root } = useWorkspaceExplorer(resourceId)
   const { decorations: gitDecorations } = useGitDecorations(resourceId, root)
 
-  const selectFile = useCallback((path: string, hash?: string): void => {
-    revealRequestRef.current += 1
+  const showFile = useCallback((path: string, hash?: string): void => {
     setMarkdownMode('preview')
     setTarget(hash ? { hash } : undefined)
     setRevealPath(path)
   }, [])
 
+  const selectFile = useCallback(
+    (path: string, hash?: string): void => {
+      navigationRequestRef.current += 1
+      showFile(path, hash)
+    },
+    [showFile]
+  )
+
   const revealWorkspaceFile = useCallback(
     (path: string, hash: string | undefined, errorContext: string): void => {
-      const request = ++revealRequestRef.current
+      const request = ++navigationRequestRef.current
       void revealFile(path)
         .then((resolved) => {
-          if (!resolved || request !== revealRequestRef.current) return
-          selectFile(resolved, hash)
+          if (!resolved || request !== navigationRequestRef.current) return
+          showFile(resolved, hash)
         })
         .catch((error) => console.error(errorContext, error))
     },
-    [revealFile, selectFile]
+    [revealFile, showFile]
   )
 
   const openInBrowser = useCallback(
     (url: string, errorContext: string): void => {
-      const request = ++browserRequestRef.current
+      const request = ++navigationRequestRef.current
       void window.bridge
         .invoke('resource:create', 'browser', sessionId, { url })
         .then((browserResourceId) => {
-          if (request !== browserRequestRef.current) return
+          if (request !== navigationRequestRef.current) {
+            void window.bridge
+              .invoke('resource:close', browserResourceId)
+              .catch((error) => console.error('[workspace:close-browser]', error))
+            return
+          }
           window.dispatchEvent(
             new CustomEvent('larify:workbench-select-resource', {
               detail: { rendererId: 'browser', resourceId: browserResourceId, sessionId }
@@ -92,6 +108,13 @@ export function WorkspaceView({
         .catch((error) => console.error(errorContext, error))
     },
     [sessionId]
+  )
+
+  useEffect(
+    () => () => {
+      navigationRequestRef.current += 1
+    },
+    [resourceId, sessionId]
   )
 
   useEffect(() => {
@@ -179,6 +202,22 @@ export function WorkspaceView({
       window.removeEventListener(workspaceMarkdownOpenExternalEvent, openExternal)
     }
   }, [openInBrowser, resourceId, revealWorkspaceFile])
+
+  // 消息正文中的文件链接：工作区资源打开后定位到目标文件。
+  useEffect(() => {
+    const navigate = (request: WorkspaceNavigationRequest): void => {
+      revealWorkspaceFile(request.path, request.hash, '[workspace:navigate]')
+    }
+    const onNavigate = (event: Event): void => {
+      const detail = (event as CustomEvent<WorkspaceNavigationRequest>).detail
+      if (detail.resourceId !== resourceId) return
+      navigate(takeWorkspaceNavigation(resourceId) ?? detail)
+    }
+    window.addEventListener(WORKSPACE_NAVIGATION_EVENT, onNavigate)
+    const pending = takeWorkspaceNavigation(resourceId)
+    if (pending) navigate(pending)
+    return () => window.removeEventListener(WORKSPACE_NAVIGATION_EVENT, onNavigate)
+  }, [resourceId, revealWorkspaceFile])
 
   useEffect(() => {
     // Keep Monaco out of the application startup path, but warm its chunk as

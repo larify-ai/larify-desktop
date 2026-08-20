@@ -1,5 +1,5 @@
 import { isToolUIPart, type UIMessage } from 'ai'
-import { MessageResponse } from '@renderer/components/ai-elements/message'
+import { MessageMarkdown } from './message-markdown'
 import { ReasoningPart } from './reasoning-part'
 import { ToolPart } from './tool-part'
 
@@ -15,7 +15,7 @@ export function MessagePart({
   if (part.type === 'text') {
     const isStreaming = part.state === 'streaming' || (part.state === undefined && streaming)
     return part.text ? (
-      <MessageResponse isAnimating={isStreaming}>{part.text}</MessageResponse>
+      <MessageMarkdown isAnimating={isStreaming}>{part.text}</MessageMarkdown>
     ) : null
   }
   if (part.type === 'reasoning') return <ReasoningPart part={part} streaming={streaming} />

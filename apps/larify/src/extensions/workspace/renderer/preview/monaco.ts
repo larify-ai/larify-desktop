@@ -3,7 +3,7 @@ import { loader } from '@monaco-editor/react'
 import { basename, extname } from 'path-unified'
 import editorWorker from 'monaco-editor/editor/editor.worker?worker'
 import 'monaco-editor/basic-languages/monaco.contribution'
-import { jsonDefaults } from 'monaco-editor/language/json/monaco.contribution'
+import { createTokenizationSupport } from 'monaco-editor/languages/features/json/tokenization.js'
 import 'monaco-editor/editor/contrib/bracketMatching/browser/bracketMatching'
 import 'monaco-editor/editor/contrib/find/browser/findController'
 import 'monaco-editor/editor/contrib/folding/browser/folding'
@@ -15,18 +15,13 @@ globalThis.MonacoEnvironment = {
   }
 }
 
-jsonDefaults.setModeConfiguration({
-  colors: false,
-  completionItems: false,
-  diagnostics: false,
-  documentFormattingEdits: false,
-  documentRangeFormattingEdits: false,
-  documentSymbols: false,
-  foldingRanges: false,
-  hovers: false,
-  selectionRanges: false,
-  tokens: true
+monaco.languages.register({
+  aliases: ['JSON', 'json'],
+  extensions: ['.json', '.bowerrc', '.jshintrc', '.jscsrc', '.eslintrc', '.babelrc', '.har'],
+  id: 'json',
+  mimetypes: ['application/json']
 })
+monaco.languages.setTokensProvider('json', createTokenizationSupport(true))
 
 loader.config({ monaco })
 
@@ -41,6 +36,9 @@ export const workspaceMonacoTheme = (dark: boolean): string =>
 export const workspaceMonacoLanguage = (path: string, content = ''): string => {
   const filename = basename(path).toLowerCase()
   const extension = extname(filename).toLowerCase()
+  // JSON support is loaded separately from Monaco's basic languages and may not
+  // have appeared in getLanguages() during the first preview render.
+  if (extension === '.json') return 'json'
   const languages = monaco.languages.getLanguages()
   const language = languages.find(
     (candidate) =>

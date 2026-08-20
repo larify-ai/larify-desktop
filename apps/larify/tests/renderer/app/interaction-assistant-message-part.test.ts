@@ -4,12 +4,20 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const harness = vi.hoisted(() => ({
   reasoningProps: [] as Array<{ part: { type: string }; streaming: boolean }>,
-  responseProps: [] as Array<{ children: string; isAnimating?: boolean }>,
+  responseProps: [] as Array<{
+    children: string
+    isAnimating?: boolean
+    components?: { a?: unknown }
+  }>,
   toolProps: [] as Array<{ part: { type: string } }>
 }))
 
 vi.mock('../../../src/renderer/src/components/ai-elements/message', () => ({
-  MessageResponse: (props: { children: string; isAnimating?: boolean }) => {
+  MessageResponse: (props: {
+    children: string
+    isAnimating?: boolean
+    components?: { a?: unknown }
+  }) => {
     harness.responseProps.push(props)
     return props.children
   }
@@ -28,6 +36,7 @@ vi.mock('../../../src/renderer/src/app/interaction/assistant/message-parts/tool-
 }))
 
 import { MessagePart } from '../../../src/renderer/src/app/interaction/assistant/message-parts/message-part'
+import { MessageLinkContextProvider } from '../../../src/renderer/src/app/interaction/assistant/message-links'
 
 describe('interaction assistant message part', () => {
   beforeEach(() => {
@@ -70,6 +79,33 @@ describe('interaction assistant message part', () => {
   it('does not mount markdown rendering for empty text', () => {
     expect(render({ type: 'text', text: '' })).toBe('')
     expect(harness.responseProps).toHaveLength(0)
+  })
+
+  it('injects clickable link components when a handler is provided', () => {
+    const handler = vi.fn()
+    const markup = renderToStaticMarkup(
+      createElement(
+        MessageLinkContextProvider,
+        { value: handler },
+        createElement(MessagePart, {
+          part: { type: 'text', text: 'see [doc](readme.md)' },
+          streaming: false
+        })
+      )
+    )
+
+    expect(markup).toBe('see [doc](readme.md)')
+    expect(harness.responseProps).toHaveLength(1)
+    const components = harness.responseProps[0].components
+    expect(components).toBeDefined()
+    expect(typeof components?.a).toBe('function')
+  })
+
+  it('keeps browser navigation disabled without a link handler', () => {
+    render({ type: 'text', text: 'plain text' })
+
+    expect(harness.responseProps).toHaveLength(1)
+    expect(harness.responseProps[0].components?.a).toBeDefined()
   })
 
   it('forwards reasoning and streaming state to the reasoning renderer', () => {

@@ -353,6 +353,49 @@ describe('WorkspaceView', () => {
 
     expect(selected).toHaveBeenCalledOnce()
     expect((selected.mock.calls[0][0] as CustomEvent).detail.resourceId).toBe(2)
+    expect(h.invoke).toHaveBeenCalledWith('resource:close', 1)
     window.removeEventListener('larify:workbench-select-resource', selected)
+  })
+
+  it('closes a pending browser when a file is selected next', async () => {
+    const browser = deferred<number>()
+    const selected = vi.fn()
+    h.invoke.mockReturnValueOnce(browser.promise)
+    window.addEventListener('larify:workbench-select-resource', selected)
+    await render()
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent('larify:workspace-markdown-open-external', {
+          detail: { resourceId: 42, url: 'https://example.com' }
+        })
+      )
+    })
+    await openFile('README.md')
+    await act(async () => browser.resolve(3))
+
+    expect(selected).not.toHaveBeenCalled()
+    expect(h.invoke).toHaveBeenCalledWith('resource:close', 3)
+    expect(h.filePreviewProps?.path).toBe('D:\\workspace\\README.md')
+    window.removeEventListener('larify:workbench-select-resource', selected)
+  })
+
+  it('closes a pending browser after the workspace unmounts', async () => {
+    const browser = deferred<number>()
+    h.invoke.mockReturnValueOnce(browser.promise)
+    await render()
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent('larify:workspace-markdown-open-external', {
+          detail: { resourceId: 42, url: 'https://example.com' }
+        })
+      )
+    })
+    await act(async () => root.unmount())
+    await act(async () => browser.resolve(4))
+
+    expect(h.invoke).toHaveBeenCalledWith('resource:close', 4)
+    root = createRoot(container)
   })
 })

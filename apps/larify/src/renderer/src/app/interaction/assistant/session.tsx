@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Chat } from '@ai-sdk/react'
 import { lastAssistantMessageIsCompleteWithToolCalls, type UIMessage } from 'ai'
 import { createIpcTransport } from './transport'
@@ -6,6 +6,7 @@ import { readModelConfig } from './model-config'
 import { AssistantChat } from './chat'
 import type { ConversationHeading } from './conversation-header'
 import { loadVisibleMessages, messagePageSize } from './session-messages'
+import { createMessageLinkHandler, MessageLinkContextProvider } from './message-links'
 
 export function AssistantSession({
   id,
@@ -65,6 +66,13 @@ export function AssistantSession({
     setTransportCwd(initialCwd)
   }, [initialCwd, setTransportCwd])
 
+  // 消息正文中的文件/URL 链接处理器，随会话 cwd 与 id 变化而更新。
+  const messageLinkHandler = useMemo(
+    () => createMessageLinkHandler(initialCwd, id),
+    [id, initialCwd]
+  )
+  useEffect(() => () => messageLinkHandler.dispose(), [messageLinkHandler])
+
   const loadRange = useCallback(
     (firstPage: number, lastPage: number) => {
       range.current = { firstPage, lastPage }
@@ -104,16 +112,18 @@ export function AssistantSession({
   )
 
   return (
-    <AssistantChat
-      active={active}
-      chat={chat}
-      title={title}
-      cwd={initialCwd}
-      recentStart={recentStart}
-      olderMessages={olderMessages}
-      onLoadRange={loadRange}
-      onCwdChange={changeCwd}
-      onHeadingChange={onHeadingChange}
-    />
+    <MessageLinkContextProvider value={messageLinkHandler}>
+      <AssistantChat
+        active={active}
+        chat={chat}
+        title={title}
+        cwd={initialCwd}
+        recentStart={recentStart}
+        olderMessages={olderMessages}
+        onLoadRange={loadRange}
+        onCwdChange={changeCwd}
+        onHeadingChange={onHeadingChange}
+      />
+    </MessageLinkContextProvider>
   )
 }

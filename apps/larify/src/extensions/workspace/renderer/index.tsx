@@ -50,11 +50,10 @@ const plugin: RendererPlugin = {
       previews.register({
         component: NativeFilePreview,
         priority: 100,
-        supports: ({ mime }) =>
+        supports: ({ binary, mime }) =>
           mime === 'application/pdf' ||
           mime.startsWith('image/') ||
-          mime.startsWith('audio/') ||
-          mime.startsWith('video/')
+          (binary && (mime.startsWith('audio/') || mime.startsWith('video/')))
       }),
       previews.register({
         component: renderMarkdownFilePreview,

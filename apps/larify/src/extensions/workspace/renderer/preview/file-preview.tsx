@@ -4,6 +4,7 @@ import { useRendererRegistry } from '@renderer/app/registry/renderer-registry'
 import { type PreviewRegistry, previewRegistryToken } from '@renderer/app/registry/file-previews'
 import type { FileDescriptor } from '../../shared/types'
 import { workspaceClient } from '../workspace-client'
+import { previewErrorMessage } from './preview-error'
 import './file-preview.css'
 
 export function FilePreview({
@@ -38,7 +39,7 @@ export function FilePreview({
       (reason: unknown) =>
         !cancelled &&
         setState({
-          error: reason instanceof Error ? reason.message : String(reason),
+          error: previewErrorMessage(reason),
           key: requestKey
         })
     )

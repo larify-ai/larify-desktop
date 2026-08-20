@@ -191,6 +191,17 @@ describe('FilePreview', () => {
     expect(monaco.props).toBeUndefined()
   })
 
+  it('shows a concise message when the file disappears before reading', async () => {
+    workspace.readFile.mockRejectedValue(
+      new Error("Error invoking remote method 'workspace:read': Error: ENOENT: missing file")
+    )
+
+    await renderPreview('D:\\workspace\\missing.ts')
+
+    expect(container.textContent).toBe('文件不存在')
+    expect(monaco.props).toBeUndefined()
+  })
+
   it('debounces consecutive file changes', async () => {
     workspace.readFile.mockResolvedValueOnce('first').mockResolvedValueOnce('second')
     await renderPreview('D:\\workspace\\src\\file.ts')
@@ -290,6 +301,18 @@ describe('FilePreview', () => {
     registry.register(previewRegistryToken, new PreviewRegistry())
     await renderPreview('D:\\workspace\\unsupported.bin')
     expect(container.textContent).toContain('text/plain')
+  })
+
+  it('shows a concise message when the file does not exist', async () => {
+    workspace.inspectFile.mockRejectedValueOnce(
+      new Error(
+        "Error invoking remote method 'workspace:inspect': Error: ENOENT: no such file or directory, open 'D:\\workspace\\missing.ts'"
+      )
+    )
+
+    await renderPreview('D:\\workspace\\missing.ts')
+
+    expect(container.textContent).toBe('文件不存在')
   })
 
   it('forwards preview state and navigation to the selected renderer', async () => {

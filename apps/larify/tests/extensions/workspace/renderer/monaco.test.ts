@@ -6,7 +6,9 @@ import { join } from 'path-unified'
 const harness = vi.hoisted(() => ({
   config: vi.fn(),
   defineTheme: vi.fn(),
-  setJsonMode: vi.fn(),
+  registerLanguage: vi.fn(),
+  setTokensProvider: vi.fn(),
+  tokenProvider: {},
   workers: {
     editor: class EditorWorker {}
   }
@@ -15,6 +17,8 @@ const harness = vi.hoisted(() => ({
 vi.mock('monaco-editor/editor/editor.api', () => ({
   editor: { defineTheme: harness.defineTheme },
   languages: {
+    register: harness.registerLanguage,
+    setTokensProvider: harness.setTokensProvider,
     getLanguages: () => [
       { extensions: ['.ts', '.tsx'], id: 'typescript' },
       { extensions: ['.md'], id: 'markdown' },
@@ -26,8 +30,8 @@ vi.mock('monaco-editor/editor/editor.api', () => ({
 }))
 vi.mock('@monaco-editor/react', () => ({ loader: { config: harness.config } }))
 vi.mock('monaco-editor/basic-languages/monaco.contribution', () => ({}))
-vi.mock('monaco-editor/language/json/monaco.contribution', () => ({
-  jsonDefaults: { setModeConfiguration: harness.setJsonMode }
+vi.mock('monaco-editor/languages/features/json/tokenization.js', () => ({
+  createTokenizationSupport: () => harness.tokenProvider
 }))
 vi.mock('monaco-editor/editor/contrib/bracketMatching/browser/bracketMatching', () => ({}))
 vi.mock('monaco-editor/editor/contrib/find/browser/findController', () => ({}))
@@ -92,19 +96,11 @@ describe('Monaco preview setup', () => {
     expect(workspaceMonacoLanguage('LICENSE')).toBe('plaintext')
   })
 
-  it('enables only JSON tokenization for read-only previews', () => {
-    expect(harness.setJsonMode).toHaveBeenCalledWith({
-      colors: false,
-      completionItems: false,
-      diagnostics: false,
-      documentFormattingEdits: false,
-      documentRangeFormattingEdits: false,
-      documentSymbols: false,
-      foldingRanges: false,
-      hovers: false,
-      selectionRanges: false,
-      tokens: true
-    })
+  it('registers JSON tokenization synchronously', () => {
+    expect(harness.registerLanguage).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'json', extensions: expect.arrayContaining(['.json']) })
+    )
+    expect(harness.setTokensProvider).toHaveBeenCalledWith('json', harness.tokenProvider)
   })
 
   it.each(['json', 'css', 'html', 'typescript', 'editorWorkerService'])(

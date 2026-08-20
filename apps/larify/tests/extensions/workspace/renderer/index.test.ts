@@ -41,10 +41,13 @@ describe('workspace renderer plugin', () => {
 
     expect(renderers.get('workspace')).toMatchObject({ order: 10, title: '文件' })
     expect(renderers.get('changes')).toMatchObject({ order: 20, title: '变更' })
-    for (const mime of ['application/pdf', 'image/png', 'audio/mpeg', 'video/mp4']) {
+    for (const mime of ['application/pdf', 'image/png']) {
       expect(previews.find({ binary: false, mime, path: 'file' })?.component).toBe(
         NativeFilePreview
       )
+    }
+    for (const mime of ['audio/mpeg', 'video/mp4']) {
+      expect(previews.find({ binary: true, mime, path: 'file' })?.component).toBe(NativeFilePreview)
     }
 
     const textRenderer = previews.find({ binary: false, mime: 'text/plain', path: 'file.txt' })
@@ -63,11 +66,17 @@ describe('workspace renderer plugin', () => {
     expect(previews.find({ binary: false, mime: 'text/markdown', path: 'notes.txt' })).toBe(
       markdownRenderer
     )
-    for (const mime of ['application/pdf', 'image/png', 'audio/mpeg', 'video/mp4']) {
+    for (const mime of ['application/pdf', 'image/png']) {
       expect(previews.find({ binary: false, mime, path: 'README.md' })?.component).toBe(
         NativeFilePreview
       )
     }
+    const typescriptRenderer = previews.find({
+      binary: false,
+      mime: 'video/mp2t',
+      path: 'workspace-link.ts'
+    })
+    expect(typescriptRenderer).toBe(textRenderer)
     expect(
       previews.find({ binary: true, mime: 'application/octet-stream', path: 'README.md' })
     ).toBeUndefined()

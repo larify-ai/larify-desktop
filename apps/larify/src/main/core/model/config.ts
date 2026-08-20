@@ -10,8 +10,8 @@ export const modelLabels: Record<ModelId, string> = {
 }
 
 export const modelContextWindows: Record<ModelId, { limit: number; rollover: number }> = {
-  'deepseek-v4-flash': { limit: 1_000_000, rollover: 800_000 },
-  'deepseek-v4-pro': { limit: 1_000_000, rollover: 800_000 }
+  'deepseek-v4-flash': { limit: 1_000_000, rollover: 100_000 },
+  'deepseek-v4-pro': { limit: 1_000_000, rollover: 100_000 }
 }
 
 export interface AgentModelConfig {

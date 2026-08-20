@@ -1,8 +1,14 @@
 import { isLoopFinished, type ToolSet } from 'ai'
 import type { PluginHost } from '../plugin/host'
 import { createModelRuntime } from '../model'
-import { defaultModelConfig, isAgentModelConfig, type AgentModelConfig } from '../model/config'
+import {
+  defaultModelConfig,
+  isAgentModelConfig,
+  modelContextWindows,
+  type AgentModelConfig
+} from '../model/config'
 import type { AgentOptions } from './engine'
+import { contextRollover } from './context-rollover'
 import { buildSystemPrompt } from './prompt'
 import template from './prompt.md?raw'
 
@@ -64,6 +70,7 @@ export function createAgentRuntime(input: AgentRuntimeInput, host: PluginHost): 
       .filter(([, tool]) => tool.metadata?.eager === true)
       .map(([name]) => name),
     toolsContext: toolsContextFor(tools, { sessionId: input.sessionId, cwd: input.cwd }),
+    prepareStep: contextRollover(modelContextWindows[config.modelId].rollover),
     stopWhen: input.stopWhen ?? isLoopFinished()
   }
 }

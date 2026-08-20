@@ -2,12 +2,9 @@ import { describe, expect, it, vi } from 'vitest'
 import { join } from 'node:path'
 import { z } from 'zod'
 import type { AgentOptions } from '../../../../src/main/core/agent/engine'
+import { contextRolloverPrompt } from '../../../../src/main/core/agent/context-rollover'
 import { createAgentRuntime } from '../../../../src/main/core/agent/runtime'
-import {
-  FilesystemSkillDiscovery,
-  PluginHost,
-  defineTool
-} from '../../../../src/main/core/plugin'
+import { FilesystemSkillDiscovery, PluginHost, defineTool } from '../../../../src/main/core/plugin'
 import { Registry } from '../../../../src/shared/infra/registry'
 
 describe('createAgentRuntime', () => {
@@ -83,13 +80,26 @@ describe('createAgentRuntime', () => {
     expect(runtime.system).not.toContain('`lazy`:')
   })
 
-  it('uses the default stop condition', () => {
+  it('uses the default stop condition and context rollover', async () => {
     const runtime = createAgentRuntime(
       { sessionId: 'session', cwd: 'cwd' },
       new PluginHost(new Registry())
     )
 
     expect(runtime.stopWhen).toBeTypeOf('function')
+    expect(runtime.prepareStep).toBeTypeOf('function')
+    const prepared = await runtime.prepareStep?.({
+      messages: [{ role: 'user', content: 'Work on the task.' }],
+      steps: [
+        {
+          usage: { inputTokens: Number.MAX_SAFE_INTEGER, outputTokens: 0, totalTokens: 0 }
+        }
+      ]
+    } as never)
+    expect(prepared?.messages?.at(-1)).toEqual({
+      role: 'user',
+      content: contextRolloverPrompt
+    })
   })
 
   it('refreshes file-discovered skills for every runtime', async () => {

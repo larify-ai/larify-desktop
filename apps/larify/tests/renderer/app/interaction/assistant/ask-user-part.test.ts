@@ -4,6 +4,7 @@ import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AskUserPart } from '../../../../../src/renderer/src/app/interaction/assistant/message-parts/ask-user-part'
+import { MessageLinkContextProvider } from '../../../../../src/renderer/src/app/interaction/assistant/message-links'
 
 describe('AskUserPart', () => {
   let container: HTMLDivElement
@@ -110,6 +111,33 @@ describe('AskUserPart', () => {
     expect(html).toContain('data-streamdown="strong"')
     expect(html).toContain('<span class="font-semibold" data-streamdown="strong">a mode</span>')
     expect(html).toContain('data-streamdown="inline-code"')
+  })
+
+  it('opens a file link through the shared markdown renderer', async () => {
+    const handler = vi.fn()
+    await act(async () => {
+      root.render(
+        createElement(
+          MessageLinkContextProvider,
+          { value: handler },
+          createElement(AskUserPart, {
+            input: { message: 'Review [file](D:/Workspace/readme.md)' },
+            onSubmit: vi.fn()
+          })
+        )
+      )
+    })
+    const link = container.querySelector<HTMLButtonElement>('button.larify-message-link')
+
+    expect(container.querySelector('a.larify-message-link')).toBeNull()
+    expect(link?.type).toBe('button')
+    await act(async () => {
+      link?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+    })
+    expect(handler).toHaveBeenCalledExactlyOnceWith({
+      kind: 'file',
+      target: 'D:/Workspace/readme.md'
+    })
   })
 
   it('ignores incomplete or invalid streamed input', async () => {

@@ -20,7 +20,7 @@ const waitFor = async (expression, label, timeout = 5_000) => {
 try {
   const switched = await evaluate(`(() => {
     const button = [...document.querySelectorAll('button[data-session-id]')].find((candidate) =>
-      candidate.textContent?.includes('请使用工具分两步完成')
+      candidate.textContent?.includes(${JSON.stringify(process.env.LARIFY_REVIEW_CARD_SESSION ?? '请使用工具分两步完成')})
     )
     button?.click()
     return Boolean(button)
@@ -49,7 +49,7 @@ try {
     y: point.y
   })
   const hoverPath = await waitFor(
-    `document.querySelector('[data-radix-popper-content-wrapper] .larify-file-diff')?.textContent?.includes('live-review-a.txt')`,
+    `(${cardExpression})?.parentElement?.querySelector('.larify-file-diff')?.textContent?.includes('live-review-a.txt')`,
     'hover diff preview'
   )
 

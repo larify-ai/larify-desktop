@@ -7,6 +7,7 @@ export const titleBarHeight = 46
 
 export function createWindow(): BrowserWindow {
   const { workArea } = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
+  const backgroundColor = nativeTheme.shouldUseDarkColors ? '#1e1e1f' : '#fafafa'
   const width = Math.max(800, Math.min(1280, Math.round(workArea.width * 0.85)))
   const height = Math.max(600, Math.min(820, Math.round(workArea.height * 0.8)))
   const window = new BrowserWindow({
@@ -18,6 +19,7 @@ export function createWindow(): BrowserWindow {
     y: Math.round(workArea.y + (workArea.height - height) / 2),
     show: false,
     title: 'Larify',
+    backgroundColor,
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden',
     ...(process.platform === 'darwin' ? { trafficLightPosition: { x: 16, y: 16 } } : {}),
     ...(process.platform === 'win32'

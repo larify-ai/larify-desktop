@@ -92,6 +92,8 @@ describe('workbench layout specification', () => {
     expect(window).toContain("process.platform === 'darwin' ? 'hiddenInset' : 'hidden'")
     expect(window).toContain('trafficLightPosition: { x: 16, y: 16 }')
     expect(window.match(/height: titleBarHeight/g)).toHaveLength(1)
+    expect(window).toContain("nativeTheme.shouldUseDarkColors ? '#1e1e1f' : '#fafafa'")
+    expect(window).toContain('backgroundColor,')
     expect(panels).toContain('rounded-l-[12px]')
   })
 

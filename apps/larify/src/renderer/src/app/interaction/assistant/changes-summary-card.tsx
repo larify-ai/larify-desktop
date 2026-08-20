@@ -1,11 +1,14 @@
+import { useEffect, useRef, useState } from 'react'
 import { ChangesIcon } from '../../../../../extensions/workspace/renderer/changes/changes-icon'
 import {
   changesRootForFile,
   requestChangesNavigation
 } from '../../../../../extensions/workspace/renderer/changes/changes-navigation'
-import { HoverCard, HoverCardContent, HoverCardTrigger } from '../../../components/ui/hover-card'
 import type { ChangeSummary } from './change-summary'
 import { ReviewHoverDiff } from './review-hover-diff'
+
+const HIDE_DELAY = 600
+const UPWARD_SWITCH_DELAY = 150
 
 export function ChangesSummaryCard({
   additions,
@@ -13,6 +16,53 @@ export function ChangesSummaryCard({
   files,
   root
 }: ChangeSummary): React.JSX.Element {
+  const [activePath, setActivePath] = useState<string | null>(null)
+  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const switchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const moveDir = useRef<'up' | 'down' | null>(null)
+  const activeFile = files.find(({ path }) => path === activePath)
+
+  const clearHide = (): void => {
+    if (hideTimer.current) {
+      clearTimeout(hideTimer.current)
+      hideTimer.current = null
+    }
+  }
+  const clearSwitch = (): void => {
+    if (switchTimer.current) {
+      clearTimeout(switchTimer.current)
+      switchTimer.current = null
+    }
+  }
+  const scheduleHide = (): void => {
+    clearHide()
+    clearSwitch()
+    hideTimer.current = setTimeout(() => {
+      hideTimer.current = null
+      setActivePath(null)
+    }, HIDE_DELAY)
+  }
+  const showFile = (path: string): void => {
+    clearHide()
+    clearSwitch()
+    if (activeFile && moveDir.current === 'up') {
+      switchTimer.current = setTimeout(() => {
+        switchTimer.current = null
+        setActivePath(path)
+      }, UPWARD_SWITCH_DELAY)
+    } else {
+      setActivePath(path)
+    }
+  }
+
+  useEffect(
+    () => () => {
+      clearHide()
+      clearSwitch()
+    },
+    []
+  )
+
   const openChanges = (selectedPath?: string): void => {
     const targetRoot = root && selectedPath ? changesRootForFile(root, selectedPath) : root
     window.dispatchEvent(
@@ -33,30 +83,61 @@ export function ChangesSummaryCard({
   }
 
   return (
-    <section
-      aria-label={`已编辑 ${files.length} 个文件`}
-      className="not-prose mt-3 w-full overflow-hidden rounded-xl border border-border bg-card"
+    <div
+      className="relative mt-3"
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) scheduleHide()
+      }}
+      onMouseLeave={scheduleHide}
+      onMouseMove={(event) => {
+        if (event.movementY < -1) moveDir.current = 'up'
+        else if (event.movementY > 1) moveDir.current = 'down'
+      }}
     >
-      <button
-        type="button"
-        className="flex w-full cursor-pointer items-center gap-3 px-4 py-3 text-left hover:bg-muted/40"
-        onClick={() => openChanges()}
+      {activeFile && (
+        <div
+          onMouseEnter={() => {
+            clearHide()
+            clearSwitch()
+          }}
+          onMouseLeave={scheduleHide}
+          className="pointer-events-auto absolute inset-x-0 bottom-full z-50 mb-1"
+        >
+          <ReviewHoverDiff file={activeFile} />
+        </div>
+      )}
+      <section
+        aria-label={`已编辑 ${files.length} 个文件`}
+        className="not-prose w-full overflow-hidden rounded-xl border border-border bg-card"
       >
-        <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
-          <ChangesIcon aria-hidden className="size-5" />
-        </span>
-        <span className="min-w-0 flex-1 text-sm font-medium">已编辑 {files.length} 个文件</span>
-        <span className="flex shrink-0 items-center gap-2 font-mono text-xs">
-          <span className="text-[var(--git-added)]">+{additions}</span>
-          <span className="text-[var(--git-deleted)]">−{deletions}</span>
-        </span>
-      </button>
-      <div className="max-h-40 overflow-y-auto border-t border-border bg-muted/20 px-2 py-1.5">
-        {files.map((file) => {
-          const button = (
+        <button
+          type="button"
+          className="flex w-full cursor-pointer items-center gap-3 px-4 py-3 text-left hover:bg-muted/40"
+          onClick={() => openChanges()}
+        >
+          <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
+            <ChangesIcon aria-hidden className="size-5" />
+          </span>
+          <span className="min-w-0 flex-1 text-sm font-medium">已编辑 {files.length} 个文件</span>
+          <span className="flex shrink-0 items-center gap-2 font-mono text-xs">
+            <span className="text-[var(--git-added)]">+{additions}</span>
+            <span className="text-[var(--git-deleted)]">−{deletions}</span>
+          </span>
+        </button>
+        <div className="max-h-40 overflow-y-auto border-t border-border bg-muted/20 px-2 py-1.5">
+          {files.map((file) => (
             <button
               key={file.path}
               type="button"
+              onFocus={
+                file.binary
+                  ? undefined
+                  : () => {
+                      moveDir.current = null
+                      showFile(file.path)
+                    }
+              }
+              onMouseEnter={file.binary ? undefined : () => showFile(file.path)}
               className="flex w-full min-w-0 cursor-pointer items-center gap-2 rounded-md py-1.5 pr-2 pl-3.5 text-left text-xs hover:bg-muted"
               onClick={() => openChanges(file.path)}
             >
@@ -66,24 +147,9 @@ export function ChangesSummaryCard({
                 −{file.deletions}
               </span>
             </button>
-          )
-          return file.binary ? (
-            button
-          ) : (
-            <HoverCard key={file.path} openDelay={250} closeDelay={100}>
-              <HoverCardTrigger asChild>{button}</HoverCardTrigger>
-              <HoverCardContent
-                side="top"
-                align="start"
-                sideOffset={8}
-                className="-translate-x-2 w-[calc(var(--radix-hover-card-trigger-width)+1rem)] max-w-[calc(100vw-2rem)] p-0"
-              >
-                <ReviewHoverDiff file={file} />
-              </HoverCardContent>
-            </HoverCard>
-          )
-        })}
-      </div>
-    </section>
+          ))}
+        </div>
+      </section>
+    </div>
   )
 }

@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { Check } from 'lucide-react'
-import { MessageResponse } from '@renderer/components/ai-elements/message'
 import { Button } from '@renderer/components/ui/button'
 import { Textarea } from '@renderer/components/ui/textarea'
 import { cn } from '@renderer/lib/utils'
+import { MessageMarkdown } from './message-markdown'
 
 interface AskUserInput {
   message: string
@@ -54,7 +54,7 @@ export function AskUserPart({
   const answers =
     output && typeof output === 'object' ? (output as { answers?: unknown }).answers : undefined
 
-  const messageNode = <MessageResponse isAnimating={false}>{input.message}</MessageResponse>
+  const messageNode = <MessageMarkdown isAnimating={false}>{input.message}</MessageMarkdown>
 
   if (isStringArray(answers)) {
     return (

@@ -6,9 +6,9 @@
 import { createHash } from 'node:crypto'
 import { copyFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
-import { exec } from 'dugite'
 import { formatPatch, parsePatch } from 'diff'
 import { ensureLarifyPath } from '../../utils/app-paths'
+import { gitService } from './core'
 
 interface GitSnapshotSummary {
   additions: number
@@ -44,14 +44,14 @@ async function git(
   args: string[],
   options: { cwd: string; env?: Record<string, string | undefined>; stdin?: Buffer }
 ): Promise<string> {
-  const result = await exec(args, options.cwd, {
+  const result = await gitService.exec(args, options.cwd, {
     env: options.env,
     stdin: options.stdin
   })
   if (result.exitCode !== 0) {
-    throw new Error(result.stderr.trim() || `git exited with ${result.exitCode}`)
+    throw new Error(result.stderr.toString().trim() || `git exited with ${result.exitCode}`)
   }
-  return result.stdout
+  return result.stdout.toString()
 }
 
 const encodeLiteralPaths = (paths: string[]): Buffer =>
@@ -95,9 +95,10 @@ export class GitSnapshotService {
 
   async start(cwd: string): Promise<SnapshotStart | null> {
     try {
-      const root = await exec(['rev-parse', '--show-toplevel'], cwd)
-      const repositoryBacked = root.exitCode === 0 && root.stdout.trim().length > 0
-      const repositoryRoot = resolve(repositoryBacked ? root.stdout.trim() : cwd)
+      const root = await gitService.exec(['rev-parse', '--show-toplevel'], cwd)
+      const rootPath = root.stdout.toString().trim()
+      const repositoryBacked = root.exitCode === 0 && rootPath.length > 0
+      const repositoryRoot = resolve(repositoryBacked ? rootPath : cwd)
       const key = createHash('sha256').update(resolve(repositoryRoot)).digest('hex')
       const gitDir = join(this.storageRoot, key)
       return await this.lock(gitDir, async () => {
@@ -312,15 +313,22 @@ export class GitSnapshotService {
   ): Promise<Set<string>> {
     if (paths.length === 0) return new Set()
     const protectedPaths = paths.map((path) => (path.startsWith(':') ? `./${path}` : path))
-    const result = await exec(['check-ignore', '--no-index', '--stdin', '-z'], repositoryRoot, {
-      env: gitDir ? snapshotEnvironment(gitDir, repositoryRoot) : undefined,
-      stdin: Buffer.from(`${protectedPaths.join('\0')}\0`)
-    })
+    const result = await gitService.exec(
+      ['check-ignore', '--no-index', '--stdin', '-z'],
+      repositoryRoot,
+      {
+        env: gitDir ? snapshotEnvironment(gitDir, repositoryRoot) : undefined,
+        stdin: Buffer.from(`${protectedPaths.join('\0')}\0`)
+      }
+    )
     if (result.exitCode !== 0 && result.exitCode !== 1) {
-      throw new Error(result.stderr.trim() || `git check-ignore exited with ${result.exitCode}`)
+      throw new Error(
+        result.stderr.toString().trim() || `git check-ignore exited with ${result.exitCode}`
+      )
     }
     return new Set(
       result.stdout
+        .toString()
         .split('\0')
         .filter(Boolean)
         .map((path) => (path.startsWith('./:') ? path.slice(2) : path))

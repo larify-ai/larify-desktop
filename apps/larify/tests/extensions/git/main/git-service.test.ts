@@ -36,13 +36,38 @@ describe('GitService', () => {
     expect(await git.checkIsRepo()).toBe(true)
   })
 
-  it('exposes Dugite exec with stdin', async () => {
+  it('executes Git with stdin through the selected runtime', async () => {
     const directory = await temporaryDirectory()
     const result = await new GitService().exec(['hash-object', '--stdin'], directory, {
       stdin: Buffer.from('example')
     })
 
     expect(result.exitCode).toBe(0)
-    expect(result.stdout.trim()).toMatch(/^[0-9a-f]{40}$/)
+    expect(result.stdout.toString().trim()).toMatch(/^[0-9a-f]{40}$/)
+  })
+
+  it('returns non-zero exits without treating them as launch failures', async () => {
+    const directory = await temporaryDirectory()
+    const result = await new GitService().exec(['rev-parse', '--verify', 'missing'], directory)
+
+    expect(result.exitCode).not.toBe(0)
+    expect(result.stderr.length).toBeGreaterThan(0)
+  })
+
+  it('preserves output larger than the Node execFile default buffer', async () => {
+    const directory = await temporaryDirectory()
+    const service = new GitService()
+    await (await service.open(directory)).init()
+    const content = Buffer.alloc(2 * 1024 * 1024, 'a')
+    const stored = await service.exec(['hash-object', '-w', '--stdin'], directory, {
+      stdin: content
+    })
+    const result = await service.exec(
+      ['cat-file', 'blob', stored.stdout.toString().trim()],
+      directory
+    )
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout.equals(content)).toBe(true)
   })
 })

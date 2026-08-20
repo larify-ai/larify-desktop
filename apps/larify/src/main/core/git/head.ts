@@ -17,9 +17,7 @@ export async function head(
 
   const relative = path.relative(repositoryRoot, target).split(path.sep).join('/')
   try {
-    const result = await runtime.exec(['show', `HEAD:${relative}`], repositoryRoot, {
-      encoding: 'buffer'
-    })
+    const result = await runtime.exec(['show', `HEAD:${relative}`], repositoryRoot)
     return result.exitCode === 0 ? new Uint8Array(result.stdout) : null
   } catch {
     return null

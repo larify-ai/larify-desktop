@@ -24,7 +24,9 @@ async function createHost(memory?: Memory): Promise<PluginHost> {
             },
             { name: 'lazy', path: 'lazy/SKILL.md', description: 'Lazy skill' }
           ]
-        : []
+        : pluginId === 'skill-only'
+          ? [{ name: 'only', path: 'only/SKILL.md', description: 'Only skill' }]
+          : []
   })
   registry.register(pluginHostToken, host)
   if (memory) registry.register(contextWorkerToken, memory)
@@ -76,9 +78,9 @@ describe('meta tools', () => {
     const tool = (await createTools()).agent_reset_context
     const schema = await asSchema(tool.inputSchema).jsonSchema
 
-    await expect(run(tool, { handoff: 'Continue from task.md.' }, { requestContextReset })).resolves.toBe(
-      'Context reset requested.'
-    )
+    await expect(
+      run(tool, { handoff: 'Continue from task.md.' }, { requestContextReset })
+    ).resolves.toBe('Context reset requested.')
     expect(requestContextReset).toHaveBeenCalledWith('Continue from task.md.')
     expect(schema.required).toEqual(expect.arrayContaining(['handoff', 'toolCallTitle']))
   })
@@ -129,7 +131,11 @@ describe('meta tools', () => {
     const tools = await createTools()
 
     await expect(run(tools.agent_list_plugins, {})).resolves.toEqual([
-      { name: 'agent', description: 'List plugins, list tools, list skills, read schemas, ask user, search memory, and reset context. (7 tools, 0 skills)' },
+      {
+        name: 'agent',
+        description:
+          'List plugins, list tools, list skills, read schemas, ask user, search memory, and reset context. (7 tools, 0 skills)'
+      },
       { name: 'demo', description: 'Demo plugin (2 tools, 2 skills)' }
     ])
     await expect(run(tools.agent_list_tools, { plugin_names: ['demo'] })).resolves.toEqual([
@@ -172,7 +178,7 @@ describe('meta tools', () => {
     )
   })
 
-  it('lists every plugin regardless of eager contributions', async () => {
+  it('lists eager-only plugins but hides plugins without tools or skills', async () => {
     const host = await createHost()
     await host.activate({
       manifest: { id: 'empty' },
@@ -186,13 +192,24 @@ describe('meta tools', () => {
         context.registerTool('tool', tool({ metadata: { eager: true }, inputSchema: z.object({}) }))
       }
     })
+    await host.activate({
+      manifest: { id: 'skill-only' },
+      activate(context) {
+        void context
+      }
+    })
+    host.refreshSkills()
     const tools = Object.fromEntries(host.getTools('agent')!)
 
     await expect(run(tools.agent_list_plugins, {})).resolves.toEqual([
-      { name: 'agent', description: 'List plugins, list tools, list skills, read schemas, ask user, search memory, and reset context. (7 tools, 0 skills)' },
+      {
+        name: 'agent',
+        description:
+          'List plugins, list tools, list skills, read schemas, ask user, search memory, and reset context. (7 tools, 0 skills)'
+      },
       { name: 'demo', description: 'Demo plugin (2 tools, 2 skills)' },
       { name: 'eager-only', description: '(1 tools, 0 skills)' },
-      { name: 'empty', description: '(0 tools, 0 skills)' }
+      { name: 'skill-only', description: '(0 tools, 1 skills)' }
     ])
   })
 })

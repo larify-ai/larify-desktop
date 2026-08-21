@@ -1,7 +1,7 @@
 import { asSchema } from 'ai'
 import { z } from 'zod'
 import type { PluginHost } from '../../../main/core/plugin/host'
-import { defineTool, type Skill, type Tool } from '../../../main/core/plugin/protocol'
+import { defineTool, type Tool } from '../../../main/core/plugin/protocol'
 
 const pluginNamesSchema = z
   .object({ plugin_names: z.array(z.string()).min(1).describe('Plugin names') })
@@ -25,6 +25,7 @@ function createListPluginsTool(host: PluginHost): Tool {
       for (const { id, description } of host.listPlugins()) {
         const tools = host.getTools(id) ?? new Map()
         const skills = host.getSkills(id) ?? new Map()
+        if (tools.size === 0 && skills.size === 0) continue
         result.push({
           name: id,
           description: describePlugin(description, tools.size, skills.size)
@@ -44,11 +45,10 @@ function createListToolsTool(host: PluginHost): Tool {
       plugin_names.flatMap((plugin) => {
         const tools = host.getTools(plugin)
         if (!tools) throw new Error(`Plugin "${plugin}" not found.`)
-        return [...tools]
-          .map(([tool_name, tool]) => ({
-            tool_name,
-            ...(typeof tool.description === 'string' && { description: tool.description })
-          }))
+        return [...tools].map(([tool_name, tool]) => ({
+          tool_name,
+          ...(typeof tool.description === 'string' && { description: tool.description })
+        }))
       })
   })
 }
@@ -62,8 +62,7 @@ function createListSkillsTool(host: PluginHost): Tool {
       plugin_names.flatMap((plugin) => {
         const skills = host.getSkills(plugin)
         if (!skills) throw new Error(`Plugin "${plugin}" not found.`)
-        return [...skills.values()]
-          .map(({ path, description }) => ({ path, description }))
+        return [...skills.values()].map(({ path, description }) => ({ path, description }))
       })
   })
 }

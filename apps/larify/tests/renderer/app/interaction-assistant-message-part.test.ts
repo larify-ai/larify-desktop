@@ -54,7 +54,7 @@ describe('interaction assistant message part', () => {
     )
 
     expect(harness.responseProps).toEqual([
-      expect.objectContaining({ children: 'streaming', isAnimating: true })
+      expect.objectContaining({ children: 'streaming', isAnimating: true, mode: 'streaming' })
     ])
   })
 
@@ -62,7 +62,7 @@ describe('interaction assistant message part', () => {
     render({ type: 'text', text: 'done' })
 
     expect(harness.responseProps).toEqual([
-      expect.objectContaining({ children: 'done', isAnimating: false })
+      expect.objectContaining({ children: 'done', isAnimating: false, mode: 'static' })
     ])
   })
 

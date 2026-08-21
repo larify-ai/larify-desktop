@@ -1,4 +1,4 @@
-import { createElement } from 'react'
+import { createElement, type ComponentProps } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import type { UIMessage } from 'ai'
@@ -233,6 +233,17 @@ describe('interaction assistant message view', () => {
     ).toBe('')
   })
 
+  it('does not render whitespace-only text or reasoning parts', () => {
+    expect(
+      render(
+        message([
+          { type: 'text', text: '\n  ' },
+          { type: 'reasoning', text: '\t', state: 'done' }
+        ])
+      )
+    ).toBe('')
+  })
+
   it('renders a single change card for a snapshot-only assistant message', () => {
     const markup = render(
       message([snapshot([{ additions: 2, deletions: 1, path: 'src/file.ts', patch: 'patch' }])])
@@ -268,14 +279,58 @@ describe('interaction assistant message view', () => {
       )
     ).toBe('')
   })
+
+  it('renders attachments only in the first message fragment', () => {
+    const value = message(
+      [
+        { type: 'file', mediaType: 'text/plain', filename: 'notes.txt', url: 'file:///notes.txt' },
+        { type: 'text', text: 'content' }
+      ],
+      'user'
+    )
+
+    const renderItem = item('current-text', [1])
+    expect(render(value, { renderItem, firstFragment: true })).toContain('notes.txt')
+    expect(render(value, { renderItem, firstFragment: false })).not.toContain('notes.txt')
+  })
+
+  it('renders the change summary only in the last message fragment', () => {
+    const value = message([
+      { type: 'text', text: 'content' },
+      snapshot([{ additions: 2, deletions: 1, path: 'src/file.ts', patch: 'patch' }])
+    ])
+
+    const renderItem = item('final-text', [0])
+    expect(render(value, { renderItem, lastFragment: false })).not.toContain('src/file.ts')
+    expect(render(value, { renderItem, lastFragment: true })).toContain('src/file.ts')
+    expect(render(value, { renderItem, lastFragment: true, hideChanges: true })).not.toContain(
+      'src/file.ts'
+    )
+  })
+
+  it('renders only the selected original part', () => {
+    const value = message([
+      { type: 'text', text: 'FIRST_CONTENT' },
+      { type: 'step-start' },
+      { type: 'text', text: 'LAST_CONTENT' }
+    ])
+    const markup = render(value, { renderItem: item('final-text', [2]) })
+
+    expect(markup).toContain('LAST_CONTENT')
+    expect(markup).not.toContain('FIRST_CONTENT')
+  })
 })
 
-function render(value: UIMessage): string {
-  return renderToStaticMarkup(createElement(MessageView, { message: value }))
+function render(value: UIMessage, props: Omit<ComponentProps<typeof MessageView>, 'message'> = {}): string {
+  return renderToStaticMarkup(createElement(MessageView, { message: value, ...props }))
 }
 
 function message(parts: unknown[], role: UIMessage['role'] = 'assistant'): UIMessage {
   return { id: 'message-1', role, parts } as UIMessage
+}
+
+function item(kind: 'current-text' | 'final-text', partIndexes: number[]) {
+  return { kind, partIndexes, summary: '' } as const
 }
 
 function snapshot(

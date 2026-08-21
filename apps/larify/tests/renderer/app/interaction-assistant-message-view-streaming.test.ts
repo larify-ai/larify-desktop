@@ -48,6 +48,18 @@ describe('interaction assistant message view streaming', () => {
       { streaming: false, type: 'reasoning' }
     ])
   })
+
+  it('ignores a whitespace-only trailing placeholder when choosing the streaming part', () => {
+    render([
+      { type: 'text', text: 'visible' },
+      { type: 'reasoning', text: '\n  \t', state: 'streaming' }
+    ])
+
+    expect(renderedParts).toEqual([
+      { streaming: true, type: 'text' },
+      { streaming: false, type: 'reasoning' }
+    ])
+  })
 })
 
 function render(parts: unknown[], streaming = true): void {

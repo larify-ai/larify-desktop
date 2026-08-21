@@ -1,24 +1,104 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { UIMessage } from 'ai'
 import { ArrowDownIcon } from 'lucide-react'
 import { Virtuoso, type ListRange, type VirtuosoHandle } from 'react-virtuoso'
 import { Button } from '@renderer/components/ui/button'
 import { MessageView } from './message-view'
+import { summarizeMessageChanges, type ChangeSummary } from './change-summary'
+import { ChangesSummaryCard } from './changes-summary-card'
 import { messagePageSize } from './session-messages'
 import { useViewportBottomAnchor } from './use-viewport-bottom-anchor'
+import { buildAssistantRenderItems, type AssistantRenderItem } from './message-render-items'
 
 const Message = memo(
   MessageView,
   (previous, next) =>
-    !next.streaming && previous.streaming === next.streaming && previous.message === next.message
+    !next.streaming &&
+    previous.streaming === next.streaming &&
+    previous.message === next.message &&
+    previous.renderItem === next.renderItem &&
+    previous.activityKey === next.activityKey &&
+    previous.activityOpen === next.activityOpen &&
+    previous.onActivityOpenChange === next.onActivityOpenChange &&
+    previous.firstFragment === next.firstFragment &&
+    previous.lastFragment === next.lastFragment &&
+    previous.hideChanges === next.hideChanges
 )
-const pageBuffer = 1
+const pageBuffer = 2
+const renderBuffer = 400
+const renderChunk = 0
 const estimatedMessageHeight = 80
 const leaveBottomThreshold = 32
 const returnBottomThreshold = 16
+const upwardInputWindow = 100
 type ScrollMode = 'positioning' | 'following' | 'reading'
 
-function ScrollPlaceholder({
+interface MessageContentListItem {
+  kind: 'content'
+  key: string
+  message: UIMessage
+  renderItem?: AssistantRenderItem
+  firstFragment: boolean
+  lastFragment: boolean
+}
+
+interface MessageChangesListItem {
+  kind: 'changes'
+  key: string
+  changes: ChangeSummary
+  message: UIMessage
+}
+
+type MessageListItem = MessageContentListItem | MessageChangesListItem
+
+function recentListItems(messages: UIMessage[], live: boolean): MessageListItem[] {
+  return messages.flatMap((message): MessageListItem[] => {
+    if (message.role !== 'assistant') {
+      return [
+        {
+          kind: 'content',
+          key: message.id,
+          message,
+          firstFragment: true,
+          lastFragment: true
+        }
+      ]
+    }
+    const changes = summarizeMessageChanges(message)
+    const streaming = live && message.id === messages.at(-1)?.id
+    const contentItems: MessageContentListItem[] = buildAssistantRenderItems(
+      message,
+      streaming
+    ).map((renderItem) => ({
+      kind: 'content',
+      key:
+        renderItem.kind === 'status' || renderItem.kind === 'activity-group'
+          ? `${message.id}-activity`
+          : `${message.id}-${renderItem.partIndexes[0] ?? renderItem.kind}`,
+      message,
+      renderItem,
+      firstFragment: false,
+      lastFragment: false
+    }))
+    if (contentItems.length > 0) {
+      contentItems[0].firstFragment = true
+      contentItems[contentItems.length - 1].lastFragment = true
+    }
+    return changes
+      ? [
+          ...contentItems,
+          {
+            changes,
+            kind: 'changes',
+            key: `${message.id}-changes`,
+            message
+          }
+        ]
+      : contentItems
+  })
+}
+
+function HistoricalMessageSpacer({
   height,
   index
 }: {
@@ -27,27 +107,16 @@ function ScrollPlaceholder({
 }): React.JSX.Element {
   return (
     <div
-      className="mx-auto flex w-[calc(100%-var(--larify-scrollbar-size))] max-w-4xl translate-x-[calc(var(--larify-scrollbar-size)/2)] flex-col justify-center gap-3 px-6 py-3"
+      className="w-full"
       style={{ height }}
       data-message-index={index}
       data-scroll-placeholder
       aria-hidden="true"
-    >
-      <div className="h-3 w-1/4 rounded bg-muted-foreground/15" />
-      <div className="h-3 w-3/4 rounded bg-muted-foreground/15" />
-    </div>
+    />
   )
 }
 
-export function AssistantMessageList({
-  active = true,
-  messages,
-  live = false,
-  followRequest = 0,
-  recentStart,
-  olderMessages,
-  onLoadRange
-}: {
+interface AssistantMessageListProps {
   active?: boolean
   messages: UIMessage[]
   live?: boolean
@@ -55,25 +124,64 @@ export function AssistantMessageList({
   recentStart: number
   olderMessages: Map<number, UIMessage>
   onLoadRange: (firstPage: number, lastPage: number) => void
-}): React.JSX.Element {
+}
+
+export function AssistantMessageList(props: AssistantMessageListProps): React.JSX.Element {
+  if (props.active === false) {
+    return <div className="relative min-h-0 min-w-0 flex-1" aria-hidden="true" />
+  }
+  return <ActiveAssistantMessageList {...props} />
+}
+
+function ActiveAssistantMessageList({
+  active = true,
+  messages,
+  live = false,
+  followRequest = 0,
+  recentStart,
+  olderMessages,
+  onLoadRange
+}: AssistantMessageListProps): React.JSX.Element {
   const list = useRef<VirtuosoHandle>(null)
   const scrollMode = useRef<ScrollMode>('positioning')
   const scrollElement = useRef<HTMLElement | null>(null)
   const lastScrollTop = useRef(0)
   const resizingMessage = useRef(false)
   const resizeVersion = useRef(0)
+  const upwardInputAt = useRef<number | null>(null)
   const scrollIntentTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const positioningStarted = useRef(false)
+  const requestedRange = useRef({ firstPage: -1, lastPage: -1 })
+  const openActivities = useRef(new Map<string, boolean>())
+  const activityScrollTop = useRef<number | null>(null)
   const [position, setPosition] = useState({
     key: false,
     complete: false,
     escaped: false
   })
   const {
-    captureAnchor,
+    trackRenderedRange,
     scrollerRef,
+    releaseAnchor,
     scrollToBottom: scrollViewportToBottom
   } = useViewportBottomAnchor(active)
+  const recentItems = useMemo(() => recentListItems(messages, live), [live, messages])
+
+  const handleActivityOpenChange = useCallback(
+    (key: string, open: boolean) => {
+      if (open) {
+        activityScrollTop.current = scrollElement.current?.scrollTop ?? null
+        openActivities.current.set(key, true)
+        scrollMode.current = 'reading'
+        releaseAnchor()
+        setPosition((current) => ({ ...current, escaped: true }))
+      } else {
+        openActivities.current.set(key, false)
+        activityScrollTop.current = null
+      }
+    },
+    [releaseAnchor]
+  )
 
   const handleScrollerRef = useCallback(
     (element: HTMLElement | Window | null) => {
@@ -84,9 +192,22 @@ export function AssistantMessageList({
     [scrollerRef]
   )
 
-  useEffect(() => {
-    if (live && scrollMode.current === 'following') list.current?.autoscrollToBottom()
-  }, [live, messages])
+  const handleTotalListHeightChanged = useCallback(() => {
+    if (activityScrollTop.current === null) return
+    const element = scrollElement.current
+    const scrollTop = activityScrollTop.current
+    activityScrollTop.current = null
+    queueMicrotask(() => {
+      if (element) element.scrollTop = scrollTop
+    })
+  }, [])
+
+  useLayoutEffect(() => {
+    if (live && scrollMode.current === 'following') {
+      scrollViewportToBottom()
+      list.current?.autoscrollToBottom()
+    }
+  }, [live, messages, scrollViewportToBottom])
 
   useLayoutEffect(() => {
     if (followRequest === 0) return
@@ -107,23 +228,31 @@ export function AssistantMessageList({
     []
   )
 
-  const followGrowingMessage = useCallback((element: HTMLDivElement | null) => {
-    if (!element || typeof ResizeObserver === 'undefined') return
-    const observer = new ResizeObserver(() => {
-      const version = ++resizeVersion.current
-      resizingMessage.current = true
-      if (scrollMode.current === 'following') list.current?.autoscrollToBottom()
-      requestAnimationFrame(() => {
-        setTimeout(() => {
-          if (resizeVersion.current === version) resizingMessage.current = false
-        }, 1)
+  const followGrowingList = useCallback(
+    (element: HTMLDivElement | null) => {
+      if (!element || typeof ResizeObserver === 'undefined') return
+      const listElement = element.closest('[data-testid="virtuoso-item-list"]') ?? element
+      const observer = new ResizeObserver(() => {
+        const version = ++resizeVersion.current
+        resizingMessage.current = true
+        const hasOpenActivity = [...openActivities.current.values()].some(Boolean)
+        if (scrollMode.current === 'following' && !hasOpenActivity) {
+          scrollViewportToBottom()
+          list.current?.autoscrollToBottom()
+        }
+        requestAnimationFrame(() => {
+          setTimeout(() => {
+            if (resizeVersion.current === version) resizingMessage.current = false
+          }, 1)
+        })
       })
-    })
-    observer.observe(element)
-    return () => observer.disconnect()
-  }, [])
+      observer.observe(listElement)
+      return () => observer.disconnect()
+    },
+    [scrollViewportToBottom]
+  )
 
-  const totalCount = recentStart + messages.length
+  const totalCount = recentStart + recentItems.length
   const positioningKey = active && totalCount > 0
   const currentPosition =
     position.key === positioningKey
@@ -135,6 +264,7 @@ export function AssistantMessageList({
       clearTimeout(scrollIntentTimer.current)
       scrollIntentTimer.current = null
     }
+    upwardInputAt.current = null
     if (!positioningKey) {
       positioningStarted.current = false
       return
@@ -153,12 +283,17 @@ export function AssistantMessageList({
     scrollViewportToBottom()
   }
   const handleAtBottomChange = (nextAtBottom: boolean): void => {
+    const preserveReadingPosition = nextAtBottom && scrollMode.current === 'reading'
     setPosition((current) => {
       const sameKey = current.key === positioningKey
       const next = {
         key: positioningKey,
         complete: sameKey ? current.complete || nextAtBottom : nextAtBottom,
-        escaped: nextAtBottom ? false : sameKey && current.escaped
+        escaped: preserveReadingPosition
+          ? sameKey && current.escaped
+          : nextAtBottom
+            ? false
+            : sameKey && current.escaped
       }
       return current.key === next.key &&
         current.complete === next.complete &&
@@ -166,29 +301,56 @@ export function AssistantMessageList({
         ? current
         : next
     })
-    if (nextAtBottom) {
+    if (nextAtBottom && !preserveReadingPosition) {
       scrollMode.current = 'following'
-    } else if (scrollMode.current === 'positioning') {
+    } else if (
+      scrollMode.current === 'positioning' &&
+      (upwardInputAt.current === null ||
+        performance.now() - upwardInputAt.current > upwardInputWindow)
+    ) {
       list.current?.autoscrollToBottom()
       scrollViewportToBottom()
     }
   }
-  const item = (index: number): UIMessage | undefined =>
-    index < recentStart ? olderMessages.get(index) : messages[index - recentStart]
+  const item = (index: number): MessageListItem | undefined => {
+    if (index < recentStart) {
+      const message = olderMessages.get(index)
+      return message
+        ? {
+            key: message.id,
+            kind: 'content',
+            message,
+            firstFragment: true,
+            lastFragment: true
+          }
+        : undefined
+    }
+    return recentItems[index - recentStart]
+  }
   const rangeChanged = ({ startIndex, endIndex }: ListRange): void => {
-    captureAnchor({ startIndex, endIndex })
-    if (recentStart <= 0) return
+    trackRenderedRange({ startIndex, endIndex })
+    if (recentStart <= 0 || startIndex >= recentStart) return
     const firstPage = Math.max(0, Math.floor(startIndex / messagePageSize) - pageBuffer)
     const lastPage = Math.min(
       Math.floor((recentStart - 1) / messagePageSize),
       Math.floor(endIndex / messagePageSize) + pageBuffer
     )
+    if (
+      requestedRange.current.firstPage === firstPage &&
+      requestedRange.current.lastPage === lastPage
+    ) {
+      return
+    }
+    requestedRange.current = { firstPage, lastPage }
     onLoadRange(firstPage, lastPage)
   }
 
   return (
     <div
       className="relative min-h-0 min-w-0 flex-1"
+      onWheelCapture={(event) => {
+        if (event.deltaY < 0) upwardInputAt.current = performance.now()
+      }}
       onScrollCapture={(event) => {
         const element = scrollElement.current
         if (!element || event.target !== element) return
@@ -199,23 +361,31 @@ export function AssistantMessageList({
           scrollMode.current = 'following'
           setPosition((current) => ({ ...current, escaped: false }))
         }
-        if (movedUp && scrollMode.current === 'following') {
+        if (movedUp && scrollMode.current !== 'reading') {
           if (scrollIntentTimer.current !== null) clearTimeout(scrollIntentTimer.current)
           scrollIntentTimer.current = setTimeout(() => {
             scrollIntentTimer.current = null
-            if (
-              !resizingMessage.current &&
+            const recentUpwardInput =
+              upwardInputAt.current !== null &&
+              performance.now() - upwardInputAt.current <= upwardInputWindow
+            const leftBottom =
               scrollElement.current === element &&
-              scrollMode.current === 'following' &&
               element.scrollTop <= scrollTop &&
               element.scrollHeight - element.clientHeight - element.scrollTop >=
                 leaveBottomThreshold
+            if (
+              (!resizingMessage.current || recentUpwardInput) &&
+              scrollMode.current !== 'reading' &&
+              leftBottom
             ) {
               scrollMode.current = 'reading'
               setPosition((current) =>
                 current.key === positioningKey ? { ...current, escaped: true } : current
               )
+            } else if (scrollMode.current === 'positioning') {
+              scrollMode.current = 'following'
             }
+            upwardInputAt.current = null
           }, 1)
         }
         lastScrollTop.current = scrollTop
@@ -230,30 +400,46 @@ export function AssistantMessageList({
         defaultItemHeight={estimatedMessageHeight}
         initialItemCount={Math.min(12, totalCount)}
         initialTopMostItemIndex={totalCount > 0 ? { index: 'LAST', align: 'end' } : 0}
-        increaseViewportBy={{ top: 600, bottom: 600 }}
-        followOutput="auto"
+        increaseViewportBy={renderBuffer}
+        overscan={renderChunk}
+        followOutput={() => (scrollMode.current === 'following' ? 'auto' : false)}
         rangeChanged={rangeChanged}
+        totalListHeightChanged={handleTotalListHeightChanged}
         atBottomStateChange={handleAtBottomChange}
-        computeItemKey={(index) => item(index)?.id ?? index}
+        computeItemKey={(index) => item(index)?.key ?? index}
         itemContent={(index) => {
-          const message = item(index)
+          const listItem = item(index)
+          const message = listItem?.message
           const joinsPrevious =
-            message?.role === 'assistant' && item(index - 1)?.role === 'assistant'
+            message?.role === 'assistant' && item(index - 1)?.message.role === 'assistant'
           const joinsNext =
-            message?.role === 'assistant' && item(index + 1)?.role === 'assistant'
+            message?.role === 'assistant' && item(index + 1)?.message.role === 'assistant'
           return message ? (
             <div
-              ref={index === totalCount - 1 ? followGrowingMessage : undefined}
-              className={`mx-auto w-[calc(100%-var(--larify-scrollbar-size))] max-w-4xl min-w-0 translate-x-[calc(var(--larify-scrollbar-size)/2)] px-6 ${joinsPrevious ? 'pt-0' : 'pt-3'} ${joinsNext ? 'pb-0' : index === totalCount - 1 ? 'pb-30' : 'pb-3'}`}
+              ref={index === totalCount - 1 ? followGrowingList : undefined}
+              className={`mx-auto w-[calc(100%-var(--larify-scrollbar-size))] max-w-4xl min-w-0 translate-x-[calc(var(--larify-scrollbar-size)/2)] px-6 ${listItem.kind === 'changes' ? '' : '[contain:layout_paint_style]'} ${joinsPrevious ? (listItem.kind === 'changes' ? 'pt-4' : 'pt-0') : 'pt-3'} ${joinsNext ? 'pb-0' : index === totalCount - 1 ? 'pb-30' : 'pb-3'}`}
               data-message-index={index}
             >
-              <Message
-                message={message}
-                streaming={live && index === totalCount - 1 && message.role === 'assistant'}
-              />
+              {listItem.kind === 'changes' ? (
+                <ChangesSummaryCard {...listItem.changes} />
+              ) : (
+                <Message
+                  message={message}
+                  streaming={
+                    live && message.role === 'assistant' && message.id === messages.at(-1)?.id
+                  }
+                  renderItem={listItem.renderItem}
+                  activityKey={listItem.key}
+                  activityOpen={openActivities.current.get(listItem.key)}
+                  onActivityOpenChange={handleActivityOpenChange}
+                  firstFragment={listItem.firstFragment}
+                  lastFragment={listItem.lastFragment}
+                  hideChanges
+                />
+              )}
             </div>
           ) : (
-            <ScrollPlaceholder height={estimatedMessageHeight} index={index} />
+            <HistoricalMessageSpacer height={estimatedMessageHeight} index={index} />
           )
         }}
       />

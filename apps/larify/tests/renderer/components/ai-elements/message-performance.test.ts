@@ -5,10 +5,28 @@ import { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { UIMessage } from "ai"
+
+const codePlugin = vi.hoisted(() => ({
+  highlight: vi.fn(),
+  idleCallback: null as IdleRequestCallback | null,
+}))
+
+vi.mock("@streamdown/code", () => ({
+  code: {
+    name: "shiki",
+    type: "code-highlighter",
+    getSupportedLanguages: () => ["text"],
+    getThemes: () => ["github-light", "github-dark"],
+    highlight: codePlugin.highlight,
+    supportsLanguage: () => true,
+  },
+}))
+
 import { MessageView } from "../../../../src/renderer/src/app/interaction/assistant/message-view"
 import {
   MessageBranch,
   MessageBranchContent,
+  MessageResponse,
 } from "../../../../src/renderer/src/components/ai-elements/message"
 import {
   Tool,
@@ -36,6 +54,13 @@ describe("message rendering performance guards", () => {
   let root: Root
 
   beforeEach(() => {
+    codePlugin.highlight.mockClear()
+    codePlugin.idleCallback = null
+    vi.stubGlobal("requestIdleCallback", (callback: IdleRequestCallback) => {
+      codePlugin.idleCallback = callback
+      return 1
+    })
+    vi.stubGlobal("cancelIdleCallback", vi.fn())
     container = document.createElement("div")
     document.body.appendChild(container)
     root = createRoot(container)
@@ -44,6 +69,51 @@ describe("message rendering performance guards", () => {
   afterEach(async () => {
     await act(async () => root.unmount())
     container.remove()
+    vi.unstubAllGlobals()
+  })
+
+  it("keeps the global syntax-highlighter preload after the scheduling response unmounts", async () => {
+    await act(async () =>
+      root.render(
+        createElement(
+          Fragment,
+          null,
+          createElement(MessageResponse, { key: "scheduler" }, "hello"),
+          createElement(MessageResponse, { key: "remaining" }, "world"),
+        ),
+      ),
+    )
+
+    expect(codePlugin.highlight).not.toHaveBeenCalled()
+    expect(codePlugin.idleCallback).not.toBeNull()
+
+    await act(async () =>
+      root.render(createElement(MessageResponse, { key: "remaining" }, "world")),
+    )
+
+    expect(cancelIdleCallback).not.toHaveBeenCalled()
+
+    await act(async () => codePlugin.idleCallback?.({ didTimeout: false, timeRemaining: () => 10 }))
+
+    expect(codePlugin.highlight).toHaveBeenCalledWith({
+      code: "",
+      language: "typescript",
+      themes: ["github-light", "github-dark"],
+    })
+  })
+
+  it("updates response props that are not part of the markdown content", async () => {
+    await act(async () =>
+      root.render(createElement(MessageResponse, { className: "before" }, "hello")),
+    )
+    expect(container.querySelector('.before')).not.toBeNull()
+
+    await act(async () =>
+      root.render(createElement(MessageResponse, { className: "after" }, "hello")),
+    )
+
+    expect(container.querySelector('.before')).toBeNull()
+    expect(container.querySelector('.after')).not.toBeNull()
   })
 
   it("skips committing unchanged old messages when wrapped with React.memo", async () => {
@@ -111,6 +181,9 @@ describe("message rendering performance guards", () => {
 
     expect(container.textContent).not.toContain("expensive output")
     expect(mount).not.toHaveBeenCalled()
+    expect(
+      container.querySelector('.text-popover-foreground')?.getAttribute('data-state'),
+    ).toBe('closed')
 
     await act(async () => {
       root.render(

@@ -35,8 +35,11 @@ interface VirtuosoProps {
   defaultItemHeight: number
   initialItemCount: number
   initialTopMostItemIndex: { index: 'LAST'; align: 'end' } | number
-  increaseViewportBy: { top: number; bottom: number }
+  increaseViewportBy: number
+  overscan: number
+  followOutput(isAtBottom: boolean): 'auto' | false
   rangeChanged(range: { startIndex: number; endIndex: number }): void
+  totalListHeightChanged(height: number): void
   atBottomStateChange(atBottom: boolean): void
   computeItemKey(index: number): React.Key
   itemContent(index: number): React.JSX.Element
@@ -82,7 +85,7 @@ describe('interaction assistant message list', () => {
     expect(props.defaultItemHeight).toBe(80)
     expect(props.initialItemCount).toBe(12)
     expect(props.initialTopMostItemIndex).toEqual({ index: 'LAST', align: 'end' })
-    expect(props.computeItemKey(4999)).toBe('latest')
+    expect(props.computeItemKey(4999)).toBe('latest-0')
     expect(props.className).toContain('[scrollbar-gutter:stable]')
     expect(props.scrollerRef).toEqual(expect.any(Function))
   })
@@ -108,9 +111,26 @@ describe('interaction assistant message list', () => {
     props.rangeChanged({ startIndex: 149, endIndex: 151 })
 
     expect(onLoadRange).toHaveBeenCalledOnce()
-    expect(onLoadRange).toHaveBeenCalledWith(1, 4)
+    expect(onLoadRange).toHaveBeenCalledWith(0, 5)
     expect(props.totalCount).toBe(5000)
-    expect(props.increaseViewportBy).toEqual({ top: 600, bottom: 600 })
+    expect(props.increaseViewportBy).toBe(400)
+    expect(props.overscan).toBe(0)
+
+    props.rangeChanged({ startIndex: 149, endIndex: 152 })
+    expect(onLoadRange).toHaveBeenCalledOnce()
+  })
+
+  it('does not request historical pages while only recent fragments are visible', async () => {
+    const onLoadRange = vi.fn()
+    await render({
+      messages: [message('latest')],
+      recentStart: 100,
+      onLoadRange
+    })
+
+    ;(captured.props as VirtuosoProps).rangeChanged({ startIndex: 100, endIndex: 100 })
+
+    expect(onLoadRange).not.toHaveBeenCalled()
   })
 
   it('does not replace loaded messages with placeholders while scrolling', async () => {
@@ -135,7 +155,7 @@ describe('interaction assistant message list', () => {
 
     ;(captured.props as VirtuosoProps).rangeChanged({ startIndex: 100, endIndex: 149 })
     expect(onLoadRange).toHaveBeenCalledOnce()
-    expect(onLoadRange).toHaveBeenCalledWith(1, 3)
+    expect(onLoadRange).toHaveBeenCalledWith(0, 4)
   })
 
   it('grows only when the agent appends a new message', async () => {
@@ -171,6 +191,64 @@ describe('interaction assistant message list', () => {
       await act(async () => itemRoot.unmount())
       itemContainer.remove()
     }
+  })
+
+  it('keeps the processing area expanded while current text streams separately', async () => {
+    const response = {
+      id: 'multi-step-stream',
+      role: 'assistant',
+      parts: [
+        { type: 'step-start' },
+        { type: 'text', text: 'I will inspect it.', state: 'done' },
+        {
+          type: 'dynamic-tool',
+          toolName: 'read_file',
+          toolCallId: 'read-1',
+          state: 'output-available',
+          input: { toolCallTitle: 'Read source' },
+          output: 'done'
+        },
+        { type: 'step-start' },
+        { type: 'reasoning', text: 'Reviewing the result', state: 'done' },
+        { type: 'text', text: 'Current answer', state: 'streaming' }
+      ]
+    } as UIMessage
+
+    await render({ messages: [response], recentStart: 0, live: true })
+
+    const streaming = captured.props as VirtuosoProps
+    expect(streaming.totalCount).toBe(2)
+    expect(streaming.computeItemKey(0)).toBe('multi-step-stream-activity')
+    expect(streaming.computeItemKey(1)).toBe('multi-step-stream-5')
+    expect(streaming.itemContent(0).props.children.props.renderItem).toEqual(
+      expect.objectContaining({
+        kind: 'activity-group',
+        defaultOpen: true,
+        partIndexes: [1, 2, 4]
+      })
+    )
+    expect(streaming.itemContent(1).props.children.props.renderItem).toEqual(
+      expect.objectContaining({ kind: 'current-text', partIndexes: [5] })
+    )
+
+    const completed = {
+      ...response,
+      metadata: { startedAt: 1, completedAt: 2 },
+      parts: response.parts.map((part) =>
+        part.type === 'text' ? { ...part, state: 'done' as const } : part
+      )
+    } as UIMessage
+    await render({ messages: [completed], recentStart: 0, live: false })
+
+    const finished = captured.props as VirtuosoProps
+    expect(finished.totalCount).toBe(2)
+    expect(finished.computeItemKey(1)).toBe('multi-step-stream-5')
+    expect(finished.itemContent(1).props.children.props.renderItem).toEqual(
+      expect.objectContaining({ kind: 'final-text', partIndexes: [5] })
+    )
+    expect(finished.itemContent(0).props.children.props.renderItem).toEqual(
+      expect.objectContaining({ kind: 'activity-group', defaultOpen: false })
+    )
   })
 
   it('waits for an assistant message before marking streaming content', async () => {
@@ -239,6 +317,14 @@ describe('interaction assistant message list', () => {
     await render({ ...props, active: false })
     await render({ ...props, active: true })
     expect(captured.autoscrollToBottom).toHaveBeenCalledTimes(2)
+    expect(captured.mounts).toBe(2)
+  })
+
+  it('does not mount a virtual list for an inactive conversation', async () => {
+    await render({ active: false, messages: [message('hidden')], recentStart: 0 })
+
+    expect(captured.mounts).toBe(0)
+    expect(container.querySelector('[role="log"]')).toBeNull()
   })
 
   it('scrolls to the bottom when initial messages finish restoring', async () => {
@@ -346,6 +432,60 @@ describe('interaction assistant message list', () => {
     expect(captured.autoscrollToBottom).not.toHaveBeenCalled()
   })
 
+  it('does not snap back before deferred scroll intent handling runs', async () => {
+    await render({ messages: [message('latest')], recentStart: 0 })
+    const scroller = createScroller(100)
+    container.firstElementChild?.append(scroller)
+    act(() => (captured.props as VirtuosoProps).scrollerRef(scroller))
+    captured.autoscrollToBottom.mockClear()
+
+    act(() => container.firstElementChild?.dispatchEvent(new WheelEvent('wheel', { deltaY: -200 })))
+    scroller.scrollTop = 50
+    act(() => scroller.dispatchEvent(new Event('scroll')))
+    act(() => (captured.props as VirtuosoProps).atBottomStateChange(false))
+
+    expect(captured.autoscrollToBottom).not.toHaveBeenCalled()
+  })
+
+  it('expires upward wheel intent when no scroll movement follows', async () => {
+    vi.useFakeTimers()
+    try {
+      await render({ messages: [message('latest')], recentStart: 0 })
+      act(() =>
+        container.firstElementChild?.dispatchEvent(new WheelEvent('wheel', { deltaY: -200 }))
+      )
+      act(() => vi.advanceTimersByTime(101))
+      captured.autoscrollToBottom.mockClear()
+
+      act(() => (captured.props as VirtuosoProps).atBottomStateChange(false))
+
+      expect(captured.autoscrollToBottom).toHaveBeenCalledOnce()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps following after a small upward wheel movement within the bottom tolerance', async () => {
+    const props = { messages: [message('streaming')], recentStart: 0, live: true }
+    await render(props)
+    act(() => (captured.props as VirtuosoProps).atBottomStateChange(true))
+    const scroller = createScroller(100)
+    container.firstElementChild?.append(scroller)
+    act(() => (captured.props as VirtuosoProps).scrollerRef(scroller))
+
+    act(() => container.firstElementChild?.dispatchEvent(new WheelEvent('wheel', { deltaY: -20 })))
+    scroller.scrollTop = 80
+    act(() => scroller.dispatchEvent(new Event('scroll')))
+    await act(() => new Promise((resolve) => setTimeout(resolve, 2)))
+    act(() => (captured.props as VirtuosoProps).atBottomStateChange(false))
+    captured.autoscrollToBottom.mockClear()
+
+    await render({ ...props, messages: [...props.messages] })
+
+    expect(captured.autoscrollToBottom).toHaveBeenCalled()
+    expect(container.querySelector('button[aria-label="返回底部"]')).toBeNull()
+  })
+
   it('cancels pending scroll intent when the conversation is hidden', async () => {
     const props = { messages: [message('streaming')], recentStart: 0, live: true }
     await render(props)
@@ -411,9 +551,41 @@ describe('interaction assistant message list', () => {
     detach()
   })
 
+  it('lets an explicit upward wheel escape follow mode while the message is growing', async () => {
+    const props = {
+      messages: [message('streaming')],
+      recentStart: 0,
+      live: true
+    }
+    await render(props)
+    act(() => (captured.props as VirtuosoProps).atBottomStateChange(true))
+    const scroller = createScroller(100)
+    container.firstElementChild?.append(scroller)
+    act(() => (captured.props as VirtuosoProps).scrollerRef(scroller))
+    const content = (captured.props as VirtuosoProps).itemContent(0)
+    const detach = content.props.ref(document.createElement('div'))
+
+    act(() => resize())
+    act(() => container.firstElementChild?.dispatchEvent(new WheelEvent('wheel', { deltaY: -200 })))
+    scroller.scrollTop = 50
+    act(() => scroller.dispatchEvent(new Event('scroll')))
+    await act(() => new Promise((resolve) => setTimeout(resolve, 2)))
+    captured.autoscrollToBottom.mockClear()
+
+    await render({ ...props, messages: [message('streaming longer')] })
+    act(() => resize())
+
+    expect(captured.autoscrollToBottom).not.toHaveBeenCalled()
+    expect(container.querySelector('button[aria-label="返回底部"]')).not.toBeNull()
+    detach()
+  })
+
   it('follows asynchronous height growth inside the streaming message', async () => {
     await render({ messages: [message('streaming')], recentStart: 0, live: true })
     act(() => (captured.props as VirtuosoProps).atBottomStateChange(true))
+    const scroller = createScroller(100)
+    container.firstElementChild?.append(scroller)
+    act(() => (captured.props as VirtuosoProps).scrollerRef(scroller))
     const content = (captured.props as VirtuosoProps).itemContent(0)
     const element = document.createElement('div')
     const detach = content.props.ref(element)
@@ -421,19 +593,84 @@ describe('interaction assistant message list', () => {
 
     act(() => resize())
 
+    expect(scroller.scrollTop).toBe(scroller.scrollHeight)
     expect(captured.autoscrollToBottom).toHaveBeenCalledOnce()
     detach()
+  })
+
+  it('keeps a completed activity open without following the bottom after virtualization remounts it', async () => {
+    const completed = {
+      id: 'completed-with-activity',
+      role: 'assistant',
+      parts: [
+        { type: 'reasoning', text: 'checked the implementation', state: 'done' },
+        { type: 'text', text: 'final answer', state: 'done' }
+      ]
+    } as UIMessage
+    await render({ messages: [completed], recentStart: 0 })
+    act(() => (captured.props as VirtuosoProps).atBottomStateChange(true))
+
+    const itemContainer = document.createElement('div')
+    const listContainer = document.createElement('div')
+    const observedItem = document.createElement('div')
+    const scroller = createScroller(100)
+    listContainer.dataset.testid = 'virtuoso-item-list'
+    listContainer.append(itemContainer, observedItem)
+    scroller.append(listContainer)
+    container.append(scroller)
+    act(() => (captured.props as VirtuosoProps).scrollerRef(scroller))
+    let itemRoot = createRoot(itemContainer)
+    const lastContent = (captured.props as VirtuosoProps).itemContent(
+      (captured.props as VirtuosoProps).totalCount - 1
+    )
+    const detach = lastContent.props.ref(observedItem)
+    try {
+      await act(async () => itemRoot.render((captured.props as VirtuosoProps).itemContent(0)))
+      await act(async () => itemContainer.querySelector<HTMLButtonElement>('button')?.click())
+
+      expect((captured.props as VirtuosoProps).followOutput(true)).toBe(false)
+      expect(itemContainer.querySelector('button')?.getAttribute('data-state')).toBe('open')
+
+      // Expanding an item while initially at the bottom can make Virtuoso report
+      // `atBottom` again before it measures the new height. That report must not
+      // resume following and pull the expanded activity out of view.
+      act(() => (captured.props as VirtuosoProps).atBottomStateChange(true))
+      expect((captured.props as VirtuosoProps).followOutput(true)).toBe(false)
+      expect(container.querySelector('button[aria-label="返回底部"]')).not.toBeNull()
+      captured.autoscrollToBottom.mockClear()
+      act(() => resize())
+      expect(captured.autoscrollToBottom).not.toHaveBeenCalled()
+
+      scroller.scrollTop = 190
+      act(() => (captured.props as VirtuosoProps).totalListHeightChanged(300))
+      await act(() => Promise.resolve())
+      expect(scroller.scrollTop).toBe(100)
+
+      await act(async () => itemRoot.unmount())
+      itemRoot = createRoot(itemContainer)
+      await act(async () => itemRoot.render((captured.props as VirtuosoProps).itemContent(0)))
+
+      expect(itemContainer.querySelector('button')?.getAttribute('data-state')).toBe('open')
+    } finally {
+      detach()
+      await act(async () => itemRoot.unmount())
+      listContainer.remove()
+    }
   })
 
   it('keeps observing a long final message with tool cards after streaming completes', async () => {
     const finalMessage = complexMessage()
     await render({ messages: [finalMessage], recentStart: 0, live: true })
-    const streamingContent = (captured.props as VirtuosoProps).itemContent(0)
+    expect((captured.props as VirtuosoProps).totalCount).toBe(3)
+    const lastIndex = (captured.props as VirtuosoProps).totalCount - 1
+    const streamingContent = (captured.props as VirtuosoProps).itemContent(lastIndex)
     act(() => (captured.props as VirtuosoProps).atBottomStateChange(true))
     const detach = streamingContent.props.ref(document.createElement('div'))
 
     await render({ messages: [finalMessage], recentStart: 0, live: false })
-    const completedContent = (captured.props as VirtuosoProps).itemContent(0)
+    expect((captured.props as VirtuosoProps).totalCount).toBe(2)
+    const completedLastIndex = (captured.props as VirtuosoProps).totalCount - 1
+    const completedContent = (captured.props as VirtuosoProps).itemContent(completedLastIndex)
 
     expect(streamingContent.props.ref).toEqual(expect.any(Function))
     expect(completedContent.props.ref).toBe(streamingContent.props.ref)
@@ -513,6 +750,7 @@ describe('interaction assistant message list', () => {
     expect(container.querySelector<HTMLElement>('[data-scroll-placeholder]')?.style.height).toBe(
       '80px'
     )
+    expect(container.querySelector('[data-scroll-placeholder]')?.childElementCount).toBe(0)
     expect(container.firstElementChild?.getAttribute('data-message-index')).toBe('100')
   })
 
@@ -539,8 +777,139 @@ describe('interaction assistant message list', () => {
     expect(props.itemContent(1).props.className).toContain('pt-0')
     expect(props.itemContent(1).props.className).toContain('pb-3')
     expect(props.itemContent(2).props.className).toContain('pt-3')
-    expect(props.computeItemKey(0)).toBe('first')
-    expect(props.computeItemKey(1)).toBe('second')
+    expect(props.computeItemKey(0)).toBe('first-0')
+    expect(props.computeItemKey(1)).toBe('second-0')
+  })
+
+  it('keeps the live changes card after every renderable response fragment', async () => {
+    const response = {
+      id: 'response-with-changes',
+      role: 'assistant',
+      parts: [
+        { type: 'text', text: 'before edit' },
+        {
+          type: 'data-git-snapshot',
+          data: {
+            root: 'D:\\repo',
+            files: [
+              {
+                additions: 1,
+                deletions: 0,
+                patch: '+change',
+                path: 'file.ts'
+              }
+            ]
+          }
+        },
+        { type: 'text', text: 'streaming after edit' }
+      ]
+    } as UIMessage
+    await render({ messages: [response], recentStart: 0, live: true })
+
+    const props = captured.props as VirtuosoProps
+    expect(props.totalCount).toBe(3)
+    expect(props.itemContent(0).props.children.props.renderItem.partIndexes).toEqual([0])
+    expect(props.itemContent(1).props.children.props.renderItem.partIndexes).toEqual([2])
+    expect(props.itemContent(2).props.children.props.files[0].path).toBe('file.ts')
+    expect(props.itemContent(2).props.className).toContain('pt-4')
+    expect(props.itemContent(1).props.className).toContain('[contain:layout_paint_style]')
+    expect(props.itemContent(2).props.className).not.toContain('[contain:layout_paint_style]')
+  })
+
+  it('keeps existing fragment keys stable when output continues after a change', async () => {
+    const snapshot = {
+      type: 'data-git-snapshot',
+      data: {
+        files: [{ additions: 1, deletions: 0, patch: '+change', path: 'file.ts' }]
+      }
+    }
+    const response = {
+      id: 'stable-response',
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'before edit' }, snapshot]
+    } as UIMessage
+    await render({ messages: [response], recentStart: 0, live: true })
+    expect((captured.props as VirtuosoProps).computeItemKey(0)).toBe('stable-response-0')
+
+    await render({
+      messages: [
+        {
+          ...response,
+          parts: [...response.parts, { type: 'text', text: 'after edit' }]
+        } as UIMessage
+      ],
+      recentStart: 0,
+      live: true
+    })
+
+    const props = captured.props as VirtuosoProps
+    expect(props.computeItemKey(0)).toBe('stable-response-0')
+    expect(props.computeItemKey(1)).toBe('stable-response-2')
+    expect(props.computeItemKey(2)).toBe('stable-response-changes')
+  })
+
+  it('does not replace long streamed output above a changes card when streaming completes', async () => {
+    const text = Array.from(
+      { length: 12 },
+      (_, index) => `## Section ${index}\n\n${`paragraph-${index} `.repeat(80)}`
+    ).join('\n\n')
+    const response = {
+      id: 'long-streamed-response',
+      role: 'assistant',
+      parts: [
+        { type: 'text', text, state: 'streaming' },
+        {
+          type: 'data-git-snapshot',
+          data: {
+            files: [{ additions: 1, deletions: 0, patch: '+change', path: 'file.ts' }]
+          }
+        }
+      ]
+    } as UIMessage
+
+    await render({ messages: [response], recentStart: 0, live: true })
+    const liveProps = captured.props as VirtuosoProps
+    expect(liveProps.totalCount).toBe(2)
+    expect(liveProps.computeItemKey(0)).toBe('long-streamed-response-0')
+
+    await render({
+      messages: [
+        {
+          ...response,
+          parts: [{ type: 'text', text, state: 'done' }, response.parts[1]]
+        } as UIMessage
+      ],
+      recentStart: 0,
+      live: false
+    })
+
+    const completedProps = captured.props as VirtuosoProps
+    expect(completedProps.totalCount).toBe(2)
+    expect(completedProps.computeItemKey(0)).toBe('long-streamed-response-0')
+  })
+
+  it('renders a snapshot-only response as one changes item without an empty message item', async () => {
+    await render({
+      messages: [
+        {
+          id: 'snapshot-only',
+          role: 'assistant',
+          parts: [
+            {
+              type: 'data-git-snapshot',
+              data: {
+                files: [{ additions: 1, deletions: 0, patch: '+change', path: 'file.ts' }]
+              }
+            }
+          ]
+        } as UIMessage
+      ],
+      recentStart: 0
+    })
+
+    const props = captured.props as VirtuosoProps
+    expect(props.totalCount).toBe(1)
+    expect(props.computeItemKey(0)).toBe('snapshot-only-changes')
   })
 
   it('reserves the rounded composer overlap inside the final message', async () => {

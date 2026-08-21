@@ -234,15 +234,16 @@ describe('interaction assistant transport', () => {
     expect(bridge.listenerCount()).toBe(0)
   })
 
-  it('cancels a running request and closes its stream', async () => {
+  it('cancels a started response without inventing frontend lifecycle chunks', async () => {
     const bridge = createBridge()
     const abort = new AbortController()
     vi.stubGlobal('window', { bridge })
     const stream = await send(abort.signal)
+    bridge.emit('agent:chunk:session-1', { type: 'start' })
     abort.abort()
     expect(bridge.invoke).toHaveBeenCalledWith('agent:cancel', 'session-1')
 
-    expect(await readAll(stream)).toEqual([])
+    expect(await readAll(stream)).toEqual([{ type: 'start' }])
     expect(bridge.listenerCount()).toBe(0)
   })
 

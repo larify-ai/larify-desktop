@@ -50,9 +50,10 @@ beforeEach(() => {
 
 describe('runStoredAgentSession', () => {
   it('saves the request and each completed step', async () => {
+    const finalAssistant = { ...assistant, metadata: { startedAt: 1, completedAt: 2 } }
     mocks.run.mockImplementation(async (_messages, _options, _onChunk, onMessage) => {
       onMessage(assistant)
-      return [history, user, assistant]
+      return [history, user, finalAssistant]
     })
     const sessions = {
       hasSession: vi.fn(() => true),
@@ -74,9 +75,10 @@ describe('runStoredAgentSession', () => {
       sessions.loadMessages.mock.invocationCallOrder[0]
     )
     expect(mocks.prepare).toHaveBeenCalledWith([history, user])
-    expect(sessions.saveMessages).toHaveBeenCalledWith('session', [assistant])
+    expect(sessions.saveMessages).toHaveBeenNthCalledWith(1, 'session', [assistant])
+    expect(sessions.saveMessages).toHaveBeenNthCalledWith(2, 'session', [finalAssistant])
     expect(mocks.save).toHaveBeenCalledOnce()
-    expect(result).toBe(assistant)
+    expect(result).toBe(finalAssistant)
   })
 
   it('does not return an assistant message from an earlier run', async () => {

@@ -153,7 +153,13 @@ describe('runAgentSession', () => {
     expect(steps).toHaveLength(2)
     expect(steps[0].parts.some((part) => part.type === 'tool-echo')).toBe(true)
     expect(textOf(steps[1])).toBe('done')
-    expect(steps[1]).toEqual(session.at(-1))
+    expect(steps[1].id).toBe(session.at(-1)?.id)
+    expect(steps[1].parts).toEqual(session.at(-1)?.parts)
+    expect(steps[1].metadata).toEqual({ startedAt: expect.any(Number) })
+    expect(session.at(-1)?.metadata).toEqual({
+      startedAt: expect.any(Number),
+      completedAt: expect.any(Number)
+    })
   })
 
   it('preserves client tool metadata in UI messages', async () => {
@@ -274,6 +280,87 @@ describe('runAgentSession', () => {
     expect(session.at(-1)?.role).toBe('assistant')
     expect(textOf(session.at(-1)!)).toBe('partial response')
     expect(errors).toEqual(['interrupted'])
+    expect(session.at(-1)?.metadata).toEqual({
+      startedAt: expect.any(Number),
+      completedAt: expect.any(Number),
+      outcome: 'error'
+    })
+  })
+
+  it('records elapsed-time metadata when the stream fails before start', async () => {
+    const model = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: new ReadableStream({
+          start(controller) {
+            controller.error(new Error('connection failed'))
+          }
+        })
+      })
+    })
+
+    const session = await runAgentSession(
+      [{ id: 'user-1', role: 'user', parts: [{ type: 'text', text: 'go' }] }],
+      {
+        tools: {},
+        activeTools: [],
+        toolsContext: {},
+        model
+      }
+    )
+
+    const metadata = session.at(-1)?.metadata as
+      { startedAt?: number; completedAt?: number; outcome?: string } | undefined
+    expect(metadata).toEqual({
+      startedAt: expect.any(Number),
+      completedAt: expect.any(Number),
+      outcome: 'error'
+    })
+    expect(metadata!.completedAt!).toBeGreaterThanOrEqual(metadata!.startedAt!)
+  })
+
+  it('records elapsed-time metadata when the run is aborted', async () => {
+    const controller = new AbortController()
+    let streamStarted!: () => void
+    const started = new Promise<void>((resolve) => {
+      streamStarted = resolve
+    })
+    const model = new MockLanguageModelV4({
+      doStream: async ({ abortSignal }) => ({
+        stream: new ReadableStream({
+          start(streamController) {
+            streamController.enqueue({ type: 'stream-start', warnings: [] })
+            streamController.enqueue({ type: 'text-start', id: '0' })
+            streamController.enqueue({ type: 'text-delta', id: '0', delta: 'partial' })
+            streamStarted()
+            abortSignal?.addEventListener(
+              'abort',
+              () => streamController.error(abortSignal.reason),
+              { once: true }
+            )
+          }
+        })
+      })
+    })
+
+    const result = runAgentSession(
+      [{ id: 'user-1', role: 'user', parts: [{ type: 'text', text: 'go' }] }],
+      {
+        tools: {},
+        activeTools: [],
+        toolsContext: {},
+        model,
+        abortSignal: controller.signal
+      }
+    )
+    await started
+    controller.abort()
+
+    const response = (await result).at(-1)
+    expect(response?.metadata).toEqual({
+      startedAt: expect.any(Number),
+      completedAt: expect.any(Number),
+      outcome: 'aborted'
+    })
   })
 })
 

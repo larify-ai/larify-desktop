@@ -37,10 +37,17 @@ export async function runStoredAgentSession(
     : undefined
   const messages = await prepareMessages(sessions.loadMessages(sessionId))
   let latestResponse: UIMessage | undefined
-  await runAgentSession(messages, options, onChunk, (response) => {
+  const finalMessages = await runAgentSession(messages, options, onChunk, (response) => {
     latestResponse = response
     sessions.saveMessages(sessionId, [response])
   })
+  const finalResponse = finalMessages
+    .slice(messages.length)
+    .findLast((candidate) => candidate.role === 'assistant')
+  if (finalResponse) {
+    latestResponse = finalResponse
+    sessions.saveMessages(sessionId, [finalResponse])
+  }
   await titleTask
   return latestResponse
 }

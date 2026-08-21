@@ -35,6 +35,67 @@ async function createStore(): Promise<SessionStore> {
 }
 
 describe('runStoredAgentSession persistence', () => {
+  it('replaces the step snapshot with the complete final UIMessage and restores it after reopening', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'larify-agent-persist-'))
+    directories.push(directory)
+    const database = join(directory, 'sessions.db')
+    const user = message('user', 'user', 'hello')
+    const step: UIMessage = {
+      id: 'assistant',
+      role: 'assistant',
+      metadata: { startedAt: 1_000 },
+      parts: [
+        { type: 'step-start' },
+        { type: 'reasoning', text: 'checking' },
+        { type: 'text', text: 'partial' }
+      ]
+    }
+    const final: UIMessage = {
+      ...step,
+      metadata: { startedAt: 1_000, completedAt: 4_000 },
+      parts: [
+        ...step.parts,
+        {
+          type: 'data-git-snapshot',
+          id: 'review',
+          data: {
+            files: [
+              {
+                additions: 1,
+                binary: false,
+                deletions: 0,
+                patch: '@@ -0,0 +1 @@\n+saved\n',
+                path: 'saved.txt'
+              }
+            ],
+            root: '/workspace'
+          }
+        } as never,
+        { type: 'text', text: 'complete' }
+      ]
+    }
+    mocks.run.mockImplementation(async (messages, _options, _onChunk, onMessage) => {
+      onMessage(step)
+      return [...messages, final]
+    })
+
+    const store = new SessionStore(database)
+    await expect(
+      runStoredAgentSession(store, {
+        sessionId: 'session',
+        cwd: '/workspace',
+        message: user,
+        options: {} as never
+      })
+    ).resolves.toEqual(final)
+    expect(store.loadMessages('session')).toEqual([user, final])
+    store.dispose()
+
+    const reopened = new SessionStore(database)
+    expect(reopened.loadMessages('session')).toEqual([user, final])
+    reopened.dispose()
+  })
+
   it('restores a persisted final Git patch after reopening the session store', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'larify-agent-persist-'))
     directories.push(directory)
@@ -80,10 +141,12 @@ describe('runStoredAgentSession persistence', () => {
       .mockImplementationOnce(async (messages, _options, _onChunk, onMessage) => {
         expect(messages).toEqual([user])
         onMessage(firstResponse)
+        return [user, firstResponse]
       })
       .mockImplementationOnce(async (messages, _options, _onChunk, onMessage) => {
         expect(messages).toEqual([user, firstResponse])
         onMessage(secondResponse)
+        return [user, firstResponse, secondResponse]
       })
 
     const request = {

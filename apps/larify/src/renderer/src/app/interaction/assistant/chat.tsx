@@ -48,19 +48,63 @@ export function AssistantChat({
   onCwdChange: (cwd: string) => void
   onHeadingChange: (heading: ConversationHeading | null) => void
 }): React.JSX.Element {
-  const { addToolOutput, messages, sendMessage, status, stop } = useChat({ chat, throttle: 50 })
+  const { addToolOutput, messages, sendMessage, setMessages, status, stop } = useChat({
+    chat,
+    throttle: 50
+  })
   const running = status === 'submitted' || status === 'streaming'
   const started = messages.length > 0
   const history = useMemo(() => inputHistory(messages), [messages])
   const titleCreated = useRef(Boolean(title))
+  const runStartedAt = useRef<number | undefined>(undefined)
   const [followRequest, setFollowRequest] = useState(0)
   const submitToolOutput = useCallback(
     (tool: string, toolCallId: string, output: unknown) => {
+      runStartedAt.current = Date.now()
       setFollowRequest((current) => current + 1)
       void addToolOutput({ tool, toolCallId, output })
     },
     [addToolOutput]
   )
+  const markAborted = useCallback(
+    (completedAt: number) => {
+      setMessages((current) => {
+        const lastUserIndex = current.findLastIndex(({ role }) => role === 'user')
+        const index = current.findLastIndex(
+          ({ role }, messageIndex) => role === 'assistant' && messageIndex > lastUserIndex
+        )
+        if (index < 0) return current
+        const next = [...current]
+        const message = current[index]
+        const metadata = (message.metadata ?? {}) as Record<string, unknown>
+        const currentRunStartedAt = runStartedAt.current
+        const alreadyTerminal =
+          typeof metadata.completedAt === 'number' &&
+          (currentRunStartedAt === undefined || metadata.completedAt >= currentRunStartedAt)
+        if (alreadyTerminal) return current
+        next[index] = {
+          ...message,
+          metadata: {
+            ...metadata,
+            startedAt:
+              typeof metadata.startedAt === 'number' &&
+              (currentRunStartedAt === undefined || metadata.startedAt >= currentRunStartedAt)
+                ? metadata.startedAt
+                : (runStartedAt.current ?? completedAt),
+            completedAt,
+            outcome: 'aborted'
+          }
+        }
+        return next
+      })
+    },
+    [setMessages]
+  )
+  const stopAndMarkAborted = useCallback(async () => {
+    const completedAt = Date.now()
+    markAborted(completedAt)
+    await stop()
+  }, [markAborted, stop])
 
   useEffect(() => {
     if (!started || title || titleCreated.current) return
@@ -87,8 +131,11 @@ export function AssistantChat({
         status={status}
         showWorkspace={!started}
         onCwdChange={onCwdChange}
-        onSubmit={({ text, files }) => void sendMessage({ text, files })}
-        onStop={() => void stop()}
+        onSubmit={({ text, files }) => {
+          runStartedAt.current = Date.now()
+          void sendMessage({ text, files })
+        }}
+        onStop={() => void stopAndMarkAborted()}
       />
     </div>
   )

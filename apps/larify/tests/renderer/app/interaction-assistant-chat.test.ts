@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   composer: vi.fn(),
   list: vi.fn(),
   sendMessage: vi.fn(),
+  setMessages: vi.fn(),
   stop: vi.fn(),
   toolOutput: undefined as
     ((tool: string, toolCallId: string, output: unknown) => void) | undefined,
@@ -55,6 +56,7 @@ describe('AssistantChat', () => {
         message('user', ['', 'second'])
       ],
       sendMessage: mocks.sendMessage,
+      setMessages: mocks.setMessages,
       status: 'streaming',
       stop: mocks.stop
     })
@@ -63,7 +65,9 @@ describe('AssistantChat', () => {
   afterEach(() => {
     act(() => root?.unmount())
     container.remove()
+    vi.useRealTimers()
     vi.clearAllMocks()
+    vi.restoreAllMocks()
   })
 
   it('connects chat state to the message list and composer', async () => {
@@ -104,10 +108,28 @@ describe('AssistantChat', () => {
     expect(composer.showWorkspace).toBe(false)
     expect(composer.onCwdChange).toBe(onCwdChange)
     expect(onHeadingChange).toHaveBeenCalledWith({ cwd: '', title: 'first message' })
+    vi.spyOn(Date, 'now').mockReturnValueOnce(500).mockReturnValue(2_000)
     composer.onSubmit({ text: 'hello', files: [] })
     composer.onStop()
     expect(mocks.sendMessage).toHaveBeenCalledWith({ text: 'hello', files: [] })
     expect(mocks.stop).toHaveBeenCalledOnce()
+    expect(mocks.setMessages).toHaveBeenCalledOnce()
+    const updateAfterStop = mocks.setMessages.mock.calls.at(-1)?.[0] as (
+      current: UIMessage[]
+    ) => UIMessage[]
+    const [aborted] = updateAfterStop([
+      {
+        id: 'assistant',
+        role: 'assistant',
+        metadata: { startedAt: 1_000 },
+        parts: [{ type: 'text', text: 'partial' }]
+      }
+    ])
+    expect(aborted.metadata).toEqual({
+      startedAt: 1_000,
+      completedAt: expect.any(Number),
+      outcome: 'aborted'
+    })
 
     await act(async () => mocks.toolOutput?.('agent_ask_user', 'call-1', ['Safe']))
     expect(mocks.addToolOutput).toHaveBeenCalledWith({
@@ -149,6 +171,102 @@ describe('AssistantChat', () => {
     root = null
 
     expect(onHeadingChange).not.toHaveBeenCalledWith(null)
+  })
+
+  it('does not overwrite terminal message metadata when stop races with completion', async () => {
+    await act(async () =>
+      root?.render(
+        createElement(AssistantChat, {
+          chat: { id: 'session' } as never,
+          cwd: '',
+          onCwdChange: vi.fn(),
+          onHeadingChange: vi.fn()
+        })
+      )
+    )
+
+    const composer = mocks.composer.mock.calls.at(-1)?.[0]
+    composer.onStop()
+    const update = mocks.setMessages.mock.calls.at(-1)?.[0] as (current: UIMessage[]) => UIMessage[]
+    const complete: UIMessage[] = [
+      {
+        id: 'assistant',
+        role: 'assistant',
+        metadata: { startedAt: 1_000, completedAt: 2_000 },
+        parts: [{ type: 'text', text: 'complete' }]
+      }
+    ]
+
+    expect(update(complete)).toBe(complete)
+    expect(complete[0].metadata).toEqual({ startedAt: 1_000, completedAt: 2_000 })
+  })
+
+  it('does not mark the previous response as aborted before the new response starts', async () => {
+    await act(async () =>
+      root?.render(
+        createElement(AssistantChat, {
+          chat: { id: 'session' } as never,
+          cwd: '',
+          onCwdChange: vi.fn(),
+          onHeadingChange: vi.fn()
+        })
+      )
+    )
+
+    const composer = mocks.composer.mock.calls.at(-1)?.[0]
+    composer.onStop()
+    const update = mocks.setMessages.mock.calls.at(-1)?.[0] as (current: UIMessage[]) => UIMessage[]
+    const submitted: UIMessage[] = [
+      {
+        id: 'previous-assistant',
+        role: 'assistant',
+        metadata: { startedAt: 1_000, completedAt: 2_000 },
+        parts: [{ type: 'text', text: 'previous answer' }]
+      },
+      {
+        id: 'current-user',
+        role: 'user',
+        parts: [{ type: 'text', text: 'new question' }]
+      }
+    ]
+
+    expect(update(submitted)).toBe(submitted)
+    expect(submitted[0].metadata).toEqual({ startedAt: 1_000, completedAt: 2_000 })
+  })
+
+  it('replaces stale terminal metadata when an Ask User continuation is interrupted', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(10_000)
+    await act(async () =>
+      root?.render(
+        createElement(AssistantChat, {
+          chat: { id: 'session' } as never,
+          cwd: '',
+          onCwdChange: vi.fn(),
+          onHeadingChange: vi.fn()
+        })
+      )
+    )
+
+    act(() => mocks.toolOutput?.('agent_ask_user', 'call-1', ['Continue']))
+    vi.setSystemTime(12_000)
+    const composer = mocks.composer.mock.calls.at(-1)?.[0]
+    act(() => composer.onStop())
+    const update = mocks.setMessages.mock.calls.at(-1)?.[0] as (current: UIMessage[]) => UIMessage[]
+    const waiting: UIMessage[] = [
+      {
+        id: 'assistant',
+        role: 'assistant',
+        metadata: { startedAt: 1_000, completedAt: 5_000 },
+        parts: [{ type: 'text', text: 'waiting' }]
+      }
+    ]
+
+    expect(update(waiting)[0].metadata).toEqual({
+      startedAt: 10_000,
+      completedAt: 12_000,
+      outcome: 'aborted'
+    })
   })
 
   it('requests bottom following after every tool output', async () => {

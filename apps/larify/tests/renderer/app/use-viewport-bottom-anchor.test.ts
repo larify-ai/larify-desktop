@@ -10,6 +10,7 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true
 let resize: (() => void) | null = null
 let capture: ((range?: { startIndex: number; endIndex: number }) => void) | null = null
 let trackRenderedRange: ((range: { startIndex: number; endIndex: number }) => void) | null = null
+let releaseAnchor: (() => void) | null = null
 let scrollToBottom: (() => void) | null = null
 let observed: Element | null = null
 let disconnected = false
@@ -37,13 +38,15 @@ function Harness({
   useEffect(() => {
     capture = anchor.captureAnchor
     trackRenderedRange = anchor.trackRenderedRange
+    releaseAnchor = anchor.releaseAnchor
     scrollToBottom = anchor.scrollToBottom
     return () => {
       capture = null
       trackRenderedRange = null
+      releaseAnchor = null
       scrollToBottom = null
     }
-  }, [anchor.captureAnchor, anchor.scrollToBottom, anchor.trackRenderedRange])
+  }, [anchor.captureAnchor, anchor.releaseAnchor, anchor.scrollToBottom, anchor.trackRenderedRange])
   if (!showScroller) return null
   return createElement(
     'div',
@@ -70,6 +73,7 @@ afterEach(() => {
   resize = null
   capture = null
   trackRenderedRange = null
+  releaseAnchor = null
   scrollToBottom = null
   vi.unstubAllGlobals()
 })
@@ -98,6 +102,27 @@ describe('viewport bottom anchor', () => {
 
     expect(readViewport).toHaveBeenCalledOnce()
     expect(readItem).toHaveBeenCalledOnce()
+  })
+
+  it('does not rebuild a released anchor from a previously rendered range', async () => {
+    await act(async () => root.render(createElement(Harness)))
+    const scroller = container.querySelector<HTMLElement>('[data-scroller]')!
+    const item = container.querySelector<HTMLElement>('[data-message-index="7"]')!
+    const readViewport = vi.fn(() => rect(0, 400))
+    const readItem = vi.fn(() => rect(200, 380))
+    scroller.getBoundingClientRect = readViewport
+    item.getBoundingClientRect = readItem
+    await nextFrame()
+    readViewport.mockClear()
+    readItem.mockClear()
+
+    trackRenderedRange?.({ startIndex: 7, endIndex: 7 })
+    releaseAnchor?.()
+    scroller.dispatchEvent(new Event('scrollend'))
+    await nextFrame()
+
+    expect(readViewport).not.toHaveBeenCalled()
+    expect(readItem).not.toHaveBeenCalled()
   })
 
   it('keeps the initial rendered range when it arrives before the scroller', async () => {
@@ -346,6 +371,31 @@ describe('viewport bottom anchor', () => {
     await nextFrame()
 
     expect(scroller.scrollTop).toBe(0)
+  })
+
+  it('restores the reading position after workbench dragging finishes', async () => {
+    await act(async () => root.render(createElement(Harness)))
+    const scroller = container.querySelector<HTMLElement>('[data-scroller]')!
+    const item = container.querySelector<HTMLElement>('[data-message-index="7"]')!
+    let viewportBottom = 400
+    container.className = 'larify-workbench-split'
+    scroller.getBoundingClientRect = () => rect(0, viewportBottom)
+    item.getBoundingClientRect = () => rect(200, 380)
+
+    captureIndex(7)
+    await nextFrame()
+    container.dataset.resizing = 'true'
+    viewportBottom = 350
+    resize?.()
+    await nextFrame()
+    expect(scroller.scrollTop).toBe(0)
+
+    container.removeAttribute('data-resizing')
+    viewportBottom = 300
+    resize?.()
+    await nextFrame()
+
+    expect(scroller.scrollTop).toBe(100)
   })
 
   it('cancels a pending restore before positioning a newly active conversation', async () => {

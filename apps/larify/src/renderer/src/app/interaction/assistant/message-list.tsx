@@ -8,7 +8,11 @@ import { summarizeMessageChanges, type ChangeSummary } from './change-summary'
 import { ChangesSummaryCard } from './changes-summary-card'
 import { messagePageSize } from './session-messages'
 import { useViewportBottomAnchor } from './use-viewport-bottom-anchor'
-import { buildAssistantRenderItems, type AssistantRenderItem } from './message-render-items'
+import {
+  buildAssistantRenderItems,
+  isActivityRenderItem,
+  type AssistantRenderItem
+} from './message-render-items'
 
 const Message = memo(
   MessageView,
@@ -16,7 +20,6 @@ const Message = memo(
     !next.streaming &&
     previous.streaming === next.streaming &&
     previous.message === next.message &&
-    previous.renderItem === next.renderItem &&
     previous.activityKey === next.activityKey &&
     previous.activityOpen === next.activityOpen &&
     previous.onActivityOpenChange === next.onActivityOpenChange &&
@@ -151,7 +154,6 @@ function ActiveAssistantMessageList({
   const upwardInputAt = useRef<number | null>(null)
   const scrollIntentTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const positioningStarted = useRef(false)
-  const requestedRange = useRef({ firstPage: -1, lastPage: -1 })
   const openActivities = useRef(new Map<string, boolean>())
   const activityScrollTop = useRef<number | null>(null)
   const [position, setPosition] = useState({
@@ -166,6 +168,18 @@ function ActiveAssistantMessageList({
     scrollToBottom: scrollViewportToBottom
   } = useViewportBottomAnchor(active)
   const recentItems = useMemo(() => recentListItems(messages, live), [live, messages])
+
+  useEffect(() => {
+    const currentActivityKeys = new Set<string>()
+    for (const item of recentItems) {
+      if (item.kind === 'content' && item.renderItem && isActivityRenderItem(item.renderItem)) {
+        currentActivityKeys.add(item.key)
+      }
+    }
+    for (const key of openActivities.current.keys()) {
+      if (!currentActivityKeys.has(key)) openActivities.current.delete(key)
+    }
+  }, [recentItems])
 
   const handleActivityOpenChange = useCallback(
     (key: string, open: boolean) => {
@@ -235,8 +249,7 @@ function ActiveAssistantMessageList({
       const observer = new ResizeObserver(() => {
         const version = ++resizeVersion.current
         resizingMessage.current = true
-        const hasOpenActivity = [...openActivities.current.values()].some(Boolean)
-        if (scrollMode.current === 'following' && !hasOpenActivity) {
+        if (scrollMode.current === 'following') {
           scrollViewportToBottom()
           list.current?.autoscrollToBottom()
         }
@@ -335,13 +348,6 @@ function ActiveAssistantMessageList({
       Math.floor((recentStart - 1) / messagePageSize),
       Math.floor(endIndex / messagePageSize) + pageBuffer
     )
-    if (
-      requestedRange.current.firstPage === firstPage &&
-      requestedRange.current.lastPage === lastPage
-    ) {
-      return
-    }
-    requestedRange.current = { firstPage, lastPage }
     onLoadRange(firstPage, lastPage)
   }
 

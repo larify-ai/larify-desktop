@@ -229,6 +229,139 @@ describe('AssistantSession', () => {
     await act(async () => root.unmount())
   })
 
+  it('loads adjacent historical pages in one request and one render', async () => {
+    const invoke = vi.fn((channel: string, _id: string, offset?: number, limit?: number) =>
+      channel === 'session:msgs'
+        ? Promise.resolve(
+            Array.from({ length: limit ?? 0 }, (_, index) => message(`page-${offset! + index}`))
+          )
+        : Promise.resolve(undefined)
+    )
+    Object.defineProperty(window, 'bridge', {
+      configurable: true,
+      value: { invoke, on: vi.fn(() => () => undefined) }
+    })
+    const root = createRoot(document.createElement('div'))
+
+    await act(async () => {
+      root.render(
+        createElement(AssistantSession, {
+          id: 'session',
+          initialMessages: [message('latest')],
+          initialMessageCount: 251,
+          initialCwd: '',
+          onHeadingChange: vi.fn(),
+          onSaved: vi.fn()
+        })
+      )
+    })
+    const session = mocks.assistant.mock.calls.at(-1)![0] as {
+      onLoadRange: (firstPage: number, lastPage: number) => void
+    }
+    const rendersBeforeLoad = mocks.assistant.mock.calls.length
+
+    await act(async () => session.onLoadRange(0, 4))
+
+    expect(invoke.mock.calls.filter(([channel]) => channel === 'session:msgs')).toEqual([
+      ['session:msgs', 'session', 0, 250]
+    ])
+    expect(mocks.assistant.mock.calls.length - rendersBeforeLoad).toBe(1)
+    const loaded = mocks.assistant.mock.calls.at(-1)![0] as {
+      olderMessages: Map<number, UIMessage>
+    }
+    expect(loaded.olderMessages.size).toBe(250)
+
+    await act(async () => root.unmount())
+  })
+
+  it('releases every page in a failed batch so the visible range can retry', async () => {
+    const invoke = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('temporary failure'))
+      .mockResolvedValueOnce([message('retried')])
+    Object.defineProperty(window, 'bridge', {
+      configurable: true,
+      value: { invoke, on: vi.fn(() => () => undefined) }
+    })
+    const root = createRoot(document.createElement('div'))
+
+    await act(async () => {
+      root.render(
+        createElement(AssistantSession, {
+          id: 'session',
+          initialMessages: [message('latest')],
+          initialMessageCount: 251,
+          initialCwd: '',
+          onHeadingChange: vi.fn(),
+          onSaved: vi.fn()
+        })
+      )
+    })
+    const session = mocks.assistant.mock.calls.at(-1)![0] as {
+      onLoadRange: (firstPage: number, lastPage: number) => void
+    }
+
+    await act(async () => session.onLoadRange(0, 4))
+    await act(async () => session.onLoadRange(2, 2))
+
+    expect(invoke.mock.calls.filter(([channel]) => channel === 'session:msgs')).toEqual([
+      ['session:msgs', 'session', 0, 250],
+      ['session:msgs', 'session', 100, 50]
+    ])
+    const loaded = mocks.assistant.mock.calls.at(-1)![0] as {
+      olderMessages: Map<number, UIMessage>
+    }
+    expect(loaded.olderMessages.get(100)?.id).toBe('retried')
+
+    await act(async () => root.unmount())
+  })
+
+  it('loads only the missing tail when a visible range overlaps a pending batch', async () => {
+    let resolveFirst!: (messages: UIMessage[]) => void
+    const first = new Promise<UIMessage[]>((resolve) => {
+      resolveFirst = resolve
+    })
+    const invoke = vi.fn((channel: string, _id: string, offset?: number, limit?: number) => {
+      if (channel !== 'session:msgs') return Promise.resolve(undefined)
+      if (offset === 0) return first
+      return Promise.resolve(
+        Array.from({ length: limit ?? 0 }, (_, index) => message(`tail-${offset! + index}`))
+      )
+    })
+    Object.defineProperty(window, 'bridge', {
+      configurable: true,
+      value: { invoke, on: vi.fn(() => () => undefined) }
+    })
+    const root = createRoot(document.createElement('div'))
+
+    await act(async () => {
+      root.render(
+        createElement(AssistantSession, {
+          id: 'session',
+          initialMessages: [message('latest')],
+          initialMessageCount: 351,
+          initialCwd: '',
+          onHeadingChange: vi.fn(),
+          onSaved: vi.fn()
+        })
+      )
+    })
+    const session = mocks.assistant.mock.calls.at(-1)![0] as {
+      onLoadRange: (firstPage: number, lastPage: number) => void
+    }
+
+    act(() => session.onLoadRange(0, 4))
+    await act(async () => session.onLoadRange(2, 6))
+
+    expect(invoke.mock.calls.filter(([channel]) => channel === 'session:msgs')).toEqual([
+      ['session:msgs', 'session', 0, 250],
+      ['session:msgs', 'session', 250, 100]
+    ])
+
+    await act(async () => resolveFirst([]))
+    await act(async () => root.unmount())
+  })
+
   it('keeps virtual indexes non-negative when the initial count is stale', async () => {
     Object.defineProperty(window, 'bridge', {
       configurable: true,

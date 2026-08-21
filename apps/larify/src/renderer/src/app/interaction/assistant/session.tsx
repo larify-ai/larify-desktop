@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Chat } from '@ai-sdk/react'
 import { lastAssistantMessageIsCompleteWithToolCalls, type UIMessage } from 'ai'
 import { createIpcTransport } from './transport'
@@ -85,27 +85,50 @@ export function AssistantSession({
           pruned = true
         }
       }
-      if (pruned) setOlderMessages(new Map(cache.current))
+      if (pruned) {
+        startTransition(() => setOlderMessages(new Map(cache.current)))
+      }
 
+      const missingPages: number[] = []
       for (let page = firstPage; page <= lastPage; page++) {
         const pageStart = page * messagePageSize
-        const pageEnd = Math.min(pageStart + messagePageSize, recentStart)
-        if (pageEnd <= pageStart || cache.current.has(pageStart) || loading.current.has(page)) {
+        if (pageStart >= recentStart || cache.current.has(pageStart) || loading.current.has(page))
           continue
-        }
-
         loading.current.add(page)
+        missingPages.push(page)
+      }
+
+      for (let index = 0; index < missingPages.length;) {
+        const firstMissingPage = missingPages[index]
+        let lastMissingPage = firstMissingPage
+        while (missingPages[index + 1] === lastMissingPage + 1) {
+          lastMissingPage = missingPages[++index]
+        }
+        index += 1
+
+        const pageStart = firstMissingPage * messagePageSize
+        const pageEnd = Math.min((lastMissingPage + 1) * messagePageSize, recentStart)
         void loadVisibleMessages(id, pageStart, pageEnd - pageStart)
           .then((messages) => {
             const active = range.current
-            if (page < active.firstPage || page > active.lastPage) return
-            messages.forEach((message, index) => cache.current.set(pageStart + index, message))
-            setOlderMessages(new Map(cache.current))
+            let changed = false
+            messages.forEach((message, messageIndex) => {
+              const absoluteIndex = pageStart + messageIndex
+              const page = Math.floor(absoluteIndex / messagePageSize)
+              if (page < active.firstPage || page > active.lastPage) return
+              cache.current.set(absoluteIndex, message)
+              changed = true
+            })
+            if (changed) startTransition(() => setOlderMessages(new Map(cache.current)))
           })
           .catch(() => {
             // Keep the page available for retry.
           })
-          .finally(() => loading.current.delete(page))
+          .finally(() => {
+            for (let page = firstMissingPage; page <= lastMissingPage; page++) {
+              loading.current.delete(page)
+            }
+          })
       }
     },
     [id, recentStart]

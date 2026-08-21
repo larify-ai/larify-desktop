@@ -117,7 +117,8 @@ describe('interaction assistant message list', () => {
     expect(props.overscan).toBe(0)
 
     props.rangeChanged({ startIndex: 149, endIndex: 152 })
-    expect(onLoadRange).toHaveBeenCalledOnce()
+    expect(onLoadRange).toHaveBeenCalledTimes(2)
+    expect(onLoadRange).toHaveBeenLastCalledWith(0, 5)
   })
 
   it('does not request historical pages while only recent fragments are visible', async () => {
@@ -651,10 +652,99 @@ describe('interaction assistant message list', () => {
       await act(async () => itemRoot.render((captured.props as VirtuosoProps).itemContent(0)))
 
       expect(itemContainer.querySelector('button')?.getAttribute('data-state')).toBe('open')
+
+      captured.autoscrollToBottom.mockClear()
+      act(() => container.querySelector<HTMLButtonElement>('button[aria-label="返回底部"]')?.click())
+      act(() => (captured.props as VirtuosoProps).atBottomStateChange(true))
+      captured.autoscrollToBottom.mockClear()
+      act(() => resize())
+
+      expect(captured.autoscrollToBottom).toHaveBeenCalledOnce()
     } finally {
       detach()
       await act(async () => itemRoot.unmount())
       listContainer.remove()
+    }
+  })
+
+  it('keeps a streaming activity collapsed after virtualization remounts it', async () => {
+    const response = {
+      id: 'streaming-with-activity',
+      role: 'assistant',
+      parts: [
+        { type: 'reasoning', text: 'checking', state: 'done' },
+        { type: 'text', text: 'current answer', state: 'streaming' }
+      ]
+    } as UIMessage
+    await render({ messages: [response], recentStart: 0, live: true })
+
+    const itemContainer = document.createElement('div')
+    document.body.append(itemContainer)
+    let itemRoot = createRoot(itemContainer)
+    try {
+      await act(async () => itemRoot.render((captured.props as VirtuosoProps).itemContent(0)))
+      expect(itemContainer.querySelector('button')?.getAttribute('data-state')).toBe('open')
+
+      await act(async () => itemContainer.querySelector<HTMLButtonElement>('button')?.click())
+      expect(itemContainer.querySelector('button')?.getAttribute('data-state')).toBe('closed')
+
+      await render({
+        messages: [
+          {
+            ...response,
+            parts: [response.parts[0], { type: 'text', text: 'longer answer', state: 'streaming' }]
+          } as UIMessage
+        ],
+        recentStart: 0,
+        live: true
+      })
+      await act(async () => itemRoot.unmount())
+      itemRoot = createRoot(itemContainer)
+      await act(async () => itemRoot.render((captured.props as VirtuosoProps).itemContent(0)))
+
+      expect(itemContainer.querySelector('button')?.getAttribute('data-state')).toBe('closed')
+    } finally {
+      await act(async () => itemRoot.unmount())
+      itemContainer.remove()
+    }
+  })
+
+  it('forgets a manual activity preference after that activity leaves the message', async () => {
+    const response = {
+      id: 'reused-activity-key',
+      role: 'assistant',
+      parts: [
+        { type: 'reasoning', text: 'checking', state: 'done' },
+        { type: 'text', text: 'current answer', state: 'streaming' }
+      ]
+    } as UIMessage
+    const itemContainer = document.createElement('div')
+    document.body.append(itemContainer)
+    const itemRoot = createRoot(itemContainer)
+    try {
+      await render({ messages: [response], recentStart: 0, live: true })
+      await act(async () => itemRoot.render((captured.props as VirtuosoProps).itemContent(0)))
+      await act(async () => itemContainer.querySelector<HTMLButtonElement>('button')?.click())
+      expect(itemContainer.querySelector('button')?.getAttribute('data-state')).toBe('closed')
+
+      await render({
+        messages: [
+          {
+            ...response,
+            parts: [{ type: 'text', text: 'only current text', state: 'streaming' }]
+          } as UIMessage
+        ],
+        recentStart: 0,
+        live: true
+      })
+      await act(async () => itemRoot.render((captured.props as VirtuosoProps).itemContent(0)))
+      await render({ messages: [response], recentStart: 0, live: true })
+      await act(async () => itemRoot.render((captured.props as VirtuosoProps).itemContent(0)))
+
+      expect(itemContainer.querySelector('button')?.getAttribute('data-state')).toBe('open')
+    } finally {
+      await act(async () => itemRoot.unmount())
+      itemContainer.remove()
     }
   })
 

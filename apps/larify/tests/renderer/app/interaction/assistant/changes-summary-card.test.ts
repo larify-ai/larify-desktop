@@ -102,6 +102,14 @@ describe('ChangesSummaryCard', () => {
     expect(requestChangesNavigation).not.toHaveBeenCalled()
   })
 
+  it('caps the file list at exactly five rows', async () => {
+    await render()
+
+    const list = container.querySelector('section > div')
+    expect(list?.classList).toContain('max-h-[calc(9.5rem+1px)]')
+    expect(list?.querySelector('button')?.classList).toContain('h-7')
+  })
+
   it('opens all changes at the selected file', async () => {
     await render()
     const button = Array.from(container.querySelectorAll('button')).find((button) =>

@@ -112,7 +112,7 @@ export function ChangesSummaryCard({
       >
         <button
           type="button"
-          className="flex w-full cursor-pointer items-center gap-3 px-4 py-3 text-left hover:bg-muted/40"
+          className="flex w-full cursor-pointer items-center gap-3 py-3 pr-[calc(1rem+var(--larify-scrollbar-size))] pl-4 text-left hover:bg-muted/40"
           onClick={() => openChanges()}
         >
           <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
@@ -124,7 +124,7 @@ export function ChangesSummaryCard({
             <span className="text-[var(--git-deleted)]">−{deletions}</span>
           </span>
         </button>
-        <div className="max-h-40 overflow-y-auto border-t border-border bg-muted/20 px-2 py-1.5">
+        <div className="max-h-[calc(9.5rem+1px)] overflow-y-auto [scrollbar-gutter:stable] border-t border-border bg-muted/20 px-2 py-1.5">
           {files.map((file) => (
             <button
               key={file.path}
@@ -138,7 +138,7 @@ export function ChangesSummaryCard({
                     }
               }
               onMouseEnter={file.binary ? undefined : () => showFile(file.path)}
-              className="flex w-full min-w-0 cursor-pointer items-center gap-2 rounded-md py-1.5 pr-2 pl-3.5 text-left text-xs hover:bg-muted"
+              className="flex h-7 w-full min-w-0 cursor-pointer items-center gap-2 rounded-md pr-2 pl-3.5 text-left text-xs hover:bg-muted"
               onClick={() => openChanges(file.path)}
             >
               <span className="min-w-0 flex-1 truncate font-mono">{file.path}</span>

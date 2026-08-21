@@ -1,6 +1,7 @@
 import type { UIMessage, UIMessageChunk } from 'ai'
 import { resolve } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { clearReadState, markRead, readAtFor } from '../../../../src/extensions/fs/main/state'
 
 const mocks = vi.hoisted(() => ({ run: vi.fn() }))
 
@@ -113,11 +114,7 @@ describe('AgentWorker', () => {
   it('updates a live review only after successful fs_write and fs_edit calls', async () => {
     let emit!: (chunk: UIMessageChunk) => void
     let complete!: () => void
-    let trackFileChange!: (mutation: {
-      path: string
-      before: string | null
-      after: string
-    }) => void
+    let trackFileChange!: (mutation: { path: string; before: string | null; after: string }) => void
     mocks.run.mockImplementation(
       (_sessions, request) =>
         new Promise<UIMessage | undefined>((resolve) => {
@@ -152,7 +149,11 @@ describe('AgentWorker', () => {
     emit({
       type: 'tool-output-available',
       toolCallId: 'write',
-      output: { kind: 'diff', path: '/workspace/file.ts', patch: '--- a/file.ts\n+++ b/file.ts\n@@ -0,0 +1 @@\n+new' }
+      output: {
+        kind: 'diff',
+        path: '/workspace/file.ts',
+        patch: '--- a/file.ts\n+++ b/file.ts\n@@ -0,0 +1 @@\n+new'
+      }
     } as UIMessageChunk)
     expect(sink.chunk).toHaveBeenCalledWith({
       type: 'data-git-snapshot',
@@ -230,6 +231,50 @@ describe('AgentWorker', () => {
     })
     expect(sessions.saveStart).toHaveBeenCalledWith('session', nextMessage)
     expect(sink.end).toHaveBeenCalledOnce()
+  })
+
+  it('clears file read state after reset', async () => {
+    const sessionId = 'reset-file-state-session'
+    const otherSessionId = 'other-file-state-session'
+    const file = '/workspace/file.ts'
+    markRead(sessionId, file, 1_000)
+    markRead(otherSessionId, file, 2_000)
+    const runtime = {
+      toolsContext: {
+        agent_reset_context: { sessionId, cwd: '/workspace' }
+      }
+    } as never
+    mocks.run
+      .mockImplementationOnce(async (_sessions, request) => {
+        request.options.toolsContext.agent_reset_context.requestContextReset('Continue fresh.')
+        return undefined
+      })
+      .mockImplementationOnce(async () => {
+        expect(readAtFor(sessionId, file)).toBeUndefined()
+        expect(readAtFor(otherSessionId, file)).toBe(2_000)
+        return undefined
+      })
+    const { worker } = createWorker()
+
+    await worker.run({ ...input, sessionId, runtime })
+
+    expect(mocks.run).toHaveBeenCalledTimes(2)
+    expect(readAtFor(sessionId, file)).toBeUndefined()
+    expect(readAtFor(otherSessionId, file)).toBe(2_000)
+    clearReadState(otherSessionId)
+  })
+
+  it('keeps file read state when the context is not reset', async () => {
+    const sessionId = 'preserved-file-state-session'
+    const file = '/workspace/file.ts'
+    markRead(sessionId, file, 1_000)
+    mocks.run.mockResolvedValueOnce(undefined)
+    const { worker } = createWorker()
+
+    await worker.run({ ...input, sessionId })
+
+    expect(readAtFor(sessionId, file)).toBe(1_000)
+    clearReadState(sessionId)
   })
 
   it('forwards generated titles while running', async () => {
@@ -324,7 +369,6 @@ describe('AgentWorker', () => {
     expect(sink.error).not.toHaveBeenCalled()
     expect(sessions.saveMessages).not.toHaveBeenCalled()
   })
-
 
   it('ignores chunks emitted after cancellation', async () => {
     let emit!: (chunk: UIMessageChunk) => void

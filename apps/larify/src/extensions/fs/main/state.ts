@@ -27,6 +27,10 @@ export function readAtFor(sessionId: string, target: string): number | undefined
   return fileStates.get(sessionId)?.get(target)
 }
 
+export function clearReadState(sessionId: string): void {
+  fileStates.delete(sessionId)
+}
+
 export function withFileLock<T>(target: string, run: () => Promise<T>): Promise<T> {
   return lock(target, run)
 }

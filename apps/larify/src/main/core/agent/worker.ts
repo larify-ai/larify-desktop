@@ -1,5 +1,6 @@
 import type { UIMessage, UIMessageChunk } from 'ai'
 import { randomUUID } from 'node:crypto'
+import { clearReadState } from '../../../extensions/fs/main/state'
 import type { SessionStore } from '../session'
 import type { AgentOptions } from './engine'
 import { runStoredAgentSession } from './persist'
@@ -117,12 +118,10 @@ export class AgentWorker {
           id: randomUUID(),
           role: 'user',
           metadata: { compaction: true },
-          parts: [
-            ...input.message.parts,
-            { type: 'text', text: `# Handoff\n\n${handoff}` }
-          ]
+          parts: [...input.message.parts, { type: 'text', text: `# Handoff\n\n${handoff}` }]
         }
         handoff = undefined
+        clearReadState(input.sessionId)
         this.sessions.saveStart(input.sessionId, message)
         response = await runOnce(message)
       }

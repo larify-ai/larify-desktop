@@ -1,9 +1,11 @@
 import { ipcMain, type BrowserWindow, type IpcMainEvent, type Rectangle } from 'electron'
+import { stat } from 'node:fs/promises'
 import type { WorkspaceManager } from './manager'
 import type { NativePreviewManager } from './native-preview-manager'
 
 const channels = [
   'workspace:inspect',
+  'workspace:path-kind',
   'workspace:list',
   'workspace-preview:open',
   'workspace:read',
@@ -27,6 +29,9 @@ export function registerWorkspaceIpc(
   )
   ipcMain.handle('workspace:inspect', (_event, id: number, file: string) =>
     manager.inspectFile(id, file)
+  )
+  ipcMain.handle('workspace:path-kind', async (_event, file: string) =>
+    (await stat(file)).isDirectory() ? 'directory' : 'file'
   )
   ipcMain.handle('workspace:read', (_event, id: number, file: string) => manager.readFile(id, file))
   ipcMain.handle('workspace:read-asset', (_event, id: number, file: string) =>

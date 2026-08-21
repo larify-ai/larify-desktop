@@ -34,4 +34,20 @@ describe('workspace navigation', () => {
     expect(takeWorkspaceNavigation(7)).toEqual(latest)
     expect(takeWorkspaceNavigation(8)).toEqual(other)
   })
+
+  it('preserves a directory request while dispatching and consuming it', () => {
+    const dispatch = vi.spyOn(window, 'dispatchEvent')
+    const request = {
+      kind: 'directory' as const,
+      path: 'D:\\Workspace\\folder',
+      resourceId: 9
+    }
+
+    requestWorkspaceNavigation(request)
+
+    const event = dispatch.mock.calls[0][0] as CustomEvent
+    expect(event.detail).toEqual(request)
+    expect(takeWorkspaceNavigation(9)).toEqual(request)
+    expect(takeWorkspaceNavigation(9)).toBeNull()
+  })
 })

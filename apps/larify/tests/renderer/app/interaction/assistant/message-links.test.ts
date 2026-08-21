@@ -21,7 +21,9 @@ describe('createMessageLinkHandler', () => {
     dispatchSpy.mockClear()
     vi.stubGlobal('dispatchEvent', dispatchSpy)
     window.bridge = {
-      invoke: vi.fn().mockResolvedValue(42)
+      invoke: vi.fn((channel: string) =>
+        Promise.resolve(channel === 'workspace:path-kind' ? 'file' : 42)
+      )
     } as unknown as typeof window.bridge
   })
 
@@ -29,6 +31,8 @@ describe('createMessageLinkHandler', () => {
     const handler = createMessageLinkHandler(cwd, sessionId)
 
     handler({ kind: 'file', target: 'src\\main\\index.ts' })
+
+    await vi.waitFor(() => expect(dispatchSpy).toHaveBeenCalled())
 
     const event = dispatchSpy.mock.calls[0][0] as CustomEvent
     expect(event.type).toBe('larify:workbench-open')
@@ -107,17 +111,58 @@ describe('createMessageLinkHandler', () => {
     expect(window.bridge.invoke).toHaveBeenCalledWith('resource:close', 1)
   })
 
-  it('navigates only the latest file when workspace callbacks run out of order', () => {
+  it('navigates only the latest file when workspace callbacks run out of order', async () => {
+    const first = deferred<string>()
+    const second = deferred<string>()
+    vi.mocked(window.bridge.invoke)
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise)
     const handler = createMessageLinkHandler(cwd, sessionId)
 
     handler({ kind: 'file', target: 'first.ts' })
     handler({ kind: 'file', target: 'second.ts' })
+    second.resolve('file')
+    first.resolve('file')
+    await vi.waitFor(() =>
+      expect(
+        dispatchSpy.mock.calls.filter(
+          ([event]) => (event as CustomEvent).type === 'larify:workbench-open'
+        )
+      ).toHaveLength(1)
+    )
     const opens = dispatchSpy.mock.calls
       .map(([event]) => event as CustomEvent<{ onOpen: (resourceId: number) => void }>)
       .filter((event) => event.type === 'larify:workbench-open')
 
-    opens[1].detail.onOpen(2)
-    opens[0].detail.onOpen(1)
+    opens[0].detail.onOpen(2)
+
+    const navigations = dispatchSpy.mock.calls
+      .map(([event]) => event as CustomEvent)
+      .filter((event) => event.type === 'larify:workspace-navigation')
+    expect(navigations).toHaveLength(1)
+    expect(navigations[0].detail).toEqual({
+      path: 'D:\\Workspace\\Project\\second.ts',
+      resourceId: 2
+    })
+  })
+
+  it('ignores an already-open workspace callback after a newer link is clicked', async () => {
+    const handler = createMessageLinkHandler(cwd, sessionId)
+
+    handler({ kind: 'file', target: 'first.ts' })
+    await vi.waitFor(() => expect(dispatchSpy).toHaveBeenCalledTimes(1))
+    const firstOpen = dispatchSpy.mock.calls[0][0] as CustomEvent<{
+      onOpen: (resourceId: number) => void
+    }>
+
+    handler({ kind: 'file', target: 'second.ts' })
+    await vi.waitFor(() => expect(dispatchSpy).toHaveBeenCalledTimes(2))
+    const secondOpen = dispatchSpy.mock.calls[1][0] as CustomEvent<{
+      onOpen: (resourceId: number) => void
+    }>
+
+    firstOpen.detail.onOpen(1)
+    secondOpen.detail.onOpen(2)
 
     const navigations = dispatchSpy.mock.calls
       .map(([event]) => event as CustomEvent)
@@ -144,6 +189,21 @@ describe('createMessageLinkHandler', () => {
     consoleError.mockRestore()
   })
 
+  it('logs path inspection failures without opening a workspace', async () => {
+    const error = new Error('inspect failed')
+    vi.mocked(window.bridge.invoke).mockRejectedValueOnce(error)
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const handler = createMessageLinkHandler(cwd, sessionId)
+
+    handler({ kind: 'file', target: 'missing.ts' })
+    await vi.waitFor(() => {
+      expect(consoleError).toHaveBeenCalledWith('[message-link:inspect-path]', error)
+    })
+
+    expect(dispatchSpy).not.toHaveBeenCalled()
+    consoleError.mockRestore()
+  })
+
   it('closes a pending browser resource after the handler is disposed', async () => {
     const browser = deferred<number>()
     vi.mocked(window.bridge.invoke).mockReturnValueOnce(browser.promise)
@@ -158,10 +218,11 @@ describe('createMessageLinkHandler', () => {
     expect(dispatchSpy).not.toHaveBeenCalled()
   })
 
-  it('ignores a pending workspace callback after the handler is disposed', () => {
+  it('ignores a pending workspace callback after the handler is disposed', async () => {
     const handler = createMessageLinkHandler(cwd, sessionId)
 
     handler({ kind: 'file', target: 'README.md' })
+    await vi.waitFor(() => expect(dispatchSpy).toHaveBeenCalled())
     const open = dispatchSpy.mock.calls[0][0] as CustomEvent<{
       onOpen: (resourceId: number) => void
     }>
@@ -185,10 +246,12 @@ describe('createMessageLinkHandler', () => {
   it.each([
     ['src/a%20b.ts?raw=1#L10', 'D:\\Workspace\\Project\\src\\a b.ts', 'L10'],
     ['file:///D:/Other/a%20b.ts#section', 'D:\\Other\\a b.ts', 'section']
-  ])('normalizes file link %s', (target, expectedPath, expectedHash) => {
+  ])('normalizes file link %s', async (target, expectedPath, expectedHash) => {
     const handler = createMessageLinkHandler(cwd, sessionId)
 
     handler({ kind: 'file', target })
+
+    await vi.waitFor(() => expect(dispatchSpy).toHaveBeenCalled())
 
     const detail = (dispatchSpy.mock.calls[0][0] as CustomEvent).detail as {
       onOpen: (resourceId: number) => void
@@ -205,11 +268,65 @@ describe('createMessageLinkHandler', () => {
 
     handler({ kind: 'file', target: 'D:\\Other\\notes\\readme.md' })
 
+    await vi.waitFor(() => expect(dispatchSpy).toHaveBeenCalled())
+
     const detail = (
       dispatchSpy.mock.calls[0][0] as CustomEvent<{
         options: { root: string }
       }>
     ).detail
     expect(detail.options.root).toBe('D:\\Other\\notes')
+  })
+
+  it('opens a Windows absolute file from the default space', async () => {
+    const handler = createMessageLinkHandler('', sessionId)
+
+    handler({ kind: 'file', target: 'C:\\Users\\test\\notes\\说明.md' })
+
+    await vi.waitFor(() => expect(dispatchSpy).toHaveBeenCalled())
+
+    const detail = (
+      dispatchSpy.mock.calls[0][0] as CustomEvent<{
+        options: { root: string }
+        onOpen: (resourceId: number) => void
+      }>
+    ).detail
+    expect(detail.options.root).toBe('C:\\Users\\test\\notes')
+
+    detail.onOpen(9)
+    const navigation = dispatchSpy.mock.calls
+      .map(([event]) => event as CustomEvent)
+      .find((event) => event.type === 'larify:workspace-navigation')
+    expect(navigation?.detail).toEqual({
+      path: 'C:\\Users\\test\\notes\\说明.md',
+      resourceId: 9
+    })
+  })
+
+  it('opens a directory link as the workspace root without file navigation', async () => {
+    vi.mocked(window.bridge.invoke).mockResolvedValueOnce('directory')
+    const handler = createMessageLinkHandler('', sessionId)
+
+    handler({ kind: 'file', target: 'C:\\Users\\test\\workspace' })
+
+    await vi.waitFor(() => expect(dispatchSpy).toHaveBeenCalled())
+    const event = dispatchSpy.mock.calls[0][0] as CustomEvent<{
+      rendererId: string
+      options: { root: string }
+      onOpen?: unknown
+    }>
+    expect(event.detail.rendererId).toBe('workspace')
+    expect(event.detail.options).toEqual({ root: 'C:\\Users\\test\\workspace' })
+    expect(typeof event.detail.onOpen).toBe('function')
+
+    ;(event.detail.onOpen as (resourceId: number) => void)(10)
+    const navigation = dispatchSpy.mock.calls
+      .map(([candidate]) => candidate as CustomEvent)
+      .find((candidate) => candidate.type === 'larify:workspace-navigation')
+    expect(navigation?.detail).toEqual({
+      kind: 'directory',
+      path: 'C:\\Users\\test\\workspace',
+      resourceId: 10
+    })
   })
 })

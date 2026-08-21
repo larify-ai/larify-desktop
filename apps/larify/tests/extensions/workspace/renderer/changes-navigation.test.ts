@@ -25,6 +25,9 @@ describe('changes navigation', () => {
   it('uses the containing directory as the root for files outside the workspace', () => {
     expect(changesRootForFile('D:\\repo', 'src/file.ts')).toBe('D:\\repo')
     expect(changesRootForFile('D:\\repo', 'E:\\other\\file.ts')).toBe('E:\\other')
+    expect(changesRootForFile('', 'C:\\Users\\test\\notes\\file.md')).toBe(
+      'C:\\Users\\test\\notes'
+    )
     expect(changesRootForFile('/repo', '/other/file.ts')).toBe('/other')
   })
 

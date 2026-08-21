@@ -1,4 +1,3 @@
-import { ExternalLinkIcon, FileTextIcon } from 'lucide-react'
 import type { ComponentProps, MouseEvent } from 'react'
 import { cn } from '@renderer/lib/utils'
 import { parseWorkspaceLink } from '@renderer/lib/workspace-link'
@@ -33,20 +32,11 @@ export function MessageLink({
 }: MessageLinkProps): React.JSX.Element {
   const target = href ?? nodeHref(node)
   const link = target ? parseWorkspaceLink(target) : null
-  const LinkIcon =
-    link?.kind === 'file' ? FileTextIcon : link?.kind === 'url' ? ExternalLinkIcon : null
   const linkClassName = cn(
-    'larify-message-link inline-flex max-w-full cursor-pointer items-baseline gap-1 border-0 bg-transparent p-0 align-baseline font-inherit text-blue-500 no-underline transition-colors hover:text-blue-400',
+    'larify-message-link inline-flex max-w-full cursor-pointer items-baseline border-0 bg-transparent p-0 align-baseline font-inherit text-blue-500 no-underline transition-colors hover:text-blue-400',
     className
   )
-  const content = (
-    <>
-      {LinkIcon && (
-        <LinkIcon aria-hidden className="size-3 shrink-0 self-center text-muted-foreground" />
-      )}
-      <span className="min-w-0 break-all">{children}</span>
-    </>
-  )
+  const content = <span className="min-w-0 break-all">{children}</span>
 
   if (target && link?.kind === 'file') {
     return (

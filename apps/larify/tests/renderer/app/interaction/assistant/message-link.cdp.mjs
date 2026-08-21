@@ -14,9 +14,10 @@ const fixtureRoot = join(
   `__message-link-cdp-${process.pid}-${Date.now()}__`
 )
 const port = process.env.LARIFY_CDP_PORT ?? '9222'
+const fixtureFile = join(fixtureRoot, 'workspace-link.ts')
 
 await mkdir(fixtureRoot, { recursive: true })
-await writeFile(join(fixtureRoot, 'workspace-link.ts'), 'export const linked = true\n')
+await writeFile(fixtureFile, 'export const linked = true\n')
 
 const app = await connectLarifyCdp(port)
 
@@ -31,13 +32,29 @@ const clickLink = (label) =>
     return Boolean(link)
   })()`)
 
+const visibleTextIncludes = (text) =>
+  app.evaluate(`document.body.innerText.includes(${JSON.stringify(text)})`)
+
 async function waitFor(expression, message, timeout = 5000) {
   const deadline = Date.now() + timeout
   while (Date.now() < deadline) {
     if (await app.evaluate(expression)) return
     await wait(100)
   }
-  assert.fail(message)
+  const diagnostics = await app.evaluate(`(() => ({
+    body: document.body.innerText.slice(-2000),
+    tabs: Array.from(document.querySelectorAll('[role="tab"]')).map((item) => item.textContent),
+    trees: Array.from(document.querySelectorAll('.workspace-tree')).map((tree) => ({
+      titles: Array.from(tree.querySelectorAll('[title]')).map((item) => item.getAttribute('title')),
+      selected: Array.from(tree.querySelectorAll('.rc-tree-node-selected [title]')).map(
+        (item) => item.getAttribute('title')
+      ),
+      expanded: Array.from(tree.querySelectorAll('[role="treeitem"][aria-expanded="true"] [title]')).map(
+        (item) => item.getAttribute('title')
+      )
+    }))
+  }))()`)
+  assert.fail(`${message}: ${JSON.stringify(diagnostics)}`)
 }
 
 try {
@@ -70,10 +87,11 @@ try {
     host.id = 'message-link-cdp-root'
     host.style.display = 'none'
     document.body.append(host)
-    const handler = createMessageLinkHandler(${JSON.stringify(fixtureRoot)}, 'message-link-cdp')
+    const handler = createMessageLinkHandler('', 'message-link-cdp')
     const root = createRoot(host)
     flushSync(() => root.render(createElement('div', null,
-      createElement(MessageLink, { href: 'workspace-link.ts', onOpenLink: handler }, 'workspace-link.ts')
+      createElement(MessageLink, { href: ${JSON.stringify(fixtureRoot)}, onOpenLink: handler }, 'fixture-directory'),
+      createElement(MessageLink, { href: ${JSON.stringify(fixtureFile)}, onOpenLink: handler }, 'workspace-link.ts')
     )))
     window.__messageLinkCdpCleanup = () => {
       handler.dispose()
@@ -83,7 +101,40 @@ try {
     }
     return host.querySelectorAll('.larify-message-link').length
   })()`)
-  assert.equal(mounted, 1, 'the real MessageLink component should mount')
+  assert.equal(mounted, 2, 'the real MessageLink components should mount')
+
+  assert.equal(await clickLink('fixture-directory'), true)
+  await waitFor(
+    `(() => {
+      const targetTitle = Array.from(
+        document.querySelectorAll('.workspace-tree [draggable="true"][title]')
+      ).find(
+        (item) => item.getAttribute('title') === ${JSON.stringify(fixtureRoot)} &&
+          item.closest('.rc-tree-node-selected')
+      )
+      const selected = targetTitle?.closest('.rc-tree-node-selected')
+      const targetItem = targetTitle?.closest('[role="treeitem"]')
+      const tree = targetTitle?.closest('.workspace-tree')
+      const rootTitle = tree
+        ?.querySelector('[role="treeitem"] [draggable="true"][title]')
+        ?.getAttribute('title')
+      const fileVisible = Array.from(
+        tree?.querySelectorAll('[draggable="true"][title]') ?? []
+      ).some(
+        (item) => item.getAttribute('title') === ${JSON.stringify(fixtureFile)}
+      )
+      return Boolean(
+        selected && targetItem?.getAttribute('aria-expanded') === 'true' &&
+        rootTitle === ${JSON.stringify(fixtureRoot)} && fileVisible
+      )
+    })()`,
+    'directory navigation should use the target as root, expand it, select its exact path, and show its child file'
+  )
+  assert.equal(
+    await visibleTextIncludes('EISDIR: illegal operation on a directory, read'),
+    false,
+    'a directory link must not be sent to the file preview'
+  )
 
   assert.equal(await clickLink('workspace-link.ts'), true)
   await waitFor(

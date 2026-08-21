@@ -56,14 +56,19 @@ export function WorkspaceView({
   const releasePreviewFrameRef = useRef<number | null>(null)
   const navigationRequestRef = useRef(0)
   const [revealPath, setRevealPath] = useState<string | null>(null)
+  const [revealingDirectory, setRevealingDirectory] = useState(false)
+  const [previewPath, setPreviewPath] = useState<string | null>(null)
   const [target, setTarget] = useState<{ hash: string } | undefined>()
-  const { entries, loadDirectory, revealFile, root } = useWorkspaceExplorer(resourceId)
+  const { entries, loadDirectory, revealDirectory, revealFile, root } =
+    useWorkspaceExplorer(resourceId)
   const { decorations: gitDecorations } = useGitDecorations(resourceId, root)
 
   const showFile = useCallback((path: string, hash?: string): void => {
     setMarkdownMode('preview')
     setTarget(hash ? { hash } : undefined)
     setRevealPath(path)
+    setRevealingDirectory(false)
+    setPreviewPath(path)
   }, [])
 
   const selectFile = useCallback(
@@ -85,6 +90,22 @@ export function WorkspaceView({
         .catch((error) => console.error(errorContext, error))
     },
     [revealFile, showFile]
+  )
+
+  const revealWorkspaceDirectory = useCallback(
+    (path: string): void => {
+      const request = ++navigationRequestRef.current
+      void revealDirectory(path)
+        .then((resolved) => {
+          if (!resolved || request !== navigationRequestRef.current) return
+          setTarget(undefined)
+          setPreviewPath(null)
+          setRevealPath(resolved)
+          setRevealingDirectory(true)
+        })
+        .catch((error) => console.error('[workspace:navigate-directory]', error))
+    },
+    [revealDirectory]
   )
 
   const openInBrowser = useCallback(
@@ -172,10 +193,10 @@ export function WorkspaceView({
 
   useEffect(() => {
     updateTab({
-      title: revealPath?.split(/[\\/]/).at(-1) ?? '文件',
-      tooltip: revealPath ?? '文件'
+      title: previewPath?.split(/[\\/]/).at(-1) ?? '文件',
+      tooltip: previewPath ?? '文件'
     })
-  }, [revealPath, updateTab])
+  }, [previewPath, updateTab])
 
   useEffect(() => {
     const openFile = (event: Event): void => {
@@ -206,7 +227,8 @@ export function WorkspaceView({
   // 消息正文中的文件链接：工作区资源打开后定位到目标文件。
   useEffect(() => {
     const navigate = (request: WorkspaceNavigationRequest): void => {
-      revealWorkspaceFile(request.path, request.hash, '[workspace:navigate]')
+      if (request.kind === 'directory') revealWorkspaceDirectory(request.path)
+      else revealWorkspaceFile(request.path, request.hash, '[workspace:navigate]')
     }
     const onNavigate = (event: Event): void => {
       const detail = (event as CustomEvent<WorkspaceNavigationRequest>).detail
@@ -217,12 +239,20 @@ export function WorkspaceView({
     const pending = takeWorkspaceNavigation(resourceId)
     if (pending) navigate(pending)
     return () => window.removeEventListener(WORKSPACE_NAVIGATION_EVENT, onNavigate)
-  }, [resourceId, revealWorkspaceFile])
+  }, [resourceId, revealWorkspaceDirectory, revealWorkspaceFile])
 
   useEffect(() => {
-    // Keep Monaco out of the application startup path, but warm its chunk as
-    // soon as the user opens the workspace so the first text file opens fast.
-    void Promise.all([loadFilePreview(), import('./preview/monaco-preview')]).catch(() => undefined)
+    const preload = (): void => {
+      void Promise.all([loadFilePreview(), import('./preview/monaco-preview')]).catch(
+        () => undefined
+      )
+    }
+    if (typeof requestIdleCallback === 'function') {
+      const idle = requestIdleCallback(preload, { timeout: 2_000 })
+      return () => cancelIdleCallback(idle)
+    }
+    const timer = window.setTimeout(preload, 0)
+    return () => window.clearTimeout(timer)
   }, [])
 
   const treeEntries = useMemo(
@@ -234,18 +264,18 @@ export function WorkspaceView({
   const tabActions = useMemo(
     () => (
       <WorkspaceTabActions
-        file={revealPath}
+        file={previewPath}
         markdownMode={markdownMode}
         navigatorOpen={navigatorOpen}
         onMarkdownModeChange={setMarkdownMode}
         onOpenInBrowser={() => {
-          if (!revealPath) return
-          openInBrowser(revealPath, '[workspace:open-in-browser]')
+          if (!previewPath) return
+          openInBrowser(previewPath, '[workspace:open-in-browser]')
         }}
         onToggleNavigator={() => setNavigatorOpen((open) => !open)}
       />
     ),
-    [markdownMode, navigatorOpen, openInBrowser, revealPath]
+    [markdownMode, navigatorOpen, openInBrowser, previewPath]
   )
   useWorkbenchTabActions(tabActions)
 
@@ -264,6 +294,7 @@ export function WorkspaceView({
           entries={treeEntries}
           gitDecorations={gitDecorations}
           revealPath={revealPath}
+          revealDirectory={revealingDirectory}
           onOpen={selectFile}
           onToggle={loadDirectory}
         />
@@ -275,16 +306,16 @@ export function WorkspaceView({
         ref={previewRef}
         style={lockedPreviewWidth === null ? undefined : { width: lockedPreviewWidth }}
       >
-        {revealPath ? (
+        {previewPath ? (
           <Suspense fallback={null}>
             <FilePreview
               active={active && (workbenchVisible || workbenchAnimating)}
               animating={workbenchAnimating}
-              key={`${resourceId}:${revealPath}`}
-              mode={isMarkdownPath(revealPath) ? markdownMode : undefined}
+              key={`${resourceId}:${previewPath}`}
+              mode={isMarkdownPath(previewPath) ? markdownMode : undefined}
               resourceId={resourceId}
               target={target}
-              path={revealPath}
+              path={previewPath}
             />
           </Suspense>
         ) : (

@@ -25,4 +25,51 @@ describe('workspace link', () => {
       path: 'D:\\Workspace\\larify-desktop\\package.json'
     })
   })
+
+  it('resolves a Windows absolute path without a workspace base', () => {
+    expect(resolveWorkspaceLink('', 'C:\\Users\\test\\notes\\说明.md')).toEqual({
+      path: 'C:\\Users\\test\\notes\\说明.md'
+    })
+  })
+
+  it('resolves a Windows file URL without a workspace base', () => {
+    expect(
+      resolveWorkspaceLink('', 'file:///C:/Users/test/notes/%E8%AF%B4%E6%98%8E.md#L10')
+    ).toEqual({
+      path: 'C:\\Users\\test\\notes\\说明.md',
+      hash: 'L10'
+    })
+  })
+
+  it('resolves an encoded Windows file URL without a workspace base', () => {
+    expect(resolveWorkspaceLink('', 'file:///C:%5CUsers%5Ctest%5Cnotes.txt')).toEqual({
+      path: 'C:\\Users\\test\\notes.txt'
+    })
+  })
+
+  it('keeps POSIX file URLs POSIX without a workspace base', () => {
+    expect(resolveWorkspaceLink('', 'file:///tmp/notes.md')).toEqual({ path: '/tmp/notes.md' })
+  })
+
+  it('preserves additional hash characters inside a fragment', () => {
+    expect(resolveWorkspaceLink('', 'file:///C:/notes.md#section#details')).toEqual({
+      path: 'C:\\notes.md',
+      hash: 'section#details'
+    })
+  })
+
+  it('resolves a file URL host as a UNC path without a workspace base', () => {
+    expect(resolveWorkspaceLink('', 'file://server/share/folder/notes.md')).toEqual({
+      path: '\\\\server\\share\\folder\\notes.md'
+    })
+  })
+
+  it('uses an absolute target path flavor instead of the workspace flavor', () => {
+    expect(resolveWorkspaceLink('/workspace', 'C:\\Users\\test\\notes.md')).toEqual({
+      path: 'C:\\Users\\test\\notes.md'
+    })
+    expect(resolveWorkspaceLink('C:\\Workspace', '/tmp/notes.md')).toEqual({
+      path: '/tmp/notes.md'
+    })
+  })
 })

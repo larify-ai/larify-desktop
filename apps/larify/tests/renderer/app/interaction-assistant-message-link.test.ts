@@ -26,6 +26,7 @@ it('renders and opens a file link through the real markdown renderer', async () 
               '[relative](readme.md)',
               '[file](file:///D:/readme.md)',
               '[windows](D:/Workspace/readme.md)',
+              '[windows-backslash](D:\\Workspace\\larify-website\\.codex-stream-card-acceptance.txt)',
               '[url](https://example.com)',
               '[unsafe](javascript:alert(1))',
               '[data](data:text/html,unsafe)',
@@ -51,6 +52,8 @@ it('renders and opens a file link through the real markdown renderer', async () 
   expect(link?.hasAttribute('node')).toBe(false)
   expect(links.find(({ textContent }) => textContent === 'file')?.tagName).toBe('BUTTON')
   expect(links.find(({ textContent }) => textContent === 'windows')?.tagName).toBe('BUTTON')
+  const windowsBackslash = links.find(({ textContent }) => textContent === 'windows-backslash')
+  expect(windowsBackslash?.tagName).toBe('BUTTON')
   expect(links.find(({ textContent }) => textContent === 'url')?.getAttribute('href')).toBe(
     'https://example.com'
   )
@@ -79,6 +82,14 @@ it('renders and opens a file link through the real markdown renderer', async () 
     link?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
   })
   expect(handler).toHaveBeenCalledExactlyOnceWith({ kind: 'file', target: 'readme.md' })
+
+  await act(async () => {
+    windowsBackslash?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+  })
+  expect(handler).toHaveBeenLastCalledWith({
+    kind: 'file',
+    target: 'D:/Workspace/larify-website/.codex-stream-card-acceptance.txt'
+  })
 
   await act(async () => root.unmount())
   container.remove()

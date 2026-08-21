@@ -19,6 +19,7 @@ const treeProps = vi.hoisted(() => ({
         expandedKeys: Key[]
         loadData(node: DataNode): Promise<void>
         onExpand(keys: Key[]): void
+        selectedKeys: Key[]
         scrollWidth?: number
         titleRender(node: DataNode): React.ReactElement
         treeData: DataNode[]
@@ -31,6 +32,7 @@ vi.mock('rc-tree', () => ({
     expandedKeys: Key[]
     loadData(node: DataNode): Promise<void>
     onExpand(keys: Key[]): void
+    selectedKeys: Key[]
     scrollWidth?: number
     titleRender(node: DataNode): React.ReactElement
     treeData: DataNode[]
@@ -149,6 +151,24 @@ describe('WorkspaceTree', () => {
     expect(treeProps.current?.expandedKeys).toEqual(['/workspace', '/workspace/a'])
   })
 
+  it.each(['/workspace/a/b', '/workspace/a/b/c'])(
+    'reveals %s when it is represented by a compact node',
+    (revealPath) => {
+      const entries = [
+        directory('/workspace', [
+          directory('/workspace/a', [
+            directory('/workspace/a/b', [directory('/workspace/a/b/c', [])])
+          ])
+        ])
+      ]
+
+      render(entries, revealPath, false, true)
+
+      expect(treeProps.current?.expandedKeys).toEqual(['/workspace', '/workspace/a'])
+      expect(treeProps.current?.selectedKeys).toEqual(['/workspace/a'])
+    }
+  )
+
   it('does not scroll back to a dismissed reveal after the tree refreshes', () => {
     const requestFrame = vi.spyOn(window, 'requestAnimationFrame').mockImplementation(() => 1)
     const file = { isLeaf: true, key: '/workspace/src/file.ts', title: 'file.ts' }
@@ -212,7 +232,12 @@ describe('WorkspaceTree', () => {
     )
   })
 
-  function render(entries: DataNode[], revealPath?: string, changesOnly = true): void {
+  function render(
+    entries: DataNode[],
+    revealPath?: string,
+    changesOnly = true,
+    revealDirectory = false
+  ): void {
     act(() =>
       root.render(
         createElement(WorkspaceTree, {
@@ -221,6 +246,7 @@ describe('WorkspaceTree', () => {
           gitDecorations: new Map(),
           onOpen: vi.fn(),
           onToggle,
+          revealDirectory,
           revealPath
         })
       )
@@ -301,6 +327,7 @@ describe('workspace tree data', () => {
     expect(compact[0].title).toBe('workspace')
     expect(compact[0].children?.[0]).toMatchObject({
       directoryPath: '/workspace/a/b/c',
+      directoryPaths: ['/workspace/a', '/workspace/a/b', '/workspace/a/b/c'],
       key: '/workspace/a',
       title: 'a / b / c',
       children: [file]
@@ -343,6 +370,7 @@ describe('workspace tree data', () => {
 
     expect(compactDirectoryTree(entries)[0].children?.[0]).toMatchObject({
       directoryPath: 'D:\\项目\\源码\\页面',
+      directoryPaths: ['D:\\项目\\源码', 'D:\\项目\\源码\\页面'],
       key: 'D:\\项目\\源码',
       title: '源码 / 页面',
       children: [file]

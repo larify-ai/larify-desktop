@@ -5,6 +5,7 @@ import {
   type MessageResponseProps
 } from '@renderer/components/ai-elements/message'
 import { createMessageLink, MessageLink } from '@renderer/components/ai-elements/message-link'
+import { normalizeModelMarkdownLinks } from '@renderer/lib/model-markdown-links'
 import { useMessageLinkHandler } from '../message-links'
 
 const transformWorkspaceUrl = (url: string, key: string): string | null => {
@@ -39,14 +40,16 @@ export function MessageMarkdown({
     () => ({ a: messageLinkHandler ? createMessageLink(messageLinkHandler) : MessageLink }),
     [messageLinkHandler]
   )
+  const markdown = useMemo(() => normalizeModelMarkdownLinks(children), [children])
   return (
     <MessageResponse
       components={components}
       isAnimating={isAnimating}
+      mode={isAnimating ? 'streaming' : 'static'}
       rehypePlugins={workspaceLinkRehypePlugins}
       urlTransform={transformWorkspaceUrl}
     >
-      {children}
+      {markdown}
     </MessageResponse>
   )
 }

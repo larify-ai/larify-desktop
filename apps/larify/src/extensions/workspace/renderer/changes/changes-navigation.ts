@@ -10,7 +10,7 @@ export const CHANGES_NAVIGATION_EVENT = 'larify:changes-navigation'
 
 const pending = new Map<number, ChangesNavigationRequest>()
 
-const pathForRoot = (root: string) =>
+const pathForRoot = (root: string): typeof posixPath =>
   /^(?:[a-z]:[\\/]|\\\\)/i.test(root) ? win32Path : posixPath
 
 export const resolveChangesPath = (root: string, file: string): string =>
@@ -22,7 +22,10 @@ export function sameChangesPath(root: string, left: string, right: string): bool
 }
 
 export function changesRootForFile(root: string, file: string): string {
-  const path = pathForRoot(root)
+  // Default-space sessions have no cwd. In that case the target itself must
+  // select the path implementation, otherwise a Windows absolute path is
+  // interpreted as a POSIX relative path.
+  const path = pathForRoot(root || file)
   const target = path.resolve(root, file)
   const relative = path.relative(root, target)
   const inside =

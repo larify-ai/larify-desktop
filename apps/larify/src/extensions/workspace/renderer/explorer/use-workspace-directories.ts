@@ -87,7 +87,8 @@ export function useWorkspaceDirectories(resourceId: number): {
   }, [load, resourceId])
 
   const isLoaded = useCallback(
-    (directory: string): boolean => isDirectoryLoaded(entriesRef.current, directory),
+    (directory: string): boolean =>
+      directory === rootRef.current || isDirectoryLoaded(entriesRef.current, directory),
     []
   )
 

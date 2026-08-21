@@ -2,6 +2,7 @@ import type { DataNode } from 'rc-tree/lib/interface'
 
 export interface CompactDirectoryNode extends DataNode {
   directoryPath?: string
+  directoryPaths?: string[]
 }
 
 const compactDirectory = (entry: DataNode): CompactDirectoryNode => {
@@ -17,6 +18,7 @@ const compactDirectory = (entry: DataNode): CompactDirectoryNode => {
     current = {
       ...child,
       directoryPath: child.directoryPath ?? String(child.key),
+      directoryPaths: [String(entry.key), ...(child.directoryPaths ?? [String(child.key)])],
       key: entry.key,
       title: names.join(' / ')
     }

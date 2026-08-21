@@ -48,6 +48,21 @@ function openWorkspaceFile(
   )
 }
 
+function openWorkspaceDirectory(targetPath: string, isCurrent: () => boolean): void {
+  window.dispatchEvent(
+    new CustomEvent('larify:workbench-open', {
+      detail: {
+        rendererId: 'workspace',
+        options: { root: targetPath },
+        onOpen: (resourceId: number) => {
+          if (!isCurrent()) return
+          requestWorkspaceNavigation({ kind: 'directory', path: targetPath, resourceId })
+        }
+      }
+    })
+  )
+}
+
 export function createMessageLinkHandler(
   cwd: string,
   sessionId: string
@@ -63,7 +78,17 @@ export function createMessageLinkHandler(
       return
     }
     const { path, hash } = resolveWorkspaceLink(cwd, link.target)
-    openWorkspaceFile(cwd, path, isCurrent, hash)
+    void window.bridge
+      .invoke('workspace:path-kind', path)
+      .then((kind) => {
+        if (!isCurrent()) return
+        if (kind === 'directory') openWorkspaceDirectory(path, isCurrent)
+        else openWorkspaceFile(cwd, path, isCurrent, hash)
+      })
+      .catch((error) => {
+        if (!isCurrent()) return
+        console.error('[message-link:inspect-path]', error)
+      })
   }
   return Object.assign(handler, {
     dispose: () => {

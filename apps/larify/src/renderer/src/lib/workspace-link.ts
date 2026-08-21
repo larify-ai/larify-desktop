@@ -26,8 +26,11 @@ export function decodeUrlComponent(value: string): string {
 }
 
 function parseFileLink(href: string, fileUrl = false): FileLink {
-  const [pathAndQuery, rawHash] = href.split('#', 2)
-  const [rawTarget] = pathAndQuery.split('?', 1)
+  const hashIndex = href.indexOf('#')
+  const pathAndQuery = hashIndex < 0 ? href : href.slice(0, hashIndex)
+  const rawHash = hashIndex < 0 ? '' : href.slice(hashIndex + 1)
+  const queryIndex = pathAndQuery.indexOf('?')
+  const rawTarget = queryIndex < 0 ? pathAndQuery : pathAndQuery.slice(0, queryIndex)
   return {
     kind: 'file',
     target: fileUrl ? rawTarget : decodeUrlComponent(rawTarget),
@@ -60,20 +63,20 @@ function pathFor(value: string): PathApi {
   return windowsRootPattern.test(value) ? win32Path : posixPath
 }
 
-function fileUrlToPath(target: string, windows: boolean): string {
+function fileUrlToPath(target: string): string {
   const url = new URL(target)
   let path = decodeUrlComponent(url.pathname)
-  if (windows && /^\/[a-z]:\//i.test(path)) path = path.slice(1)
-  return url.host ? `//${url.host}${path}` : path
+  if (/^\/[a-z]:[\\/]/i.test(path)) path = path.slice(1)
+  return url.host ? `\\\\${url.host}${path.replaceAll('/', '\\')}` : path
 }
 
 export function resolveWorkspaceLink(base: string, href: string): { path: string; hash?: string } {
   const link = parseWorkspaceLink(href)
   if (link?.kind !== 'file') throw new Error(`Expected a file link: ${href}`)
 
-  const path = pathFor(base)
-  const target =
-    schemeOf(link.target) === 'file' ? fileUrlToPath(link.target, path === win32Path) : link.target
+  const target = schemeOf(link.target) === 'file' ? fileUrlToPath(link.target) : link.target
+  const targetPath = pathFor(target)
+  const path = targetPath.isAbsolute(target) ? targetPath : pathFor(base)
   return {
     path: path.isAbsolute(target) ? path.normalize(target) : path.resolve(base, target),
     ...(link.hash ? { hash: link.hash } : {})

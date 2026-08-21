@@ -6,6 +6,7 @@ import { useWorkspaceDirectories } from './use-workspace-directories'
 export function useWorkspaceExplorer(resourceId: number): {
   entries: DataNode[]
   loadDirectory(directory: DataNode): Promise<void>
+  revealDirectory(directory: string): Promise<string | undefined>
   revealFile(file: string): Promise<string | undefined>
   root: string | null
 } {
@@ -26,8 +27,8 @@ export function useWorkspaceExplorer(resourceId: number): {
     [load]
   )
 
-  const revealFile = useCallback(
-    async (file: string): Promise<string | undefined> => {
+  const revealPath = useCallback(
+    async (target: string, includeTarget: boolean): Promise<string | undefined> => {
       revealController.current?.abort()
       const controller = new AbortController()
       revealController.current = controller
@@ -35,10 +36,11 @@ export function useWorkspaceExplorer(resourceId: number): {
         await load('', controller.signal)
         if (controller.signal.aborted) return undefined
       }
-      const path = await workspaceClient.reveal(resourceId, file)
+      const path = await workspaceClient.reveal(resourceId, target)
       const key = path.at(-1)
       if (!key) return undefined
-      for (const directory of path.slice(0, -1)) {
+      const directories = includeTarget ? path : path.slice(0, -1)
+      for (const directory of directories) {
         if (controller.signal.aborted) return undefined
         if (isLoaded(directory)) continue
         await load(directory, controller.signal)
@@ -49,5 +51,15 @@ export function useWorkspaceExplorer(resourceId: number): {
     [isLoaded, load, resourceId, root]
   )
 
-  return { entries, loadDirectory, revealFile, root }
+  const revealFile = useCallback(
+    (file: string): Promise<string | undefined> => revealPath(file, false),
+    [revealPath]
+  )
+
+  const revealDirectory = useCallback(
+    (directory: string): Promise<string | undefined> => revealPath(directory, true),
+    [revealPath]
+  )
+
+  return { entries, loadDirectory, revealDirectory, revealFile, root }
 }

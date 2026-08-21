@@ -18,6 +18,7 @@ interface WorkspaceTreeProps {
   gitDecorations: Map<string, string>
   onOpen(file: string): void
   onToggle(directory: DataNode): Promise<void>
+  revealDirectory?: boolean
   revealPath?: string | null
 }
 
@@ -30,7 +31,14 @@ const findNode = (
   parents: Key[] = []
 ): { parents: Key[]; path: string } | undefined => {
   for (const entry of entries) {
-    if (String(entry.key) === key) return { parents, path: key }
+    const compactEntry = entry as CompactDirectoryNode
+    if (
+      String(entry.key) === key ||
+      nodePath(entry) === key ||
+      compactEntry.directoryPaths?.includes(key)
+    ) {
+      return { parents, path: String(entry.key) }
+    }
     const child = entry.children && findNode(entry.children, key, [...parents, entry.key])
     if (child) return child
   }
@@ -68,6 +76,7 @@ function WorkspaceTreeContent({
   gitDecorations,
   onOpen,
   onToggle,
+  revealDirectory = false,
   revealPath
 }: WorkspaceTreeProps): React.JSX.Element {
   const { resolvedTheme } = useTheme()
@@ -110,7 +119,13 @@ function WorkspaceTreeContent({
 
   const revealActive = revealed && !revealState.dismissed
   const visibleExpandedKeys = revealActive
-    ? [...new Set([...expandedKeys, ...revealed.parents])]
+    ? [
+        ...new Set([
+          ...expandedKeys,
+          ...revealed.parents,
+          ...(revealDirectory ? [revealed.path] : [])
+        ])
+      ]
     : expandedKeys
   const visibleSelectedKeys = revealActive ? [revealed.path] : selectedKeys
   const visibleExpandedKeySet = new Set(visibleExpandedKeys)

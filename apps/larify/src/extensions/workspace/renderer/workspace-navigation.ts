@@ -3,6 +3,7 @@ import { changesRootForFile } from './changes/changes-navigation'
 export interface WorkspaceNavigationRequest {
   /** 目标文件的绝对路径 */
   path: string
+  kind?: 'file' | 'directory'
   hash?: string
   resourceId: number
 }

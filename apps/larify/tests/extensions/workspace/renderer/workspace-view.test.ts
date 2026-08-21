@@ -19,6 +19,7 @@ const h = vi.hoisted(() => ({
   entries: [] as Record<string, unknown>[],
   filePreviewProps: null as Record<string, unknown> | null,
   invoke: vi.fn(async () => 73),
+  revealDirectory: vi.fn(async (path: string) => path),
   revealFile: vi.fn(async (path: string) => `D:\\workspace\\${path}`),
   treeProps: null as Record<string, unknown> | null
 }))
@@ -32,6 +33,7 @@ vi.mock('../../../../src/extensions/workspace/renderer/explorer/use-workspace-ex
   useWorkspaceExplorer: () => ({
     entries: h.entries,
     loadDirectory: vi.fn(),
+    revealDirectory: h.revealDirectory,
     revealFile: h.revealFile,
     root: 'D:\\workspace'
   })
@@ -93,6 +95,7 @@ describe('WorkspaceView', () => {
     h.filePreviewProps = null
     h.invoke.mockClear()
     h.revealFile.mockClear()
+    h.revealDirectory.mockClear()
     h.treeProps = null
     Object.assign(window, { bridge: { invoke: h.invoke } })
     frames = []
@@ -166,6 +169,88 @@ describe('WorkspaceView', () => {
     act(() => frames.shift()!(0))
 
     expect(preview.style.width).toBe('')
+  })
+
+  it('schedules preview preloading while idle and cancels it on unmount', async () => {
+    const idleCallbacks: IdleRequestCallback[] = []
+    const cancelIdle = vi.fn()
+    vi.stubGlobal('requestIdleCallback', (callback: IdleRequestCallback) => {
+      idleCallbacks.push(callback)
+      return 17
+    })
+    vi.stubGlobal('cancelIdleCallback', cancelIdle)
+
+    await render()
+
+    expect(idleCallbacks).toHaveLength(1)
+    await act(async () => root.unmount())
+    expect(cancelIdle).toHaveBeenCalledWith(17)
+    root = createRoot(container)
+  })
+
+  it('reveals a directory navigation without opening a file preview', async () => {
+    await render()
+
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent('larify:workspace-navigation', {
+          detail: {
+            kind: 'directory',
+            path: 'E:\\outside\\folder',
+            resourceId: 42
+          }
+        })
+      )
+      await Promise.resolve()
+    })
+
+    expect(h.revealDirectory).toHaveBeenCalledWith('E:\\outside\\folder')
+    expect(h.treeProps?.revealPath).toBe('E:\\outside\\folder')
+    expect(h.treeProps?.revealDirectory).toBe(true)
+    expect(h.filePreviewProps).toBeNull()
+  })
+
+  it('does not show file actions for a directory whose name looks like a file', async () => {
+    await render()
+
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent('larify:workspace-navigation', {
+          detail: {
+            kind: 'directory',
+            path: 'E:\\outside\\docs.md',
+            resourceId: 42
+          }
+        })
+      )
+      await Promise.resolve()
+    })
+
+    expect(container.querySelector('button[aria-label="查看源码"]')).toBeNull()
+    expect(container.querySelector('button[aria-label="在内置浏览器中打开"]')).toBeNull()
+  })
+
+  it('clears an existing file preview when a directory is revealed', async () => {
+    await render()
+    await openFile('README.md')
+    expect(container.querySelector('[data-testid="preview"]')).not.toBeNull()
+
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent('larify:workspace-navigation', {
+          detail: {
+            kind: 'directory',
+            path: 'D:\\workspace\\docs',
+            resourceId: 42
+          }
+        })
+      )
+      await Promise.resolve()
+    })
+
+    expect(container.querySelector('[data-testid="preview"]')).toBeNull()
+    expect(container.querySelector('[data-testid="empty"]')).not.toBeNull()
+    expect(h.treeProps?.revealDirectory).toBe(true)
   })
 
   it('keeps a reviewed file preview inactive until its workbench tab is active and visible', async () => {
@@ -295,6 +380,56 @@ describe('WorkspaceView', () => {
     await act(async () => first.resolve('D:\\workspace\\first.md'))
 
     expect(h.filePreviewProps?.path).toBe('D:\\workspace\\second.md')
+  })
+
+  it('keeps the latest file when an older directory reveal finishes last', async () => {
+    const directory = deferred<string>()
+    h.revealDirectory.mockReturnValueOnce(directory.promise)
+    await render()
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent('larify:workspace-navigation', {
+          detail: { kind: 'directory', path: 'D:\\workspace\\folder', resourceId: 42 }
+        })
+      )
+    })
+    await openFile('latest.md')
+    await act(async () => directory.resolve('D:\\workspace\\folder'))
+
+    expect(h.filePreviewProps?.path).toBe('D:\\workspace\\latest.md')
+    expect(h.treeProps?.revealDirectory).toBe(false)
+  })
+
+  it('keeps the latest directory when an older file reveal finishes last', async () => {
+    const file = deferred<string>()
+    h.revealFile.mockReturnValueOnce(file.promise)
+    await render()
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent('larify:workspace-markdown-open-file', {
+          detail: { path: 'old.md', resourceId: 42 }
+        })
+      )
+    })
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent('larify:workspace-navigation', {
+          detail: {
+            kind: 'directory',
+            path: 'D:\\workspace\\latest-folder',
+            resourceId: 42
+          }
+        })
+      )
+      await Promise.resolve()
+    })
+    await act(async () => file.resolve('D:\\workspace\\old.md'))
+
+    expect(container.querySelector('[data-testid="preview"]')).toBeNull()
+    expect(h.treeProps?.revealPath).toBe('D:\\workspace\\latest-folder')
+    expect(h.treeProps?.revealDirectory).toBe(true)
   })
 
   it('offers reading and source modes for the .markdown extension', async () => {

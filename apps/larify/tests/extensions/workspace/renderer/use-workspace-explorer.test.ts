@@ -157,6 +157,64 @@ describe('useWorkspaceExplorer', () => {
     ])
   })
 
+  it('loads and returns the target directory itself when revealing a directory', async () => {
+    workspace.readDirectory.mockImplementation(async (directory?: string) => {
+      if (!directory) return [{ isLeaf: false, key: 'D:\\workspace\\src', title: 'src' }]
+      if (directory === 'D:\\workspace\\src') {
+        return [{ isLeaf: false, key: 'D:\\workspace\\src\\nested', title: 'nested' }]
+      }
+      return []
+    })
+
+    act(() => root.unmount())
+    root = createRoot(container)
+    await act(async () => root.render(createElement(Harness)))
+
+    let revealed: string | undefined
+    await act(async () => {
+      revealed = await explorer.revealDirectory('D:\\workspace\\src\\nested')
+    })
+
+    expect(revealed).toBe('D:\\workspace\\src\\nested')
+    expect(workspace.readDirectory.mock.calls.slice(-3)).toEqual([
+      [undefined],
+      ['D:\\workspace\\src'],
+      ['D:\\workspace\\src\\nested']
+    ])
+  })
+
+  it('reveals the workspace root without trying to load it as a child entry', async () => {
+    await act(async () => {
+      await expect(explorer.revealDirectory('D:\\workspace')).resolves.toBe('D:\\workspace')
+    })
+
+    expect(workspace.readDirectory).toHaveBeenCalledTimes(1)
+    expect(workspace.readDirectory).toHaveBeenCalledWith(undefined)
+  })
+
+  it('cancels an older file reveal when a directory reveal starts', async () => {
+    let resolveFile: ((value: string[]) => void) | undefined
+    workspace.reveal
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFile = resolve
+          })
+      )
+      .mockResolvedValueOnce(['D:\\workspace\\src'])
+
+    const file = explorer.revealFile('D:\\workspace\\old\\file.ts')
+    await act(async () => {
+      await expect(explorer.revealDirectory('D:\\workspace\\src')).resolves.toBe(
+        'D:\\workspace\\src'
+      )
+    })
+    await act(async () => resolveFile?.(['D:\\workspace\\old', 'D:\\workspace\\old\\file.ts']))
+
+    await expect(file).resolves.toBeUndefined()
+    expect(workspace.readDirectory).not.toHaveBeenCalledWith('D:\\workspace\\old')
+  })
+
   it('loads a single-child directory chain in one expansion', async () => {
     workspace.readDirectory.mockImplementation(async (directory?: string) => {
       if (!directory) return [{ key: 'D:\\workspace\\src', title: 'src' }]

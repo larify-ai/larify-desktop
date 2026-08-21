@@ -19,7 +19,10 @@ const electron = vi.hoisted(() => {
   }
 })
 
+const fileSystem = vi.hoisted(() => ({ stat: vi.fn() }))
+
 vi.mock('electron', () => ({ ipcMain: electron.ipcMain }))
+vi.mock('node:fs/promises', () => ({ stat: fileSystem.stat }))
 
 import { registerWorkspaceIpc } from '../../../../src/extensions/workspace/main/ipc'
 
@@ -39,6 +42,31 @@ describe('workspace IPC', () => {
     electron.handlers.clear()
     electron.listeners.clear()
     vi.clearAllMocks()
+  })
+
+  it.each([
+    [true, 'directory'],
+    [false, 'file']
+  ] as const)('classifies a path as %s=%s', async (directory, kind) => {
+    fileSystem.stat.mockResolvedValue({ isDirectory: () => directory })
+    const manager = { bindChange: vi.fn(() => vi.fn()) }
+    registerWorkspaceIpc(manager as never, createPreviews() as never, createWindow() as never)
+
+    await expect(
+      electron.handlers.get('workspace:path-kind')?.({} as never, 'D:\\outside\\target' as never)
+    ).resolves.toBe(kind)
+    expect(fileSystem.stat).toHaveBeenCalledWith('D:\\outside\\target')
+  })
+
+  it('propagates path inspection failures', async () => {
+    const error = Object.assign(new Error('missing'), { code: 'ENOENT' })
+    fileSystem.stat.mockRejectedValue(error)
+    const manager = { bindChange: vi.fn(() => vi.fn()) }
+    registerWorkspaceIpc(manager as never, createPreviews() as never, createWindow() as never)
+
+    await expect(
+      electron.handlers.get('workspace:path-kind')?.({} as never, 'missing' as never)
+    ).rejects.toBe(error)
   })
 
   it('routes reads and changes by resource id', async () => {

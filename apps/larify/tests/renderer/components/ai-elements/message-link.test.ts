@@ -24,7 +24,7 @@ describe('MessageLink', () => {
     container.remove()
   })
 
-  it('shows a file icon, omits the native href, and invokes onOpenLink', async () => {
+  it('shows a file link without an icon, omits the native href, and invokes onOpenLink', async () => {
     const onOpenLink = vi.fn()
     await act(async () => {
       root.render(
@@ -32,7 +32,7 @@ describe('MessageLink', () => {
       )
     })
 
-    expect(container.querySelector('.lucide-file-text')).not.toBeNull()
+    expect(container.querySelector('svg')).toBeNull()
     const button = container.querySelector('button')
     expect(container.querySelector('a')).toBeNull()
     expect(button?.type).toBe('button')
@@ -52,15 +52,23 @@ describe('MessageLink', () => {
     })
   })
 
-  it('shows an external-link icon and label for a url', async () => {
+  it('shows a url label without an icon', async () => {
+    const onOpenLink = vi.fn()
     await act(async () => {
-      root.render(
-        createElement(MessageLink, { href: 'https://example.com', onOpenLink: vi.fn() }, '文档')
-      )
+      root.render(createElement(MessageLink, { href: 'https://example.com', onOpenLink }, '文档'))
     })
 
-    expect(container.querySelector('.lucide-external-link')).not.toBeNull()
-    expect(container.querySelector('.lucide-file-text')).toBeNull()
+    expect(container.querySelector('svg')).toBeNull()
+    expect(container.textContent).toBe('文档')
+
+    const event = new MouseEvent('click', { bubbles: true, cancelable: true })
+    await act(async () => container.querySelector('a')!.dispatchEvent(event))
+
+    expect(event.defaultPrevented).toBe(true)
+    expect(onOpenLink).toHaveBeenCalledExactlyOnceWith({
+      kind: 'url',
+      target: 'https://example.com'
+    })
   })
 
   it('routes a file URL only through Larify and never through the renderer fallback', async () => {
@@ -221,12 +229,17 @@ describe('MessageLink', () => {
   })
 
   it('does not show an external icon for an anchor', async () => {
+    const onClick = vi.fn()
     await act(async () => {
-      root.render(createElement(MessageLink, { href: '#section' }, '章节'))
+      root.render(createElement(MessageLink, { href: '#section', onClick }, '章节'))
     })
 
-    expect(container.querySelector('a')?.getAttribute('href')).toBe('#section')
+    const anchor = container.querySelector('a')!
+    expect(anchor.getAttribute('href')).toBe('#section')
     expect(container.querySelector('svg')).toBeNull()
+
+    await act(async () => anchor.click())
+    expect(onClick).toHaveBeenCalledOnce()
   })
 })
 

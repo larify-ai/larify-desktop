@@ -47,7 +47,9 @@ function findBottomAnchor(
 
 export function useViewportBottomAnchor(resetKey?: unknown): {
   captureAnchor: (range?: RenderedRange) => void
+  trackRenderedRange: (range: RenderedRange) => void
   scrollerRef: (element: HTMLElement | Window | null) => void
+  releaseAnchor: () => void
   scrollToBottom: () => void
 } {
   const [scroller, setScroller] = useState<HTMLElement | null>(null)
@@ -94,12 +96,17 @@ export function useViewportBottomAnchor(resetKey?: unknown): {
     [scroller]
   )
 
+  const trackRenderedRange = useCallback((range: RenderedRange) => {
+    renderedRange.current = range
+  }, [])
+
   useEffect(() => {
     if (!scroller || typeof ResizeObserver === 'undefined') return
 
-    const handleScroll = (): void => captureAnchor()
-    scroller.addEventListener('scroll', handleScroll, { passive: true })
+    const handleScrollEnd = (): void => captureAnchor()
+    scroller.addEventListener('scrollend', handleScrollEnd, { passive: true })
     const observer = new ResizeObserver(() => {
+      if (scroller.closest('.larify-workbench-split[data-resizing]')) return
       const viewport = scroller.getBoundingClientRect()
       if (viewport.width === 0 || viewport.height === 0) return
       const saved = anchor.current
@@ -127,7 +134,7 @@ export function useViewportBottomAnchor(resetKey?: unknown): {
 
     return () => {
       observer.disconnect()
-      scroller.removeEventListener('scroll', handleScroll)
+      scroller.removeEventListener('scrollend', handleScrollEnd)
       if (captureFrame.current !== null) cancelAnimationFrame(captureFrame.current)
       if (restoreFrame.current !== null) cancelAnimationFrame(restoreFrame.current)
       captureFrame.current = null
@@ -147,5 +154,11 @@ export function useViewportBottomAnchor(resetKey?: unknown): {
     if (element) element.scrollTop = element.scrollHeight
   }, [resetAnchor])
 
-  return { captureAnchor, scrollerRef, scrollToBottom }
+  return {
+    captureAnchor,
+    trackRenderedRange,
+    scrollerRef,
+    releaseAnchor: resetAnchor,
+    scrollToBottom
+  }
 }

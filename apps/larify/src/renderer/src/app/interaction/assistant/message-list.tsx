@@ -33,7 +33,6 @@ const renderChunk = 0
 const estimatedMessageHeight = 80
 const leaveBottomThreshold = 32
 const returnBottomThreshold = 16
-const upwardInputWindow = 100
 type ScrollMode = 'positioning' | 'following' | 'reading'
 
 interface MessageContentListItem {
@@ -151,7 +150,6 @@ function ActiveAssistantMessageList({
   const lastScrollTop = useRef(0)
   const resizingMessage = useRef(false)
   const resizeVersion = useRef(0)
-  const upwardInputAt = useRef<number | null>(null)
   const scrollIntentTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const positioningStarted = useRef(false)
   const openActivities = useRef(new Map<string, boolean>())
@@ -277,7 +275,6 @@ function ActiveAssistantMessageList({
       clearTimeout(scrollIntentTimer.current)
       scrollIntentTimer.current = null
     }
-    upwardInputAt.current = null
     if (!positioningKey) {
       positioningStarted.current = false
       return
@@ -316,11 +313,7 @@ function ActiveAssistantMessageList({
     })
     if (nextAtBottom && !preserveReadingPosition) {
       scrollMode.current = 'following'
-    } else if (
-      scrollMode.current === 'positioning' &&
-      (upwardInputAt.current === null ||
-        performance.now() - upwardInputAt.current > upwardInputWindow)
-    ) {
+    } else if (scrollMode.current === 'positioning') {
       list.current?.autoscrollToBottom()
       scrollViewportToBottom()
     }
@@ -355,7 +348,21 @@ function ActiveAssistantMessageList({
     <div
       className="relative min-h-0 min-w-0 flex-1"
       onWheelCapture={(event) => {
-        if (event.deltaY < 0) upwardInputAt.current = performance.now()
+        if (
+          event.target instanceof Element &&
+          event.target.closest('[data-message-local-scroll]')
+        ) {
+          return
+        }
+        if (event.deltaY < 0 && (scrollElement.current?.scrollTop ?? 0) > 0) {
+          if (scrollMode.current !== 'reading') {
+            scrollMode.current = 'reading'
+            releaseAnchor()
+            setPosition((current) =>
+              current.key === positioningKey ? { ...current, escaped: true } : current
+            )
+          }
+        }
       }}
       onScrollCapture={(event) => {
         const element = scrollElement.current
@@ -371,27 +378,20 @@ function ActiveAssistantMessageList({
           if (scrollIntentTimer.current !== null) clearTimeout(scrollIntentTimer.current)
           scrollIntentTimer.current = setTimeout(() => {
             scrollIntentTimer.current = null
-            const recentUpwardInput =
-              upwardInputAt.current !== null &&
-              performance.now() - upwardInputAt.current <= upwardInputWindow
             const leftBottom =
               scrollElement.current === element &&
               element.scrollTop <= scrollTop &&
               element.scrollHeight - element.clientHeight - element.scrollTop >=
                 leaveBottomThreshold
-            if (
-              (!resizingMessage.current || recentUpwardInput) &&
-              scrollMode.current !== 'reading' &&
-              leftBottom
-            ) {
+            if (!resizingMessage.current && scrollMode.current !== 'reading' && leftBottom) {
               scrollMode.current = 'reading'
+              releaseAnchor()
               setPosition((current) =>
                 current.key === positioningKey ? { ...current, escaped: true } : current
               )
             } else if (scrollMode.current === 'positioning') {
               scrollMode.current = 'following'
             }
-            upwardInputAt.current = null
           }, 1)
         }
         lastScrollTop.current = scrollTop

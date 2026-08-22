@@ -124,7 +124,10 @@ export function ChangesSummaryCard({
             <span className="text-[var(--git-deleted)]">−{deletions}</span>
           </span>
         </button>
-        <div className="max-h-[calc(9.5rem+1px)] overflow-y-auto [scrollbar-gutter:stable] border-t border-border bg-muted/20 px-2 py-1.5">
+        <div
+          data-message-local-scroll
+          className="max-h-[calc(9.5rem+1px)] overflow-y-auto overscroll-contain [scrollbar-gutter:stable] border-t border-border bg-muted/20 px-2 py-1.5"
+        >
           {files.map((file) => (
             <button
               key={file.path}

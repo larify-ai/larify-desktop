@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import type { UIMessage } from 'ai'
+import { isToolUIPart, type UIMessage } from 'ai'
 import { buildAssistantRenderItems } from '../../../../../src/renderer/src/app/interaction/assistant/message-render-items'
+import { isVisibleToolPart } from '../../../../../src/renderer/src/app/interaction/assistant/message-parts/tool-visibility'
 
 const message = (...parts: UIMessage['parts']): UIMessage => ({
   id: 'assistant',
@@ -81,7 +82,7 @@ describe('assistant message render items', () => {
     ])
   })
 
-  it('keeps only the last completed text fully rendered', () => {
+  it('keeps text after the last tool fully rendered', () => {
     const parts: UIMessage['parts'] = [
       { type: 'text', text: 'intermediate **markdown**' },
       tool('1', 'Read source'),
@@ -185,6 +186,40 @@ describe('assistant message render items', () => {
     expect(items[0].children?.[0].summary).toBe('**foo_bar** <!-- keep --> [README](README.md)')
   })
 
+  it('keeps only the first sentence in text and reasoning summaries', () => {
+    const items = buildAssistantRenderItems(
+      message(
+        { type: 'reasoning', text: '正在检查实现。后续推理不应累计到摘要。' },
+        { type: 'text', text: 'Starting the browser checks. More progress follows.' },
+        tool('1', 'Read source')
+      ),
+      true
+    )
+
+    expect(items[0].children?.map((item) => item.summary)).toEqual([
+      '正在检查实现。',
+      'Starting the browser checks.',
+      'Read source'
+    ])
+  })
+
+  it('segments abbreviations and unfinished summaries without a punctuation list', () => {
+    const items = buildAssistantRenderItems(
+      message(
+        { type: 'reasoning', text: 'Checking the U.S. implementation. More details follow.' },
+        { type: 'text', text: '仍在检查尚未结束' },
+        tool('1', 'Read source')
+      ),
+      true
+    )
+
+    expect(items[0].children?.map((item) => item.summary)).toEqual([
+      'Checking the U.S. implementation.',
+      '仍在检查尚未结束',
+      'Read source'
+    ])
+  })
+
   it('does not create render items for whitespace-only text', () => {
     const streaming = {
       ...message({ type: 'text', text: '\n  \t', state: 'streaming' }),
@@ -261,7 +296,11 @@ describe('assistant message render items', () => {
     const items = buildAssistantRenderItems(waiting, false)
 
     expect(items[0]).toEqual(
-      expect.objectContaining({ kind: 'activity-group', summary: '等待回答 · 处理了 33秒' })
+      expect.objectContaining({
+        kind: 'activity-group',
+        summary: '等待回答 · 处理了 33秒',
+        defaultOpen: true
+      })
     )
     expect(items[1]).toEqual(
       expect.objectContaining({ kind: 'pending-ask-user', defaultOpen: true })
@@ -335,6 +374,25 @@ describe('assistant message render items', () => {
     expect(items.at(-1)?.defaultOpen).toBe(true)
   })
 
+  it('keeps every trailing text part visible when streaming completes', () => {
+    const response = message(
+      { type: 'reasoning', text: 'thinking' },
+      { type: 'text', text: 'first paragraph' },
+      { type: 'text', text: 'second paragraph' }
+    )
+
+    expect(buildAssistantRenderItems(response, true).map((item) => item.kind)).toEqual([
+      'activity-group',
+      'current-text',
+      'current-text'
+    ])
+    expect(buildAssistantRenderItems(response, false).map((item) => item.kind)).toEqual([
+      'activity-group',
+      'final-text',
+      'final-text'
+    ])
+  })
+
   it('shows elapsed processing time from the first streaming step', () => {
     const live = {
       ...message({ type: 'text', text: 'starting', state: 'streaming' }),
@@ -373,7 +431,7 @@ describe('assistant message render items', () => {
 
     expect(buildAssistantRenderItems(completed, false)[0].summary).toBe('处理过程')
     const abortedItems = buildAssistantRenderItems(aborted, false)
-    expect(abortedItems.map((item) => item.kind)).toEqual(['status', 'final-text'])
+    expect(abortedItems.map((item) => item.kind)).toEqual(['activity-group'])
     expect(abortedItems[0].summary).toBe('已中断')
   })
 
@@ -398,17 +456,44 @@ describe('assistant message render items', () => {
     )
   })
 
-  it('keeps the streaming activity area open while text stays directly visible', () => {
+  it('moves streaming text into activity once a tool follows it', () => {
     const items = buildAssistantRenderItems(
       message({ type: 'text', text: 'I will inspect it.' }, tool('1', 'Read source')),
       true
     )
 
-    expect(items.map((item) => item.kind)).toEqual(['activity-group', 'current-text'])
+    expect(items.map((item) => item.kind)).toEqual(['activity-group'])
     expect(items[0].defaultOpen).toBe(true)
-    expect(items[0].children?.[0]).toEqual(
-      expect.objectContaining({ kind: 'tool-group', defaultOpen: false })
+    expect(items[0].children?.map((item) => item.kind)).toEqual(['intermediate-text', 'tool-group'])
+  })
+
+  it('stops treating text as current as soon as a hidden tool starts streaming', () => {
+    const hiddenTool = {
+      ...tool('1', 'Read source'),
+      state: 'input-streaming',
+      input: undefined
+    } as UIMessage['parts'][number]
+    const items = buildAssistantRenderItems(
+      message({ type: 'text', text: 'I will inspect it.' }, hiddenTool),
+      true
     )
+
+    expect(items.map((item) => item.kind)).toEqual(['activity-group'])
+    expect(items[0].children?.map((item) => item.kind)).toEqual(['intermediate-text'])
+  })
+
+  it('does not expose text before a hidden raw tool as a final answer', () => {
+    const hiddenTool = {
+      ...tool('1', 'Read source'),
+      rawInput: { path: 'README.md' }
+    } as UIMessage['parts'][number]
+    const items = buildAssistantRenderItems(
+      message({ type: 'text', text: 'I will inspect it.' }, hiddenTool),
+      false
+    )
+
+    expect(items.map((item) => item.kind)).toEqual(['activity-group'])
+    expect(items[0].children?.map((item) => item.kind)).toEqual(['intermediate-text'])
   })
 
   it('moves a step into completed activity only after the next step starts', () => {
@@ -469,7 +554,36 @@ describe('assistant message render items', () => {
       false
     )
     expect(items.flatMap((item) => item.partIndexes)).toEqual([0, 1, 2, 3, 4])
-    expect(items[0].children?.flatMap((item) => item.partIndexes)).toEqual([0, 1, 2, 3])
+    expect(items[0].children?.flatMap((item) => item.partIndexes)).toEqual([0, 1, 2])
+  })
+
+  it('renders every visible part exactly once across structural combinations', () => {
+    const candidates: UIMessage['parts'] = [
+      { type: 'text', text: 'text' },
+      { type: 'reasoning', text: 'reasoning' },
+      tool('visible', 'Visible tool'),
+      { ...tool('hidden', 'Hidden tool'), rawInput: {} } as UIMessage['parts'][number]
+    ]
+    const leafIndexes = (items: ReturnType<typeof buildAssistantRenderItems>): number[] =>
+      items.flatMap((item) =>
+        item.children ? item.children.flatMap((child) => child.partIndexes) : item.partIndexes
+      )
+
+    for (let first = 0; first < candidates.length; first += 1) {
+      for (let second = 0; second < candidates.length; second += 1) {
+        const parts = [candidates[first], candidates[second]]
+        const expected = parts.flatMap((part, index) => {
+          if (part.type === 'text' || part.type === 'reasoning') return [index]
+          return isToolUIPart(part) && isVisibleToolPart(part) ? [index] : []
+        })
+
+        for (const streaming of [false, true]) {
+          expect(leafIndexes(buildAssistantRenderItems(message(...parts), streaming))).toEqual(
+            expected
+          )
+        }
+      }
+    }
   })
 
   it('collapses all completed activity into one outer row', () => {
@@ -539,6 +653,31 @@ describe('assistant message render items', () => {
     )
   })
 
+  it('expands only active and waiting activity groups', () => {
+    const parts: UIMessage['parts'] = [
+      { type: 'reasoning', text: 'working' },
+      tool('ask', 'Choose one', 'input-available', 'agent_ask_user')
+    ]
+    const streaming = buildAssistantRenderItems(message(...parts), true)
+    const waiting = buildAssistantRenderItems(message(...parts), false)
+    const completed = buildAssistantRenderItems(
+      timedMessage({ type: 'reasoning', text: 'worked' }, { type: 'text', text: 'done' }),
+      false
+    )
+    const interrupted = buildAssistantRenderItems(
+      {
+        ...timedMessage({ type: 'reasoning', text: 'worked' }),
+        metadata: { startedAt: 1_000, completedAt: 2_000, outcome: 'aborted' }
+      } as UIMessage,
+      false
+    )
+
+    expect(streaming[0].defaultOpen).toBe(true)
+    expect(waiting[0].defaultOpen).toBe(true)
+    expect(completed[0].defaultOpen).toBe(false)
+    expect(interrupted[0].defaultOpen).toBe(false)
+  })
+
   it('shows aborted elapsed time even when the response only contains text', () => {
     const aborted = {
       ...message({ type: 'text', text: 'partial answer' }),
@@ -547,8 +686,9 @@ describe('assistant message render items', () => {
 
     const items = buildAssistantRenderItems(aborted, false)
 
-    expect(items.map((item) => item.kind)).toEqual(['status', 'final-text'])
+    expect(items.map((item) => item.kind)).toEqual(['activity-group'])
     expect(items[0].summary).toBe('已中断 · 处理了 8秒')
+    expect(items[0].children?.map((item) => item.kind)).toEqual(['intermediate-text'])
   })
 
   it('shows a stream error as interrupted with elapsed time', () => {
@@ -579,7 +719,7 @@ describe('assistant message render items', () => {
 
     const items = buildAssistantRenderItems(failed, false)
 
-    expect(items.map((item) => item.kind)).toEqual(['status', 'final-text'])
+    expect(items.map((item) => item.kind)).toEqual(['activity-group'])
     expect(items[0].summary).toBe('已中断')
   })
 })

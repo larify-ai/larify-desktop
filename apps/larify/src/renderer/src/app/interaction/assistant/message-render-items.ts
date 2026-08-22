@@ -56,8 +56,12 @@ export function isActivityRenderItem(item: AssistantRenderItem): boolean {
   )
 }
 
+const sentenceSegmenter = new Intl.Segmenter(undefined, { granularity: 'sentence' })
+
 function textSummary(text: string): string {
-  return text.replace(/\s+/g, ' ').trim()
+  const normalized = text.replace(/\s+/g, ' ').trim()
+  const first = sentenceSegmenter.segment(normalized)[Symbol.iterator]().next()
+  return first.done ? normalized : first.value.segment.trim()
 }
 
 export function hasVisibleTextPart(part: UIMessage['parts'][number]): boolean {
@@ -83,11 +87,11 @@ function isPendingAskUser(part: UIMessage['parts'][number]): boolean {
 
 function pendingAskUserIndex(message: UIMessage): number {
   const lastStepStartIndex = message.parts.findLastIndex((part) => part.type === 'step-start')
-  const relativeIndex = message.parts
-    .slice(lastStepStartIndex + 1)
-    .findLastIndex((part) => isToolUIPart(part) && isVisibleToolPart(part))
-  if (relativeIndex < 0) return -1
-  const index = lastStepStartIndex + 1 + relativeIndex
+  const index = message.parts.findLastIndex(
+    (part, partIndex) =>
+      partIndex > lastStepStartIndex && isToolUIPart(part) && isVisibleToolPart(part)
+  )
+  if (index < 0) return -1
   return isPendingAskUser(message.parts[index]) ? index : -1
 }
 
@@ -97,10 +101,8 @@ function toolIcon(part: UIMessage['parts'][number]): string | undefined {
   return typeof icon === 'string' ? icon : undefined
 }
 
-function completedSummary(message: UIMessage): string {
-  const metadata = lifecycleMetadata(message)
+function completedSummary(metadata: LifecycleMetadata, waitingForAnswer: boolean): string {
   const interrupted = isInterrupted(metadata)
-  const waitingForAnswer = !interrupted && pendingAskUserIndex(message) >= 0
   const status = interrupted ? '已中断' : waitingForAnswer ? '等待回答' : '已完成'
   if (!hasValidDuration(metadata)) {
     return waitingForAnswer ? '等待回答' : interrupted ? '已中断' : '处理过程'
@@ -114,6 +116,8 @@ export function buildAssistantRenderItems(
 ): AssistantRenderItem[] {
   if (message.role !== 'assistant') return []
 
+  const metadata = lifecycleMetadata(message)
+  const interrupted = isInterrupted(metadata)
   const visibleIndexes: number[] = []
   const stepByPartIndex: number[] = []
   let step = 0
@@ -127,33 +131,24 @@ export function buildAssistantRenderItems(
       visibleIndexes.push(index)
     }
   })
-  const lastVisibleIndex = visibleIndexes.at(-1) ?? -1
   const lastStepStartIndex = message.parts.findLastIndex((part) => part.type === 'step-start')
-  const lastVisibleIsCurrentStepText =
-    lastVisibleIndex > lastStepStartIndex && message.parts[lastVisibleIndex]?.type === 'text'
-  const finalTextIndex = !streaming && lastVisibleIsCurrentStepText ? lastVisibleIndex : -1
+  const lastStepActivityIndex = message.parts.findLastIndex(
+    (part, index) => index > lastStepStartIndex && (part.type === 'reasoning' || isToolUIPart(part))
+  )
+  const directTextStartIndex = Math.max(lastStepStartIndex, lastStepActivityIndex)
+  const directTextKind = interrupted ? undefined : streaming ? 'current-text' : 'final-text'
   const items: AssistantRenderItem[] = []
-  const pendingAskIndex = isInterrupted(lifecycleMetadata(message))
-    ? -1
-    : pendingAskUserIndex(message)
+  const pendingAskIndex = interrupted ? -1 : pendingAskUserIndex(message)
+  const waitingForAnswer = pendingAskIndex >= 0
 
   for (let offset = 0; offset < visibleIndexes.length; offset += 1) {
     const partIndex = visibleIndexes[offset]
     const part = message.parts[partIndex]
     if (!part) continue
 
-    if (partIndex === finalTextIndex && part.type === 'text') {
+    if (directTextKind && part.type === 'text' && partIndex > directTextStartIndex) {
       items.push({
-        kind: 'final-text',
-        partIndexes: [partIndex],
-        summary: textSummary(part.text),
-        defaultOpen: true
-      })
-      continue
-    }
-    if (streaming && part.type === 'text' && partIndex > lastStepStartIndex) {
-      items.push({
-        kind: 'current-text',
+        kind: directTextKind,
         partIndexes: [partIndex],
         summary: textSummary(part.text),
         defaultOpen: true
@@ -218,7 +213,7 @@ export function buildAssistantRenderItems(
   }
   if (streaming) {
     const activityItems = items.filter(isActivityRenderItem)
-    const { startedAt } = lifecycleMetadata(message)
+    const { startedAt } = metadata
     if (activityItems.length === 0) {
       return isFiniteNumber(startedAt)
         ? [
@@ -249,13 +244,12 @@ export function buildAssistantRenderItems(
 
   const activityItems = items.filter(isActivityRenderItem)
   if (activityItems.length === 0) {
-    const metadata = lifecycleMetadata(message)
-    return hasValidDuration(metadata) || isInterrupted(metadata)
+    return hasValidDuration(metadata) || interrupted
       ? [
           {
             kind: 'status',
             partIndexes: [],
-            summary: completedSummary(message),
+            summary: completedSummary(metadata, waitingForAnswer),
             defaultOpen: false
           },
           ...items
@@ -271,8 +265,8 @@ export function buildAssistantRenderItems(
         {
           kind: 'activity-group' as const,
           partIndexes: activityItems.flatMap((activity) => activity.partIndexes),
-          summary: completedSummary(message),
-          defaultOpen: false,
+          summary: completedSummary(metadata, waitingForAnswer),
+          defaultOpen: pendingAskIndex >= 0,
           icon: latestActivity?.icon,
           children: activityItems
         }

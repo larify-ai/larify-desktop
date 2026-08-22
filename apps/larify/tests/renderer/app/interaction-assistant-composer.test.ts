@@ -122,7 +122,7 @@ describe('AssistantComposer', () => {
       '默认空间'
     )
     expect(container.querySelector('[aria-label="配置模型和思考强度"]')?.textContent).toContain(
-      'DeepSeek-V4-Flash低'
+      'DeepSeek-V4-Flash-Vision低'
     )
     await act(async () => submit())
     expect(onSubmit).not.toHaveBeenCalled()

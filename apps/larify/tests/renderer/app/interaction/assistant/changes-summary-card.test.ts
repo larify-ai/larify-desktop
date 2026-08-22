@@ -227,6 +227,22 @@ describe('ChangesSummaryCard', () => {
     outside.remove()
   })
 
+  it('keeps the preview open while the card or conversation scrolls', async () => {
+    await render()
+    const row = hoverRow('a.ts')
+    const list = row.parentElement!
+
+    act(() => {
+      list.dispatchEvent(new Event('scroll'))
+      document.dispatchEvent(new Event('scroll'))
+      window.dispatchEvent(new Event('resize'))
+    })
+
+    expect(hoverDiff()).toBe('a.ts')
+    expect(list.hasAttribute('data-message-local-scroll')).toBe(true)
+    expect(list.classList).toContain('overscroll-contain')
+  })
+
   it('drops the preview when the active file disappears', async () => {
     await render()
     const row = Array.from(container.querySelectorAll('button')).find((button) =>

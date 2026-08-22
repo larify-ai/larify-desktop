@@ -26,7 +26,7 @@ describe('interaction assistant model configuration', () => {
     expect(readModelConfig(storage)).toEqual(defaultModelConfig)
     expect(storage.setItem).toHaveBeenCalledWith(
       'larify.modelConfig',
-      '{"modelId":"deepseek-v4-flash","reasoningEffort":"off"}'
+      JSON.stringify(defaultModelConfig)
     )
   })
 

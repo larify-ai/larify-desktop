@@ -3,6 +3,7 @@ import type { PluginHost } from '../plugin/host'
 import { createModelRuntime } from '../model'
 import {
   defaultModelConfig,
+  imageCapableModelIds,
   isAgentModelConfig,
   modelContextWindows,
   type AgentModelConfig
@@ -66,10 +67,15 @@ export function createAgentRuntime(input: AgentRuntimeInput, host: PluginHost): 
     ...createModelRuntime(config),
     system: buildSystemPrompt(template, input.cwd, collectPromptContext(host)),
     tools,
+    imageCapable: imageCapableModelIds.has(config.modelId),
     activeTools: Object.entries(tools)
       .filter(([, tool]) => tool.metadata?.eager === true)
       .map(([name]) => name),
-    toolsContext: toolsContextFor(tools, { sessionId: input.sessionId, cwd: input.cwd }),
+    toolsContext: toolsContextFor(tools, {
+      sessionId: input.sessionId,
+      cwd: input.cwd,
+      modelId: config.modelId
+    }),
     prepareStep: contextRollover(modelContextWindows[config.modelId].rollover),
     stopWhen: input.stopWhen ?? isLoopFinished()
   }

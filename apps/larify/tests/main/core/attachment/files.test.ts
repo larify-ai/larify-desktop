@@ -1,6 +1,6 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { extname, join } from 'node:path'
 import type { UIMessage } from 'ai'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -44,6 +44,20 @@ describe('attachments', () => {
     await expect(loadAttachments([saved])).resolves.toMatchObject([
       { parts: [{ type: 'file', url: 'data:image/png;base64,aGVsbG8=' }] }
     ])
+  })
+
+  it('uses the detected type when a pasted image has no filename', async () => {
+    await root()
+    const input = message(
+      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
+    )
+    const part = input.parts[0]
+    if (part.type === 'file') part.filename = undefined
+
+    const saved = await saveAttachments('session', input)
+    const file = saved.parts[0]
+    if (file.type !== 'file') return
+    expect(extname(file.url)).toBe('.png')
   })
 
   it('survives an attachment and session database round trip', async () => {

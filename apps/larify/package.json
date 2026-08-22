@@ -40,7 +40,7 @@
     "build:linux": "electron-vite build && electron-builder --linux"
   },
   "dependencies": {
-    "@ai-sdk/deepseek": "^3.0.7",
+    "@ai-sdk/deepseek": "^3.0.30",
     "@ai-sdk/react": "^4.0.23",
     "@ant-design/x": "^2.9.0",
     "@ant-design/x-markdown": "^2.9.0",

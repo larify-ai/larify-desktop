@@ -34,6 +34,7 @@ describe('runAgent', () => {
       tools: {},
       activeTools: [],
       toolsContext: {},
+      imageCapable: false,
       abortSignal: controller.signal,
       system: 'system prompt',
       providerOptions,
@@ -60,7 +61,8 @@ describe('runAgent', () => {
       model: languageModel,
       tools: { visible: tool, hidden: tool },
       activeTools: ['visible'],
-      toolsContext: {}
+      toolsContext: {},
+      imageCapable: false
     })
 
     for await (const _ of stream) void _

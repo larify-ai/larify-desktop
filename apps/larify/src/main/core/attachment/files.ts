@@ -1,18 +1,13 @@
-import { readFile, writeFile } from 'node:fs/promises'
-import { extname, isAbsolute, join } from 'node:path'
-import { randomUUID } from 'node:crypto'
+import { readFile } from 'node:fs/promises'
+import { isAbsolute } from 'node:path'
 import { isFileUIPart, type FileUIPart, type UIMessage } from 'ai'
-import { sessionAttachmentsPath } from '../../utils/app-paths'
+import { saveAttachmentBytes } from './store'
 
 async function saveFile(sessionId: string, part: FileUIPart): Promise<FileUIPart> {
   if (!part.url.startsWith('data:')) return part
 
-  const target = join(
-    sessionAttachmentsPath(sessionId),
-    `${randomUUID()}${extname(part.filename ?? '')}`
-  )
   const data = await fetch(part.url).then((response) => response.arrayBuffer())
-  await writeFile(target, Buffer.from(data))
+  const target = await saveAttachmentBytes(sessionId, new Uint8Array(data))
   return { ...part, url: target }
 }
 

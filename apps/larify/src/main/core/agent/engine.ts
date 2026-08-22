@@ -12,12 +12,14 @@ import {
   type TextStreamPart,
   type ToolSet
 } from 'ai'
+import { promoteToolImages } from './tool-images'
 
 export interface AgentOptions {
   model: LanguageModelV4
   tools: ToolSet
   activeTools: string[]
   toolsContext: Record<string, unknown>
+  imageCapable: boolean
   abortSignal?: AbortSignal
   system?: string
   providerOptions?: ProviderOptions
@@ -35,14 +37,23 @@ function promptWithTools(names: string[]): LanguageModelMiddleware {
   }
 }
 
+function toolImages(imageCapable: boolean): LanguageModelMiddleware {
+  return {
+    transformParams: async ({ params }) => ({
+      ...params,
+      prompt: promoteToolImages(params.prompt, imageCapable)
+    })
+  }
+}
+
 export function runAgent(
   messages: ModelMessage[],
   options: AgentOptions
 ): AsyncIterableStream<TextStreamPart<ToolSet>> {
-  const { activeTools, model, toolsContext, ...streamOptions } = options
+  const { activeTools, imageCapable, model, toolsContext, ...streamOptions } = options
   const wrappedModel = wrapLanguageModel({
     model,
-    middleware: promptWithTools(activeTools)
+    middleware: [toolImages(imageCapable), promptWithTools(activeTools)]
   })
   return streamText({
     ...streamOptions,

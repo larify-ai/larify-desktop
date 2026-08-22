@@ -68,9 +68,18 @@ describe('createAgentRuntime', () => {
 
     expect(Object.keys(runtime.tools)).toEqual(['files_edit', 'files_read'])
     expect(runtime.activeTools).toEqual(['files_read'])
+    expect(runtime.imageCapable).toBe(true)
     expect(runtime.toolsContext).toEqual({
-      files_edit: { sessionId: 'session', cwd: 'cwd' },
-      files_read: { sessionId: 'session', cwd: 'cwd' }
+      files_edit: {
+        sessionId: 'session',
+        cwd: 'cwd',
+        modelId: 'deepseek-v4-flash-vision-exp'
+      },
+      files_read: {
+        sessionId: 'session',
+        cwd: 'cwd',
+        modelId: 'deepseek-v4-flash-vision-exp'
+      }
     })
     expect(runtime.system).toContain('cwd')
     expect(runtime.system).toContain('`files`:')
@@ -78,6 +87,19 @@ describe('createAgentRuntime', () => {
     expect(runtime.system).toContain('files_review')
     expect(runtime.system).not.toContain('optional/SKILL.md')
     expect(runtime.system).not.toContain('`lazy`:')
+  })
+
+  it('marks non-vision models as not image capable', () => {
+    const runtime = createAgentRuntime(
+      {
+        sessionId: 'session',
+        cwd: 'cwd',
+        modelConfig: { modelId: 'deepseek-v4-flash', reasoningEffort: 'off' }
+      },
+      new PluginHost(new Registry())
+    )
+
+    expect(runtime.imageCapable).toBe(false)
   })
 
   it('uses the default stop condition and context rollover', async () => {

@@ -46,9 +46,8 @@ export function wrapTool(tool: Tool): Tool {
 export const toolContextSchema = z.object({
   sessionId: z.string(),
   cwd: z.string(),
-  trackFileChange: z
-    .custom<TrackFileChange>((value) => typeof value === 'function')
-    .optional(),
+  modelId: z.string().optional(),
+  trackFileChange: z.custom<TrackFileChange>((value) => typeof value === 'function').optional(),
   requestContextReset: z
     .custom<RequestContextReset>((value) => typeof value === 'function')
     .optional()
@@ -65,7 +64,7 @@ export function defineTool<IN extends z.ZodTypeAny, OUT>(config: {
   inputSchema: IN
   outputSchema?: z.ZodType<OUT>
   execute: (args: z.infer<IN>, context: ToolRunContext) => OUT | Promise<OUT>
-  toModelOutput?: (output: Awaited<OUT>) => ModelOutput
+  toModelOutput?: (output: Awaited<OUT>) => ModelOutput | Promise<ModelOutput>
 }): Tool {
   return {
     description: config.description,

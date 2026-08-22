@@ -21,10 +21,9 @@ import {
   takeChangesNavigation,
   type ChangesNavigationRequest
 } from './changes-navigation'
+import { loadMonacoDiff } from './changes-loaders'
 
-const MonacoDiff = lazy(() =>
-  import('./monaco-diff').then(({ MonacoDiff }) => ({ default: MonacoDiff }))
-)
+const MonacoDiff = lazy(() => loadMonacoDiff().then(({ MonacoDiff }) => ({ default: MonacoDiff })))
 
 export function ChangesView({
   active = false,
@@ -53,8 +52,8 @@ export function ChangesView({
   const hasChanges = changes.length > 0
   const requestedPath = selected && root ? resolveChangesPath(root, selected) : selected
   const current = selected
-    ? changes.find((status) => root && sameChangesPath(root, status.path, requestedPath!)) ?? null
-    : changes[0] ?? null
+    ? (changes.find((status) => root && sameChangesPath(root, status.path, requestedPath!)) ?? null)
+    : (changes[0] ?? null)
   const selectedPath = current?.path ?? null
   const previewActive = active && (workbenchState.visible || workbenchState.animating)
 

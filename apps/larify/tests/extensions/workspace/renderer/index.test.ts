@@ -34,6 +34,24 @@ import {
 import { RendererPluginHost } from '../../../../src/renderer/src/app/registry/renderer-plugins'
 
 describe('workspace renderer plugin', () => {
+  it('cancels the scheduled editor preload when disposed before idle', () => {
+    const requestIdle = vi.fn(() => 42)
+    const cancelIdle = vi.fn()
+    vi.stubGlobal('requestIdleCallback', requestIdle)
+    vi.stubGlobal('cancelIdleCallback', cancelIdle)
+    try {
+      const { registry, subscriptions } = createServices()
+
+      plugin.activate({ registry, subscriptions })
+      subscriptions[0].dispose()
+
+      expect(requestIdle).toHaveBeenCalledWith(expect.any(Function))
+      expect(cancelIdle).toHaveBeenCalledWith(42)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('registers the workbench and selects previews by MIME and binary state', () => {
     const { previews, registry, renderers, subscriptions } = createServices()
 

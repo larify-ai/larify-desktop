@@ -48,10 +48,7 @@ try {
   if (process.env.INSPECT_SCROLL) {
     const geometry = await app.evaluate(`(() => {
       const preview = document.querySelector('[data-testid="native-file-preview"]')?.getBoundingClientRect()
-      const sash = Array.from(document.querySelectorAll('.sash')).find((item) => {
-        const rect = item.getBoundingClientRect()
-        return item.parentElement?.parentElement?.classList.contains('larify-workbench-allotment') && rect.height > 400 && rect.width < 20
-      })?.getBoundingClientRect()
+      const sash = document.querySelector('.larify-workbench-resize-handle')?.getBoundingClientRect()
       return preview && sash && {
         previewWidth: preview.width,
         sash: { x: sash.x + sash.width / 2, y: sash.y + sash.height / 2 }
@@ -158,10 +155,7 @@ try {
     process.exit(0)
   }
   const sash = await app.evaluate(`(() => {
-    const element = Array.from(document.querySelectorAll('.sash')).find((item) => {
-      const rect = item.getBoundingClientRect()
-      return item.parentElement?.parentElement?.classList.contains('larify-workbench-allotment') && rect.height > 400 && rect.width < 20
-    })
+    const element = document.querySelector('.larify-workbench-resize-handle')
     const rect = element?.getBoundingClientRect()
     return rect && { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }
   })()`)

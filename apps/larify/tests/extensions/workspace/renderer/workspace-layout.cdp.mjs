@@ -99,7 +99,7 @@ try {
 
   const initialPanes = await evaluate(`(() => {
     const panes = Array.from(document.querySelectorAll(
-      '.larify-workbench-allotment > .split-view-container > .split-view-view'
+      '.larify-interaction-pane, .larify-workbench-pane'
     ))
     return panes.map((pane) => pane.getBoundingClientRect().width)
   })()`)
@@ -138,24 +138,24 @@ try {
 
   const panesBeforeNavigationCollapse = await evaluate(`(() =>
     Array.from(document.querySelectorAll(
-      '.larify-workbench-allotment > .split-view-container > .split-view-view'
+      '.larify-interaction-pane, .larify-workbench-pane'
     )).map((pane) => pane.getBoundingClientRect().width)
   )()`)
   await clickAria('隐藏侧边栏')
   await waitFor(
     `Array.from(document.querySelectorAll(
-      '.larify-workbench-allotment > .split-view-container > .split-view-view'
-    ))[1]?.getBoundingClientRect().width > ${panesBeforeNavigationCollapse[1] + 180}`,
-    'workbench growth after navigation collapse'
+      '.larify-interaction-pane, .larify-workbench-pane'
+    ))[0]?.getBoundingClientRect().width > ${panesBeforeNavigationCollapse[0] + 180}`,
+    'interaction growth after navigation collapse'
   )
   const panesAfterNavigationCollapse = await evaluate(`(() =>
     Array.from(document.querySelectorAll(
-      '.larify-workbench-allotment > .split-view-container > .split-view-view'
+      '.larify-interaction-pane, .larify-workbench-pane'
     )).map((pane) => pane.getBoundingClientRect().width)
   )()`)
   const interactionGrowth = panesAfterNavigationCollapse[0] - panesBeforeNavigationCollapse[0]
   const workbenchGrowth = panesAfterNavigationCollapse[1] - panesBeforeNavigationCollapse[1]
-  if (Math.abs(interactionGrowth) > 24 || workbenchGrowth < 180) {
+  if (interactionGrowth < 180 || Math.abs(workbenchGrowth) > 24) {
     throw new Error(
       `Navigation collapse resized the wrong pane: ${JSON.stringify({
         panesAfterNavigationCollapse,
@@ -166,9 +166,9 @@ try {
   await clickAria('显示侧边栏')
   await waitFor(
     `Array.from(document.querySelectorAll(
-      '.larify-workbench-allotment > .split-view-container > .split-view-view'
-    ))[1]?.getBoundingClientRect().width < ${panesAfterNavigationCollapse[1] - 180}`,
-    'workbench shrink after navigation restore'
+      '.larify-interaction-pane, .larify-workbench-pane'
+    ))[0]?.getBoundingClientRect().width < ${panesAfterNavigationCollapse[0] - 180}`,
+    'interaction shrink after navigation restore'
   )
 
   if (

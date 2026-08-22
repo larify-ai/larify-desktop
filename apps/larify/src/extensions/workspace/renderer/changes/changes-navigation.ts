@@ -10,7 +10,15 @@ export const CHANGES_NAVIGATION_EVENT = 'larify:changes-navigation'
 
 const pending = new Map<number, ChangesNavigationRequest>()
 
-const pathForRoot = (root: string): typeof posixPath =>
+interface PathApi {
+  resolve(...paths: string[]): string
+  relative(from: string, to: string): string
+  isAbsolute(path: string): boolean
+  dirname(path: string): string
+  sep: string
+}
+
+const pathForRoot = (root: string): PathApi =>
   /^(?:[a-z]:[\\/]|\\\\)/i.test(root) ? win32Path : posixPath
 
 export const resolveChangesPath = (root: string, file: string): string =>

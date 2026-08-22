@@ -15,12 +15,13 @@ import {
 } from '@renderer/app/registry/file-previews'
 import { NativeFilePreview } from './preview/native-file-preview'
 import { ChangesIcon } from './changes/changes-icon'
+import { loadChangesView, preloadChangesEditor } from './changes/changes-loaders'
 
 const WorkspaceView = lazy(() =>
   import('./workspace-view').then(({ WorkspaceView }) => ({ default: WorkspaceView }))
 )
 const ChangesView = lazy(() =>
-  import('./changes/changes-view').then(({ ChangesView }) => ({ default: ChangesView }))
+  loadChangesView().then(({ ChangesView }) => ({ default: ChangesView }))
 )
 const MonacoPreview = lazy(() =>
   import('./preview/monaco-preview').then(({ MonacoPreview }) => ({ default: MonacoPreview }))
@@ -45,6 +46,14 @@ const plugin: RendererPlugin = {
     if (!renderers) throw new Error('Workbench renderer registry is unavailable.')
     const previews = registry.get<PreviewRegistry>(previewRegistryToken)
     if (!previews) throw new Error('Preview registry is unavailable.')
+
+    const preload = (): void => {
+      void preloadChangesEditor().catch(() => undefined)
+    }
+    if (typeof requestIdleCallback === 'function') {
+      const idle = requestIdleCallback(preload)
+      subscriptions.push({ dispose: () => cancelIdleCallback(idle) })
+    }
 
     subscriptions.push(
       previews.register({

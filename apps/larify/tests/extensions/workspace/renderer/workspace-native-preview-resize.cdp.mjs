@@ -181,11 +181,11 @@ try {
   const initial = await ensurePreview()
   const getOuterSash = async () => {
     const sashes =
-      await app.evaluate(`Array.from(document.querySelectorAll('.sash')).map((element, index) => {
+      await app.evaluate(`Array.from(document.querySelectorAll('.sash, .larify-workbench-resize-handle')).map((element, index) => {
     const rect = element.getBoundingClientRect()
     return {
       index,
-      workbench: element.parentElement?.parentElement?.classList.contains('larify-workbench-allotment') ?? false,
+      workbench: element.classList.contains('larify-workbench-resize-handle'),
       x: rect.x, y: rect.y, width: rect.width, height: rect.height, className: element.className
     }
   })`)

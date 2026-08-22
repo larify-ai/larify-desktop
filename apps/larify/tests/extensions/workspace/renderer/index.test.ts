@@ -6,6 +6,10 @@ import { describe, expect, it, vi } from 'vitest'
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
+const changesLoaders = vi.hoisted(() => ({
+  preloadChangesEditor: vi.fn(() => Promise.resolve())
+}))
+
 vi.mock('../../../../src/extensions/workspace/renderer/preview/markdown-preview', () => ({
   MarkdownPreview: () => createElement('div', { 'data-preview': 'markdown' })
 }))
@@ -20,6 +24,12 @@ vi.mock('../../../../src/extensions/workspace/renderer/changes/changes-view', ()
       'data-testid': 'changes-view'
     })
 }))
+vi.mock('../../../../src/extensions/workspace/renderer/changes/changes-loaders', async () => {
+  const actual = await vi.importActual<
+    typeof import('../../../../src/extensions/workspace/renderer/changes/changes-loaders')
+  >('../../../../src/extensions/workspace/renderer/changes/changes-loaders')
+  return { ...actual, preloadChangesEditor: changesLoaders.preloadChangesEditor }
+})
 import plugin from '../../../../src/extensions/workspace/renderer'
 import { NativeFilePreview } from '../../../../src/extensions/workspace/renderer/preview/native-file-preview'
 import { Registry } from '../../../../src/shared/infra/registry'
@@ -34,6 +44,62 @@ import {
 import { RendererPluginHost } from '../../../../src/renderer/src/app/registry/renderer-plugins'
 
 describe('workspace renderer plugin', () => {
+  it('does not schedule eager loading without the idle callback API', () => {
+    vi.stubGlobal('requestIdleCallback', undefined)
+    changesLoaders.preloadChangesEditor.mockClear()
+    try {
+      const { registry, subscriptions } = createServices()
+
+      plugin.activate({ registry, subscriptions })
+
+      expect(changesLoaders.preloadChangesEditor).not.toHaveBeenCalled()
+      expect(subscriptions).toHaveLength(5)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('preloads the changes editor only after the idle callback runs', async () => {
+    let idleCallback: IdleRequestCallback | undefined
+    vi.stubGlobal('requestIdleCallback', vi.fn((callback: IdleRequestCallback) => {
+      idleCallback = callback
+      return 42
+    }))
+    vi.stubGlobal('cancelIdleCallback', vi.fn())
+    changesLoaders.preloadChangesEditor.mockClear()
+    try {
+      const { registry } = createServices()
+      plugin.activate({ registry, subscriptions: [] })
+
+      expect(changesLoaders.preloadChangesEditor).not.toHaveBeenCalled()
+      await idleCallback?.({ didTimeout: false, timeRemaining: () => 10 })
+      expect(changesLoaders.preloadChangesEditor).toHaveBeenCalledOnce()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('contains idle preload failures because opening the editor remains lazy', async () => {
+    let idleCallback: IdleRequestCallback | undefined
+    vi.stubGlobal('requestIdleCallback', vi.fn((callback: IdleRequestCallback) => {
+      idleCallback = callback
+      return 42
+    }))
+    vi.stubGlobal('cancelIdleCallback', vi.fn())
+    changesLoaders.preloadChangesEditor.mockClear()
+    changesLoaders.preloadChangesEditor.mockRejectedValueOnce(new Error('preload failed'))
+    try {
+      const { registry } = createServices()
+      plugin.activate({ registry, subscriptions: [] })
+
+      await idleCallback?.({ didTimeout: false, timeRemaining: () => 10 })
+      await Promise.resolve()
+      expect(changesLoaders.preloadChangesEditor).toHaveBeenCalledOnce()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('cancels the scheduled editor preload when disposed before idle', () => {
     const requestIdle = vi.fn(() => 42)
     const cancelIdle = vi.fn()

@@ -15,6 +15,7 @@
     "test:browser-live": "node tests/extensions/browser/live/run-oopif-screenshot.mjs && node tests/extensions/browser/live/run-drag.mjs && node tests/extensions/browser/live/run-input.mjs",
     "test:layout-performance": "node tests/performance/layout-resize.cdp.mjs",
     "test:layout-interaction-performance": "node tests/performance/layout-interaction-performance.cdp.mjs",
+    "test:layout-environment-matrix": "node tests/performance/layout-environment-matrix.cdp.mjs",
     "test:layout-startup-divider-performance": "node tests/performance/layout-startup-divider-performance.cdp.mjs",
     "test:layout-stress-performance": "node tests/performance/layout-stress-performance.cdp.mjs",
     "test:workbench-responsive": "node tests/renderer/app/workbench/workbench-empty.cdp.mjs",

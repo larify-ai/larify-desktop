@@ -198,6 +198,79 @@ describe('layout with the real resizable component', () => {
     expect(pane?.style.width).toBe('800px')
   })
 
+  it('ignores non-primary pointer drags', async () => {
+    await click('显示工作台')
+
+    const split = container.querySelector<HTMLElement>('.larify-workbench-split')!
+    const pane = container.querySelector<HTMLElement>('.larify-workbench-pane')!
+    const handle = container.querySelector<HTMLElement>('[role="separator"]')!
+    Object.defineProperty(split, 'clientWidth', { configurable: true, value: 1200 })
+
+    await act(async () => {
+      handle.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 1, clientX: 1000 }))
+      window.dispatchEvent(pointerEvent('pointermove', 800))
+    })
+
+    expect(split.hasAttribute('data-resizing')).toBe(false)
+    expect(pane.style.width).toBe('700px')
+    expect(HTMLElement.prototype.setPointerCapture).not.toHaveBeenCalled()
+  })
+
+  it('commits the latest width when the pointer is cancelled', async () => {
+    await click('显示工作台')
+
+    const split = container.querySelector<HTMLElement>('.larify-workbench-split')!
+    const pane = container.querySelector<HTMLElement>('.larify-workbench-pane')!
+    const handle = container.querySelector<HTMLElement>('[role="separator"]')!
+    Object.defineProperty(split, 'clientWidth', { configurable: true, value: 1200 })
+    pane.getBoundingClientRect = () => ({
+      bottom: 0,
+      height: 0,
+      left: 0,
+      right: 700,
+      top: 0,
+      width: 700,
+      x: 0,
+      y: 0,
+      toJSON: () => ({})
+    })
+
+    await act(async () => {
+      handle.dispatchEvent(pointerEvent('pointerdown', 1000))
+      window.dispatchEvent(pointerEvent('pointermove', 850))
+      window.dispatchEvent(pointerEvent('pointercancel', 850))
+    })
+
+    expect(split.hasAttribute('data-resizing')).toBe(false)
+    expect(pane.style.width).toBe('850px')
+
+    await act(async () => window.dispatchEvent(pointerEvent('pointermove', 700)))
+    expect(pane.style.width).toBe('850px')
+  })
+
+  it('clamps keyboard resizing to both pane minimums', async () => {
+    await click('显示工作台')
+
+    const split = container.querySelector<HTMLElement>('.larify-workbench-split')!
+    const pane = container.querySelector<HTMLElement>('.larify-workbench-pane')!
+    const handle = container.querySelector<HTMLElement>('[role="separator"]')!
+    Object.defineProperty(split, 'clientWidth', { configurable: true, value: 1000 })
+
+    await act(async () => {
+      for (let index = 0; index < 100; index += 1) {
+        handle.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'ArrowLeft' }))
+      }
+    })
+    expect(pane.style.width).toBe('664px')
+
+    await act(async () => {
+      for (let index = 0; index < 100; index += 1) {
+        handle.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'ArrowRight' }))
+      }
+    })
+    expect(pane.style.width).toBe('280px')
+  })
+
   it('cancels an active resize when the workbench collapses', async () => {
     await click('显示工作台')
 

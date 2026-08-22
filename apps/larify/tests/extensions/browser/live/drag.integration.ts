@@ -52,6 +52,7 @@ async function main(): Promise<void> {
     await app.whenReady()
     window = new BrowserWindow({ show: true, x: -2000, y: -2000, width: 600, height: 500 })
     tab = new BrowserTab(1, `drag-live-${Date.now()}`)
+    tab.view.webContents.setBackgroundThrottling(false)
     window.contentView.addChildView(tab.view)
     tab.view.setBounds({ x: 0, y: 0, width: 600, height: 500 })
     await tab.navigateAndWait(`http://127.0.0.1:${address.port}`)

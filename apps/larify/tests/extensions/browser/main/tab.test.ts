@@ -7,6 +7,7 @@ const h = vi.hoisted(() => ({
   clickMock: vi.fn(),
   pressMock: vi.fn(),
   sendCommandMock: vi.fn(),
+  viewOptions: [] as unknown[],
 }))
 
 vi.mock("electron", () => {
@@ -130,8 +131,17 @@ vi.mock("electron", () => {
 
   class WebContentsView {
     webContents = new FakeWebContents()
-    setVisible(): void {}
+    visible = true
+    setVisible(visible: boolean): void {
+      this.visible = visible
+    }
+    getVisible(): boolean {
+      return this.visible
+    }
     setBounds(): void {}
+    constructor(options: unknown) {
+      h.viewOptions.push(options)
+    }
   }
 
   return {
@@ -220,9 +230,18 @@ describe("BrowserTab", () => {
     h.clickMock.mockReset()
     h.pressMock.mockReset()
     h.sendCommandMock.mockReset()
+    h.viewOptions.length = 0
     h.clickMock.mockResolvedValue(undefined)
     h.pressMock.mockResolvedValue(undefined)
     h.sendCommandMock.mockResolvedValue({})
+  })
+
+  it("enables background throttling for idle automation tabs", () => {
+    new BrowserTab(1, "persist:test")
+
+    expect(h.viewOptions).toContainEqual({
+      webPreferences: { partition: "persist:test", backgroundThrottling: true },
+    })
   })
 
   it("falls back to CDP when the display surface is unavailable", async () => {

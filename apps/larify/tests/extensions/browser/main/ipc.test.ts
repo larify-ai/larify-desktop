@@ -78,7 +78,7 @@ describe('registerBrowserIpc', () => {
     expect(h.handlers.has('browser:close')).toBe(false)
   })
 
-  it('routes commands by resource id', () => {
+  it('routes commands by resource id', async () => {
     const service = fakeService()
     registerBrowserIpc(service)
     h.handlers.get('browser:navigate')!({ sender: sender() }, 'session-a', 7, 'openai.com')
@@ -87,23 +87,26 @@ describe('registerBrowserIpc', () => {
     h.handlers.get('browser:reload')!({ sender: sender() }, 'session-a', 7)
     h.handlers.get('browser:setVisible')!({ sender: sender() }, 'session-a', 7, true)
     const event = { returnValue: null }
-    h.listeners.get('browser:setBoundsSync')!(event, 'session-a', 7, {
-      x: 1,
-      y: 2,
-      width: 300,
-      height: 200
-    })
+    h.listeners.get('browser:setBoundsSync')!(
+      event,
+      'session-a',
+      7,
+      { x: 1, y: 2, width: 300, height: 200 },
+      false,
+      false
+    )
     expect(service.navigate).toHaveBeenCalledWith('session-a', 7, 'openai.com')
     expect(service.goBack).toHaveBeenCalledWith('session-a', 7)
     expect(service.goForward).toHaveBeenCalledWith('session-a', 7)
     expect(service.reload).toHaveBeenCalledWith('session-a', 7)
     expect(service.setVisible).toHaveBeenCalledWith('session-a', 7, true)
-    expect(service.setBounds).toHaveBeenCalledWith('session-a', 7, {
-      x: 1,
-      y: 2,
-      width: 300,
-      height: 200
-    })
+    expect(service.setBounds).toHaveBeenCalledWith(
+      'session-a',
+      7,
+      { x: 1, y: 2, width: 300, height: 200 },
+      false,
+      false
+    )
     expect(event.returnValue).toBe(true)
   })
 
@@ -114,18 +117,43 @@ describe('registerBrowserIpc', () => {
       throw error
     })
     registerBrowserIpc(service)
-    const event = { returnValue: null as boolean | null }
+    const event = { returnValue: null as unknown }
 
     expect(() =>
-      h.listeners.get('browser:setBoundsSync')!(event, 'session-a', 7, {
-        x: 1,
-        y: 2,
-        width: 300,
-        height: 200
-      })
+      h.listeners.get('browser:setBoundsSync')!(
+        event,
+        'session-a',
+        7,
+        { x: 1, y: 2, width: 300, height: 200 },
+        false
+      )
     ).not.toThrow()
     expect(event.returnValue).toBe(false)
     expect(h.error).toHaveBeenCalledWith('[browser] Failed to update bounds:', error)
+  })
+
+  it('forwards live resize and activation flags', () => {
+    const service = fakeService()
+    registerBrowserIpc(service)
+    const event = { returnValue: null as unknown }
+
+    h.listeners.get('browser:setBoundsSync')!(
+      event,
+      'session-a',
+      7,
+      { x: 5, y: 6, width: 300, height: 200 },
+      true,
+      true
+    )
+
+    expect(service.setBounds).toHaveBeenCalledWith(
+      'session-a',
+      7,
+      { x: 5, y: 6, width: 300, height: 200 },
+      true,
+      true
+    )
+    expect(event.returnValue).toBe(true)
   })
 
   it('returns one resource state and subscribes for changes', () => {

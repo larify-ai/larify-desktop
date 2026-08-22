@@ -66,11 +66,12 @@ export function registerBrowserIpc(browser: BrowserService): () => void {
     event: IpcMainEvent,
     sessionId: string,
     id: number,
-    bounds: Rectangle
+    bounds: Rectangle,
+    live = false,
+    activate = false
   ): void => {
     try {
-      browser.setBounds(sessionId, id, bounds)
-      event.returnValue = true
+      event.returnValue = browser.setBounds(sessionId, id, bounds, live, activate) !== false
     } catch (error) {
       console.error("[browser] Failed to update bounds:", error)
       event.returnValue = false

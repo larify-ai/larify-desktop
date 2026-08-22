@@ -1,5 +1,17 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { nativeLayoutEvent } from '@renderer/app/layout/native-layout'
+import { useEffect, useRef, type ReactNode } from 'react'
+import { nativeLayoutEvent, type NativeLayoutDetail } from '@renderer/app/layout/native-layout'
+
+interface ViewportBounds {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+interface PendingBounds {
+  bounds: ViewportBounds
+  live: boolean
+}
 
 interface BrowserViewportProps {
   children?: ReactNode
@@ -15,14 +27,49 @@ export function BrowserViewport({
   visible
 }: BrowserViewportProps): React.JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
-  const [viewportHasSize, setViewportHasSize] = useState(false)
 
   useEffect(() => {
     const element = ref.current
     if (!element) return
-    const pane = element.closest<HTMLElement>('.split-view-view')
-    let previousBounds: { x: number; y: number; width: number; height: number } | null = null
+    if (!visible) {
+      void window.bridge.invoke('browser:setVisible', sessionId, resourceId, false)
+      return
+    }
+    const pane = element.closest<HTMLElement>('.larify-workbench-pane, .split-view-view')
+    const split = element.closest<HTMLElement>('.larify-workbench-split')
+    let previousBounds: ViewportBounds | null = null
+    let previousLiveResize = false
+    let queuedRequest: PendingBounds | null = null
+    let boundsFrame = 0
+    let nativeVisible = false
     void window.bridge.invoke('browser:setVisible', sessionId, resourceId, false)
+
+    const flushBounds = (): void => {
+      if (boundsFrame) cancelAnimationFrame(boundsFrame)
+      boundsFrame = 0
+      const request = queuedRequest
+      queuedRequest = null
+      if (!request) return
+      const updated = window.bridge.sendSync(
+        'browser:setBoundsSync',
+        sessionId,
+        resourceId,
+        request.bounds,
+        request.live,
+        true
+      )
+      if (updated !== true) previousBounds = null
+      const shouldShow = updated === true && request.bounds.width > 0 && request.bounds.height > 0
+      if (nativeVisible !== shouldShow) {
+        nativeVisible = shouldShow
+        void window.bridge.invoke('browser:setVisible', sessionId, resourceId, shouldShow)
+      }
+    }
+
+    const queueRequest = (request: PendingBounds): void => {
+      queuedRequest = request
+      if (!boundsFrame) boundsFrame = requestAnimationFrame(flushBounds)
+    }
 
     const report = (): void => {
       const rect = element.getBoundingClientRect()
@@ -39,40 +86,43 @@ export function BrowserViewport({
         width: right - left,
         height: bottom - top
       }
+      const liveResize = split?.hasAttribute('data-resizing') ?? false
       const changed =
         !previousBounds ||
         previousBounds.x !== bounds.x ||
         previousBounds.y !== bounds.y ||
         previousBounds.width !== bounds.width ||
-        previousBounds.height !== bounds.height
+        previousBounds.height !== bounds.height ||
+        previousLiveResize !== liveResize
       if (!changed) return
       previousBounds = bounds
-      setViewportHasSize(bounds.width > 0 && bounds.height > 0)
-      window.bridge.sendSync('browser:setBoundsSync', sessionId, resourceId, bounds)
+      previousLiveResize = liveResize
+      queueRequest({
+        bounds,
+        live: liveResize
+      })
     }
 
     report()
+    flushBounds()
     const observer = new ResizeObserver(report)
     observer.observe(element)
     if (pane) observer.observe(pane)
-    window.addEventListener(nativeLayoutEvent, report)
+    const reportNativeLayout = (event: Event): void => {
+      const detail = (event as CustomEvent<NativeLayoutDetail | undefined>).detail
+      report()
+      if (detail?.phase !== 'start') flushBounds()
+    }
+    window.addEventListener(nativeLayoutEvent, reportNativeLayout)
     window.addEventListener('resize', report)
     return () => {
       observer.disconnect()
-      window.removeEventListener(nativeLayoutEvent, report)
+      if (boundsFrame) cancelAnimationFrame(boundsFrame)
+      window.removeEventListener(nativeLayoutEvent, reportNativeLayout)
       window.removeEventListener('resize', report)
       void window.bridge.invoke('browser:setVisible', sessionId, resourceId, false)
     }
-  }, [resourceId, sessionId])
-
-  useEffect(() => {
-    void window.bridge.invoke(
-      'browser:setVisible',
-      sessionId,
-      resourceId,
-      visible && viewportHasSize
-    )
-  }, [resourceId, sessionId, visible, viewportHasSize])
+  }, [resourceId, sessionId, visible])
 
   return (
     <div

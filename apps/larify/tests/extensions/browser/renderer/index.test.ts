@@ -51,9 +51,27 @@ describe('browser renderer plugin', () => {
       }
     })
     expect(updateTab).toHaveBeenLastCalledWith(expect.objectContaining({ title: 'Updated' }))
+    const updateCount = updateTab.mock.calls.length
+    stateListener({
+      sessionId: 'session-a',
+      state: {
+        activeId: 7,
+        tabs: [{ id: 7, title: 'Updated', favIconUrl: 'https://example.com/favicon.ico' }]
+      }
+    })
+    expect(updateTab).toHaveBeenCalledTimes(updateCount)
+
+    stateListener({
+      sessionId: 'session-a',
+      state: {
+        activeId: 7,
+        tabs: [{ id: 7, title: 'Renamed', favIconUrl: 'https://example.com/favicon.ico' }]
+      }
+    })
+    expect(updateTab).toHaveBeenLastCalledWith({ title: 'Renamed' })
     const host = document.createElement('div')
     const root = createRoot(host)
-    const presentation = updateTab.mock.lastCall?.[0] as { icon: ReactNode }
+    const presentation = updateTab.mock.calls[updateCount - 1]?.[0] as { icon: ReactNode }
     await act(async () => root.render(presentation.icon))
     expect(host.querySelector('img')?.src).toBe('https://example.com/favicon.ico')
     await act(async () => host.querySelector('img')?.dispatchEvent(new Event('error')))

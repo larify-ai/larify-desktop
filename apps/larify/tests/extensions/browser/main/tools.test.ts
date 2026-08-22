@@ -35,6 +35,12 @@ function createService(): BrowserService {
     })),
     createTab: vi.fn(() => 1),
     close: vi.fn(),
+    withRendered: vi.fn(async (_sessionId: string, _id: number, operation: () => Promise<unknown>) =>
+      operation(),
+    ),
+    withUnthrottled: vi.fn(async (_sessionId: string, _id: number, operation: () => Promise<unknown>) =>
+      operation(),
+    ),
   } as unknown as BrowserService
 }
 
@@ -80,6 +86,37 @@ describe("browser toolkit", () => {
     await tool("create_tab", service).execute({ url: localPath }, ctx)
 
     expect(tab.navigateAndWait).toHaveBeenCalledWith(localPath)
+  })
+
+  it("closes a create_tab resource when its native tab is missing", async () => {
+    const service = {
+      ...createService(),
+      createTab: vi.fn(() => 2),
+      tab: vi.fn(() => null),
+      close: vi.fn(async () => undefined),
+    } as unknown as BrowserService
+
+    await expect(tool("create_tab", service).execute({}, ctx)).rejects.toThrow(
+      'Browser tab "2" not found.',
+    )
+    expect(service.close).toHaveBeenCalledWith("session-1", 2)
+  })
+
+  it("preserves create_tab and cleanup failures", async () => {
+    const service = {
+      ...createService(),
+      createTab: vi.fn(() => 2),
+      tab: vi.fn(() => null),
+      close: vi.fn(async () => { throw new Error("close failed") }),
+    } as unknown as BrowserService
+
+    const error = await tool("create_tab", service).execute({}, ctx).catch((reason) => reason)
+
+    expect(error).toBeInstanceOf(AggregateError)
+    expect((error as AggregateError).errors).toEqual([
+      expect.objectContaining({ message: 'Browser tab "2" not found.' }),
+      expect.objectContaining({ message: "close failed" }),
+    ])
   })
 
   it("exposes the migrated browser tool surface without browser_ prefixes", () => {
@@ -142,7 +179,10 @@ describe("browser toolkit", () => {
         "navigate",
         "press",
         "read_page",
+        "screenshot",
+        "scroll",
         "snapshot",
+        "wait_for",
         "web_fetch",
         "web_search",
       ].sort(),
@@ -226,6 +266,7 @@ describe("browser toolkit", () => {
     await expect(tool("click", service).execute({ id: 99, selector: "button" }, ctx)).rejects.toThrow(
       'Browser tab "99" not found.',
     )
+    expect(service.withUnthrottled).not.toHaveBeenCalled()
   })
 
   it("navigates with goto, back, forward, and reload actions", async () => {
@@ -493,6 +534,24 @@ describe("browser toolkit", () => {
       ),
     ).resolves.toEqual({ content: JSON.stringify(value, null, 2) })
     expect(sendCdp).toHaveBeenCalledWith("Runtime.evaluate", undefined, undefined, undefined, controller.signal)
+  })
+
+  it("uses a render lease for every raw CDP command", async () => {
+    const sendCdp = vi.fn(async () => ({}))
+    const withRendered = vi.fn(async (_sessionId: string, _id: number, operation: () => Promise<unknown>) =>
+      operation(),
+    )
+    const service = {
+      ...createService(),
+      tab: vi.fn(() => ({ sendCdp })),
+      withRendered,
+    } as unknown as BrowserService
+
+    await tool("cdp_call", service).execute({ id: 1, method: "Runtime.evaluate" }, ctx)
+    expect(withRendered).toHaveBeenCalledOnce()
+
+    await tool("cdp_call", service).execute({ id: 1, method: "Page.captureScreenshot" }, ctx)
+    expect(withRendered).toHaveBeenCalledTimes(2)
   })
 
   it("throws cdp_call errors", async () => {
@@ -875,6 +934,28 @@ describe("browser toolkit", () => {
     expect(parseToolInput("screenshot", { id: 1, quality: 0 }).success).toBe(true)
   })
 
+  it("uses a render lease for every screenshot mode", async () => {
+    const image = Buffer.from("png-data")
+    const tab = {
+      screenshot: vi.fn(async () => ({ data: image.toString("base64"), mimeType: "image/png" })),
+    }
+    const withRendered = vi.fn(async (_sessionId: string, _id: number, operation: () => Promise<unknown>) =>
+      operation(),
+    )
+    const service = {
+      ...createService(),
+      tab: vi.fn(() => tab),
+      withRendered,
+    } as unknown as BrowserService
+
+    await tool("screenshot", service).execute({ id: 1 }, ctx)
+    expect(withRendered).toHaveBeenCalledOnce()
+    await tool("screenshot", service).execute({ id: 1, fullPage: true }, ctx)
+    await tool("screenshot", service).execute({ id: 1, selector: "#target" }, ctx)
+    expect(withRendered).toHaveBeenCalledTimes(3)
+    expect(service.withUnthrottled).not.toHaveBeenCalled()
+  })
+
   it("auto-stops record_start when a duration is given and returns the finished recording", async () => {
     vi.useFakeTimers()
     const recordPath = join(tmpdir(), "larify-record-duration-test.webm")
@@ -891,6 +972,7 @@ describe("browser toolkit", () => {
 
     expect(service.recordStart).toHaveBeenCalledTimes(1)
     expect(service.recordStopIfCurrent).toHaveBeenCalledWith(ctx.context.sessionId, 1)
+    expect(service.withUnthrottled).not.toHaveBeenCalled()
     expect(result).toEqual({ path: recordPath, bytes: 42 })
     vi.useRealTimers()
   })
@@ -936,6 +1018,51 @@ describe("browser toolkit", () => {
       "ERR_NAME_NOT_RESOLVED",
     )
     expect(service.close).toHaveBeenCalledWith("session-1", 2)
+  })
+
+  it("closes a new click resource when its native tab is missing", async () => {
+    const source = { elementHref: vi.fn(async () => "https://example.com/next") }
+    const service = {
+      ...createService(),
+      createTab: vi.fn(() => 2),
+      close: vi.fn(async () => undefined),
+      tab: vi.fn((_sessionId: string, id: number) => (id === 1 ? source : null)),
+    } as unknown as BrowserService
+
+    await expect(
+      tool("click", service).execute({ id: 1, selector: "a", newTab: true }, ctx),
+    ).rejects.toThrow('Browser tab "2" not found.')
+    expect(service.close).toHaveBeenCalledWith("session-1", 2)
+  })
+
+  it("releases the source tab lease before navigating a new click tab", async () => {
+    const active = new Set<number>()
+    let finishNavigation!: () => void
+    const source = { elementHref: vi.fn(async () => "https://example.com/next") }
+    const target = {
+      navigateAndWait: vi.fn(() => new Promise<void>((resolve) => { finishNavigation = resolve })),
+    }
+    const service = {
+      ...createService(),
+      createTab: vi.fn(() => 2),
+      tab: vi.fn((_sessionId: string, id: number) => (id === 1 ? source : target)),
+      withUnthrottled: vi.fn(async (_sessionId: string, id: number, operation: () => Promise<unknown>) => {
+        active.add(id)
+        try {
+          return await operation()
+        } finally {
+          active.delete(id)
+        }
+      }),
+    } as unknown as BrowserService
+
+    const pending = tool("click", service).execute({ id: 1, selector: "a", newTab: true }, ctx)
+    await vi.waitFor(() => expect(finishNavigation).toBeTypeOf("function"))
+    expect([...active]).toEqual([2])
+
+    finishNavigation()
+    await expect(pending).resolves.toMatchObject({ id: 2, newTab: true })
+    expect(active.size).toBe(0)
   })
 
   it("closes a new click tab when its navigation is aborted", async () => {

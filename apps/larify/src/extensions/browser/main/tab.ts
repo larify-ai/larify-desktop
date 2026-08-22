@@ -236,7 +236,7 @@ export class BrowserTab {
   constructor(id: number, partition: string, { automation = true }: BrowserTabOptions = {}) {
     this.id = id
     this.view = new WebContentsView({
-      webPreferences: { partition, backgroundThrottling: false },
+      webPreferences: { partition, backgroundThrottling: true },
     })
     this.wireEvents()
     if (automation) {

@@ -17,8 +17,10 @@ const sameBounds = (left: Rectangle, right: Rectangle): boolean =>
 export class BrowserTabManager {
   private tabs = new Map<number, BrowserTab>()
   private activeId: number | null = null
+  private recordingId: number | null = null
   private nextTemporaryId = -1
   private bounds: Rectangle = { x: 0, y: 0, width: 0, height: 0 }
+  private liveResize = false
   private visible = false
   private onChange?: (state: BrowserState) => void
   private readonly host: BrowserWindow
@@ -27,6 +29,8 @@ export class BrowserTabManager {
   private readonly temporaryTabs = new Map<number, BrowserTab>()
   private readonly temporaryCancels = new Map<number, (error: Error) => void>()
   private readonly temporaryOperations = new Set<Promise<unknown>>()
+  private readonly renderLeases = new Map<number, number>()
+  private readonly activityLeases = new Map<number, number>()
   private readonly recorder = new Recorder()
   private destroyTask: Promise<void> | null = null
   private destroying = false
@@ -46,7 +50,7 @@ export class BrowserTabManager {
       height: 800,
       skipTaskbar: true,
       focusable: false,
-      webPreferences: { backgroundThrottling: false }
+      webPreferences: { backgroundThrottling: true }
     })
     this.host.setPosition(HOST_POSITION.x, HOST_POSITION.y)
     this.window.once("closed", this.handleWindowClosed)
@@ -64,9 +68,9 @@ export class BrowserTabManager {
     return this.activeId === id
   }
 
-  createTab(id: number, url?: string): number {
+  createTab(id: number, url?: string, activate = true): number {
     if (this.destroying) throw new Error("browser tab manager is destroyed")
-    const previous = this.activeId === null ? undefined : this.tabs.get(this.activeId)
+    const previous = activate && this.activeId !== null ? this.tabs.get(this.activeId) : undefined
     const tab = new BrowserTab(id, BROWSER_PARTITION)
     tab.view.setVisible(true)
     tab.bindChange(() => this.emit())
@@ -81,10 +85,14 @@ export class BrowserTabManager {
       return { action: "deny" }
     })
     this.tabs.set(tab.id, tab)
-    this.activeId = tab.id
     if (url) tab.navigate(url)
-    if (previous) this.hideView(previous)
-    this.layoutActive()
+    if (activate) {
+      this.activeId = tab.id
+      if (previous) this.hideView(previous)
+      this.layoutActive()
+    } else {
+      this.hideView(tab)
+    }
     this.emit()
     return id
   }
@@ -92,6 +100,7 @@ export class BrowserTabManager {
   async withTemporaryTab<T>(url: string, callback: (tab: BrowserTab) => Promise<T>): Promise<T> {
     if (this.destroying) throw new Error("browser tab manager is destroyed")
     const tab = new BrowserTab(this.nextTemporaryId--, BROWSER_PARTITION)
+    tab.view.webContents.setBackgroundThrottling(false)
     tab.view.webContents.setWindowOpenHandler(() => ({ action: "deny" }))
     const operation = this.runTemporaryTab(tab, url, callback)
     this.temporaryOperations.add(operation)
@@ -147,6 +156,7 @@ export class BrowserTabManager {
 
   private async closeTab(id: number, tab: BrowserTab): Promise<void> {
     await this.recorder.stopIfRecordingTab(id).catch(() => {})
+    if (this.recordingId === id) this.recordingId = null
     const order = [...this.tabs.keys()]
     const index = order.indexOf(id)
     this.viewParent.get(id)?.contentView.removeChildView(tab.view)
@@ -194,9 +204,65 @@ export class BrowserTabManager {
     return this.recorder.restart(tab, path)
   }
 
-  setBounds(bounds: Rectangle): void {
-    if (sameBounds(this.bounds, bounds)) return
-    this.bounds = bounds
+  setRecording(id: number | null): void {
+    if (id !== null && !this.tabs.has(id)) throw new Error("browser tab not found")
+    if (this.recordingId === id) return
+    const previous = this.recordingId
+    this.recordingId = id
+    for (const tabId of [previous, id]) {
+      if (tabId === null) continue
+      const tab = this.tabs.get(tabId)
+      if (!tab) continue
+      this.syncBackgroundThrottling(tab)
+      this.syncOffscreenVisibility(tab)
+    }
+    this.layoutActive()
+  }
+
+  async withRendered<T>(id: number, operation: () => Promise<T>): Promise<T> {
+    return this.withUnthrottled(id, async () => {
+      const tab = this.tabs.get(id)
+      if (!tab) throw new Error("browser tab not found")
+      const previous = this.renderLeases.get(id) ?? 0
+      this.renderLeases.set(id, previous + 1)
+      this.syncOffscreenVisibility(tab)
+      try {
+        if (previous === 0 && this.viewParent.get(id) === this.host) {
+          tab.view.webContents.invalidate()
+          await new Promise<void>((resolve) => setImmediate(resolve))
+        }
+        return await operation()
+      } finally {
+        const remaining = (this.renderLeases.get(id) ?? 1) - 1
+        if (remaining > 0) this.renderLeases.set(id, remaining)
+        else this.renderLeases.delete(id)
+        const current = this.tabs.get(id)
+        if (current) this.syncOffscreenVisibility(current)
+      }
+    })
+  }
+
+  async withUnthrottled<T>(id: number, operation: () => Promise<T>): Promise<T> {
+    const tab = this.tabs.get(id)
+    if (!tab) throw new Error("browser tab not found")
+    this.activityLeases.set(id, (this.activityLeases.get(id) ?? 0) + 1)
+    this.syncBackgroundThrottling(tab)
+    try {
+      return await operation()
+    } finally {
+      const remaining = (this.activityLeases.get(id) ?? 1) - 1
+      if (remaining > 0) this.activityLeases.set(id, remaining)
+      else this.activityLeases.delete(id)
+      const current = this.tabs.get(id)
+      if (current) this.syncBackgroundThrottling(current)
+    }
+  }
+
+  setBounds(bounds: Rectangle, live = false): void {
+    const nextBounds = live ? { ...this.bounds, x: bounds.x } : bounds
+    if (sameBounds(this.bounds, nextBounds) && live === this.liveResize) return
+    this.bounds = nextBounds
+    this.liveResize = live
     this.layoutActive()
   }
 
@@ -238,6 +304,8 @@ export class BrowserTabManager {
       }
       this.tabs.clear()
       this.viewParent.clear()
+      this.renderLeases.clear()
+      this.activityLeases.clear()
       this.activeId = null
       if (!this.host.isDestroyed()) this.host.destroy()
     }
@@ -249,21 +317,36 @@ export class BrowserTabManager {
 
   private placeView(tab: BrowserTab, target: BrowserWindow, bounds: Rectangle): void {
     const current = this.viewParent.get(tab.id)
-    if (current !== target) {
+    const moved = current !== target
+    if (moved) {
       current?.contentView.removeChildView(tab.view)
       target.contentView.addChildView(tab.view)
       this.viewParent.set(tab.id, target)
     }
     tab.view.setBounds(bounds)
+    if (moved) tab.view.setVisible(true)
   }
 
   private hideView(tab: BrowserTab): void {
+    this.liveResize = false
     const current = this.viewParent.get(tab.id)
-    if (current === this.host) return
-    current?.contentView.removeChildView(tab.view)
-    this.host.contentView.addChildView(tab.view)
-    this.viewParent.set(tab.id, this.host)
-    tab.view.setBounds(HOST_BOUNDS)
+    if (current !== this.host) {
+      current?.contentView.removeChildView(tab.view)
+      this.host.contentView.addChildView(tab.view)
+      this.viewParent.set(tab.id, this.host)
+      tab.view.setBounds(HOST_BOUNDS)
+    }
+    this.syncOffscreenVisibility(tab)
+  }
+
+  private syncOffscreenVisibility(tab: BrowserTab): void {
+    if (this.viewParent.get(tab.id) !== this.host) return
+    tab.view.setVisible(tab.id === this.recordingId || (this.renderLeases.get(tab.id) ?? 0) > 0)
+  }
+
+  private syncBackgroundThrottling(tab: BrowserTab): void {
+    const active = tab.id === this.recordingId || (this.activityLeases.get(tab.id) ?? 0) > 0
+    tab.view.webContents.setBackgroundThrottling(!active)
   }
 
   private layoutActive(): void {

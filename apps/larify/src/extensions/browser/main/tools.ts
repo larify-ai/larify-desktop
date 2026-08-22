@@ -148,7 +148,22 @@ async function withTab<T>(
   id: number,
   action: (tab: BrowserTab) => Promise<T> | T,
 ): Promise<T> {
-  return action(getTab(service, sessionId, id))
+  const tab = getTab(service, sessionId, id)
+  return service.withUnthrottled(sessionId, id, async () => action(tab))
+}
+
+async function closeCreatedTab(
+  service: BrowserService,
+  sessionId: string,
+  id: number,
+  error: unknown,
+): Promise<never> {
+  try {
+    await service.close(sessionId, id)
+  } catch (closeError) {
+    throw new AggregateError([error, closeError], `Failed to close browser tab ${id} after an error.`)
+  }
+  throw error
 }
 
 const tempPath = (extension: string): string =>
@@ -185,20 +200,23 @@ export function createBrowserTools(service: BrowserService): Record<string, Tool
         execute: async (args, ctx) => {
           const { url } = args
           const id = service.createTab(ctx.sessionId)
-          const tab = getTab(service, ctx.sessionId, id)
           try {
+            const tab = getTab(service, ctx.sessionId, id)
             if (url) {
-              await runUntilAbort(
-                () => tab.navigateAndWait(resolveNavigationInput(ctx.cwd, url)),
-                ctx.signal,
-                "browser navigation",
+              await service.withUnthrottled(
+                ctx.sessionId,
+                id,
+                () => runUntilAbort(
+                  () => tab.navigateAndWait(resolveNavigationInput(ctx.cwd, url)),
+                  ctx.signal,
+                  "browser navigation",
+                ),
               )
             }
+            return tabState(tab)
           } catch (error) {
-            await service.close(ctx.sessionId, id)
-            throw error
+            return closeCreatedTab(service, ctx.sessionId, id, error)
           }
-          return tabState(tab)
         },
       }),
       close_tab: defineTool({
@@ -281,12 +299,11 @@ export function createBrowserTools(service: BrowserService): Record<string, Tool
         execute: async (args, ctx) => {
           const { id, method, params, sessionId, timeout } = args
           const tab = getTab(service, ctx.sessionId, id)
+          const call = (): Promise<unknown> =>
+            tab.sendCdp(method, params, sessionId, secondsToMs(timeout), ctx.signal)
+          const value = await service.withRendered(ctx.sessionId, id, call)
           return spill(
-            JSON.stringify(
-              await tab.sendCdp(method, params, sessionId, secondsToMs(timeout), ctx.signal),
-              null,
-              2,
-            ),
+            JSON.stringify(value, null, 2),
           )
         },
       }),
@@ -487,33 +504,38 @@ function interactionTools(service: BrowserService): Record<string, Tool> {
       inputSchema: clickSchema,
       execute: async (args, ctx) => {
         const { id, selector, newTab } = args
-        return withTab(service, ctx.sessionId, id, async (tab) => {
-          if (newTab) {
-            const href = await runUntilAbort(
+        if (newTab) {
+          const href = await withTab(service, ctx.sessionId, id, (tab) =>
+            runUntilAbort(
               () => tab.elementHref(selector),
               ctx.signal,
               "browser link lookup",
             )
-            if (!href) throw new Error(`element '${selector}' has no link target`)
-            const newTabId = service.createTab(ctx.sessionId)
+          )
+          if (!href) throw new Error(`element '${selector}' has no link target`)
+          const newTabId = service.createTab(ctx.sessionId)
+          try {
             const created = getTab(service, ctx.sessionId, newTabId)
-            try {
-              await runUntilAbort(
+            await service.withUnthrottled(
+              ctx.sessionId,
+              newTabId,
+              () => runUntilAbort(
                 () => created.navigateAndWait(href),
                 ctx.signal,
                 "browser navigation",
-              )
-            } catch (error) {
-              await service.close(ctx.sessionId, newTabId)
-              throw error
-            }
-            return {
-              clicked: selector,
-              newTab: true,
-              id: newTabId,
-              url: href,
-            }
+              ),
+            )
+          } catch (error) {
+            return closeCreatedTab(service, ctx.sessionId, newTabId, error)
           }
+          return {
+            clicked: selector,
+            newTab: true,
+            id: newTabId,
+            url: href,
+          }
+        }
+        return withTab(service, ctx.sessionId, id, async (tab) => {
           await tab.click(selector)
           return { clicked: selector }
         })
@@ -633,7 +655,7 @@ function interactionTools(service: BrowserService): Record<string, Tool> {
     }),
     scroll: defineTool({
       description: "Scroll the page or an element.",
-      metadata: { icon: "browser" },
+      metadata: { icon: "browser", eager: true },
       inputSchema: scrollSchema,
       execute: async (args, ctx) => {
         const { id, selector, direction, amount } = args
@@ -662,7 +684,7 @@ function waitTools(service: BrowserService): Record<string, Tool> {
   return {
     wait_for: defineTool({
       description: "Wait for an element state.",
-      metadata: { icon: "browser" },
+      metadata: { icon: "browser", eager: true },
       inputSchema: waitForSchema,
       execute: async (args, ctx) => {
         return withTab(service, ctx.sessionId, args.id, async (tab) => {
@@ -719,18 +741,17 @@ function captureTools(service: BrowserService): Record<string, Tool> {
   return {
     screenshot: defineTool({
       description: "Capture a screenshot of the page or an element.",
-      metadata: { icon: "browser" },
+      metadata: { icon: "browser", eager: true },
       inputSchema: screenshotSchema,
       execute: async (args, ctx) => {
         const { id, path, ...opts } = args
-        return withTab(service, ctx.sessionId, id, async (tab) => {
-          const result = await tab.screenshot(opts)
-          return await writeDataUrl(
-            path ? resolveToolPath(ctx.cwd, path) : tempPath(opts.format),
-            result.data,
-            result.mimeType,
-          )
-        })
+        const tab = getTab(service, ctx.sessionId, id)
+        const result = await service.withRendered(ctx.sessionId, id, () => tab.screenshot(opts))
+        return writeDataUrl(
+          path ? resolveToolPath(ctx.cwd, path) : tempPath(opts.format),
+          result.data,
+          result.mimeType,
+        )
       },
     }),
     pdf: defineTool({
@@ -750,28 +771,27 @@ function captureTools(service: BrowserService): Record<string, Tool> {
       inputSchema: recordStartSchema,
       execute: async (args, ctx) => {
         const { id, path, duration } = args
-        return withTab(service, ctx.sessionId, id, async (tab) => {
-          const target = resolveToolPath(ctx.cwd, path)
-          if (ctx.signal?.aborted) throw new Error("recording was cancelled")
-          const generation = await service.recordStart(ctx.sessionId, tab, target)
-          if (duration === undefined) return { recording: true, path: target }
-          await waitMs(duration * 1000, ctx.signal)
-          try {
-            const result =
-              (await service.recordStopIfCurrent(ctx.sessionId, generation)) ?? {
-                recording: false,
-                path: target,
-              }
-            if (ctx.signal?.aborted) throw new Error("recording was cancelled")
-            return result
-          } catch (error) {
-            if (error instanceof Error && error.message === "no recording in progress") {
-              if (ctx.signal?.aborted) throw new Error("recording was cancelled")
-              return { recording: false, path: target }
+        const tab = getTab(service, ctx.sessionId, id)
+        const target = resolveToolPath(ctx.cwd, path)
+        if (ctx.signal?.aborted) throw new Error("recording was cancelled")
+        const generation = await service.recordStart(ctx.sessionId, tab, target)
+        if (duration === undefined) return { recording: true, path: target }
+        await waitMs(duration * 1000, ctx.signal)
+        try {
+          const result =
+            (await service.recordStopIfCurrent(ctx.sessionId, generation)) ?? {
+              recording: false,
+              path: target,
             }
-            throw error
+          if (ctx.signal?.aborted) throw new Error("recording was cancelled")
+          return result
+        } catch (error) {
+          if (error instanceof Error && error.message === "no recording in progress") {
+            if (ctx.signal?.aborted) throw new Error("recording was cancelled")
+            return { recording: false, path: target }
           }
-        })
+          throw error
+        }
       },
     }),
     record_stop: defineTool({
@@ -786,11 +806,10 @@ function captureTools(service: BrowserService): Record<string, Tool> {
       inputSchema: recordSchema,
       execute: async (args, ctx) => {
         const { id, path } = args
-        return withTab(service, ctx.sessionId, id, async (tab) => {
-          const target = resolveToolPath(ctx.cwd, path)
-          await service.recordRestart(ctx.sessionId, tab, target)
-          return { recording: true, path: target }
-        })
+        const tab = getTab(service, ctx.sessionId, id)
+        const target = resolveToolPath(ctx.cwd, path)
+        await service.recordRestart(ctx.sessionId, tab, target)
+        return { recording: true, path: target }
       },
     }),
   }

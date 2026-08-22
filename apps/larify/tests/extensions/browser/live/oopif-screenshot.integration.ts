@@ -239,7 +239,9 @@ async function main(): Promise<void> {
     const hiddenTab = service.tab('hidden-capture', hiddenId)
     if (!hiddenTab) throw new Error('hidden capture tab was not created')
     await hiddenTab.navigateAndWait(url(rootServer, 'localhost'))
-    const hiddenScreenshot = await hiddenTab.screenshot({ format: 'png' })
+    const hiddenScreenshot = await service.withRendered('hidden-capture', hiddenId, () =>
+      hiddenTab.screenshot({ format: 'png' })
+    )
     const hiddenSize = nativeImage
       .createFromBuffer(Buffer.from(hiddenScreenshot.data, 'base64'))
       .getSize()
@@ -247,23 +249,12 @@ async function main(): Promise<void> {
       throw new Error(`hidden viewport screenshot was empty: ${JSON.stringify(hiddenSize)}`)
     }
     console.log(`PASS hidden viewport screenshot: ${hiddenSize.width}x${hiddenSize.height}`)
-    const hiddenDebugger = hiddenTab.view.webContents.debugger
-    const hiddenMetrics = (await hiddenDebugger.sendCommand('Page.getLayoutMetrics')) as {
-      cssVisualViewport?: { pageX: number; pageY: number; clientWidth: number; clientHeight: number }
+    const hiddenCdpCapture = await service.withRendered('hidden-capture', hiddenId, () =>
+      hiddenTab.screenshot({ format: 'png', fullPage: true })
+    )
+    if (hiddenTab.view.getVisible()) {
+      throw new Error('hidden CDP capture did not restore the view visibility')
     }
-    const hiddenViewport = hiddenMetrics.cssVisualViewport
-    if (!hiddenViewport) throw new Error('CDP did not return a hidden CSS visual viewport')
-    const hiddenCdpCapture = (await hiddenDebugger.sendCommand('Page.captureScreenshot', {
-      format: 'png',
-      fromSurface: true,
-      clip: {
-        x: hiddenViewport.pageX,
-        y: hiddenViewport.pageY,
-        width: hiddenViewport.clientWidth,
-        height: hiddenViewport.clientHeight,
-        scale: 1
-      }
-    })) as { data: string }
     const hiddenCdpSize = nativeImage
       .createFromBuffer(Buffer.from(hiddenCdpCapture.data, 'base64'))
       .getSize()
@@ -276,6 +267,7 @@ async function main(): Promise<void> {
     console.log('PASS BrowserService empty session resources and listener cleanup')
 
     tab = new BrowserTab(1, `oopif-live-${Date.now()}`)
+    tab.view.webContents.setBackgroundThrottling(false)
     window.contentView.addChildView(tab.view)
     tab.view.setBounds({ x: 0, y: 0, width: 900, height: 700 })
     await tab.navigateAndWait(url(rootServer, 'localhost'))
@@ -484,9 +476,10 @@ async function main(): Promise<void> {
       new Promise<void>((resolve) => downloadServer?.close(() => resolve()) ?? resolve()),
       new Promise<void>((resolve) => transferServer?.close(() => resolve()) ?? resolve())
     ])
-    if (downloadDir) await rm(downloadDir, { recursive: true, force: true })
-    if (transferDir) await rm(transferDir, { recursive: true, force: true })
-    if (recordingDir) await rm(recordingDir, { recursive: true, force: true })
+    const cleanupOptions = { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }
+    if (downloadDir) await rm(downloadDir, cleanupOptions)
+    if (transferDir) await rm(transferDir, cleanupOptions)
+    if (recordingDir) await rm(recordingDir, cleanupOptions)
   }
 }
 

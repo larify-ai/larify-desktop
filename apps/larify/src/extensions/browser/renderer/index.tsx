@@ -2,6 +2,7 @@ import { lazy, Suspense, type ReactNode } from 'react'
 import { GlobeIcon } from 'lucide-react'
 import type { RendererPlugin } from '@renderer/app/registry/renderer-plugins'
 import {
+  type WorkbenchTabPresentation,
   type WorkbenchRendererRegistry,
   workbenchRendererRegistryToken
 } from '@renderer/app/registry/workbench-renderers'
@@ -28,12 +29,19 @@ const plugin: RendererPlugin = {
       renderers.register('browser', {
         bindTab: ({ resourceId, sessionId, updateTab }) => {
           updateTab({ icon: <GlobeIcon aria-hidden />, title: '新标签页' })
+          let currentTitle = '新标签页'
+          let currentFavicon = ''
           const apply = (tab: BrowserTabState | null | undefined): void => {
             if (!tab) return
-            updateTab({
-              icon: tabIcon(tab),
-              title: tabTitle(tab)
-            })
+            const title = tabTitle(tab)
+            const favicon = tab.favIconUrl || ''
+            if (title === currentTitle && favicon === currentFavicon) return
+            const presentation: Partial<WorkbenchTabPresentation> = {}
+            if (title !== currentTitle) presentation.title = title
+            if (favicon !== currentFavicon) presentation.icon = tabIcon(tab)
+            currentTitle = title
+            currentFavicon = favicon
+            updateTab(presentation)
           }
           let active = true
           let receivedEvent = false

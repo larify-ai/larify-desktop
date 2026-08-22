@@ -51,6 +51,11 @@ export default defineConfig({
     }
   },
   renderer: {
+    server: {
+      fs: {
+        allow: [resolve('../..')]
+      }
+    },
     resolve: {
       alias: {
         '@shared': resolve('src/shared'),

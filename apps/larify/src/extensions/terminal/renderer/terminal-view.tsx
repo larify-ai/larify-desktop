@@ -113,7 +113,7 @@ export function TerminalView({
     try {
       const fitAddon = fitRef.current
       const dims = fitAddon?.proposeDimensions()
-      if (!dims || isNaN(dims.cols) || isNaN(dims.rows)) return
+      if (!fitAddon || !dims || isNaN(dims.cols) || isNaN(dims.rows)) return
       if (dims.cols < MIN_COLS || dims.rows < MIN_ROWS) return
       fitAddon.fit()
     } catch {

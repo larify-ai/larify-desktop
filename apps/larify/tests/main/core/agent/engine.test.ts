@@ -1,4 +1,5 @@
 import { convertArrayToReadableStream, MockLanguageModelV4 } from 'ai/test'
+import type { LanguageModelV4FinishReason } from '@ai-sdk/provider'
 import { describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import { runAgent } from '../../../../src/main/core/agent/engine'
@@ -8,6 +9,10 @@ const usage = {
   outputTokens: { total: 1, text: 1, reasoning: 0 }
 }
 
+const finishReason = (
+  unified: LanguageModelV4FinishReason['unified']
+): LanguageModelV4FinishReason => ({ unified, raw: undefined })
+
 function model(): MockLanguageModelV4 {
   return new MockLanguageModelV4({
     doStream: async () => ({
@@ -16,7 +21,7 @@ function model(): MockLanguageModelV4 {
         { type: 'text-start', id: 'text' },
         { type: 'text-delta', id: 'text', delta: 'hello' },
         { type: 'text-end', id: 'text' },
-        { type: 'finish', finishReason: 'stop', usage }
+        { type: 'finish', finishReason: finishReason('stop'), usage }
       ])
     })
   })

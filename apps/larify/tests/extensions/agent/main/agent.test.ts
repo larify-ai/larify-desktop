@@ -2,12 +2,17 @@ import { describe, it, expect } from 'vitest'
 import { z } from 'zod'
 import { MockLanguageModelV4, convertArrayToReadableStream } from 'ai/test'
 import { isLoopFinished, type UIMessage } from 'ai'
+import type { LanguageModelV4FinishReason } from '@ai-sdk/provider'
 import { runAgentSession } from '../../../../src/main/core/agent'
 
 const USAGE = {
   inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
   outputTokens: { total: 1, text: 1, reasoning: 0 }
 }
+
+const finishReason = (
+  unified: LanguageModelV4FinishReason['unified']
+): LanguageModelV4FinishReason => ({ unified, raw: undefined })
 
 function mockModel(chunks: string[]): MockLanguageModelV4 {
   return new MockLanguageModelV4({
@@ -19,7 +24,7 @@ function mockModel(chunks: string[]): MockLanguageModelV4 {
         { type: 'text-end', id: '0' },
         {
           type: 'finish',
-          finishReason: 'stop' as const,
+          finishReason: finishReason('stop'),
           usage: {
             inputTokens: { total: 3, noCache: 3, cacheRead: 0, cacheWrite: 0 },
             outputTokens: { total: 5, text: 5, reasoning: 0 }
@@ -113,14 +118,14 @@ describe('runAgentSession', () => {
                   toolName: 'echo',
                   input: '{"text":"hello"}'
                 },
-                { type: 'finish', finishReason: 'tool-calls', usage: USAGE }
+                { type: 'finish', finishReason: finishReason('tool-calls'), usage: USAGE }
               ]
             : [
                 { type: 'stream-start', warnings: [] },
                 { type: 'text-start', id: '0' },
                 { type: 'text-delta', id: '0', delta: 'done' },
                 { type: 'text-end', id: '0' },
-                { type: 'finish', finishReason: 'stop', usage: USAGE }
+                { type: 'finish', finishReason: finishReason('stop'), usage: USAGE }
               ]
         )
       })
@@ -173,7 +178,7 @@ describe('runAgentSession', () => {
             toolName: 'ask',
             input: '{"message":"Continue?"}'
           },
-          { type: 'finish', finishReason: 'tool-calls', usage: USAGE }
+          { type: 'finish', finishReason: finishReason('tool-calls'), usage: USAGE }
         ])
       })
     })
@@ -212,7 +217,7 @@ describe('runAgentSession', () => {
             toolName: 'fail',
             input: '{}'
           },
-          { type: 'finish', finishReason: 'tool-calls', usage: USAGE }
+          { type: 'finish', finishReason: finishReason('tool-calls'), usage: USAGE }
         ])
       })
     })
@@ -396,7 +401,7 @@ describe('prompt-cache middleware', () => {
               { type: 'text-start', id: '0' },
               { type: 'text-delta', id: '0', delta: 'done' },
               { type: 'text-end', id: '0' },
-              { type: 'finish', finishReason: 'stop', usage: USAGE }
+              { type: 'finish', finishReason: finishReason('stop'), usage: USAGE }
             ])
           }
         }
@@ -404,7 +409,7 @@ describe('prompt-cache middleware', () => {
           stream: convertArrayToReadableStream([
             { type: 'stream-start', warnings: [] },
             { type: 'tool-call', toolCallId: 'c1', toolName: 'lazy_tool', input: '{}' },
-            { type: 'finish', finishReason: 'tool-calls', usage: USAGE }
+            { type: 'finish', finishReason: finishReason('tool-calls'), usage: USAGE }
           ])
         }
       }

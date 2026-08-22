@@ -108,6 +108,64 @@
   display: none !important;
 }
 
+/* Align the four-character line-number field with the workbench home glyph. */
+.workspace-file-preview .monaco-editor .line-numbers {
+  left: 1px !important;
+}
+
+.workspace-added-only-editor .workspace-added-line {
+  background: var(--vscode-diffEditor-insertedLineBackground, rgb(46 160 67 / 20%));
+}
+
+/* Monaco draws shadows from both editors toward the split, which makes the
+   divider look like a wide dark gutter. Keep the four-pixel sash hit area and
+   draw one visible line at its center. */
+.workspace-file-preview .monaco-diff-editor.side-by-side .editor.original,
+.workspace-file-preview .monaco-diff-editor.side-by-side .editor.modified {
+  box-shadow: none;
+}
+
+/* Monaco forces an unused glyph column onto only the original split editor.
+   Match its internal gutter geometry to the configured four-digit modified
+   editor. The CDP regression test locks all four resulting coordinates. */
+.workspace-file-preview[data-diff-mode='split'] {
+  --workspace-monaco-gutter-width: 41px;
+}
+
+.workspace-file-preview[data-diff-mode='split']
+  .monaco-diff-editor.side-by-side
+  .editor.original
+  .glyph-margin {
+  width: 0 !important;
+}
+
+.workspace-file-preview[data-diff-mode='split']
+  .monaco-diff-editor.side-by-side
+  .editor.original
+  :is(.margin, .margin-view-zones, .margin-view-overlays, .current-line-margin-both) {
+  width: var(--workspace-monaco-gutter-width) !important;
+}
+
+.workspace-file-preview[data-diff-mode='split']
+  .monaco-diff-editor.side-by-side
+  .editor.original
+  :is(.native-edit-context, .monaco-scrollable-element.editor-scrollable) {
+  left: var(--workspace-monaco-gutter-width) !important;
+}
+
+.workspace-file-preview[data-diff-mode='split']
+  .monaco-diff-editor.side-by-side
+  .editor.original
+  .monaco-scrollable-element.editor-scrollable {
+  width: calc(100% - var(--workspace-monaco-gutter-width)) !important;
+}
+
+.workspace-file-preview .monaco-diff-editor.side-by-side > .monaco-sash.vertical::before {
+  left: calc(50% - 0.5px);
+  width: 1px;
+  background: var(--border-strong);
+}
+
 /* Monaco models an empty document as one empty line. Hide the resulting
    phantom deletion/insertion so new and deleted files match the Git patch. */
 .workspace-file-preview[data-original-empty='true'] .monaco-diff-editor .line-delete,

@@ -3,17 +3,18 @@ import { Uri, type editor } from 'monaco-editor/editor/editor.api'
 import { useTheme } from 'next-themes'
 import type { PreviewRendererProps } from '@renderer/app/registry/file-previews'
 import { useWorkspaceTextFile } from './use-workspace-text-file'
-import { workspaceMonacoLanguage, workspaceMonacoTheme } from './monaco'
+import {
+  workspaceMonacoGutterOptions,
+  workspaceMonacoLanguage,
+  workspaceMonacoTheme
+} from './monaco'
 
 const editorOptions = {
   automaticLayout: true,
   contextmenu: false,
   domReadOnly: true,
-  folding: true,
-  glyphMargin: false,
+  ...workspaceMonacoGutterOptions,
   largeFileOptimizations: true,
-  lineNumbers: 'on',
-  lineNumbersMinChars: 4,
   minimap: { enabled: false },
   occurrencesHighlight: 'off',
   overviewRulerLanes: 0,

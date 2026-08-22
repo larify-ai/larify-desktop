@@ -60,7 +60,9 @@ const openChanges = async () => {
 }
 
 try {
-  const workspaceSession = await switchSession('您能编辑一些文件我看看么')
+  const workspaceSession =
+    (await switchSession('您能编辑一些文件我看看么')) ||
+    (await evaluate(`Boolean(document.querySelector(${JSON.stringify(session)}))`))
   if (!workspaceSession) throw new Error('Larify workspace session not found')
   await wait(300)
   await openChanges()
@@ -167,6 +169,10 @@ try {
     `document.querySelector(${JSON.stringify(`${view} .workspace-file-preview`)})?.getAttribute('data-diff-mode') === 'split'`,
     'split diff'
   )
+  await waitFor(
+    `Array.from(document.querySelectorAll(${JSON.stringify(`${view} .monaco-diff-editor .editor.original, ${view} .monaco-diff-editor .editor.modified`)})).length === 2 && Array.from(document.querySelectorAll(${JSON.stringify(`${view} .monaco-diff-editor .editor.original, ${view} .monaco-diff-editor .editor.modified`)})).every((editor) => editor.getBoundingClientRect().width > 0)`,
+    'split editor layout'
+  )
   const splitEditorWidths = await evaluate(`(() => {
     const selector = ${JSON.stringify(`${view} .monaco-diff-editor .editor.original, ${view} .monaco-diff-editor .editor.modified`)}
     return Array.from(document.querySelectorAll(selector)).map((editor) =>
@@ -177,27 +183,51 @@ try {
     throw new Error(`Split diff editors are not visible: ${splitEditorWidths.join(', ')}`)
   }
   const splitGutterGeometry = await evaluate(`(() => {
-    const homeIcon = document.querySelector(${JSON.stringify(`${session} .larify-workbench-home svg`)})
-    const lineNumber = document.querySelector(${JSON.stringify(`${view} .monaco-diff-editor .editor.original .line-numbers`)})
-    return {
-      homeRight: homeIcon?.getBoundingClientRect().right ?? null,
-      lineNumberRight: lineNumber?.getBoundingClientRect().right ?? null
-    }
+    const selector = ${JSON.stringify(`${view} .monaco-diff-editor .editor.original .monaco-editor, ${view} .monaco-diff-editor .editor.modified .monaco-editor`)}
+    return Array.from(document.querySelectorAll(selector)).map((editor) => {
+      const root = editor.getBoundingClientRect()
+      const margin = editor.querySelector('.margin')?.getBoundingClientRect()
+      const lineNumber = editor.querySelector('.line-numbers')?.getBoundingClientRect()
+      const content = editor.querySelector('.lines-content')?.getBoundingClientRect()
+      return {
+        contentGap: lineNumber && content ? content.left - lineNumber.right : null,
+        contentLeft: content ? content.left - root.left : null,
+        marginWidth: margin?.width ?? null,
+        numberRight: lineNumber ? lineNumber.right - root.left : null
+      }
+    })
   })()`)
   if (
-    splitGutterGeometry.homeRight === null ||
-    splitGutterGeometry.lineNumberRight === null ||
-    Math.abs(splitGutterGeometry.homeRight - splitGutterGeometry.lineNumberRight) > 2
+    splitGutterGeometry.length !== 2 ||
+    splitGutterGeometry.some(
+      (gutter) =>
+        gutter.contentGap === null ||
+        gutter.contentLeft === null ||
+        gutter.marginWidth === null ||
+        gutter.numberRight === null ||
+        gutter.contentGap < 8 ||
+        gutter.contentGap > 10 ||
+        gutter.marginWidth < 40 ||
+        gutter.marginWidth > 42 ||
+        gutter.numberRight < 31 ||
+        gutter.numberRight > 33
+    ) ||
+    Math.abs(splitGutterGeometry[0].marginWidth - splitGutterGeometry[1].marginWidth) > 1 ||
+    Math.abs(splitGutterGeometry[0].contentLeft - splitGutterGeometry[1].contentLeft) > 1
   ) {
-    throw new Error(`Split gutter is misaligned: ${JSON.stringify(splitGutterGeometry)}`)
+    throw new Error(`Split gutters differ: ${JSON.stringify(splitGutterGeometry)}`)
   }
   await clickAria('切换到统一视图')
   await waitFor(
     `document.querySelector(${JSON.stringify(`${view} .workspace-file-preview`)})?.getAttribute('data-diff-mode') === 'unified'`,
     'unified diff'
   )
+  await waitFor(
+    `Array.from(document.querySelectorAll(${JSON.stringify(`${view} .workspace-file-preview .margin-view-overlays`)})).some((element) => { const rect = element.getBoundingClientRect(); return rect.width > 0 && rect.height > 0 })`,
+    'unified editor layout'
+  )
   const unifiedLineNumberColumns = await evaluate(`(() => {
-    const selector = ${JSON.stringify(`${view} .monaco-diff-editor .margin-view-overlays`)}
+    const selector = ${JSON.stringify(`${view} .workspace-file-preview .margin-view-overlays`)}
     return Array.from(document.querySelectorAll(selector)).filter((element) => {
       const rect = element.getBoundingClientRect()
       return rect.width > 0 && rect.height > 0 && getComputedStyle(element).visibility !== 'hidden'
@@ -208,7 +238,7 @@ try {
   const gutterGeometry = await evaluate(`(() => {
     const homeIcon = document.querySelector(${JSON.stringify(`${session} .larify-workbench-home svg`)})
     const lineNumbers = Array.from(
-      document.querySelectorAll(${JSON.stringify(`${view} .monaco-diff-editor .line-numbers`)})
+      document.querySelectorAll(${JSON.stringify(`${view} .workspace-file-preview .line-numbers`)})
     ).find((element) => {
       const rect = element.getBoundingClientRect()
       return rect.width > 0 && rect.height > 0 && getComputedStyle(element).visibility !== 'hidden'
@@ -216,7 +246,7 @@ try {
     if (!homeIcon || !lineNumbers?.firstChild) return null
     const numberRange = document.createRange()
     numberRange.selectNodeContents(lineNumbers)
-    const code = document.querySelector(${JSON.stringify(`${view} .monaco-diff-editor .editor.modified .view-line span`)})
+    const code = document.querySelector(${JSON.stringify(`${view} .workspace-file-preview .view-line span`)})
     return {
       homeRight: homeIcon.getBoundingClientRect().right,
       lineNumberRight: numberRange.getBoundingClientRect().right,

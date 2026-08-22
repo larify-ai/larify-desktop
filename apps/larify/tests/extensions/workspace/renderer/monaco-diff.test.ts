@@ -19,13 +19,19 @@ const harness = vi.hoisted(() => ({
 vi.mock('file-type', () => ({ fileTypeFromBuffer: harness.detectType }))
 
 vi.mock('@monaco-editor/react', () => ({
+  default: (props: unknown) => {
+    harness.props(props)
+    return createElement('div', { 'data-testid': 'added-editor' })
+  },
   DiffEditor: (props: unknown) => {
     harness.props(props)
     return createElement('div', { 'data-testid': 'diff-editor' })
   }
 }))
 vi.mock('monaco-editor/editor/editor.api', () => ({
-  editor: { ShowLightbulbIconMode: { Off: 'off' } },
+  editor: {
+    ShowLightbulbIconMode: { Off: 'off' }
+  },
   Uri: {
     file: (path: string) => {
       const uri = (scheme = 'file', query = ''): unknown => ({
@@ -39,6 +45,13 @@ vi.mock('monaco-editor/editor/editor.api', () => ({
 }))
 vi.mock('next-themes', () => ({ useTheme: () => ({ resolvedTheme: 'dark' }) }))
 vi.mock('../../../../src/extensions/workspace/renderer/preview/monaco', () => ({
+  workspaceMonacoGutterOptions: {
+    folding: false,
+    glyphMargin: false,
+    lineDecorationsWidth: 10,
+    lineNumbers: 'on',
+    lineNumbersMinChars: 4
+  },
   workspaceMonacoLanguage: (path: string) => (path.endsWith('.ts') ? 'typescript' : 'plaintext'),
   workspaceMonacoTheme: (dark: boolean) =>
     dark ? 'larify-workspace-dark' : 'larify-workspace-light'
@@ -121,7 +134,7 @@ describe('MonacoDiff', () => {
         options: expect.objectContaining({
           compactMode: true,
           glyphMargin: false,
-          lineDecorationsWidth: 8,
+          lineDecorationsWidth: 10,
           lineNumbersMinChars: 4,
           lightbulb: { enabled: 'off' },
           renderSideBySide: false,
@@ -162,7 +175,8 @@ describe('MonacoDiff', () => {
       expect.objectContaining({
         options: expect.objectContaining({
           compactMode: false,
-          lineNumbersMinChars: 2,
+          glyphMargin: false,
+          lineNumbersMinChars: 4,
           renderSideBySide: true
         })
       })
@@ -308,7 +322,30 @@ describe('MonacoDiff', () => {
       await Promise.resolve()
     })
 
-    expect(harness.props).toHaveBeenLastCalledWith(expect.objectContaining({ original: '' }))
+    expect(harness.props).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        options: expect.objectContaining({ folding: false, lineDecorationsWidth: 10 }),
+        value: 'after'
+      })
+    )
+    expect(harness.props).toHaveBeenLastCalledWith(
+      expect.not.objectContaining({ original: expect.anything() })
+    )
+    const addedEditorProps = harness.props.mock.lastCall?.[0] as {
+      onMount(editor: unknown): void
+    }
+    const range = { endColumn: 1, endLineNumber: 2, startColumn: 1, startLineNumber: 1 }
+    const createDecorationsCollection = vi.fn()
+    addedEditorProps.onMount({
+      createDecorationsCollection,
+      getModel: () => ({ getFullModelRange: () => range })
+    })
+    expect(createDecorationsCollection).toHaveBeenCalledWith([
+      {
+        options: { className: 'workspace-added-line', isWholeLine: true },
+        range
+      }
+    ])
     expect(container.querySelector('[data-original-empty="true"]')).not.toBeNull()
     expect(container.querySelector('[data-modified-empty="false"]')).not.toBeNull()
     await act(async () => root.unmount())

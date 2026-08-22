@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { DiffEditor } from '@monaco-editor/react'
+import MonacoEditor, { DiffEditor } from '@monaco-editor/react'
 import { fileTypeFromBuffer } from 'file-type'
 import { editor, Uri } from 'monaco-editor/editor/editor.api'
 import { useTheme } from 'next-themes'
@@ -7,30 +7,45 @@ import type { FileStatusResult } from 'simple-git'
 import { gitClient } from '../git-client'
 import { workspaceClient } from '../workspace-client'
 import { FilePreview } from '../preview/file-preview'
-import { workspaceMonacoLanguage, workspaceMonacoTheme } from '../preview/monaco'
+import {
+  workspaceMonacoGutterOptions,
+  workspaceMonacoLanguage,
+  workspaceMonacoTheme
+} from '../preview/monaco'
+
+const editorOptions = {
+  automaticLayout: true,
+  contextmenu: false,
+  ...workspaceMonacoGutterOptions,
+  lightbulb: { enabled: editor.ShowLightbulbIconMode.Off },
+  minimap: { enabled: false },
+  readOnly: true,
+  overviewRulerLanes: 0,
+  scrollBeyondLastLine: false,
+  scrollbar: { horizontalScrollbarSize: 8, verticalScrollbarSize: 8 }
+} satisfies editor.IStandaloneEditorConstructionOptions
 
 const options = {
-  automaticLayout: true,
-  compactMode: true,
-  contextmenu: false,
+  ...editorOptions,
   diffAlgorithm: 'advanced',
   enableSplitViewResizing: true,
-  glyphMargin: false,
-  lightbulb: { enabled: editor.ShowLightbulbIconMode.Off },
-  lineDecorationsWidth: 8,
-  lineNumbers: 'on',
-  lineNumbersMinChars: 4,
-  minimap: { enabled: false },
   originalEditable: false,
-  readOnly: true,
   renderIndicators: false,
   renderMarginRevertIcon: false,
   renderOverviewRuler: false,
-  overviewRulerLanes: 0,
-  scrollBeyondLastLine: false,
-  scrollbar: { horizontalScrollbarSize: 8, verticalScrollbarSize: 8 },
   useInlineViewWhenSpaceIsLimited: false
 } satisfies editor.IStandaloneDiffEditorConstructionOptions
+
+const highlightAddedLines = (instance: editor.IStandaloneCodeEditor): void => {
+  const model = instance.getModel()
+  if (!model) return
+  instance.createDecorationsCollection([
+    {
+      range: model.getFullModelRange(),
+      options: { className: 'workspace-added-line', isWholeLine: true }
+    }
+  ])
+}
 
 interface MonacoDiffProps {
   active?: boolean
@@ -69,14 +84,46 @@ export function MonacoContentDiff({
 }: MonacoContentDiffProps): React.JSX.Element {
   const { resolvedTheme } = useTheme()
   const deletedOnly = mode === 'unified' && modified.length === 0 && original.length > 0
+  const addedOnly = mode === 'unified' && original.length === 0 && modified.length > 0
   const renderedModified = deletedOnly ? original : modified
   const renderedOriginal = deletedOnly ? '' : original
   const split = mode === 'split'
+  const modifiedModelPath = modelPath(
+    modifiedPath,
+    scheme === 'git-original' ? undefined : `${scheme}-modified`,
+    modelKey
+  )
+  const originalModelPath = modelPath(originalPath, scheme, modelKey)
+
+  if (addedOnly) {
+    return (
+      <div
+        className="workspace-added-only-editor workspace-file-preview h-full"
+        data-added-only="true"
+        data-diff-mode={mode}
+        data-modified-empty="false"
+        data-original-empty="true"
+      >
+        <MonacoEditor
+          height="100%"
+          key={modifiedModelPath}
+          language={workspaceMonacoLanguage(modifiedPath, modified)}
+          loading={null}
+          onMount={highlightAddedLines}
+          options={editorOptions}
+          path={modifiedModelPath}
+          theme={workspaceMonacoTheme(resolvedTheme === 'dark')}
+          value={modified}
+        />
+      </div>
+    )
+  }
 
   return (
     <div
       className="workspace-file-preview h-full"
       data-diff-mode={mode}
+      data-added-only={addedOnly}
       data-deleted-only={deletedOnly}
       data-modified-empty={renderedModified.length === 0}
       data-original-empty={renderedOriginal.length === 0}
@@ -89,20 +136,15 @@ export function MonacoContentDiff({
           deletedOnly ? originalPath : modifiedPath,
           renderedModified
         )}
-        modifiedModelPath={modelPath(
-          modifiedPath,
-          scheme === 'git-original' ? undefined : `${scheme}-modified`,
-          modelKey
-        )}
+        modifiedModelPath={modifiedModelPath}
         options={{
           ...options,
           compactMode: !split,
-          lineNumbersMinChars: split ? 2 : 4,
           renderSideBySide: split
         }}
         original={renderedOriginal}
         originalLanguage={workspaceMonacoLanguage(originalPath, renderedOriginal)}
-        originalModelPath={modelPath(originalPath, scheme, modelKey)}
+        originalModelPath={originalModelPath}
         theme={workspaceMonacoTheme(resolvedTheme === 'dark')}
       />
     </div>

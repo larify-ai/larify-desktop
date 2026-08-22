@@ -80,6 +80,19 @@ describe('Monaco preview setup', () => {
     expect(workspaceMonacoTheme(false)).toBe('larify-workspace-light')
   })
 
+  it('exports the shared four-character gutter geometry', async () => {
+    const { workspaceMonacoGutterOptions } =
+      await import('../../../../src/extensions/workspace/renderer/preview/monaco')
+
+    expect(workspaceMonacoGutterOptions).toEqual({
+      folding: false,
+      glyphMargin: false,
+      lineDecorationsWidth: 10,
+      lineNumbers: 'on',
+      lineNumbersMinChars: 4
+    })
+  })
+
   it('resolves model languages from Monaco registrations', async () => {
     const { workspaceMonacoLanguage } =
       await import('../../../../src/extensions/workspace/renderer/preview/monaco')

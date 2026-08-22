@@ -30,6 +30,14 @@ const workspaceMonacoThemes = {
   light: 'larify-workspace-light'
 } as const
 
+export const workspaceMonacoGutterOptions = {
+  folding: false,
+  glyphMargin: false,
+  lineDecorationsWidth: 10,
+  lineNumbers: 'on',
+  lineNumbersMinChars: 4
+} satisfies monaco.editor.IEditorOptions
+
 export const workspaceMonacoTheme = (dark: boolean): string =>
   workspaceMonacoThemes[dark ? 'dark' : 'light']
 

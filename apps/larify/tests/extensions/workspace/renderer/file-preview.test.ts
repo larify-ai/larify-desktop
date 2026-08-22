@@ -65,6 +65,13 @@ vi.mock('monaco-editor/editor/editor.api', () => ({
 vi.mock('next-themes', () => ({ useTheme: () => ({ resolvedTheme: theme.resolved }) }))
 
 vi.mock('../../../../src/extensions/workspace/renderer/preview/monaco', () => ({
+  workspaceMonacoGutterOptions: {
+    folding: false,
+    glyphMargin: false,
+    lineDecorationsWidth: 10,
+    lineNumbers: 'on',
+    lineNumbersMinChars: 4
+  },
   workspaceMonacoLanguage: monaco.language,
   workspaceMonacoTheme: monaco.theme
 }))
@@ -164,7 +171,10 @@ describe('FilePreview', () => {
     expect(monaco.props).toMatchObject({
       language: 'plaintext',
       options: {
+        folding: false,
         glyphMargin: false,
+        lineDecorationsWidth: 10,
+        lineNumbersMinChars: 4,
         overviewRulerLanes: 0,
         readOnly: true
       },

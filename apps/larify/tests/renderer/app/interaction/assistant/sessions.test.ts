@@ -8,16 +8,23 @@ import {
   useAssistantSessions,
   type AssistantSessions
 } from '../../../../../src/renderer/src/app/interaction/assistant/sessions-context'
+import {
+  useSessionAttentionReport,
+  type SessionAttentionReport
+} from '../../../../../src/renderer/src/app/interaction/assistant/session-attention'
 
 let root: Root
 let sessions: AssistantSessions
+let reportAttentionState: SessionAttentionReport
 const invoke = vi.fn()
 
 function Probe(): null {
   const value = useAssistantSessions()
+  const report = useSessionAttentionReport()
   useEffect(() => {
     sessions = value
-  }, [value])
+    reportAttentionState = report
+  }, [report, value])
   return null
 }
 
@@ -79,6 +86,46 @@ describe('AssistantSessionsProvider', () => {
       sessions.create('D:\\Another')
     })
     expect(sessions.activeSession).toMatchObject({ cwd: 'D:\\Another', persisted: false })
+  })
+
+  it.each(['active', 'waiting'] as const)(
+    'marks a background %s session unread when it settles and clears it on select',
+    async (runtimeState) => {
+      const backgroundId = sessions.activeId
+      await act(async () => {
+        sessions.setPersisted(backgroundId)
+        sessions.create()
+        reportAttentionState(backgroundId, runtimeState)
+        reportAttentionState(backgroundId, 'idle')
+      })
+
+      expect(sessions.attentionState(backgroundId)).toBe('unread')
+
+      await act(async () => reportAttentionState(backgroundId, 'idle'))
+      expect(sessions.attentionState(backgroundId)).toBe('unread')
+
+      await act(async () => sessions.select(backgroundId))
+      expect(sessions.attentionState(backgroundId)).toBe('idle')
+    }
+  )
+
+  it('keeps the current session active or waiting without creating unread state', async () => {
+    const id = sessions.activeId
+
+    await act(async () => reportAttentionState(id, 'active'))
+    expect(sessions.attentionState(id)).toBe('active')
+
+    await act(async () => reportAttentionState(id, 'waiting'))
+    expect(sessions.attentionState(id)).toBe('waiting')
+
+    await act(async () => reportAttentionState(id, 'idle'))
+    expect(sessions.attentionState(id)).toBe('idle')
+  })
+
+  it('does not change the selected session for an unknown id', async () => {
+    const id = sessions.activeId
+    await act(async () => sessions.select('missing'))
+    expect(sessions.activeId).toBe(id)
   })
 
   it('closes draft resources only once when Strict Mode replays the update', async () => {
@@ -170,10 +217,16 @@ describe('AssistantSessionsProvider', () => {
     await act(async () => {
       root.render(createElement(AssistantSessionsProvider, null, createElement(Probe)))
     })
+    await act(async () => {
+      reportAttentionState('stored', 'active')
+      reportAttentionState('stored', 'idle')
+    })
+    expect(sessions.attentionState('stored')).toBe('unread')
 
     await act(async () => sessions.select('stored'))
 
     expect(sessions.activeId).toBe('stored')
+    expect(sessions.attentionState('stored')).toBe('idle')
     expect(sessions.activeSession).toMatchObject({
       id: 'stored',
       heading: { cwd: 'D:\\Workspace', title: 'Stored' },
@@ -181,6 +234,37 @@ describe('AssistantSessionsProvider', () => {
       messages: [{ id: 'message', role: 'user', parts: [] }],
       messageCount: 1
     })
+  })
+
+  it('keeps a stored session unread when opening its messages fails', async () => {
+    act(() => root.unmount())
+    invoke.mockImplementation((channel: string) => {
+      if (channel === 'session:cwds') return Promise.resolve(['D:\\Workspace'])
+      if (channel === 'session:list') {
+        return Promise.resolve([{ id: 'stored', title: 'Stored', cwd: 'D:\\Workspace' }])
+      }
+      if (channel === 'session:msg-count') return Promise.reject(new Error('load failed'))
+      return Promise.resolve([])
+    })
+    root = createRoot(document.createElement('div'))
+    await act(async () => {
+      root.render(createElement(AssistantSessionsProvider, null, createElement(Probe)))
+    })
+    const activeId = sessions.activeId
+    await act(async () => {
+      reportAttentionState('stored', 'active')
+      reportAttentionState('stored', 'idle')
+    })
+
+    await act(async () => sessions.select('stored'))
+
+    expect(sessions.activeId).toBe(activeId)
+    expect(sessions.attentionState('stored')).toBe('unread')
+    await act(async () => {
+      reportAttentionState(activeId, 'active')
+      reportAttentionState(activeId, 'idle')
+    })
+    expect(sessions.attentionState(activeId)).toBe('idle')
   })
 
   it('keeps a new draft selected when an older open request finishes later', async () => {
@@ -194,6 +278,7 @@ describe('AssistantSessionsProvider', () => {
       if (channel === 'session:list') {
         return Promise.resolve([{ id: 'stored', title: 'Stored', cwd: 'D:\\Workspace' }])
       }
+      if (channel === 'session:msg-count') return Promise.resolve(1)
       if (channel === 'session:msgs') return messages
       return Promise.resolve([])
     })
@@ -202,6 +287,10 @@ describe('AssistantSessionsProvider', () => {
       root.render(createElement(AssistantSessionsProvider, null, createElement(Probe)))
     })
     const draft = sessions.activeId
+    await act(async () => {
+      reportAttentionState('stored', 'active')
+      reportAttentionState('stored', 'idle')
+    })
 
     let opening!: Promise<void>
     act(() => {
@@ -213,6 +302,7 @@ describe('AssistantSessionsProvider', () => {
 
     expect(sessions.activeId).toBe(draft)
     expect(sessions.sessions.some(({ id }) => id === 'stored')).toBe(true)
+    expect(sessions.attentionState('stored')).toBe('unread')
   })
 
   it('updates only the selected session heading', async () => {

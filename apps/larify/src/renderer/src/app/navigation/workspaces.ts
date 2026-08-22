@@ -1,10 +1,12 @@
 import type { AssistantSessions } from '../interaction/assistant/sessions-context'
 import { workspaceName } from '../interaction/assistant/workspace'
+import type { SessionAttentionState } from '../interaction/assistant/session-attention'
 
 export interface SessionPreview {
   id: string
   name: string
   active: boolean
+  attentionState: SessionAttentionState
   onClick: () => void
 }
 
@@ -29,6 +31,7 @@ export function createWorkspaces(source: AssistantSessions): WorkspacePreview[] 
       id: session.id,
       name: session.title,
       active: session.id === source.activeId,
+      attentionState: source.attentionState(session.id),
       onClick: () => void source.select(session.id)
     })),
     hasMore: group.hasMore,

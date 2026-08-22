@@ -25,7 +25,8 @@ function renderWorkspace(values: Partial<WorkspacePreview> = {}): void {
     name: 'Workspace',
     sessions: Array.from({ length: 12 }, (_, index) => ({
       id: String(index + 1),
-      name: `Session ${index + 1}`
+      name: `Session ${index + 1}`,
+      attentionState: 'idle' as const
     })),
     ...values
   }
@@ -72,7 +73,8 @@ describe('navigation workspace', () => {
     renderWorkspace({
       sessions: Array.from({ length: 5 }, (_, index) => ({
         id: String(index),
-        name: `Session ${index}`
+        name: `Session ${index}`,
+        attentionState: 'idle' as const
       }))
     })
 
@@ -83,7 +85,9 @@ describe('navigation workspace', () => {
   it('marks and selects the active session', () => {
     const onClick = vi.fn()
     renderWorkspace({
-      sessions: [{ id: 'active', name: 'Session active', active: true, onClick }]
+      sessions: [
+        { id: 'active', name: 'Session active', active: true, attentionState: 'idle', onClick }
+      ]
     })
 
     const session = container.querySelector('[aria-current="page"]')
@@ -91,6 +95,32 @@ describe('navigation workspace', () => {
     expect(session?.getAttribute('data-session-id')).toBe('active')
     click('Session active')
     expect(onClick).toHaveBeenCalledOnce()
+  })
+
+  it.each([
+    ['active', '执行中', ['size-3.5', 'animate-spin', 'text-muted-foreground']],
+    ['waiting', '等待处理', ['size-2', 'bg-amber-500']],
+    ['unread', '有新消息', ['size-2', 'bg-blue-500']]
+  ] as const)('renders the %s session indicator', (attentionState, label, classes) => {
+    renderWorkspace({
+      sessions: [{ id: attentionState, name: `Session ${attentionState}`, attentionState }]
+    })
+
+    const indicator = container.querySelector(`[aria-label="${label}"]`)
+    expect(indicator).not.toBeNull()
+    for (const className of classes) expect(indicator?.classList).toContain(className)
+  })
+
+  it('reserves the status area and renders no indicator while idle', () => {
+    renderWorkspace({
+      sessions: [{ id: 'idle', name: 'Session idle', attentionState: 'idle' }]
+    })
+
+    const session = container.querySelector('[data-session-id="idle"]')
+    const title = session?.querySelector<HTMLElement>('span[style*="mask-image"]')
+    expect(session?.classList).toContain('pr-9')
+    expect(title?.style.maskImage).toContain('linear-gradient')
+    expect(session?.querySelector('[aria-label]')).toBeNull()
   })
 
   it('creates a task in the workspace without toggling the directory', () => {
@@ -115,7 +145,8 @@ describe('navigation workspace', () => {
     )
     const firstPage = Array.from({ length: 5 }, (_, index) => ({
       id: String(index),
-      name: `Session ${index}`
+      name: `Session ${index}`,
+      attentionState: 'idle' as const
     }))
     renderWorkspace({ sessions: firstPage, hasMore: true, onMore })
 

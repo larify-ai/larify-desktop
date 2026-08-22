@@ -39,7 +39,8 @@ function renderNavigation(create = vi.fn()): void {
     select: vi.fn(),
     loadMore: vi.fn(),
     refresh: vi.fn(),
-    setHeading: vi.fn()
+    setHeading: vi.fn(),
+    attentionState: vi.fn(() => 'idle' as const)
   }
 
   act(() =>

@@ -2,6 +2,7 @@ import { createContext, useContext } from 'react'
 import type { UIMessage } from 'ai'
 import type { ConversationHeading } from './conversation-header'
 import type { SessionDirectoryGroup } from './session-directory'
+import type { SessionAttentionState } from './session-attention'
 
 export interface AssistantSessionState {
   cwd: string
@@ -24,6 +25,7 @@ export interface AssistantSessions {
   setCwd(id: string, cwd: string): void
   setPersisted(id: string): void
   setHeading(id: string, heading: ConversationHeading | null): void
+  attentionState(id: string): SessionAttentionState
 }
 
 export const AssistantSessionsContext = createContext<AssistantSessions | null>(null)

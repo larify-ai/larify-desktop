@@ -7,6 +7,7 @@ import {
   type SessionDirectoryGroup
 } from './session-directory'
 import { loadMessagePage } from './session-messages'
+import { SessionAttentionContext, type SessionAttentionState } from './session-attention'
 
 function createSession(cwd = ''): AssistantSessionState {
   return {
@@ -45,6 +46,7 @@ export function AssistantSessionsProvider({
 }): React.JSX.Element {
   const [state, setState] = useState(createState)
   const [directory, setDirectory] = useState<SessionDirectoryGroup[]>([])
+  const [attention, setAttention] = useState(() => new Map<string, SessionAttentionState>())
   const refreshVersion = useRef(0)
   const loading = useRef(new Set<string>())
   const closingResources = useRef(new Set<string>())
@@ -87,8 +89,17 @@ export function AssistantSessionsProvider({
   }, [])
   const select = useCallback(
     async (activeId: string) => {
+      const clearUnread = (): void => {
+        setAttention((current) => {
+          if (current.get(activeId) !== 'unread') return current
+          const next = new Map(current)
+          next.delete(activeId)
+          return next
+        })
+      }
       if (state.sessions.some(({ id }) => id === activeId)) {
         selected.current = activeId
+        clearUnread()
         setState((current) => ({ ...current, activeId }))
         return
       }
@@ -100,8 +111,10 @@ export function AssistantSessionsProvider({
       try {
         page = await loadMessagePage(activeId)
       } catch {
+        if (selected.current === activeId) selected.current = state.activeId
         return
       }
+      if (selected.current === activeId) clearUnread()
       setState((current) => {
         const existing = current.sessions.find(({ id }) => id === activeId)
         const sessions = existing
@@ -119,7 +132,7 @@ export function AssistantSessionsProvider({
         return { sessions, activeId: selected.current === activeId ? activeId : current.activeId }
       })
     },
-    [directory, state.sessions]
+    [directory, state.activeId, state.sessions]
   )
   const loadMore = useCallback(
     async (cwd: string) => {
@@ -180,6 +193,29 @@ export function AssistantSessionsProvider({
       )
     }))
   }, [])
+  const attentionState = useCallback(
+    (id: string): SessionAttentionState => attention.get(id) ?? 'idle',
+    [attention]
+  )
+  const reportAttentionState = useCallback(
+    (id: string, nextState: Exclude<SessionAttentionState, 'unread'>) => {
+      setAttention((current) => {
+        const previous = current.get(id) ?? 'idle'
+        const resolved =
+          nextState === 'idle' &&
+          id !== selected.current &&
+          (previous === 'active' || previous === 'waiting' || previous === 'unread')
+            ? 'unread'
+            : nextState
+        if (previous === resolved) return current
+        const next = new Map(current)
+        if (resolved === 'idle') next.delete(id)
+        else next.set(id, resolved)
+        return next
+      })
+    },
+    []
+  )
   const activeSession = state.sessions.find(({ id }) => id === state.activeId)!
   const value = useMemo(
     () => ({
@@ -192,7 +228,8 @@ export function AssistantSessionsProvider({
       refresh,
       setCwd,
       setPersisted,
-      setHeading
+      setHeading,
+      attentionState
     }),
     [
       activeSession,
@@ -204,11 +241,16 @@ export function AssistantSessionsProvider({
       setCwd,
       setHeading,
       setPersisted,
-      state
+      state,
+      attentionState
     ]
   )
 
   return (
-    <AssistantSessionsContext.Provider value={value}>{children}</AssistantSessionsContext.Provider>
+    <SessionAttentionContext.Provider value={reportAttentionState}>
+      <AssistantSessionsContext.Provider value={value}>
+        {children}
+      </AssistantSessionsContext.Provider>
+    </SessionAttentionContext.Provider>
   )
 }

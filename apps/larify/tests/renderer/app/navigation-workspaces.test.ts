@@ -21,6 +21,7 @@ function source(values: Partial<AssistantSessions> = {}): AssistantSessions {
     refresh: vi.fn(),
     setPersisted: vi.fn(),
     setHeading: vi.fn(),
+    attentionState: vi.fn(() => 'idle'),
     ...values
   }
 }
@@ -139,12 +140,14 @@ describe('createWorkspaces', () => {
     const create = vi.fn()
     const select = vi.fn().mockResolvedValue(undefined)
     const loadMore = vi.fn().mockResolvedValue(undefined)
+    const attentionState = vi.fn((id: string) => (id === 'second' ? 'unread' : 'idle'))
     const workspaces = createWorkspaces(
       source({
         activeId: 'second',
         create,
         select,
         loadMore,
+        attentionState,
         directory: [
           {
             cwd: 'D:\\Workspace',
@@ -159,6 +162,10 @@ describe('createWorkspaces', () => {
     )
 
     expect(workspaces[0].sessions.map(({ active }) => active)).toEqual([false, true])
+    expect(workspaces[0].sessions.map(({ attentionState }) => attentionState)).toEqual([
+      'idle',
+      'unread'
+    ])
     workspaces[0].sessions[1].onClick()
     workspaces[0].onCreate?.()
     await workspaces[0].onMore()

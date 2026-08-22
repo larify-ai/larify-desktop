@@ -5,6 +5,7 @@ import { AssistantMessageList } from './message-list'
 import { AssistantComposer } from './composer'
 import type { ConversationHeading } from './conversation-header'
 import { ToolOutputContext } from './tool-output'
+import { sessionAttentionState, useSessionAttentionReport } from './session-attention'
 
 function messageText(message: UIMessage): string {
   let text = ''
@@ -53,6 +54,8 @@ export function AssistantChat({
     throttle: 50
   })
   const running = status === 'submitted' || status === 'streaming'
+  const attentionState = sessionAttentionState(status, messages)
+  const reportAttentionState = useSessionAttentionReport()
   const started = messages.length > 0
   const history = useMemo(() => inputHistory(messages), [messages])
   const titleCreated = useRef(Boolean(title))
@@ -111,6 +114,10 @@ export function AssistantChat({
     titleCreated.current = true
     onHeadingChange({ cwd, title: firstTitle(messages) || '未命名任务' })
   }, [cwd, messages, onHeadingChange, started, title])
+
+  useEffect(() => {
+    reportAttentionState(chat.id, attentionState)
+  }, [attentionState, chat.id, reportAttentionState])
 
   return (
     <div className="flex h-full min-w-0 flex-col">

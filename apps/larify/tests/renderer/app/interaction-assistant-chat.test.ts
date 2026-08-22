@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   addToolOutput: vi.fn(),
   composer: vi.fn(),
   list: vi.fn(),
+  reportAttentionState: vi.fn(),
   sendMessage: vi.fn(),
   setMessages: vi.fn(),
   stop: vi.fn(),
@@ -18,6 +19,15 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock('@ai-sdk/react', () => ({ useChat: mocks.useChat }))
+vi.mock(
+  '../../../src/renderer/src/app/interaction/assistant/session-attention',
+  async (importOriginal) => ({
+    ...(await importOriginal<
+      typeof import('../../../src/renderer/src/app/interaction/assistant/session-attention')
+    >()),
+    useSessionAttentionReport: () => mocks.reportAttentionState
+  })
+)
 vi.mock('../../../src/renderer/src/app/interaction/assistant/message-list', async () => {
   const { useToolOutput } =
     await import('../../../src/renderer/src/app/interaction/assistant/tool-output')
@@ -108,6 +118,7 @@ describe('AssistantChat', () => {
     expect(composer.showWorkspace).toBe(false)
     expect(composer.onCwdChange).toBe(onCwdChange)
     expect(onHeadingChange).toHaveBeenCalledWith({ cwd: '', title: 'first message' })
+    expect(mocks.reportAttentionState).toHaveBeenCalledWith('session', 'active')
     vi.spyOn(Date, 'now').mockReturnValueOnce(500).mockReturnValue(2_000)
     composer.onSubmit({ text: 'hello', files: [] })
     composer.onStop()
@@ -171,6 +182,60 @@ describe('AssistantChat', () => {
     root = null
 
     expect(onHeadingChange).not.toHaveBeenCalledWith(null)
+  })
+
+  it('reports attention transitions without repeating an unchanged state', async () => {
+    const chat = { id: 'session' } as never
+    const props = {
+      chat,
+      cwd: '',
+      onCwdChange: vi.fn(),
+      onHeadingChange: vi.fn()
+    }
+    await act(async () => root?.render(createElement(AssistantChat, props)))
+    expect(mocks.reportAttentionState).toHaveBeenLastCalledWith('session', 'active')
+
+    mocks.reportAttentionState.mockClear()
+    await act(async () =>
+      root?.render(createElement(AssistantChat, { ...props, cwd: 'D:\\Workspace' }))
+    )
+    expect(mocks.reportAttentionState).not.toHaveBeenCalled()
+
+    mocks.useChat.mockReturnValue({
+      addToolOutput: mocks.addToolOutput,
+      messages: [
+        {
+          id: 'assistant',
+          role: 'assistant',
+          parts: [
+            {
+              type: 'dynamic-tool',
+              toolName: 'agent_ask_user',
+              toolCallId: 'call',
+              state: 'input-available',
+              input: {}
+            }
+          ]
+        }
+      ],
+      sendMessage: mocks.sendMessage,
+      setMessages: mocks.setMessages,
+      status: 'ready',
+      stop: mocks.stop
+    })
+    await act(async () => root?.render(createElement(AssistantChat, props)))
+    expect(mocks.reportAttentionState).toHaveBeenLastCalledWith('session', 'waiting')
+
+    mocks.useChat.mockReturnValue({
+      addToolOutput: mocks.addToolOutput,
+      messages: [],
+      sendMessage: mocks.sendMessage,
+      setMessages: mocks.setMessages,
+      status: 'ready',
+      stop: mocks.stop
+    })
+    await act(async () => root?.render(createElement(AssistantChat, props)))
+    expect(mocks.reportAttentionState).toHaveBeenLastCalledWith('session', 'idle')
   })
 
   it('does not overwrite terminal message metadata when stop races with completion', async () => {

@@ -1,9 +1,32 @@
 import { useRef, useState } from 'react'
-import { FolderClosedIcon, FolderOpenIcon, PlusIcon } from 'lucide-react'
+import { FolderClosedIcon, FolderOpenIcon, LoaderCircleIcon, PlusIcon } from 'lucide-react'
 import { navigationItemClassName } from './navigation-action'
 import type { WorkspacePreview } from './workspaces'
+import type { SessionAttentionState } from '../interaction/assistant/session-attention'
 
 const pageSize = 5
+
+function SessionStatus({ state }: { state: SessionAttentionState }): React.JSX.Element | null {
+  let indicator: React.JSX.Element
+  if (state === 'active') {
+    indicator = (
+      <LoaderCircleIcon
+        aria-label="执行中"
+        className="size-3.5 shrink-0 animate-spin text-muted-foreground"
+      />
+    )
+  } else if (state === 'waiting') {
+    indicator = <span aria-label="等待处理" className="size-2 rounded-full bg-amber-500" />
+  } else if (state === 'unread') {
+    indicator = <span aria-label="有新消息" className="size-2 rounded-full bg-blue-500" />
+  } else return null
+
+  return (
+    <span className="absolute top-1/2 right-2 grid size-6 -translate-y-1/2 place-items-center">
+      {indicator}
+    </span>
+  )
+}
 
 export function Workspace({ workspace }: { workspace: WorkspacePreview }): React.JSX.Element {
   const [expanded, setExpanded] = useState(true)
@@ -70,11 +93,19 @@ export function Workspace({ workspace }: { workspace: WorkspacePreview }): React
               type="button"
               data-session-id={session.id}
               aria-current={session.active ? 'page' : undefined}
-              className={`${navigationItemClassName} h-8 ${session.active ? 'bg-sidebar-accent' : ''}`}
+              className={`${navigationItemClassName} relative h-8 pr-9 ${session.active ? 'bg-sidebar-accent' : ''}`}
               onClick={session.onClick}
             >
               <span aria-hidden="true" />
-              <span className="min-w-0 truncate">{session.name}</span>
+              <span
+                className="min-w-0 w-full overflow-hidden whitespace-nowrap"
+                style={{
+                  maskImage: 'linear-gradient(to right, black calc(100% - 16px), transparent)'
+                }}
+              >
+                {session.name}
+              </span>
+              <SessionStatus state={session.attentionState} />
             </button>
           ))}
           {(visibleCount < workspace.sessions.length || workspace.hasMore) && (

@@ -1,6 +1,6 @@
 import { convertArrayToReadableStream, MockLanguageModelV4 } from 'ai/test'
 import { isLoopFinished, type ToolSet, type UIMessage } from 'ai'
-import type { LanguageModelV4StreamPart } from '@ai-sdk/provider'
+import type { LanguageModelV4FinishReason, LanguageModelV4StreamPart } from '@ai-sdk/provider'
 import { describe, expect, it } from 'vitest'
 import type { Tool } from '../../../../src/main/core/plugin/protocol'
 import { runAgentSession } from '../../../../src/main/core/agent'
@@ -13,6 +13,10 @@ const USAGE = {
   outputTokens: { total: 1, text: 1, reasoning: 0 }
 }
 
+const finishReason = (
+  unified: LanguageModelV4FinishReason['unified']
+): LanguageModelV4FinishReason => ({ unified, raw: undefined })
+
 const toolCall = (name: string, input: object, index: number): LanguageModelV4StreamPart[] => [
   { type: 'stream-start' as const, warnings: [] },
   {
@@ -21,7 +25,7 @@ const toolCall = (name: string, input: object, index: number): LanguageModelV4St
     toolName: `terminal_${name}`,
     input: JSON.stringify(input)
   },
-  { type: 'finish' as const, finishReason: 'tool-calls' as const, usage: USAGE }
+  { type: 'finish' as const, finishReason: finishReason('tool-calls'), usage: USAGE }
 ]
 
 const finalReply: LanguageModelV4StreamPart[] = [
@@ -29,7 +33,7 @@ const finalReply: LanguageModelV4StreamPart[] = [
   { type: 'text-start' as const, id: 'final' },
   { type: 'text-delta' as const, id: 'final', delta: 'Terminal workflow completed.' },
   { type: 'text-end' as const, id: 'final' },
-  { type: 'finish' as const, finishReason: 'stop' as const, usage: USAGE }
+  { type: 'finish' as const, finishReason: finishReason('stop'), usage: USAGE }
 ]
 
 const commandFor = (title: string, marker: string): string => {

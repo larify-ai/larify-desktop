@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useReducer } from 'react'
+import { Fragment, memo, useEffect, useReducer, useState } from 'react'
 import { useStore } from 'zustand'
 import { useRendererRegistry } from '../registry/renderer-registry'
 import {
@@ -13,6 +13,7 @@ import { WorkbenchTabsLayout } from './workbench-tabs-layout'
 import { WorkbenchTabActionScope } from './workbench-tab-actions'
 
 interface WorkbenchShellProps {
+  active?: boolean
   cwd: string
   store: WorkbenchStore
   sessionId: string
@@ -20,6 +21,7 @@ interface WorkbenchShellProps {
 }
 
 export function WorkbenchShell({
+  active = true,
   cwd,
   store,
   sessionId,
@@ -27,7 +29,7 @@ export function WorkbenchShell({
 }: WorkbenchShellProps): React.JSX.Element {
   const registry = useRendererRegistry()
   const renderers = registry.get<WorkbenchRendererRegistry>(workbenchRendererRegistryToken)
-  const [, refreshTabs] = useReducer((value: number) => value + 1, 0)
+  const [rendererRevision, refreshTabs] = useReducer((value: number) => value + 1, 0)
   useEffect(() => registry.subscribe(workbenchRendererRegistryToken, refreshTabs), [registry])
   const { activeViewId, closeViews, reorderView, selectView, showLauncher, updateTab, views } =
     useStore(store)
@@ -75,32 +77,61 @@ export function WorkbenchShell({
             view={null}
           />
         )}
-        {views.map((view) => (
-          <div
-            aria-hidden={view.id !== activeViewId}
-            className={`absolute inset-0 h-full ${
-              view.id === activeViewId ? 'opacity-100' : 'pointer-events-none opacity-0'
-            }`}
-            data-active={view.id === activeViewId || undefined}
-            data-resource-id={view.resourceId}
-            data-view-id={view.id}
-            data-workbench-view={view.rendererId}
-            key={`view:${view.id}`}
-          >
-            <WorkbenchTabActionScope active={view.id === activeViewId}>
-              <WorkbenchRenderer
-                active={view.id === activeViewId}
-                cwd={cwd}
-                onOpenTool={onOpenTool}
-                onUpdateTab={updateTab}
-                sessionId={sessionId}
-                view={view}
-              />
-            </WorkbenchTabActionScope>
-          </div>
-        ))}
+        {views.map((view) => {
+          const viewActive = active && view.id === activeViewId
+          return (
+            <div
+              aria-hidden={!viewActive}
+              className={`absolute inset-0 h-full ${
+                viewActive ? 'opacity-100' : 'pointer-events-none opacity-0'
+              }`}
+              data-active={viewActive || undefined}
+              data-resource-id={view.resourceId}
+              data-view-id={view.id}
+              data-workbench-view={view.rendererId}
+              key={`view:${view.id}`}
+            >
+              <WorkbenchTabActionScope active={viewActive}>
+                <ActivatedWorkbenchRenderer
+                  active={viewActive}
+                  cwd={cwd}
+                  onOpenTool={onOpenTool}
+                  onUpdateTab={updateTab}
+                  rendererRevision={rendererRevision}
+                  sessionId={sessionId}
+                  view={view}
+                />
+              </WorkbenchTabActionScope>
+            </div>
+          )
+        })}
       </Fragment>
     </WorkbenchTabsLayout>
+  )
+}
+
+const ActivatedWorkbenchRenderer = memo(function ActivatedWorkbenchRenderer(
+  props: React.ComponentProps<typeof WorkbenchRenderer> & { rendererRevision: number }
+): React.JSX.Element | null {
+  const [activated, setActivated] = useState(Boolean(props.active))
+  if (props.active && !activated) setActivated(true)
+  return activated || props.active ? <WorkbenchRenderer {...props} /> : null
+}, sameRendererProps)
+
+function sameRendererProps(
+  previous: React.ComponentProps<typeof WorkbenchRenderer> & { rendererRevision: number },
+  next: React.ComponentProps<typeof WorkbenchRenderer> & { rendererRevision: number }
+): boolean {
+  return (
+    previous.active === next.active &&
+    previous.cwd === next.cwd &&
+    previous.onOpenTool === next.onOpenTool &&
+    previous.onUpdateTab === next.onUpdateTab &&
+    previous.rendererRevision === next.rendererRevision &&
+    previous.sessionId === next.sessionId &&
+    previous.view?.id === next.view?.id &&
+    previous.view?.rendererId === next.view?.rendererId &&
+    previous.view?.resourceId === next.view?.resourceId
   )
 }
 

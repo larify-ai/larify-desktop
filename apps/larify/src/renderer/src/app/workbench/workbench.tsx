@@ -67,24 +67,31 @@ export function Workbench({
   }, [resources, sessionId, store])
 
   useLayoutEffect(() => {
-    const selectResource = (event: Event): void => {
-      const detail = (
-        event as CustomEvent<{
-          rendererId?: string
-          resourceId?: number
-          sessionId?: string
-        }>
-      ).detail
+    const selectResource = (detail: unknown): void => {
+      if (!detail || typeof detail !== 'object') return
+      const {
+        rendererId,
+        resourceId,
+        sessionId: selectedSessionId
+      } = detail as Record<string, unknown>
       if (
-        detail?.sessionId !== sessionId ||
-        !detail.rendererId ||
-        typeof detail.resourceId !== 'number'
+        selectedSessionId !== sessionId ||
+        typeof rendererId !== 'string' ||
+        typeof resourceId !== 'number'
       )
         return
-      store.getState().openView({ rendererId: detail.rendererId, resourceId: detail.resourceId })
+      window.dispatchEvent(new Event('larify:workbench-open'))
+      store.getState().openView({ rendererId, resourceId })
     }
-    window.addEventListener('larify:workbench-select-resource', selectResource)
-    return () => window.removeEventListener('larify:workbench-select-resource', selectResource)
+    const selectLocalResource = (event: Event): void => {
+      selectResource((event as CustomEvent<unknown>).detail)
+    }
+    const unbindSelect = window.bridge.on('resource:select', selectResource)
+    window.addEventListener('larify:workbench-select-resource', selectLocalResource)
+    return () => {
+      unbindSelect()
+      window.removeEventListener('larify:workbench-select-resource', selectLocalResource)
+    }
   }, [sessionId, store])
 
   const createTool = useCallback(
@@ -187,7 +194,13 @@ export function Workbench({
   return (
     <Region label="Workbench" className="h-full min-w-0 overflow-hidden">
       <aside aria-label="Workbench content" className="h-full">
-        <WorkbenchShell cwd={cwd} store={store} sessionId={sessionId} onOpenTool={openTool} />
+        <WorkbenchShell
+          active={active}
+          cwd={cwd}
+          store={store}
+          sessionId={sessionId}
+          onOpenTool={openTool}
+        />
       </aside>
     </Region>
   )

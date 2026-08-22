@@ -17,6 +17,10 @@ import {
 const css = readFileSync(resolve('src/renderer/src/assets/main.css'), 'utf8')
 const window = readFileSync(resolve('src/main/window/create.ts'), 'utf8')
 const panels = readFileSync(resolve('src/renderer/src/app/layout/layout-panels.tsx'), 'utf8')
+const workbenchSplit = readFileSync(
+  resolve('src/renderer/src/app/layout/workbench-split.tsx'),
+  'utf8'
+)
 const header = readFileSync(resolve('src/renderer/src/app/layout/titlebar.tsx'), 'utf8')
 const toggle = readFileSync(resolve('src/renderer/src/app/layout/panel-toggle.tsx'), 'utf8')
 const groupToggle = readFileSync(
@@ -24,6 +28,7 @@ const groupToggle = readFileSync(
   'utf8'
 )
 const panelsCss = readFileSync(resolve('src/renderer/src/app/layout/layout-panels.css'), 'utf8')
+const allotmentPatch = readFileSync(resolve('../../patches/allotment+1.20.5.patch'), 'utf8')
 const navigation = ['navigation-content.tsx', 'navigation-action.tsx', 'workspace.tsx']
   .map((file) => readFileSync(resolve('src/renderer/src/app/navigation', file), 'utf8'))
   .join('\n')
@@ -45,6 +50,13 @@ function renderLayout(): string {
 }
 
 describe('workbench layout specification', () => {
+  it('coalesces Allotment sash changes to one layout per animation frame', () => {
+    expect(allotmentPatch.match(/requestAnimationFrame/g)).toHaveLength(3)
+    expect(allotmentPatch.match(/cancelAnimationFrame/g)).toHaveLength(3)
+    expect(allotmentPatch).toContain('this.emit("change", h(e))')
+    expect(allotmentPatch).toContain('_this.emit("change", h(e))')
+  })
+
   it('uses the specified navigation width range', () => {
     expect(layoutSpec.navigation).toEqual({ defaultSize: 240, minSize: 180, maxSize: 520 })
     expect(mainLayoutDefaultSizes(1200)).toEqual([240, 960])
@@ -65,14 +77,14 @@ describe('workbench layout specification', () => {
     expect(layoutSpec.workbench).toEqual({ defaultSize: 700, minSize: 280 })
     expect(layoutSpec.workbench).not.toHaveProperty('maxSize')
     expect(expandedContentMinSize).toBe(616)
-    expect(panels).toContain('minSize={layoutSpec.interaction.minSize}')
-    expect(panels).toContain('preferredSize={layoutSpec.workbench.defaultSize}')
+    expect(workbenchSplit).toContain('layoutSpec.interaction.minSize')
+    expect(panels).toContain('<WorkbenchSplit')
     expect(panels).not.toContain('preferredWorkbenchSize')
     expect(panels).not.toContain('workbenchExtraSize')
     expect(panels).not.toContain('panelRef=')
-    expect(panels.match(/proportionalLayout=\{false\}/g)).toHaveLength(2)
-    expect(panels.match(/onChange=\{notifyNativeLayout\}/g)).toHaveLength(2)
-    expect(panels).toContain('id="content"')
+    expect(panels.match(/proportionalLayout=\{false\}/g)).toHaveLength(1)
+    expect(panels).not.toContain('onChange={notifyNativeLayout}')
+    expect(panels.match(/onDragEnd=\{\(\) => flushNativeLayout\(\)\}/g)).toHaveLength(1)
     expect(panels).toContain('expandedContentMinSize')
   })
 
@@ -94,12 +106,13 @@ describe('workbench layout specification', () => {
     expect(window.match(/height: titleBarHeight/g)).toHaveLength(1)
     expect(window).toContain("nativeTheme.shouldUseDarkColors ? '#1e1e1f' : '#fafafa'")
     expect(window).toContain('backgroundColor,')
-    expect(panels).toContain('rounded-l-[12px]')
+    expect(panels).toContain('<MainSurfaceCorners />')
+    expect(panelsCss).toContain('.larify-main-surface-corner')
   })
 
   it('starts with the workbench collapsed while preserving its expanded size', () => {
     expect(panels).toContain('useAllotmentToggle(true)')
-    expect(panels).toContain('layoutSpec.workbench.defaultSize')
+    expect(workbenchSplit).toContain('layoutSpec.workbench.defaultSize')
   })
 
   it('renders all regions in order', () => {
@@ -152,9 +165,9 @@ describe('workbench layout specification', () => {
 
   it('uses one divider style for every region boundary', () => {
     expect(panels).toContain("navigation.animating ? ' larify-allotment-animated' : ''")
-    expect(panels).toContain('larify-workbench-allotment')
+    expect(panels).toContain('<WorkbenchSplit')
     expect(header).toContain('border-b-[0.5px] border-border-strong')
-    expect(panels).toContain('rounded-l-[12px]')
+    expect(panels).toContain('<MainSurfaceCorners />')
     expect(panels).toContain('border-[0.5px] border-border-strong')
   })
 
@@ -178,7 +191,7 @@ describe('workbench layout specification', () => {
     expect(toggle).toContain('size-8')
     expect(toggle).toContain('pointer-events-none')
     expect(panels).toContain('visible={!navigation.collapsed}')
-    expect(panels).toContain('visible={!workbench.collapsed}')
+    expect(panels).toContain('collapsed={workbench.collapsed}')
   })
 
   it('keeps every region in a vertical flex layout', () => {
@@ -190,26 +203,54 @@ describe('workbench layout specification', () => {
     expect(panelsCss).toContain('--sash-size: 8px')
     expect(panelsCss).toContain('--sash-hover-size: 1px')
     expect(panelsCss).toContain('--focus-border: transparent')
-    expect(panelsCss).toContain('.larify-workbench-allotment')
+    expect(panelsCss).toContain('.larify-workbench-resize-handle')
+    expect(panelsCss).toContain('width: 8px')
+    expect(panelsCss).toContain('right: 0')
+    expect(panelsCss).toContain('cursor: ew-resize')
+    expect(panelsCss).toContain('background: var(--border-strong)')
+    expect(panelsCss).toContain(
+      'background: color-mix(in srgb, var(--foreground) 55%, transparent)'
+    )
+  })
+
+  it('coalesces live workbench resizing and flushes native layout after dragging', () => {
+    const moveStart = workbenchSplit.indexOf('const move =')
+    const stopStart = workbenchSplit.indexOf('const stop =')
+    const moveSource = workbenchSplit.slice(moveStart, stopStart)
+    const stopSource = workbenchSplit.slice(
+      stopStart,
+      workbenchSplit.indexOf('stopDraggingRef.current()', stopStart)
+    )
+
+    expect(moveSource).toContain('requestAnimationFrame')
+    expect(moveSource).toContain('setWidth(pendingWidth, maxWidth)')
+    expect(workbenchSplit).toContain('setWidth(pendingWidth, maxWidth)')
+    expect(moveSource).not.toContain('flushNativeLayout')
+    expect(workbenchSplit).toContain("flushNativeLayout({ phase: 'start' })")
+    expect(stopSource).toContain('setWorkbenchWidth(workbenchWidthRef.current)')
+    expect(stopSource).toContain("flushNativeLayout({ phase: 'end' })")
   })
 
   it('does not paint panes before Allotment marks them visible', () => {
-    expect(panelsCss).toContain(
-      '.split-view-view:not(.split-view-view-visible) {\n  content-visibility: hidden;\n  visibility: hidden;'
+    expect(panelsCss).toMatch(
+      /\.split-view-view:not\(\.split-view-view-visible\) \{\r?\n {2}content-visibility: hidden;\r?\n {2}visibility: hidden;/
     )
     expect(panelsCss).toContain('content-visibility: visible')
   })
 
   it('animates programmatic layout changes without delaying pointer dragging', () => {
-    expect(panels).toContain("workbench.animating ? ' larify-allotment-animated' : ''")
+    expect(panels).toContain('animated={workbench.animating}')
     expect(groupToggle).toContain('const animationDuration = 180')
     expect(groupToggle).toContain('window.clearTimeout(animationTimer.current)')
     expect(panelsCss).toContain('left 180ms ease-out')
     expect(panelsCss).toContain('width 180ms ease-out')
     expect(panelsCss).toContain('visibility 0s 180ms')
+    expect(panelsCss).toContain(
+      ".larify-workbench-split-animated .larify-workbench-pane[aria-hidden='true']"
+    )
     expect(panelsCss).toContain(':has(> .sash-container > .sash-active)')
     expect(panelsCss).toContain('@media (prefers-reduced-motion: reduce)')
-    expect(panelsCss.match(/content-visibility: hidden/g)).toHaveLength(2)
+    expect(panelsCss).toContain("[data-workbench-view][aria-hidden='true']")
     expect(groupToggle).not.toContain('requestAnimationFrame')
     expect(groupToggle).not.toContain('flushSync')
     expect(css).not.toContain('.panel-animated')
@@ -223,14 +264,15 @@ describe('workbench layout specification', () => {
     const workbench = readFileSync(resolve('src/renderer/src/app/workbench/workbench.tsx'), 'utf8')
 
     expect(panels).toContain('visible={!navigation.collapsed}')
-    expect(panels).toContain('visible={!workbench.collapsed}')
+    expect(panels).toContain('collapsed={workbench.collapsed}')
     expect(panels).not.toContain('onExpand=')
     expect(panels).not.toContain('disabled=')
-    expect(panels.match(/overflow-hidden \[contain:layout_paint\]/g)).toHaveLength(3)
+    expect(panels.match(/overflow-hidden \[contain:layout_paint\]/g)).toHaveLength(1)
+    expect(workbenchSplit.match(/overflow-hidden \[contain:layout_paint\]/g)).toHaveLength(2)
     expect(panels).toContain('minSize={layoutSpec.navigation.minSize}')
-    expect(panels).toContain('minSize={layoutSpec.workbench.minSize}')
+    expect(workbenchSplit).toContain('layoutSpec.workbench.minSize')
     expect(panels).toContain('style={{ minWidth: layoutSpec.navigation.minSize }}')
-    expect(panels).toContain('style={{ minWidth: layoutSpec.workbench.minSize }}')
+    expect(workbenchSplit).toContain('style={{ minWidth: layoutSpec.workbench.minSize }}')
     expect(interaction).toContain('min-w-0 overflow-hidden')
     expect(workbench).toContain('min-w-0 overflow-hidden')
     expect(interaction).not.toContain('min-w-[352px]')

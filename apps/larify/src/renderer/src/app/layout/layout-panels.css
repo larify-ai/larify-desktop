@@ -5,6 +5,102 @@
   --sash-size: 8px;
 }
 
+/* Keep rounded clipping local to two tiny corner decorations. The resizable
+   main surface itself stays rectangular, so resizing does not rebuild a
+   full-window rounded border mask in Chromium's compositor. */
+.larify-main-surface-corner {
+  position: absolute;
+  z-index: 30;
+  left: -0.5px;
+  width: 12.5px;
+  height: 12.5px;
+  overflow: hidden;
+  pointer-events: none;
+  background: var(--sidebar);
+}
+
+.larify-main-surface-corner-top {
+  top: -0.5px;
+}
+
+.larify-main-surface-corner-bottom {
+  bottom: -0.5px;
+}
+
+.larify-main-surface-corner::after {
+  position: absolute;
+  left: 0;
+  width: 24px;
+  height: 24px;
+  box-sizing: border-box;
+  content: '';
+  border: 0.5px solid var(--border-strong);
+  border-radius: 50%;
+  background: var(--background);
+}
+
+.larify-main-surface-corner-top::after {
+  top: 0;
+}
+
+.larify-main-surface-corner-bottom::after {
+  bottom: 0;
+}
+
+.larify-workbench-split {
+  display: flex;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.larify-workbench-pane[aria-hidden='true'] {
+  content-visibility: hidden;
+  visibility: hidden;
+}
+
+.larify-workbench-split-animated .larify-workbench-pane {
+  transition: width 180ms ease-out;
+}
+
+.larify-workbench-split-animated .larify-workbench-pane[aria-hidden='true'] {
+  content-visibility: visible;
+  transition:
+    width 180ms ease-out,
+    visibility 0s 180ms;
+}
+
+.larify-workbench-split[data-resizing='true'] .larify-workbench-pane {
+  transition: none;
+}
+
+.larify-workbench-resize-handle {
+  position: absolute;
+  z-index: 20;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: 8px;
+  touch-action: none;
+  cursor: ew-resize;
+  outline: none;
+}
+
+.larify-workbench-resize-handle::after {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: 1px;
+  content: '';
+  background: var(--border-strong);
+}
+
+.larify-workbench-resize-handle:hover::after,
+.larify-workbench-resize-handle:focus-visible::after,
+.larify-workbench-split[data-resizing='true'] .larify-workbench-resize-handle::after {
+  background: color-mix(in srgb, var(--foreground) 55%, transparent);
+}
+
 .larify-allotment > .split-view-container > .split-view-view:not(.split-view-view-visible) {
   content-visibility: hidden;
   visibility: hidden;
@@ -38,12 +134,22 @@
   transition: none;
 }
 
-.larify-workbench-allotment {
-  --separator-border: var(--border-strong);
-  --focus-border: color-mix(in srgb, var(--foreground) 20%, transparent);
+/* Workbench tabs stay mounted to preserve state, but inactive renderers do not
+   need layout or paint work while another tab is visible. */
+[data-workbench-view][aria-hidden='true'] {
+  content-visibility: hidden;
+  visibility: hidden;
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .larify-workbench-split-animated .larify-workbench-pane {
+    transition: none;
+  }
+
+  .larify-workbench-split-animated .larify-workbench-pane[aria-hidden='true'] {
+    content-visibility: hidden;
+  }
+
   .larify-allotment-animated > .split-view-container > .split-view-view,
   .larify-allotment-animated > .sash-container > .sash {
     transition: none;

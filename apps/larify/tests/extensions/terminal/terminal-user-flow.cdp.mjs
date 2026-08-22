@@ -173,7 +173,7 @@ async function pasteInTerminal(text) {
 async function resizeWorkbench() {
   const sash = await evaluate(`(() => {
     const element = document.querySelector(
-      '.larify-workbench-allotment > .sash-container > .sash'
+      '.larify-workbench-resize-handle'
     )
     if (!element) return null
     const rect = element.getBoundingClientRect()

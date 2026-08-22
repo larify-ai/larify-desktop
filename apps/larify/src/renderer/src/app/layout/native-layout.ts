@@ -7,8 +7,12 @@ export interface WorkbenchAnimationState {
   visible: boolean
 }
 
-export const notifyNativeLayout = (): void => {
-  window.dispatchEvent(new Event(nativeLayoutEvent))
+export interface NativeLayoutDetail {
+  phase: 'start' | 'end'
+}
+
+export const flushNativeLayout = (detail?: NativeLayoutDetail): void => {
+  window.dispatchEvent(new CustomEvent(nativeLayoutEvent, { detail }))
 }
 
 export const notifyWorkbenchAnimation = (state: WorkbenchAnimationState): void => {

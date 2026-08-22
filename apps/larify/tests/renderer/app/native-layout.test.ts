@@ -2,24 +2,39 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  flushNativeLayout,
   nativeLayoutEvent,
-  notifyNativeLayout,
   notifyWorkbenchAnimation,
   workbenchAnimationEvent,
+  type NativeLayoutDetail,
   type WorkbenchAnimationState
 } from '../../../src/renderer/src/app/layout/native-layout'
 
 describe('native layout events', () => {
   afterEach(() => vi.restoreAllMocks())
 
-  it('dispatches every native layout notification synchronously', () => {
+  it('publishes a synchronous final native layout check', () => {
     const listener = vi.fn()
     window.addEventListener(nativeLayoutEvent, listener)
 
-    notifyNativeLayout()
-    notifyNativeLayout()
+    flushNativeLayout()
 
-    expect(listener).toHaveBeenCalledTimes(2)
+    expect(listener).toHaveBeenCalledTimes(1)
+    window.removeEventListener(nativeLayoutEvent, listener)
+  })
+
+  it('publishes the live layout phase', () => {
+    const phases: Array<NativeLayoutDetail['phase']> = []
+    const listener = (event: Event): void => {
+      const detail = (event as CustomEvent<NativeLayoutDetail>).detail
+      phases.push(detail.phase)
+    }
+    window.addEventListener(nativeLayoutEvent, listener)
+
+    flushNativeLayout({ phase: 'start' })
+    flushNativeLayout({ phase: 'end' })
+
+    expect(phases).toEqual(['start', 'end'])
     window.removeEventListener(nativeLayoutEvent, listener)
   })
 

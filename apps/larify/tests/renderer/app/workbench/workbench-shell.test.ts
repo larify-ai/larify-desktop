@@ -92,7 +92,8 @@ describe('WorkbenchShell', () => {
     })
     const store = createWorkbenchStore()
     const first = store.getState().openView({ rendererId: 'terminal', resourceId: 1 })
-    store.getState().openView({ rendererId: 'terminal', resourceId: 2 })
+    const second = store.getState().openView({ rendererId: 'terminal', resourceId: 2 })
+    store.getState().selectView(first)
     await act(async () => {
       root.render(
         createElement(
@@ -102,6 +103,7 @@ describe('WorkbenchShell', () => {
         )
       )
     })
+    await act(async () => store.getState().selectView(second))
     invoke.mockImplementation((channel: string, ids: number[]) => {
       if (channel === 'resource:close-many') expect(disposed).toEqual([1])
       return Promise.resolve(ids)
@@ -397,6 +399,36 @@ describe('WorkbenchShell', () => {
     expect(container.querySelector('[data-testid="terminal-renderer"]')).not.toBeNull()
   })
 
+  it('restores the placeholder when an active renderer is unregistered', async () => {
+    const registration = registry
+      .get<WorkbenchRendererRegistry>(workbenchRendererRegistryToken)
+      ?.register('terminal', {
+        component: () => createElement('div', { 'data-testid': 'terminal-renderer' }),
+        icon: createElement('span'),
+        order: 10,
+        title: 'Terminal'
+      })
+    const store = createWorkbenchStore()
+    store.getState().openView({ rendererId: 'terminal', resourceId: 7 })
+    await act(async () => {
+      root.render(
+        createElement(
+          RendererRegistryProvider,
+          { registry },
+          createElement(WorkbenchShell, { onOpenTool: vi.fn(), store })
+        )
+      )
+    })
+    expect(container.querySelector('[data-testid="terminal-renderer"]')).not.toBeNull()
+
+    await act(async () => registration?.dispose())
+
+    expect(container.querySelector('[data-testid="terminal-renderer"]')).toBeNull()
+    expect(container.querySelector('[data-testid="workbench-placeholder"]')?.textContent).toBe(
+      'terminal 7'
+    )
+  })
+
   it('keeps renderer component state scoped to its view', async () => {
     registry.get<WorkbenchRendererRegistry>(workbenchRendererRegistryToken)?.register('terminal', {
       component: StatefulTestRenderer,
@@ -436,6 +468,43 @@ describe('WorkbenchShell', () => {
     expect(
       container.querySelector('[data-active] [data-testid="renderer-state"]')?.textContent
     ).toBe('3')
+  })
+
+  it('keeps a mounted renderer inactive while its session is hidden', async () => {
+    const activeStates: boolean[] = []
+    registry.get<WorkbenchRendererRegistry>(workbenchRendererRegistryToken)?.register('browser', {
+      component: ({ active }) => {
+        activeStates.push(active)
+        return createElement('div', { 'data-testid': 'browser-renderer' })
+      },
+      icon: createElement('span'),
+      order: 10,
+      title: 'Browser'
+    })
+    const store = createWorkbenchStore()
+    store.getState().openView({ rendererId: 'browser', resourceId: 1 })
+    const render = async (active: boolean): Promise<void> => {
+      await act(async () => {
+        root.render(
+          createElement(
+            RendererRegistryProvider,
+            { registry },
+            createElement(WorkbenchShell, { active, onOpenTool: vi.fn(), store })
+          )
+        )
+      })
+    }
+
+    await render(true)
+    await render(false)
+    expect(activeStates.at(-1)).toBe(false)
+    expect(container.querySelector('[data-workbench-view]')?.getAttribute('aria-hidden')).toBe(
+      'true'
+    )
+    expect(container.querySelector('[data-testid="browser-renderer"]')).not.toBeNull()
+
+    await render(true)
+    expect(activeStates.at(-1)).toBe(true)
   })
 
   it('shows tab actions only for the active renderer', async () => {
@@ -513,6 +582,42 @@ describe('WorkbenchShell', () => {
         .querySelector(`[data-tab-id="${first}"] .larify-workbench-tab-trigger`)
         ?.getAttribute('title')
     ).toBe('D:\\workspace\\terminal-1')
+  })
+
+  it('does not rerender mounted renderer content for presentation-only tab updates', async () => {
+    const renders = new Map<number, number>()
+    registry.get<WorkbenchRendererRegistry>(workbenchRendererRegistryToken)?.register('terminal', {
+      component: ({ resourceId }) => {
+        renders.set(resourceId, (renders.get(resourceId) ?? 0) + 1)
+        return createElement('div', { 'data-testid': `renderer-${resourceId}` })
+      },
+      icon: createElement('span'),
+      order: 10,
+      title: 'Terminal'
+    })
+    const store = createWorkbenchStore()
+    const first = store.getState().openView({ rendererId: 'terminal', resourceId: 1 })
+    const second = store.getState().openView({ rendererId: 'terminal', resourceId: 2 })
+    await act(async () => {
+      root.render(
+        createElement(
+          RendererRegistryProvider,
+          { registry },
+          createElement(WorkbenchShell, { onOpenTool: vi.fn(), store })
+        )
+      )
+      store.getState().selectView(first)
+    })
+    const before = new Map(renders)
+
+    await act(async () => store.getState().updateTab(second, { title: 'Updated title' }))
+
+    expect(renders).toEqual(before)
+    expect(
+      container
+        .querySelector(`[data-tab-id="${second}"] .larify-workbench-tab-title`)
+        ?.textContent?.trim()
+    ).toBe('Updated title')
   })
 })
 

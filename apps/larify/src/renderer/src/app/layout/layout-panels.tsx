@@ -9,12 +9,28 @@ import { WorkbenchHost } from '../workbench/workbench'
 import { expandedContentMinSize, layoutSpec, mainLayoutDefaultSizes } from './layout-spec'
 import { Titlebar } from './titlebar'
 import { useAllotmentToggle } from './use-allotment-toggle'
+import { WorkbenchSplit } from './workbench-split'
 import {
-  notifyNativeLayout,
+  flushNativeLayout,
   notifyWorkbenchAnimation,
   workbenchStateRequestEvent
 } from './native-layout'
 import './layout-panels.css'
+
+function MainSurfaceCorners(): React.JSX.Element {
+  return (
+    <>
+      <span
+        aria-hidden="true"
+        className="larify-main-surface-corner larify-main-surface-corner-top"
+      />
+      <span
+        aria-hidden="true"
+        className="larify-main-surface-corner larify-main-surface-corner-bottom"
+      />
+    </>
+  )
+}
 
 export function LayoutPanels(): React.JSX.Element {
   const { activeId, activeSession, sessions } = useAssistantSessions()
@@ -51,7 +67,7 @@ export function LayoutPanels(): React.JSX.Element {
       className={`larify-allotment${navigation.animating ? ' larify-allotment-animated' : ''}`}
       defaultSizes={mainDefaultSizes}
       id="main"
-      onChange={notifyNativeLayout}
+      onDragEnd={() => flushNativeLayout()}
       proportionalLayout={false}
     >
       <Allotment.Pane
@@ -71,10 +87,11 @@ export function LayoutPanels(): React.JSX.Element {
         minSize={workbench.collapsed ? layoutSpec.interaction.minSize : expandedContentMinSize}
       >
         <div
-          className={`flex h-full min-w-0 flex-col overflow-hidden border-[0.5px] border-border-strong bg-background ${
-            navigation.collapsed ? 'rounded-none border-l-0' : 'rounded-l-[12px]'
+          className={`relative flex h-full min-w-0 flex-col overflow-hidden border-[0.5px] border-border-strong bg-background ${
+            navigation.collapsed ? 'border-l-0' : ''
           }`}
         >
+          {!navigation.collapsed && <MainSurfaceCorners />}
           <Titlebar
             navigationCollapsed={navigation.collapsed}
             workbenchCollapsed={workbench.collapsed}
@@ -83,36 +100,12 @@ export function LayoutPanels(): React.JSX.Element {
           >
             {heading && <ConversationHeader cwd={heading.cwd} title={heading.title} />}
           </Titlebar>
-          <Allotment
-            className={`larify-allotment larify-workbench-allotment min-h-0 flex-1${
-              workbench.animating ? ' larify-allotment-animated' : ''
-            }`}
-            id="content"
-            onChange={notifyNativeLayout}
-            onVisibleChange={(index, visible) => {
-              if (index === 1) workbench.setCollapsed(!visible)
-            }}
-            proportionalLayout={false}
-          >
-            <Allotment.Pane minSize={layoutSpec.interaction.minSize}>
-              <div className="h-full w-full overflow-hidden [contain:layout_paint]">
-                <Interaction />
-              </div>
-            </Allotment.Pane>
-            <Allotment.Pane
-              minSize={layoutSpec.workbench.minSize}
-              preferredSize={layoutSpec.workbench.defaultSize}
-              snap
-              visible={!workbench.collapsed}
-            >
-              <div
-                className="h-full w-full overflow-hidden [contain:layout_paint]"
-                style={{ minWidth: layoutSpec.workbench.minSize }}
-              >
-                <WorkbenchHost activeId={activeId} sessions={sessions} />
-              </div>
-            </Allotment.Pane>
-          </Allotment>
+          <WorkbenchSplit
+            animated={workbench.animating}
+            collapsed={workbench.collapsed}
+            interaction={<Interaction />}
+            workbench={<WorkbenchHost activeId={activeId} sessions={sessions} />}
+          />
         </div>
       </Allotment.Pane>
     </Allotment>

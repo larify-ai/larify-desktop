@@ -43,6 +43,7 @@ describe('layout with the real resizable component', () => {
       return 0
     })
     vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    HTMLElement.prototype.setPointerCapture = vi.fn()
 
     container = document.createElement('div')
     document.body.appendChild(container)
@@ -117,9 +118,9 @@ describe('layout with the real resizable component', () => {
     expect(states.at(-1)).toEqual({ animating: false, visible: true })
   })
 
-  it('uses nested Allotment split views with workbench feedback styling', () => {
-    expect(container.querySelectorAll('.larify-allotment')).toHaveLength(2)
-    expect(container.querySelector('.larify-workbench-allotment')).not.toBeNull()
+  it('uses Allotment only for navigation and a lightweight workbench split', () => {
+    expect(container.querySelectorAll('.larify-allotment')).toHaveLength(1)
+    expect(container.querySelector('.larify-workbench-split')).not.toBeNull()
   })
 
   it('reports the current workbench animation state on request', () => {
@@ -147,6 +148,126 @@ describe('layout with the real resizable component', () => {
     expect(workbench?.style.minWidth).toBe('280px')
   })
 
+  it('shows an accessible resize handle only while the workbench is open', async () => {
+    expect(container.querySelector('[role="separator"]')).toBeNull()
+
+    await click('显示工作台')
+
+    const handle = container.querySelector<HTMLElement>('[role="separator"]')
+    expect(handle?.getAttribute('aria-label')).toBe('调整工作台宽度')
+    expect(handle?.getAttribute('aria-orientation')).toBe('vertical')
+    expect(handle?.getAttribute('aria-valuemin')).toBe('280')
+    expect(handle?.parentElement?.classList.contains('larify-interaction-pane')).toBe(true)
+    expect(handle?.closest('.larify-workbench-pane')).toBeNull()
+  })
+
+  it('keeps both panes laid out at the live pointer width', async () => {
+    await click('显示工作台')
+
+    const split = container.querySelector<HTMLElement>('.larify-workbench-split')
+    const pane = container.querySelector<HTMLElement>('.larify-workbench-pane')
+    const handle = container.querySelector<HTMLElement>('[role="separator"]')
+    expect(split).not.toBeNull()
+    expect(pane?.style.width).toBe('700px')
+    expect(handle).not.toBeNull()
+
+    Object.defineProperty(split, 'clientWidth', { configurable: true, value: 1200 })
+    pane!.getBoundingClientRect = () => ({
+      bottom: 0,
+      height: 0,
+      left: 0,
+      right: 700,
+      top: 0,
+      width: 700,
+      x: 0,
+      y: 0,
+      toJSON: () => ({})
+    })
+
+    await act(async () => {
+      handle!.dispatchEvent(pointerEvent('pointerdown', 1000))
+      window.dispatchEvent(pointerEvent('pointermove', 900))
+    })
+
+    expect(split?.getAttribute('data-resizing')).toBe('true')
+    expect(pane?.style.width).toBe('800px')
+
+    await act(async () => window.dispatchEvent(pointerEvent('pointerup', 900)))
+
+    expect(split?.hasAttribute('data-resizing')).toBe(false)
+    expect(pane?.style.width).toBe('800px')
+  })
+
+  it('cancels an active resize when the workbench collapses', async () => {
+    await click('显示工作台')
+
+    const split = container.querySelector<HTMLElement>('.larify-workbench-split')!
+    const pane = container.querySelector<HTMLElement>('.larify-workbench-pane')!
+    const handle = container.querySelector<HTMLElement>('[role="separator"]')!
+    Object.defineProperty(split, 'clientWidth', { configurable: true, value: 1200 })
+    pane.getBoundingClientRect = () => ({
+      bottom: 0,
+      height: 0,
+      left: 0,
+      right: 700,
+      top: 0,
+      width: 700,
+      x: 0,
+      y: 0,
+      toJSON: () => ({})
+    })
+    const phases: string[] = []
+    const recordPhase = (event: Event): void => {
+      const phase = (event as CustomEvent<{ phase?: string }>).detail?.phase
+      if (phase) phases.push(phase)
+    }
+    window.addEventListener('larify:native-layout', recordPhase)
+
+    await act(async () => handle.dispatchEvent(pointerEvent('pointerdown', 1000)))
+    expect(split.getAttribute('data-resizing')).toBe('true')
+
+    await click('隐藏工作台')
+    expect(split.hasAttribute('data-resizing')).toBe(false)
+
+    await act(async () => window.dispatchEvent(pointerEvent('pointermove', 800)))
+    await click('显示工作台')
+    expect(pane.style.width).toBe('700px')
+    expect(phases).toEqual(['start', 'end'])
+    window.removeEventListener('larify:native-layout', recordPhase)
+  })
+
+  it('synchronizes native view bounds in the same frame as each pointer width', async () => {
+    await click('显示工作台')
+    const split = container.querySelector<HTMLElement>('.larify-workbench-split')!
+    const pane = container.querySelector<HTMLElement>('.larify-workbench-pane')!
+    const handle = container.querySelector<HTMLElement>('[role="separator"]')!
+    Object.defineProperty(split, 'clientWidth', { configurable: true, value: 1200 })
+    pane.getBoundingClientRect = () => ({
+      bottom: 0,
+      height: 0,
+      left: 0,
+      right: 700,
+      top: 0,
+      width: 700,
+      x: 0,
+      y: 0,
+      toJSON: () => ({})
+    })
+    const nativeLayouts = vi.fn()
+    window.addEventListener('larify:native-layout', nativeLayouts)
+
+    await act(async () => {
+      handle.dispatchEvent(pointerEvent('pointerdown', 1000))
+      window.dispatchEvent(pointerEvent('pointermove', 900))
+    })
+
+    expect(pane.style.width).toBe('800px')
+    expect(nativeLayouts).toHaveBeenCalledOnce()
+
+    await act(async () => window.dispatchEvent(pointerEvent('pointerup', 900)))
+    window.removeEventListener('larify:native-layout', nativeLayouts)
+  })
+
   it('clips navigation content when its panel collapses', () => {
     expect(container.querySelectorAll('.overflow-hidden')).not.toHaveLength(0)
   })
@@ -159,5 +280,9 @@ describe('layout with the real resizable component', () => {
     const button = buttons(label)[0]
     expect(button).toBeDefined()
     await act(async () => button.click())
+  }
+
+  function pointerEvent(type: string, clientX: number): MouseEvent {
+    return new MouseEvent(type, { bubbles: true, button: 0, clientX })
   }
 })

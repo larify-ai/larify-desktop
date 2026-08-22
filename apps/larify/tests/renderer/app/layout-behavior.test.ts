@@ -117,13 +117,19 @@ describe('layout panel behavior', () => {
   })
 
   it('restores the workbench layout after toggling twice', async () => {
-    expect(container.querySelector('[aria-label="Workbench"]')).toBeNull()
+    const workbenchPane = (): HTMLElement | null =>
+      container.querySelector('.larify-workbench-pane')
+
+    expect(workbenchPane()?.getAttribute('aria-hidden')).toBe('true')
+    expect(workbenchPane()?.style.width).toBe('0px')
 
     await click('显示工作台')
-    expect(container.querySelector('[aria-label="Workbench"]')).not.toBeNull()
+    expect(workbenchPane()?.getAttribute('aria-hidden')).toBe('false')
+    expect(workbenchPane()?.style.width).not.toBe('0px')
 
     await click('隐藏工作台')
-    expect(container.querySelector('[aria-label="Workbench"]')).toBeNull()
+    expect(workbenchPane()?.getAttribute('aria-hidden')).toBe('true')
+    expect(workbenchPane()?.style.width).toBe('0px')
   })
 
   it('collapses and restores navigation', async () => {

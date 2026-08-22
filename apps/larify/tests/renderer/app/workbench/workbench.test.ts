@@ -224,6 +224,37 @@ describe('Workbench', () => {
     expect(container.querySelector('[data-state="active"]')?.textContent).toContain('Browser')
   })
 
+  it('selects a resource requested by the main process', async () => {
+    invoke.mockResolvedValue([])
+    registerTerminal(registry)
+    await renderWorkbench(root, registry, sessionId)
+    const openWorkbench = vi.fn()
+    window.addEventListener('larify:workbench-open', openWorkbench)
+
+    await act(async () => {
+      listeners.get('resource:select')?.(null)
+      listeners.get('resource:select')?.({
+        rendererId: 'terminal',
+        resourceId: 8,
+        sessionId: 'another-session'
+      })
+    })
+    expect(container.querySelector('[data-state="active"]')).toBeNull()
+    expect(openWorkbench).not.toHaveBeenCalled()
+
+    await act(async () => {
+      listeners.get('resource:select')?.({
+        rendererId: 'terminal',
+        resourceId: 8,
+        sessionId
+      })
+    })
+
+    expect(container.querySelector('[data-state="active"]')?.textContent).toContain('Terminal')
+    expect(openWorkbench).toHaveBeenCalledOnce()
+    window.removeEventListener('larify:workbench-open', openWorkbench)
+  })
+
   it.each([
     ['workspace', 'Files'],
     ['changes', 'Changes']
@@ -489,8 +520,20 @@ describe('Workbench', () => {
 
     await renderWorkbench(root, registry, sessionId)
 
-    expect(mounted).toEqual([7, 8])
+    expect(mounted).toEqual([])
     expect(container.querySelectorAll('[data-workbench-view]')).toHaveLength(2)
+    await act(async () => {
+      container
+        .querySelector<HTMLElement>('[data-tab-id="1"] .larify-workbench-tab-trigger')
+        ?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }))
+    })
+    expect(mounted).toEqual([7])
+    await act(async () => {
+      container
+        .querySelector<HTMLElement>('[data-tab-id="2"] .larify-workbench-tab-trigger')
+        ?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }))
+    })
+    expect(mounted).toEqual([7, 8])
     await act(async () => {
       container
         .querySelector<HTMLButtonElement>('[data-tab-id="1"] .larify-workbench-tab-close')
@@ -500,7 +543,7 @@ describe('Workbench', () => {
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith('resource:close-many', [7]))
   })
 
-  it('mounts only the active session and inactive sessions that own resources', async () => {
+  it('does not initialize renderers merely because an inactive session owns resources', async () => {
     const mounted: number[] = []
     const firstSessionId = sessionId
     const secondSessionId = `session-${crypto.randomUUID()}`
@@ -527,7 +570,7 @@ describe('Workbench', () => {
         )
       )
     })
-    expect(mounted).toEqual([7])
+    expect(mounted).toEqual([])
 
     await act(async () => {
       root.render(
@@ -538,7 +581,7 @@ describe('Workbench', () => {
         )
       )
     })
-    expect(mounted).toEqual([7])
+    expect(mounted).toEqual([])
   })
 })
 

@@ -1,0 +1,112 @@
+diff --git a/node_modules/allotment/dist/legacy.js b/node_modules/allotment/dist/legacy.js
+index 89d5084..d7c222b 100644
+--- a/node_modules/allotment/dist/legacy.js
++++ b/node_modules/allotment/dist/legacy.js
+@@ -516,18 +516,26 @@ var ie = /*#__PURE__*/function (_H) {
+           currentY: i
+         };
+       _this.el.classList.add("sash-active", Z), _this.emit("start", s), _this.el.setPointerCapture(e.pointerId);
+-      var n = function n(e) {
+-          e.preventDefault();
+-          var s = {
++      var o = 0,
++        a,
++        h = function h(e) {
++          return {
+             startX: t,
+             currentX: e.pageX,
+             startY: i,
+             currentY: e.pageY
+           };
+-          _this.emit("change", s);
++        },
++        n = function n(e) {
++          e.preventDefault();
++          a = h(e), o || (o = requestAnimationFrame(function () {
++            o = 0;
++            var e = a;
++            a = void 0, e && _this.emit("change", e);
++          }));
+         },
+         _r = function r(e) {
+-          e.preventDefault(), _this.el.classList.remove("sash-active", Z), _this.hoverDelayer.cancel(), _this.emit("end"), _this.el.releasePointerCapture(e.pointerId), window.removeEventListener("pointermove", n), window.removeEventListener("pointerup", _r);
++          e.preventDefault(), o && cancelAnimationFrame(o), o = 0, a = void 0, _this.emit("change", h(e)), _this.el.classList.remove("sash-active", Z), _this.hoverDelayer.cancel(), _this.emit("end"), _this.el.releasePointerCapture(e.pointerId), window.removeEventListener("pointermove", n), window.removeEventListener("pointerup", _r);
+         };
+       window.addEventListener("pointermove", n), window.addEventListener("pointerup", _r);
+     }, _this.onPointerDoublePress = function () {
+diff --git a/node_modules/allotment/dist/modern.mjs b/node_modules/allotment/dist/modern.mjs
+index f3131dc..4aafcb1 100644
+--- a/node_modules/allotment/dist/modern.mjs
++++ b/node_modules/allotment/dist/modern.mjs
+@@ -443,18 +443,24 @@ class ue extends G {
+           currentY: i
+         };
+       this.el.classList.add("sash-active", re), this.emit("start", s), this.el.setPointerCapture(e.pointerId);
+-      const n = e => {
++      let o = 0,
++        a;
++      const h = e => ({
++          startX: t,
++          currentX: e.pageX,
++          startY: i,
++          currentY: e.pageY
++        }),
++        n = e => {
+           e.preventDefault();
+-          const s = {
+-            startX: t,
+-            currentX: e.pageX,
+-            startY: i,
+-            currentY: e.pageY
+-          };
+-          this.emit("change", s);
++          a = h(e), o || (o = requestAnimationFrame(() => {
++            o = 0;
++            const e = a;
++            a = void 0, e && this.emit("change", e);
++          }));
+         },
+         r = e => {
+-          e.preventDefault(), this.el.classList.remove("sash-active", re), this.hoverDelayer.cancel(), this.emit("end"), this.el.releasePointerCapture(e.pointerId), window.removeEventListener("pointermove", n), window.removeEventListener("pointerup", r);
++          e.preventDefault(), o && cancelAnimationFrame(o), o = 0, a = void 0, this.emit("change", h(e)), this.el.classList.remove("sash-active", re), this.hoverDelayer.cancel(), this.emit("end"), this.el.releasePointerCapture(e.pointerId), window.removeEventListener("pointermove", n), window.removeEventListener("pointerup", r);
+         };
+       window.addEventListener("pointermove", n), window.addEventListener("pointerup", r);
+     }, this.onPointerDoublePress = () => {
+diff --git a/node_modules/allotment/dist/module.js b/node_modules/allotment/dist/module.js
+index 6036fbd..cb55da6 100644
+--- a/node_modules/allotment/dist/module.js
++++ b/node_modules/allotment/dist/module.js
+@@ -447,18 +447,24 @@ class ue extends G {
+           currentY: i
+         };
+       this.el.classList.add("sash-active", re), this.emit("start", s), this.el.setPointerCapture(e.pointerId);
+-      var n = e => {
++      var o = 0,
++        a,
++        h = e => ({
++          startX: t,
++          currentX: e.pageX,
++          startY: i,
++          currentY: e.pageY
++        }),
++        n = e => {
+           e.preventDefault();
+-          var s = {
+-            startX: t,
+-            currentX: e.pageX,
+-            startY: i,
+-            currentY: e.pageY
+-          };
+-          this.emit("change", s);
++          a = h(e), o || (o = requestAnimationFrame(() => {
++            o = 0;
++            var e = a;
++            a = void 0, e && this.emit("change", e);
++          }));
+         },
+         r = e => {
+-          e.preventDefault(), this.el.classList.remove("sash-active", re), this.hoverDelayer.cancel(), this.emit("end"), this.el.releasePointerCapture(e.pointerId), window.removeEventListener("pointermove", n), window.removeEventListener("pointerup", r);
++          e.preventDefault(), o && cancelAnimationFrame(o), o = 0, a = void 0, this.emit("change", h(e)), this.el.classList.remove("sash-active", re), this.hoverDelayer.cancel(), this.emit("end"), this.el.releasePointerCapture(e.pointerId), window.removeEventListener("pointermove", n), window.removeEventListener("pointerup", r);
+         };
+       window.addEventListener("pointermove", n), window.addEventListener("pointerup", r);
+     }, this.onPointerDoublePress = () => {

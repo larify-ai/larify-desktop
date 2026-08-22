@@ -50,7 +50,9 @@ function send(method, params = {}) {
 
 async function evaluate(expression) {
   const response = await send('Runtime.evaluate', { expression, returnByValue: true })
-  if (response.exceptionDetails) throw new Error(response.exceptionDetails.text)
+  if (response.exceptionDetails) {
+    throw new Error(response.exceptionDetails.exception?.description ?? response.exceptionDetails.text)
+  }
   return response.result.value
 }
 
@@ -153,7 +155,7 @@ try {
     {
       direction: 1,
       name: 'navigation',
-      selector: '#main > .sash-container > .sash'
+      selector: '.larify-allotment > .sash-container > .sash'
     },
     {
       direction: -1,

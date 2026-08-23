@@ -348,6 +348,28 @@ describe('WorkspaceView', () => {
     expect(h.filePreviewProps).toBeNull()
   })
 
+  it('keeps textual TypeScript in the source preview when its extension maps to video/mp2t', async () => {
+    h.inspectFile.mockResolvedValueOnce({
+      binary: false,
+      mime: 'video/mp2t',
+      path: 'D:\\workspace\\source.ts'
+    })
+    await render()
+
+    await openFile('source.ts')
+
+    expect(h.invoke).not.toHaveBeenCalledWith(
+      'resource:create',
+      'browser',
+      expect.anything(),
+      expect.anything()
+    )
+    expect(h.filePreviewProps).toMatchObject({
+      descriptor: { binary: false, mime: 'video/mp2t', path: 'D:\\workspace\\source.ts' },
+      path: 'D:\\workspace\\source.ts'
+    })
+  })
+
   it('lets the preview surface an inspection failure instead of keeping the previous file', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined)
     await render()

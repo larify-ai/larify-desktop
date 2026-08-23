@@ -37,6 +37,7 @@ await Promise.all([
     join(fixtureRoot, 'preview.html'),
     '<!doctype html><title>HTML fixture</title><h1>HTML</h1>'
   ),
+  writeFile(join(fixtureRoot, 'source.ts'), 'export const workspaceRegression = true\n'),
   writeFile(
     join(fixtureRoot, 'preview.png'),
     Buffer.from(
@@ -101,6 +102,13 @@ try {
   )
   assert.ok(workspaceTabId, 'active workspace tab id is missing')
 
+  assert.equal(await clickTreeItem('source.ts'), true, 'source.ts is missing')
+  await waitFor(
+    `Boolean(document.querySelector('.monaco-editor')) &&
+      !document.querySelector('[data-browser-webview-host][data-active]')`,
+    'TypeScript source preview'
+  )
+
   assert.equal(await clickTreeItem('preview.html'), true, 'preview.html is missing')
   await waitFor(
     `Boolean(
@@ -144,7 +152,9 @@ try {
     await wait(250)
   }
 
-  console.log('HTML source + explicit browser action, image/PDF direct browser; edge gap <= 1px')
+  console.log(
+    'TypeScript/HTML source, HTML explicit browser action, image/PDF direct browser; edge gap <= 1px'
+  )
 } finally {
   if (workspaceTabId) {
     await evaluate(

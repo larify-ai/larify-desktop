@@ -38,11 +38,9 @@ const FilePreview = lazy(loadFilePreview)
 type WorkspaceViewProps = Omit<WorkbenchRendererProps, 'cwd'>
 
 const isMarkdownPath = (path: string): boolean => /\.(?:md|markdown)$/i.test(path)
-const opensInBrowser = ({ mime }: FileDescriptor): boolean =>
+const opensInBrowser = ({ binary, mime }: FileDescriptor): boolean =>
   mime === 'application/pdf' ||
-  mime.startsWith('image/') ||
-  mime.startsWith('audio/') ||
-  mime.startsWith('video/')
+  (binary && (mime.startsWith('image/') || mime.startsWith('audio/') || mime.startsWith('video/')))
 
 export function WorkspaceView({
   active = false,

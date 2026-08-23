@@ -2,6 +2,7 @@ export interface KeyInfo {
   key: string
   code: string
   keyCode: number
+  shift?: boolean
 }
 
 export const MODIFIER_BITS: Record<string, number> = {
@@ -46,38 +47,38 @@ const NAMED_KEYS: Record<string, KeyInfo> = {
 }
 
 const PUNCTUATION: Record<string, KeyInfo> = {
-  '!': { key: '!', code: 'Digit1', keyCode: 49 },
-  '@': { key: '@', code: 'Digit2', keyCode: 50 },
-  '#': { key: '#', code: 'Digit3', keyCode: 51 },
-  $: { key: '$', code: 'Digit4', keyCode: 52 },
-  '%': { key: '%', code: 'Digit5', keyCode: 53 },
-  '^': { key: '^', code: 'Digit6', keyCode: 54 },
-  '&': { key: '&', code: 'Digit7', keyCode: 55 },
-  '*': { key: '*', code: 'Digit8', keyCode: 56 },
-  '(': { key: '(', code: 'Digit9', keyCode: 57 },
-  ')': { key: ')', code: 'Digit0', keyCode: 48 },
+  '!': { key: '!', code: 'Digit1', keyCode: 49, shift: true },
+  '@': { key: '@', code: 'Digit2', keyCode: 50, shift: true },
+  '#': { key: '#', code: 'Digit3', keyCode: 51, shift: true },
+  $: { key: '$', code: 'Digit4', keyCode: 52, shift: true },
+  '%': { key: '%', code: 'Digit5', keyCode: 53, shift: true },
+  '^': { key: '^', code: 'Digit6', keyCode: 54, shift: true },
+  '&': { key: '&', code: 'Digit7', keyCode: 55, shift: true },
+  '*': { key: '*', code: 'Digit8', keyCode: 56, shift: true },
+  '(': { key: '(', code: 'Digit9', keyCode: 57, shift: true },
+  ')': { key: ')', code: 'Digit0', keyCode: 48, shift: true },
   '`': { key: '`', code: 'Backquote', keyCode: 192 },
-  '~': { key: '~', code: 'Backquote', keyCode: 192 },
+  '~': { key: '~', code: 'Backquote', keyCode: 192, shift: true },
   '-': { key: '-', code: 'Minus', keyCode: 189 },
-  _: { key: '_', code: 'Minus', keyCode: 189 },
+  _: { key: '_', code: 'Minus', keyCode: 189, shift: true },
   '=': { key: '=', code: 'Equal', keyCode: 187 },
-  '+': { key: '+', code: 'Equal', keyCode: 187 },
+  '+': { key: '+', code: 'Equal', keyCode: 187, shift: true },
   '[': { key: '[', code: 'BracketLeft', keyCode: 219 },
-  '{': { key: '{', code: 'BracketLeft', keyCode: 219 },
+  '{': { key: '{', code: 'BracketLeft', keyCode: 219, shift: true },
   ']': { key: ']', code: 'BracketRight', keyCode: 221 },
-  '}': { key: '}', code: 'BracketRight', keyCode: 221 },
+  '}': { key: '}', code: 'BracketRight', keyCode: 221, shift: true },
   '\\': { key: '\\', code: 'Backslash', keyCode: 220 },
-  '|': { key: '|', code: 'Backslash', keyCode: 220 },
+  '|': { key: '|', code: 'Backslash', keyCode: 220, shift: true },
   ';': { key: ';', code: 'Semicolon', keyCode: 186 },
-  ':': { key: ':', code: 'Semicolon', keyCode: 186 },
+  ':': { key: ':', code: 'Semicolon', keyCode: 186, shift: true },
   "'": { key: "'", code: 'Quote', keyCode: 222 },
-  '"': { key: '"', code: 'Quote', keyCode: 222 },
+  '"': { key: '"', code: 'Quote', keyCode: 222, shift: true },
   ',': { key: ',', code: 'Comma', keyCode: 188 },
-  '<': { key: '<', code: 'Comma', keyCode: 188 },
+  '<': { key: '<', code: 'Comma', keyCode: 188, shift: true },
   '.': { key: '.', code: 'Period', keyCode: 190 },
-  '>': { key: '>', code: 'Period', keyCode: 190 },
+  '>': { key: '>', code: 'Period', keyCode: 190, shift: true },
   '/': { key: '/', code: 'Slash', keyCode: 191 },
-  '?': { key: '?', code: 'Slash', keyCode: 191 }
+  '?': { key: '?', code: 'Slash', keyCode: 191, shift: true }
 }
 
 export function charToKeyInfo(ch: string): KeyInfo | undefined {
@@ -86,7 +87,7 @@ export function charToKeyInfo(ch: string): KeyInfo | undefined {
   if (ch === '\t') return { key: 'Tab', code: 'Tab', keyCode: 9 }
   if (ch === ' ') return { key: ' ', code: 'Space', keyCode: 32 }
   if (ch >= 'a' && ch <= 'z') return { key: ch, code: 'Key' + ch.toUpperCase(), keyCode: ch.toUpperCase().charCodeAt(0) }
-  if (ch >= 'A' && ch <= 'Z') return { key: ch, code: 'Key' + ch, keyCode: ch.charCodeAt(0) }
+  if (ch >= 'A' && ch <= 'Z') return { key: ch, code: 'Key' + ch, keyCode: ch.charCodeAt(0), shift: true }
   if (ch >= '0' && ch <= '9') return { key: ch, code: 'Digit' + ch, keyCode: ch.charCodeAt(0) }
   return PUNCTUATION[ch]
 }
@@ -111,13 +112,25 @@ export interface KeyChord {
   info: KeyInfo
 }
 
+function keyChord(info: KeyInfo, modifiers = 0): KeyChord {
+  const unshiftedLetterShortcut =
+    modifiers !== 0 && !(modifiers & MODIFIER_BITS.shift) && /^[A-Z]$/.test(info.key)
+  if (unshiftedLetterShortcut) {
+    return { info: { ...info, key: info.key.toLowerCase(), shift: undefined }, modifiers }
+  }
+  return {
+    info,
+    modifiers: modifiers | (info.shift ? MODIFIER_BITS.shift : 0)
+  }
+}
+
 export function modifierBitForKey(key: string): number {
   return MODIFIER_BITS[key.toLowerCase()] ?? 0
 }
 
 export function parseKeyChord(chord: string): KeyChord {
   const parts = chord.split('+')
-  if (parts.length < 2) return { modifiers: 0, info: namedKeyInfo(chord) }
+  if (parts.length < 2) return keyChord(namedKeyInfo(chord))
   let modifiers = 0
   const keyParts: string[] = []
   for (const part of parts) {
@@ -125,7 +138,7 @@ export function parseKeyChord(chord: string): KeyChord {
     if (bit) modifiers |= bit
     else keyParts.push(part)
   }
-  if (modifiers === 0) return { modifiers: 0, info: namedKeyInfo(chord) }
+  if (modifiers === 0) return keyChord(namedKeyInfo(chord))
   const key = keyParts.length ? keyParts.join('+') : chord
-  return { modifiers, info: namedKeyInfo(key) }
+  return keyChord(namedKeyInfo(key), modifiers)
 }

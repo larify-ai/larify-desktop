@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react'
-import { FileText } from 'lucide-react'
+import { SquareCode } from 'lucide-react'
 import type { RendererPlugin } from '@renderer/app/registry/renderer-plugins'
 import {
   type WorkbenchRendererRegistry,
@@ -92,7 +92,7 @@ const plugin: RendererPlugin = {
             />
           </Suspense>
         ),
-        icon: <FileText aria-hidden />,
+        icon: <SquareCode aria-hidden className="larify-workbench-icon-file" />,
         order: 10,
         title: '文件'
       })
@@ -104,7 +104,7 @@ const plugin: RendererPlugin = {
             <ChangesView {...props} />
           </Suspense>
         ),
-        icon: <ChangesIcon />,
+        icon: <ChangesIcon className="larify-workbench-icon-changes" />,
         order: 20,
         title: '变更'
       })

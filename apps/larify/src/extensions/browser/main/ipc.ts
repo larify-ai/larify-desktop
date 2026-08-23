@@ -1,12 +1,12 @@
 import {
   ipcMain,
-  type IpcMainEvent,
+  session,
+  webContents,
   type IpcMainInvokeEvent,
-  type Rectangle,
   type WebContents
 } from "electron"
 import type { BrowserService } from "./browser-service"
-import type { BrowserState } from "../shared/types"
+import { BROWSER_PARTITION, type BrowserState } from "../shared/types"
 
 export function registerBrowserIpc(browser: BrowserService): () => void {
   const subscribers = new Map<WebContents, () => void>()
@@ -41,6 +41,8 @@ export function registerBrowserIpc(browser: BrowserService): () => void {
       subscribe(event)
       return browser.tab(sessionId, id)?.state() ?? null
     },
+    "browser:openUrl": (_event: IpcMainInvokeEvent, sessionId: string, url: string) =>
+      browser.openUrl(sessionId, url),
     "browser:navigate": (_event: IpcMainInvokeEvent, sessionId: string, id: number, url: string) =>
       browser.navigate(sessionId, id, url),
     "browser:back": (_event: IpcMainInvokeEvent, sessionId: string, id: number) =>
@@ -49,12 +51,23 @@ export function registerBrowserIpc(browser: BrowserService): () => void {
       browser.goForward(sessionId, id),
     "browser:reload": (_event: IpcMainInvokeEvent, sessionId: string, id: number) =>
       browser.reload(sessionId, id),
-    "browser:setVisible": (
-      _event: IpcMainInvokeEvent,
+    "browser:attach": (
+      event: IpcMainInvokeEvent,
       sessionId: string,
       id: number,
-      visible: boolean
-    ) => browser.setVisible(sessionId, id, visible)
+      webContentsId: number
+    ) => {
+      const guest = webContents.fromId(webContentsId)
+      if (
+        !guest ||
+        guest.hostWebContents !== event.sender ||
+        guest.getType() !== "webview" ||
+        guest.session !== session.fromPartition(BROWSER_PARTITION)
+      ) {
+        throw new Error("browser guest WebContents is unavailable")
+      }
+      browser.attach(sessionId, id, guest)
+    }
   }
 
   for (const [channel, handler] of Object.entries(handlers)) {
@@ -62,28 +75,10 @@ export function registerBrowserIpc(browser: BrowserService): () => void {
     ipcMain.handle(channel, handler)
   }
 
-  const setBoundsSync = (
-    event: IpcMainEvent,
-    sessionId: string,
-    id: number,
-    bounds: Rectangle,
-    live = false,
-    activate = false
-  ): void => {
-    try {
-      event.returnValue = browser.setBounds(sessionId, id, bounds, live, activate) !== false
-    } catch (error) {
-      console.error("[browser] Failed to update bounds:", error)
-      event.returnValue = false
-    }
-  }
-  ipcMain.on("browser:setBoundsSync", setBoundsSync)
-
   return () => {
     unbindChange()
     for (const [sender, onDestroyed] of subscribers) sender.off("destroyed", onDestroyed)
     subscribers.clear()
-    ipcMain.removeListener("browser:setBoundsSync", setBoundsSync)
     for (const channel of Object.keys(handlers)) ipcMain.removeHandler(channel)
   }
 }

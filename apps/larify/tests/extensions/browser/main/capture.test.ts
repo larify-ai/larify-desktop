@@ -169,6 +169,28 @@ describe('element screenshot frame session', () => {
     })
   })
 
+  it('uses legacy visualViewport when cssVisualViewport is present but invalid', async () => {
+    const send = vi.fn(async (method: string) => {
+      if (method === 'Page.getLayoutMetrics') {
+        return {
+          cssVisualViewport: { pageX: 0, pageY: 0, clientWidth: 0, clientHeight: 600 },
+          visualViewport: { pageX: 4, pageY: 6, clientWidth: 800, clientHeight: 600 }
+        }
+      }
+      return method === 'Page.captureScreenshot' ? { data: 'viewport' } : {}
+    })
+
+    await screenshot({ send, refMap: new Map() }, {})
+
+    expect(send).toHaveBeenCalledWith(
+      'Page.captureScreenshot',
+      expect.objectContaining({
+        clip: { x: 4, y: 6, width: 800, height: 600, scale: 1 },
+        captureBeyondViewport: false
+      })
+    )
+  })
+
   it('preserves full-page capture behavior', async () => {
     const send = vi.fn(async (method: string) => {
       if (method === 'Page.getLayoutMetrics') {
@@ -188,6 +210,46 @@ describe('element screenshot frame session', () => {
       })
     )
   })
+
+  it('uses legacy contentSize when cssContentSize is present but invalid', async () => {
+    const send = vi.fn(async (method: string) => {
+      if (method === 'Page.getLayoutMetrics') {
+        return {
+          cssContentSize: { width: 0, height: 2400 },
+          contentSize: { width: 1200, height: 2400 }
+        }
+      }
+      return method === 'Page.captureScreenshot' ? { data: 'full-page' } : {}
+    })
+
+    await screenshot({ send, refMap: new Map() }, { fullPage: true })
+
+    expect(send).toHaveBeenCalledWith(
+      'Page.captureScreenshot',
+      expect.objectContaining({
+        clip: { x: 0, y: 0, width: 1200, height: 2400, scale: 1 },
+        captureBeyondViewport: true
+      })
+    )
+  })
+
+  it.each([{}, { cssContentSize: { width: 0, height: 2400 } }])(
+    'falls back to a viewport capture when full-page size is unavailable (%j)',
+    async (metrics) => {
+      const send = vi.fn(async (method: string) =>
+        method === 'Page.getLayoutMetrics' ? metrics : { data: 'viewport' }
+      )
+
+      await expect(
+        screenshot({ send, refMap: new Map() }, { fullPage: true })
+      ).resolves.toEqual({ data: 'viewport', mimeType: 'image/png' })
+      expect(send).toHaveBeenCalledWith('Page.captureScreenshot', {
+        format: 'png',
+        fromSurface: true,
+        optimizeForSpeed: true
+      })
+    }
+  )
 })
 
 describe('mapFrameBoxToTopLevel', () => {

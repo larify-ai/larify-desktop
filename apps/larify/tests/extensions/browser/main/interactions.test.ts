@@ -10,6 +10,7 @@ import {
   callOn,
   check,
   fill,
+  press,
   select,
   type as typeInto,
 } from "../../../../src/extensions/browser/main/interactions"
@@ -20,15 +21,32 @@ interface Call {
   sessionId?: string
 }
 
-function makeCtx(): { ctx: Parameters<typeof fill>[0]; calls: Call[] } {
+function makeCtx(): {
+  ctx: Parameters<typeof fill>[0]
+  calls: Call[]
+  dispatchKey: ReturnType<typeof vi.fn>
+  pressKey: ReturnType<typeof vi.fn>
+  insertText: ReturnType<typeof vi.fn>
+} {
   const calls: Call[] = []
+  const dispatchKey = vi.fn(async () => undefined)
+  const pressKey = vi.fn(async () => undefined)
+  const insertText = vi.fn(async () => undefined)
   const send = vi.fn(async (method: string, params: Record<string, unknown>, sessionId?: string) => {
     calls.push({ method, params, sessionId })
     return { result: { value: undefined } }
   })
   return {
-    ctx: { send, refMap: new Map(), sessions: undefined } as unknown as Parameters<typeof fill>[0],
+    ctx: {
+      send,
+      input: { dispatchKey, pressKey, insertText },
+      refMap: new Map(),
+      sessions: undefined,
+    } as unknown as Parameters<typeof fill>[0],
     calls,
+    dispatchKey,
+    pressKey,
+    insertText,
   }
 }
 
@@ -48,64 +66,73 @@ describe("interactions sessionId threading", () => {
   })
 
   it("fill inserts text into the resolved frame session", async () => {
-    const { ctx, calls } = makeCtx()
+    const { ctx, pressKey, insertText } = makeCtx()
 
     await fill(ctx, "ref_1", "hello")
 
-    const insert = calls.find((c) => c.method === "Input.insertText")
-    expect(insert).toMatchObject({ params: { text: "hello" }, sessionId: "SID" })
+    expect(pressKey).toHaveBeenCalledTimes(2)
+    expect(pressKey.mock.calls[0]).toEqual([
+      expect.objectContaining({ key: "a" }),
+      process.platform === "darwin" ? 4 : 2,
+    ])
+    expect(pressKey.mock.calls[1]).toEqual([expect.objectContaining({ key: "Backspace" })])
+    expect(insertText).toHaveBeenCalledWith("hello")
   })
 
-  it("fill clears contenteditable via textContent rather than value", async () => {
+  it("fill clears through native input rather than mutating the element value", async () => {
     const { ctx, calls } = makeCtx()
 
     await fill(ctx, "ref_1", "hello")
 
-    const clearCall = calls.find(
-      (c) =>
-        c.method === "Runtime.callFunctionOn" &&
-        String((c.params as { functionDeclaration?: string }).functionDeclaration).includes("this.value=''"),
-    )
-    const decl = String((clearCall?.params as { functionDeclaration: string }).functionDeclaration)
-    expect(decl).toContain("isContentEditable")
-    expect(decl).toContain("this.textContent=''")
+    const declarations = calls
+      .filter((call) => call.method === "Runtime.callFunctionOn")
+      .map((call) => String(call.params.functionDeclaration))
+    expect(declarations).toEqual(["function(){ this.focus(); }"])
+    expect(declarations.join("\n")).not.toContain("this.value")
+    expect(declarations.join("\n")).not.toContain("textContent")
   })
 
   it("type dispatches keys and text into the resolved frame session", async () => {
-    const { ctx, calls } = makeCtx()
+    const { ctx, calls, dispatchKey, insertText } = makeCtx()
 
     await typeInto(ctx, "ref_1", "a\tb", false, 0)
 
-    const keyEvents = calls.filter((c) => c.method === "Input.dispatchKeyEvent")
-    const textEvents = calls.filter((c) => c.method === "Input.insertText")
+    expect(calls.filter((c) => c.method === "Input.dispatchKeyEvent")).toHaveLength(0)
+    expect(dispatchKey).toHaveBeenCalledTimes(1)
+    expect(dispatchKey.mock.calls[0][0]).toMatchObject({ key: "Tab" })
+    expect(insertText.mock.calls.map(([text]) => text)).toEqual(["a", "b"])
+  })
 
-    expect(keyEvents.length).toBeGreaterThan(0)
-    expect(keyEvents.every((c) => c.sessionId === "SID")).toBe(true)
-    expect(textEvents.map((c) => c.params.text)).toEqual(["a", "b"])
-    expect(textEvents.every((c) => c.sessionId === "SID")).toBe(true)
+  it("keeps chord modifiers separate from already-held modifiers", async () => {
+    const { ctx, pressKey } = makeCtx()
+
+    await press(ctx, "Ctrl+A", 8)
+
+    expect(pressKey).toHaveBeenCalledWith(
+      expect.objectContaining({ key: "a", code: "KeyA" }),
+      2,
+      8,
+    )
   })
 
   it("stops delayed typing when the operation is aborted", async () => {
-    const { ctx, calls } = makeCtx()
+    const { ctx, insertText } = makeCtx()
     const controller = new AbortController()
     const pending = typeInto(ctx, "ref_1", "abc", false, 10_000, controller.signal)
     await vi.waitFor(() => {
-      expect(calls.some((call) => call.method === "Input.insertText")).toBe(true)
+      expect(insertText).toHaveBeenCalled()
     })
 
     controller.abort()
 
     await expect(pending).rejects.toThrow("typing was cancelled")
-    expect(calls.filter((call) => call.method === "Input.insertText")).toHaveLength(1)
+    expect(insertText).toHaveBeenCalledTimes(1)
   })
 
   it("does not wait or fail on cancellation after the final character", async () => {
-    const { ctx } = makeCtx()
+    const { ctx, insertText } = makeCtx()
     const controller = new AbortController()
-    vi.mocked(ctx.send).mockImplementation(async (method) => {
-      if (method === "Input.insertText") controller.abort()
-      return { result: { value: undefined } }
-    })
+    insertText.mockImplementation(async () => controller.abort())
 
     await expect(
       typeInto(ctx, "ref_1", "a", false, 10_000, controller.signal),

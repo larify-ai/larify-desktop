@@ -85,6 +85,42 @@ describe('activity group part', () => {
     expect(buttons[0]?.getAttribute('aria-expanded')).toBe('true')
     expect(container.textContent).toContain('处理了 0秒')
     expect(container.textContent).toContain('Read source')
+    expect(container.querySelector('[data-shimmer-content]')).toBeNull()
+  })
+
+  it('shows a live text only once as a shimmering single-line title', async () => {
+    const liveMessage = {
+      id: 'assistant-live-text',
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'Inspecting the current implementation', state: 'streaming' }]
+    } as UIMessage
+    await act(async () =>
+      root.render(
+        createElement(ActivityGroupPart, {
+          item: {
+            kind: 'activity-group',
+            partIndexes: [0],
+            summary: '处理了 1秒',
+            defaultOpen: true,
+            children: [
+              {
+                kind: 'intermediate-text',
+                partIndexes: [0],
+                summary: 'Inspecting the current implementation',
+                defaultOpen: false
+              }
+            ]
+          },
+          message: liveMessage,
+          streaming: true
+        })
+      )
+    )
+
+    const liveTitle = container.querySelector('[data-shimmer-content]')
+    expect(liveTitle?.textContent).toContain('Inspecting the current implementation')
+    expect(liveTitle?.querySelector('[aria-hidden="true"]')).toBeNull()
+    expect(container.querySelector('[data-markdown]')).toBeNull()
   })
 
   it('does not count a partial second as a completed second', async () => {
@@ -122,7 +158,7 @@ describe('activity group part', () => {
     expect(container.querySelector('[data-detail]')?.textContent).toBe('Read source')
   })
 
-  it('renders expanded reasoning inside a distinct visual container', async () => {
+  it('renders expanded reasoning in the existing reasoning card', async () => {
     const reasoningMessage = {
       id: 'assistant-reasoning',
       role: 'assistant',
@@ -144,9 +180,12 @@ describe('activity group part', () => {
     )
 
     const reasoning = container.querySelector('[data-reasoning-content]')
-    expect(reasoning?.className).toContain('border')
+    expect(reasoning?.className).toContain('rounded-md')
+    expect(reasoning?.className).toContain('border-border/70')
     expect(reasoning?.className).toContain('bg-muted/20')
-    expect(reasoning?.className).toContain('text-muted-foreground')
+    expect(reasoning?.className).toContain('px-3')
+    expect(reasoning?.className).toContain('text-foreground')
+    expect(reasoning?.className).not.toContain('text-muted-foreground')
     expect(reasoning?.textContent).toBe('Inspect the implementation')
   })
 
@@ -180,6 +219,49 @@ describe('activity group part', () => {
     )
 
     expect(container.querySelector('[data-markdown]')?.getAttribute('data-animating')).toBe('true')
+  })
+
+  it('uses explicit streaming state instead of assuming the last child is live', async () => {
+    const reasoningMessage = {
+      id: 'assistant-explicit-live-reasoning',
+      role: 'assistant',
+      parts: [
+        { type: 'reasoning', text: 'Still inspecting', state: 'streaming' },
+        { type: 'reasoning', text: 'Later completed item', state: 'done' }
+      ]
+    } as UIMessage
+    await act(async () =>
+      root.render(
+        createElement(ActivityGroupPart, {
+          item: {
+            kind: 'activity-group',
+            partIndexes: [0, 1],
+            summary: '处理了 1秒',
+            defaultOpen: true,
+            children: [
+              {
+                kind: 'reasoning',
+                partIndexes: [0],
+                summary: 'Still inspecting',
+                defaultOpen: true
+              },
+              {
+                kind: 'reasoning',
+                partIndexes: [1],
+                summary: 'Later completed item',
+                defaultOpen: true
+              }
+            ]
+          },
+          message: reasoningMessage,
+          streaming: true
+        })
+      )
+    )
+
+    const markdown = container.querySelectorAll('[data-markdown]')
+    expect(markdown[0]?.getAttribute('data-animating')).toBe('true')
+    expect(markdown[1]?.getAttribute('data-animating')).toBe('false')
   })
 
   it('streams only the latest legacy reasoning child when part state is absent', async () => {

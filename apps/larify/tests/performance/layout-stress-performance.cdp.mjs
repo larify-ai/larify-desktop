@@ -113,6 +113,24 @@ function runTrace(output) {
   })
 }
 
+function leaveStressSession(output) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [traceScript], {
+      env: {
+        ...process.env,
+        LARIFY_TRACE_CLEANUP_STRESS_ONLY: '1',
+        LARIFY_TRACE_OUTPUT: output
+      },
+      stdio: 'inherit'
+    })
+    child.once('error', reject)
+    child.once('exit', (code) => {
+      if (code === 0) resolve()
+      else reject(new Error(`stress cleanup exited with code ${code}`))
+    })
+  })
+}
+
 const directory = await mkdtemp(join(tmpdir(), 'larify-layout-stress-performance-'))
 try {
   createStressSession({ cwd: desktopCwd, messageCount: syntheticMessageCount })
@@ -172,6 +190,7 @@ try {
   if (result.domNodes > limits.maxDomNodes) failures.push(`DOM nodes ${result.domNodes}`)
   if (failures.length > 0) throw new Error(failures.join('; '))
 } finally {
+  await leaveStressSession(join(directory, 'cleanup.json')).catch(() => undefined)
   removeStressSession()
   await rm(directory, { recursive: true, force: true })
 }

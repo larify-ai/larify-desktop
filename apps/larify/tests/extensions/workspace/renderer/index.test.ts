@@ -125,6 +125,12 @@ describe('workspace renderer plugin', () => {
 
     expect(renderers.get('workspace')).toMatchObject({ order: 10, title: '文件' })
     expect(renderers.get('changes')).toMatchObject({ order: 20, title: '变更' })
+    expect(renderers.get('workspace')?.icon).toMatchObject({
+      props: { className: 'larify-workbench-icon-file' }
+    })
+    expect(renderers.get('changes')?.icon).toMatchObject({
+      props: { className: 'larify-workbench-icon-changes' }
+    })
     for (const mime of ['application/pdf', 'image/png']) {
       expect(previews.find({ binary: false, mime, path: 'file' })?.component).toBe(
         NativeFilePreview

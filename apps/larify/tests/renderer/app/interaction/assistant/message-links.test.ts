@@ -53,11 +53,13 @@ describe('createMessageLinkHandler', () => {
 
     handler({ kind: 'url', target: 'https://example.com/doc' })
 
-    expect(window.bridge.invoke).toHaveBeenCalledWith('resource:create', 'browser', sessionId, {
-      url: 'https://example.com/doc'
-    })
+    expect(window.bridge.invoke).toHaveBeenCalledWith(
+      'browser:openUrl',
+      sessionId,
+      'https://example.com/doc'
+    )
 
-    // 等待 resource:create resolve 后应派发选中浏览器资源事件
+    // 等待 browser:openUrl resolve 后应派发选中浏览器资源事件
     await vi.waitFor(() => {
       const selects = dispatchSpy.mock.calls
         .map(([e]) => e as CustomEvent)
@@ -91,7 +93,7 @@ describe('createMessageLinkHandler', () => {
       .filter((event) => event.type === 'larify:workbench-select-resource')
     expect(selections).toHaveLength(1)
     expect(selections[0].detail.resourceId).toBe(2)
-    expect(window.bridge.invoke).toHaveBeenCalledWith('resource:close', 1)
+    expect(window.bridge.invoke).not.toHaveBeenCalledWith('resource:close', 1)
   })
 
   it('does not select a pending browser resource after a file link is opened', async () => {
@@ -108,7 +110,7 @@ describe('createMessageLinkHandler', () => {
       .map(([event]) => event as CustomEvent)
       .filter((event) => event.type === 'larify:workbench-select-resource')
     expect(selections).toHaveLength(0)
-    expect(window.bridge.invoke).toHaveBeenCalledWith('resource:close', 1)
+    expect(window.bridge.invoke).not.toHaveBeenCalledWith('resource:close', 1)
   })
 
   it('navigates only the latest file when workspace callbacks run out of order', async () => {
@@ -204,7 +206,7 @@ describe('createMessageLinkHandler', () => {
     consoleError.mockRestore()
   })
 
-  it('closes a pending browser resource after the handler is disposed', async () => {
+  it('does not select a pending browser resource after the handler is disposed', async () => {
     const browser = deferred<number>()
     vi.mocked(window.bridge.invoke).mockReturnValueOnce(browser.promise)
     const handler = createMessageLinkHandler(cwd, sessionId)
@@ -214,7 +216,7 @@ describe('createMessageLinkHandler', () => {
     browser.resolve(3)
     await Promise.resolve()
 
-    expect(window.bridge.invoke).toHaveBeenCalledWith('resource:close', 3)
+    expect(window.bridge.invoke).not.toHaveBeenCalledWith('resource:close', 3)
     expect(dispatchSpy).not.toHaveBeenCalled()
   })
 

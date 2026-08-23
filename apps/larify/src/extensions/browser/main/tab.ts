@@ -21,6 +21,7 @@ import * as queries from "./queries"
 import type { Box } from "./queries"
 import { htmlToMarkdown } from "./read"
 import * as input from "./input"
+import * as nativeInput from "./nativeInput"
 import { newMouseState, type MouseButton } from "./input"
 import * as waits from "./waits"
 import type { WaitState } from "./waits"
@@ -202,11 +203,19 @@ function evalJsExpression(script: string): string {
 
 interface BrowserTabOptions {
   automation?: boolean
+  deferred?: boolean
 }
+
+export type BrowserColorScheme = "dark" | "light"
 
 export class BrowserTab {
   readonly id: number
-  readonly view: WebContentsView
+  private readonly deferred: boolean
+  private nativeView?: WebContentsView
+  private contents?: WebContents
+  private resolveAttached!: (contents: WebContents) => void
+  private rejectAttached!: (error: Error) => void
+  private attached!: Promise<WebContents>
   private currentUrl = ""
   private pendingUrl = ""
   private navigationTask: Promise<void> | null = null
@@ -216,15 +225,18 @@ export class BrowserTab {
   private favIconRequest = 0
   private error: BrowserTabError | null = null
   private onChange?: () => void
+  private onOpen?: (url?: string) => void
   private readonly cdpBuffer = new CdpEventBuffer()
   private readonly consoleBuffer = new ConsoleBuffer()
-  private readonly cdpReady: Promise<void>
+  private cdpReady: Promise<void>
   private refMap = new Map<string, RefEntry>()
   private nextRef = 1
   private readonly frames = new FrameSessions()
   private readonly mouseState = newMouseState()
   private keyboardModifiers = 0
   private inputTask = Promise.resolve()
+  private renderingLeases = 0
+  private renderingReady: Promise<void> | null = null
   private readonly pendingNetworkRequests = new Set<string>()
   private readonly networkWaiters = new Set<() => void>()
   private readonly cancelDownloads = new Set<(error: Error) => void>()
@@ -233,22 +245,147 @@ export class BrowserTab {
   private readonly cdpSend: CdpSend = (method, params, sessionId) =>
     this.sendCdp(method, params, sessionId)
 
-  constructor(id: number, partition: string, { automation = true }: BrowserTabOptions = {}) {
+  constructor(
+    id: number,
+    partition: string,
+    { automation = true, deferred = false }: BrowserTabOptions = {}
+  ) {
     this.id = id
-    this.view = new WebContentsView({
+    this.deferred = deferred
+    this.resetAttachment()
+    if (deferred) {
+      this.cdpReady = automation
+        ? this.attached.then(() => this.initCdp(Promise.resolve()))
+        : this.attached.then(() => undefined)
+      void this.cdpReady.catch(() => {})
+      return
+    }
+    const view = new WebContentsView({
       webPreferences: { partition, backgroundThrottling: true },
     })
+    this.nativeView = view
+    this.contents = view.webContents
+    this.resolveAttached(this.contents)
     this.wireEvents()
     if (automation) {
-      const blankReady = this.view.webContents.loadURL("about:blank").catch(() => {})
+      const blankReady = this.webContents.loadURL("about:blank").catch(() => {})
       this.cdpReady = this.initCdp(blankReady)
     } else {
       this.cdpReady = Promise.resolve()
     }
   }
 
+  get webContents(): WebContents {
+    if (!this.contents || this.contents.isDestroyed()) throw new Error("browser tab is not ready")
+    return this.contents
+  }
+
+  get view(): WebContentsView {
+    if (!this.nativeView) throw new Error("browser tab has no native view")
+    return this.nativeView
+  }
+
+  attach(contents: WebContents): void {
+    if (this.destroyed) {
+      if (!contents.isDestroyed()) contents.close()
+      return
+    }
+    if (this.contents === contents) return
+    const replacing = Boolean(this.contents)
+    if (this.contents && !this.contents.isDestroyed()) {
+      throw new Error("browser tab is already attached")
+    }
+    this.contents = contents
+    this.wireEvents()
+    if (replacing) {
+      this.cdpReady = this.initCdp(Promise.resolve())
+      void this.cdpReady.catch(() => {})
+    } else {
+      this.resolveAttached(contents)
+    }
+    if (this.renderingLeases > 0) this.renderingReady = this.enableRendering()
+  }
+
+  private resetAttachment(): void {
+    this.attached = new Promise<WebContents>((resolve, reject) => {
+      this.resolveAttached = resolve
+      this.rejectAttached = reject
+    })
+  }
+
+  ready(): Promise<void> {
+    return this.attached.then(() => undefined)
+  }
+
+  isReady(): boolean {
+    return Boolean(this.contents && !this.contents.isDestroyed())
+  }
+
+  setBackgroundThrottling(throttled: boolean): void {
+    this.contents?.setBackgroundThrottling(throttled)
+  }
+
+  async setColorScheme(colorScheme: BrowserColorScheme): Promise<void> {
+    await this.sendCdp("Emulation.setEmulatedMedia", {
+      features: [{ name: "prefers-color-scheme", value: colorScheme }],
+    })
+    await this.sendCdp("Emulation.setAutoDarkModeOverride", {
+      enabled: colorScheme === "dark",
+    })
+  }
+
+  invalidate(): void {
+    this.contents?.invalidate()
+  }
+
+  async acquireRendering(): Promise<void> {
+    await this.ready()
+    this.renderingLeases++
+    if (this.renderingLeases === 1) this.renderingReady = this.enableRendering()
+    const ready = this.renderingReady
+    try {
+      await ready
+    } catch (error) {
+      this.renderingLeases--
+      if (this.renderingLeases === 0 && this.renderingReady === ready) {
+        this.renderingReady = null
+      }
+      throw error
+    }
+  }
+
+  private async enableRendering(): Promise<void> {
+    const contents = this.contents
+    await this.cdpReady
+    if (
+      this.renderingLeases === 0 ||
+      !contents ||
+      contents.isDestroyed() ||
+      this.contents !== contents
+    ) return
+    await this.sendCdp("Page.bringToFront").catch(() => {})
+    await this.sendCdp("Emulation.setFocusEmulationEnabled", { enabled: true }).catch(() => {})
+    this.invalidate()
+    await new Promise<void>((resolve) => setImmediate(resolve))
+  }
+
+  async releaseRendering(): Promise<void> {
+    if (this.renderingLeases === 0) return
+    this.renderingLeases--
+    if (this.renderingLeases > 0 || !this.isReady()) return
+    const ready = this.renderingReady
+    await ready
+    if (this.renderingLeases > 0 || this.renderingReady !== ready) return
+    await this.sendCdp("Emulation.setFocusEmulationEnabled", { enabled: false }).catch(() => {})
+    if (this.renderingLeases === 0 && this.renderingReady === ready) this.renderingReady = null
+  }
+
   bindChange(cb: () => void): void {
     this.onChange = cb
+  }
+
+  bindOpen(cb: (url?: string) => void): void {
+    this.onOpen = cb
   }
 
   navigate(url: string): boolean {
@@ -270,19 +407,25 @@ export class BrowserTab {
   }
 
   goBack(): void {
-    if (this.view.webContents.navigationHistory.canGoBack()) {
-      this.runNavigationAction(() => this.view.webContents.navigationHistory.goBack())
-    }
+    void this.ready().then(() => {
+      if (this.webContents.navigationHistory.canGoBack()) {
+        this.runNavigationAction(() => this.webContents.navigationHistory.goBack())
+      }
+    }).catch(() => {})
   }
 
   goForward(): void {
-    if (this.view.webContents.navigationHistory.canGoForward()) {
-      this.runNavigationAction(() => this.view.webContents.navigationHistory.goForward())
-    }
+    void this.ready().then(() => {
+      if (this.webContents.navigationHistory.canGoForward()) {
+        this.runNavigationAction(() => this.webContents.navigationHistory.goForward())
+      }
+    }).catch(() => {})
   }
 
   reload(): void {
-    this.runNavigationAction(() => this.view.webContents.reload())
+    void this.ready()
+      .then(() => this.runNavigationAction(() => this.webContents.reload()))
+      .catch(() => {})
   }
 
   async navigateAndWait(url: string): Promise<void> {
@@ -301,12 +444,12 @@ export class BrowserTab {
     this.onChange?.()
     const task = this.cdpReady.then(async () => {
       const loaded = waitForWebContentsLoad(
-        this.view.webContents,
+        this.webContents,
         NAVIGATION_TIMEOUT,
         (url) => this.activeNavigationUrls.has(url),
       )
       await Promise.all([
-        this.view.webContents.loadURL(target).catch(() => {
+        this.webContents.loadURL(target).catch(() => {
           // load failure is captured in state via did-fail-load
         }),
         loaded,
@@ -325,7 +468,8 @@ export class BrowserTab {
   }
 
   async goBackAndWait(): Promise<void> {
-    const wc = this.view.webContents
+    await this.ready()
+    const wc = this.webContents
     if (!wc.navigationHistory.canGoBack()) return
     const waitController = new AbortController()
     const loaded = waitForWebContentsLoad(wc, NAVIGATION_TIMEOUT, undefined, waitController.signal)
@@ -342,7 +486,8 @@ export class BrowserTab {
   }
 
   async goForwardAndWait(): Promise<void> {
-    const wc = this.view.webContents
+    await this.ready()
+    const wc = this.webContents
     if (!wc.navigationHistory.canGoForward()) return
     const waitController = new AbortController()
     const loaded = waitForWebContentsLoad(wc, NAVIGATION_TIMEOUT, undefined, waitController.signal)
@@ -359,7 +504,8 @@ export class BrowserTab {
   }
 
   async reloadAndWait(): Promise<void> {
-    const wc = this.view.webContents
+    await this.ready()
+    const wc = this.webContents
     const waitController = new AbortController()
     const loaded = waitForWebContentsLoad(wc, NAVIGATION_TIMEOUT, undefined, waitController.signal)
     let generation: number
@@ -388,7 +534,19 @@ export class BrowserTab {
   }
 
   state(): BrowserTabState {
-    const wc = this.view.webContents
+    const wc = this.contents
+    if (!wc || wc.isDestroyed()) {
+      return {
+        id: this.id,
+        url: this.pendingUrl,
+        title: "",
+        favIconUrl: this.favIconUrl,
+        loading: Boolean(this.pendingUrl),
+        canGoBack: false,
+        canGoForward: false,
+        error: this.error,
+      }
+    }
     const url = wc.getURL()
     const isBlank = !url || url === "about:blank"
     const displayUrl = isBlank ? this.pendingUrl : url
@@ -407,9 +565,13 @@ export class BrowserTab {
   destroy(): void {
     if (this.destroyed) return
     this.destroyed = true
-    const error = new Error("tab was closed during download")
-    for (const cancel of [...this.cancelDownloads]) cancel(error)
-    const wc = this.view.webContents
+    const downloadError = new Error("tab was closed during download")
+    for (const cancel of [...this.cancelDownloads]) cancel(downloadError)
+    const wc = this.contents
+    if (!wc) {
+      this.rejectAttached(new Error("tab was closed before it was ready"))
+      return
+    }
     if (wc.isDestroyed()) return
     const dbg = wc.debugger
     if (dbg?.isAttached()) dbg.detach()
@@ -423,14 +585,14 @@ export class BrowserTab {
     timeoutMs = 30000,
     signal?: AbortSignal,
   ): Promise<unknown> {
-    const wc = this.view.webContents
+    await this.cdpReady
+    const wc = this.webContents
     const throwIfCancelled = (): void => {
       if (signal?.aborted) throw new Error(`CDP command was cancelled: ${method}`)
       if (this.destroyed || wc.isDestroyed())
         throw new Error(`tab was closed before CDP command: ${method}`)
     }
     throwIfCancelled()
-    await this.cdpReady
     throwIfCancelled()
     const dbg = wc.debugger
     if (!dbg.isAttached()) {
@@ -462,7 +624,8 @@ export class BrowserTab {
   }
 
   async snapshot(opts: CaptureOptions = {}): Promise<string> {
-    const url = this.view.webContents.getURL()
+    await this.ready()
+    const url = this.webContents.getURL()
     if (!url || url === "about:blank") {
       throw new Error("cannot snapshot a blank tab: navigate to a page first")
     }
@@ -561,10 +724,11 @@ export class BrowserTab {
     timeoutMs = 1_800_000,
     signal?: AbortSignal,
   ): Promise<string> {
+    if (!this.contents) await this.ready()
     if (signal?.aborted) throw new Error("download was cancelled")
     if (this.downloadActive) throw new Error("a download is already in progress for this tab")
     this.downloadActive = true
-    const wc = this.view.webContents
+    const wc = this.webContents
     return new Promise<string>((resolve, reject) => {
       let started = false
       let settled = false
@@ -712,7 +876,7 @@ export class BrowserTab {
       const { modifiers, info } = parseKeyChord(key)
       const modifier = modifierBitForKey(info.key)
       const nextModifiers = this.keyboardModifiers | modifiers | modifier
-      await input.keyDown(this.cdpSend, info, nextModifiers)
+      await nativeInput.keyDown(this.webContents, info, nextModifiers)
       if (modifier) this.keyboardModifiers = nextModifiers
     })
   }
@@ -724,17 +888,17 @@ export class BrowserTab {
       const nextModifiers = modifier
         ? this.keyboardModifiers & ~modifier
         : this.keyboardModifiers | modifiers
-      await input.keyUp(this.cdpSend, info, nextModifiers)
+      await nativeInput.keyUp(this.webContents, info, nextModifiers)
       if (modifier) this.keyboardModifiers = nextModifiers
     })
   }
 
   async keyboardType(text: string): Promise<void> {
-    await this.runInput(() => input.typeText(this.cdpSend, text, this.keyboardModifiers))
+    await this.runInput(() => nativeInput.typeText(this.webContents, text, this.keyboardModifiers))
   }
 
   async keyboardInsertText(text: string): Promise<void> {
-    await this.runInput(() => input.insertText(this.cdpSend, text))
+    await this.runInput(() => nativeInput.insertText(this.webContents, text))
   }
 
   async mouseMove(x: number, y: number): Promise<void> {
@@ -754,12 +918,15 @@ export class BrowserTab {
   }
 
   private runInput(operation: () => Promise<void>): Promise<void> {
-    const task = this.inputTask.then(() => {
-      if (this.destroyed || this.view.webContents.isDestroyed()) {
-        throw new Error("tab was closed before input")
+    const execute = (): Promise<void> => {
+      if (this.destroyed || !this.contents || this.contents.isDestroyed()) {
+        return Promise.reject(new Error("tab was closed before input"))
       }
       return operation()
-    })
+    }
+    const task = this.inputTask.then(() =>
+      this.contents ? execute() : this.ready().then(execute)
+    )
     this.inputTask = task.catch(() => {})
     return task
   }
@@ -790,7 +957,8 @@ export class BrowserTab {
     timeoutMs = 25000,
   ): Promise<void> {
     if (state === "networkidle") return this.waitForNetworkIdle(timeoutMs)
-    const wc = this.view.webContents
+    if (!this.contents) await this.ready()
+    const wc = this.webContents
     if (wc.isDestroyed()) throw new Error("tab was closed while waiting for load")
     if (!wc.isLoading()) return
     await new Promise<void>((resolve, reject) => {
@@ -822,24 +990,13 @@ export class BrowserTab {
   }
 
   async screenshot(opts: ScreenshotOptions): Promise<ScreenshotResult> {
-    if (!opts.selector && !opts.fullPage) {
-      try {
-        const image = await this.view.webContents.capturePage()
-        const format = opts.format ?? "png"
-        const buffer = format === "jpeg" ? image.toJPEG(opts.quality ?? 80) : image.toPNG()
-        return {
-          data: buffer.toString("base64"),
-          mimeType: format === "jpeg" ? "image/jpeg" : "image/png"
-        }
-      } catch (error) {
-        if (!(error instanceof Error) || !/display surface/i.test(error.message)) throw error
-      }
-    }
+    await this.ready()
     return screenshot(this.interactCtx(), opts)
   }
 
   async pdf(): Promise<Buffer> {
-    return this.view.webContents.printToPDF({ printBackground: true })
+    await this.ready()
+    return this.webContents.printToPDF({ printBackground: true })
   }
 
   async read(): Promise<{ url: string; title?: string; content: string }> {
@@ -868,7 +1025,7 @@ export class BrowserTab {
     }
     if (html === undefined) throw new Error("page DOM is unavailable after waiting for it to load")
 
-    const sourceUrl = this.view.webContents.getURL()
+    const sourceUrl = this.webContents.getURL()
     const { title, markdown } = await htmlToMarkdown(html, sourceUrl)
     return { url: sourceUrl, title, content: markdown }
   }
@@ -890,7 +1047,7 @@ export class BrowserTab {
   }
 
   private wireEvents(): void {
-    const wc = this.view.webContents
+    const wc = this.webContents
     const emit = (): void => this.onChange?.()
     const syncUrl = (): void => {
       this.currentUrl = wc.getURL()
@@ -937,14 +1094,26 @@ export class BrowserTab {
       this.resetPageState()
       emit()
     })
+    wc.once("destroyed", () => {
+      if (!this.deferred || this.destroyed || this.contents !== wc) return
+      this.contents = undefined
+      this.resetAttachment()
+      this.cdpReady = this.attached.then(() => this.initCdp(Promise.resolve()))
+      void this.cdpReady.catch(() => {})
+    })
   }
 
   private async initCdp(blankReady: Promise<void>): Promise<void> {
     try {
-      const dbg = this.view.webContents.debugger
+      const dbg = this.webContents.debugger
       if (!dbg.isAttached()) dbg.attach()
       dbg.on("message", (_event, eventMethod, eventParams, eventSessionId) => {
         try {
+          if (eventMethod === "Page.windowOpen") {
+            const url = (eventParams as { url?: string }).url
+            this.onOpen?.(url || undefined)
+            return
+          }
           if (this.handleNetworkEvent(eventMethod, eventParams, eventSessionId || undefined)) return
           if (this.handleTargetEvent(dbg, eventMethod, eventParams, eventSessionId || undefined)) {
             return
@@ -1042,6 +1211,12 @@ export class BrowserTab {
   private interactCtx(): Interactions {
     return {
       send: (method, params, sessionId) => this.sendCdp(method, params, sessionId),
+      input: {
+        dispatchKey: (info, modifiers) => nativeInput.dispatchKey(this.webContents, info, modifiers),
+        pressKey: (info, modifiers, heldModifiers) =>
+          nativeInput.pressKey(this.webContents, info, modifiers, heldModifiers),
+        insertText: (text) => nativeInput.insertText(this.webContents, text),
+      },
       waitForEvent: (method, sessionId, timeoutMs) =>
         this.waitForCdpEvent(method, sessionId, timeoutMs),
       refMap: this.refMap,
@@ -1054,8 +1229,8 @@ export class BrowserTab {
     sessionId?: string,
     timeoutMs = 5000,
   ): Promise<unknown> {
-    const dbg = this.view.webContents.debugger
-    const wc = this.view.webContents
+    const dbg = this.webContents.debugger
+    const wc = this.webContents
     return new Promise((resolve, reject) => {
       const cleanup = (): void => {
         clearTimeout(timer)
@@ -1093,8 +1268,10 @@ export class BrowserTab {
 
   private async waitForNetworkIdle(timeoutMs: number): Promise<void> {
     await this.cdpReady
-    const wc = this.view.webContents
-    if (wc.isDestroyed()) throw new Error("tab was closed while waiting for load")
+    if (this.destroyed || !this.contents || this.contents.isDestroyed()) {
+      throw new Error("tab was closed while waiting for load")
+    }
+    const wc = this.webContents
     return new Promise<void>((resolve, reject) => {
       let idle: ReturnType<typeof setTimeout> | null = null
       let settled = false
@@ -1178,7 +1355,7 @@ export class BrowserTab {
   }
 
   private async setFavIcon(favicons: string[]): Promise<void> {
-    const wc = this.view.webContents
+    const wc = this.webContents
     const pageUrl = wc.getURL()
     const sourceUrl = favicons.at(-1) ?? ""
     const request = ++this.favIconRequest

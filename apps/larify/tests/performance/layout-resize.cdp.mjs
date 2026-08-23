@@ -14,7 +14,9 @@ const targets = await fetch(targetUrl).then((response) => {
   return response.json()
 })
 const target = targets.find(
-  ({ type, url }) => type === 'page' && url.startsWith('http://localhost:')
+  ({ type, url }) =>
+    type === 'page' &&
+    (url.startsWith('http://localhost:') || url.endsWith('/out/renderer/index.html'))
 )
 if (!target?.webSocketDebuggerUrl) throw new Error(`Larify page not found at ${targetUrl}`)
 

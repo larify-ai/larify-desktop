@@ -25,7 +25,6 @@ function createService(): BrowserService {
   ]
   return {
     state: vi.fn(() => ({
-      activeId: 1,
       tabs,
     })),
     tab: vi.fn((_, id: number) => ({
@@ -777,6 +776,7 @@ describe("browser toolkit", () => {
       path: "D:\\Downloads\\file.txt",
     })
     expect(tab.download).toHaveBeenCalledWith("a", "D:\\Downloads\\default.txt", 1_800_000, undefined)
+    expect(service.withRendered).toHaveBeenCalledTimes(17)
   })
 
   it("passes the tool cancellation signal to downloads", async () => {

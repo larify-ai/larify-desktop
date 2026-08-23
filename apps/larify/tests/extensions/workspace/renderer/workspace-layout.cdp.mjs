@@ -42,10 +42,10 @@ const click = async (selector) => {
 }
 
 const visibleAria = (label) =>
-  evaluate(`Array.from(document.querySelectorAll(${JSON.stringify(`[aria-label="${label}"]`)})).find(
+  evaluate(`Array.from(document.querySelectorAll(${JSON.stringify(`[aria-label="${label}"]`)})).some(
     (element) => element.getClientRects().length > 0
   )`)
-const hasVisibleAria = async (label) => Boolean(await visibleAria(label))
+const hasVisibleAria = (label) => visibleAria(label)
 const clickAria = (label) =>
   evaluate(`Array.from(document.querySelectorAll(${JSON.stringify(`[aria-label="${label}"]`)})).find(
     (element) => element.getClientRects().length > 0

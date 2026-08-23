@@ -21,7 +21,7 @@ const RECORDER_HTML =
       'const c = document.getElementById("c"), ctx = c.getContext("2d");' +
       'const img = new Image();' +
       'img.onload = () => ctx.drawImage(img, 0, 0, c.width, c.height);' +
-      'let rec = null, stream = null, frameTimer = null, out = null, warmed = false, writeError = null, writeChain = Promise.resolve(), bytes = 0;' +
+      'let rec = null, stream = null, frameTimer = null, out = null, warmed = false, writeError = null, writeChain = Promise.resolve(), bytes = 0, startedAt = 0;' +
       'ipcRenderer.on("record:init", async (_e, o) => {' +
       '  if (rec) { try { rec.stop(); } catch (e) {} rec = null; }' +
       '  if (frameTimer) { clearInterval(frameTimer); frameTimer = null; }' +
@@ -85,7 +85,7 @@ const RECORDER_HTML =
       '      bytes += buf.length;' +
       '    }).catch((err) => { writeError = err; });' +
       '  };' +
-      '  rec.start(250);' +
+      '  rec.start(250); startedAt = Date.now();' +
       '  const emitFrame = () => {' +
       '    if (img.complete && img.naturalWidth) ctx.drawImage(img, 0, 0, c.width, c.height);' +
       '    videoTrack.requestFrame();' +
@@ -97,6 +97,8 @@ const RECORDER_HTML =
       'ipcRenderer.on("record:stop", async () => {' +
       '  if (!rec) { ipcRenderer.send("record:done", { bytes: 0 }); return; }' +
       '  if (frameTimer) { clearInterval(frameTimer); frameTimer = null; }' +
+      '  const remaining = 300 - (Date.now() - startedAt);' +
+      '  if (remaining > 0) await new Promise((res) => setTimeout(res, remaining));' +
       '  await new Promise((res) => { rec.onstop = res; rec.stop(); });' +
       '  await writeChain;' +
       '  if (stream) { stream.getTracks().forEach((track) => track.stop()); stream = null; }' +
@@ -114,6 +116,7 @@ interface ActiveRecording {
   tabId: number
   generation: number
   frameCount: () => number
+  tab: BrowserTab
 }
 
 function waitForIpc<T>(
@@ -191,10 +194,11 @@ export class Recorder {
   private discardDestroyedWindow(): void {
     if (this.win && !this.win.isDestroyed()) return
     if (this.active) {
-      const { dbg, onMessage } = this.active
+      const { dbg, onMessage, tab } = this.active
       this.active = null
       dbg.off('message', onMessage)
       void dbg.sendCommand('Page.stopScreencast').catch(() => {})
+      void tab.releaseRendering().catch(() => {})
     }
     this.win = null
   }
@@ -226,8 +230,11 @@ export class Recorder {
       finishStart = resolve
     })
     this.startDone = startDone
-    const dbg = tab.view.webContents.debugger
+    let renderingAcquired = false
     try {
+      await tab.acquireRendering()
+      renderingAcquired = true
+      const dbg = tab.webContents.debugger
       await mkdir(dirname(path), { recursive: true })
       const [{ width, height }, win] = await Promise.all([this.canvasSize(tab), this.ensureWindow()])
 
@@ -240,7 +247,13 @@ export class Recorder {
       const onMessage: ActiveRecording['onMessage'] = (_event, method, params) => {
         if (method !== 'Page.screencastFrame') return
         frames += 1
-        if (params.data) win.webContents.send('record:frame', params.data)
+        if (params.data && !win.isDestroyed()) {
+          try {
+            win.webContents.send('record:frame', params.data)
+          } catch {
+            // The recorder window can disappear between the destroyed check and send.
+          }
+        }
         if (params.sessionId != null)
           dbg.sendCommand('Page.screencastFrameAck', { sessionId: params.sessionId }).catch(() => {})
       }
@@ -261,9 +274,10 @@ export class Recorder {
         throw new Error('recorder window was destroyed during startup')
       }
       const generation = this.nextGeneration++
-      this.active = { dbg, onMessage, path, tabId: tab.id, generation, frameCount: () => frames }
+      this.active = { dbg, onMessage, path, tabId: tab.id, generation, frameCount: () => frames, tab }
       return generation
     } catch (e) {
+      if (renderingAcquired) await tab.releaseRendering().catch(() => {})
       if (this.win && !this.win.isDestroyed()) this.win.destroy()
       this.win = null
       throw e
@@ -296,11 +310,12 @@ export class Recorder {
 
   private async stopActive(): Promise<{ path: string; bytes: number }> {
     if (!this.active || !this.win) throw new Error('no recording in progress')
-    const { dbg, onMessage, path, frameCount } = this.active
+    const { dbg, onMessage, path, frameCount, tab } = this.active
     const win = this.win
     this.active = null
     await dbg.sendCommand('Page.stopScreencast').catch(() => {})
     dbg.off('message', onMessage)
+    await tab.releaseRendering().catch(() => {})
 
     try {
       const { bytes, error } = await waitForIpc<{ bytes: number; error?: string }>(

@@ -44,6 +44,7 @@ export function WorkbenchSplit({ animated, collapsed, interaction, workbench }: 
       frame ??= window.requestAnimationFrame(() => {
         frame = undefined
         setWidth(pendingWidth, maxWidth)
+        flushNativeLayout()
       })
     }
     const cleanup = (): void => {

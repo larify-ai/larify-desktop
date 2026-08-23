@@ -194,7 +194,7 @@ describe('interaction assistant message list', () => {
     }
   })
 
-  it('keeps the processing area expanded while current text streams separately', async () => {
+  it('keeps all streaming content in processing and reveals final text after completion', async () => {
     const response = {
       id: 'multi-step-stream',
       role: 'assistant',
@@ -218,18 +218,14 @@ describe('interaction assistant message list', () => {
     await render({ messages: [response], recentStart: 0, live: true })
 
     const streaming = captured.props as VirtuosoProps
-    expect(streaming.totalCount).toBe(2)
+    expect(streaming.totalCount).toBe(1)
     expect(streaming.computeItemKey(0)).toBe('multi-step-stream-activity')
-    expect(streaming.computeItemKey(1)).toBe('multi-step-stream-5')
     expect(streaming.itemContent(0).props.children.props.renderItem).toEqual(
       expect.objectContaining({
         kind: 'activity-group',
         defaultOpen: true,
-        partIndexes: [1, 2, 4]
+        partIndexes: [1, 2, 4, 5]
       })
-    )
-    expect(streaming.itemContent(1).props.children.props.renderItem).toEqual(
-      expect.objectContaining({ kind: 'current-text', partIndexes: [5] })
     )
 
     const completed = {
@@ -247,8 +243,33 @@ describe('interaction assistant message list', () => {
     expect(finished.itemContent(1).props.children.props.renderItem).toEqual(
       expect.objectContaining({ kind: 'final-text', partIndexes: [5] })
     )
+    expect(finished.itemContent(1).props.children.props.replayFinal).toBe(true)
     expect(finished.itemContent(0).props.children.props.renderItem).toEqual(
       expect.objectContaining({ kind: 'activity-group', defaultOpen: false })
+    )
+  })
+
+  it('does not enter final replay after an aborted response', async () => {
+    const running = {
+      id: 'aborted-stream',
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'unfinished', state: 'streaming' }],
+      metadata: { startedAt: 1 }
+    } as UIMessage
+    await render({ messages: [running], recentStart: 0, live: true })
+
+    const aborted = {
+      ...running,
+      parts: [{ type: 'text', text: 'unfinished', state: 'done' }],
+      metadata: { startedAt: 1, completedAt: 2, outcome: 'aborted' }
+    } as UIMessage
+    await render({ messages: [aborted], recentStart: 0, live: false })
+
+    const finished = captured.props as VirtuosoProps
+    expect(finished.totalCount).toBe(1)
+    expect(finished.itemContent(0).props.children.props.replayFinal).toBe(false)
+    expect(finished.itemContent(0).props.children.props.renderItem).toEqual(
+      expect.objectContaining({ kind: 'activity-group' })
     )
   })
 
@@ -453,9 +474,7 @@ describe('interaction assistant message list', () => {
     const scroller = createScroller(100)
     container.firstElementChild?.append(scroller)
     act(() => (captured.props as VirtuosoProps).scrollerRef(scroller))
-    act(() =>
-      container.firstElementChild?.dispatchEvent(new WheelEvent('wheel', { deltaY: -200 }))
-    )
+    act(() => container.firstElementChild?.dispatchEvent(new WheelEvent('wheel', { deltaY: -200 })))
     captured.autoscrollToBottom.mockClear()
 
     act(() => (captured.props as VirtuosoProps).atBottomStateChange(false))
@@ -667,7 +686,9 @@ describe('interaction assistant message list', () => {
       expect(itemContainer.querySelector('button')?.getAttribute('data-state')).toBe('open')
 
       captured.autoscrollToBottom.mockClear()
-      act(() => container.querySelector<HTMLButtonElement>('button[aria-label="返回底部"]')?.click())
+      act(() =>
+        container.querySelector<HTMLButtonElement>('button[aria-label="返回底部"]')?.click()
+      )
       act(() => (captured.props as VirtuosoProps).atBottomStateChange(true))
       captured.autoscrollToBottom.mockClear()
       act(() => resize())
@@ -722,7 +743,7 @@ describe('interaction assistant message list', () => {
     }
   })
 
-  it('forgets a manual activity preference after that activity leaves the message', async () => {
+  it('keeps a manual activity preference while streaming text remains processing', async () => {
     const response = {
       id: 'reused-activity-key',
       role: 'assistant',
@@ -754,7 +775,7 @@ describe('interaction assistant message list', () => {
       await render({ messages: [response], recentStart: 0, live: true })
       await act(async () => itemRoot.render((captured.props as VirtuosoProps).itemContent(0)))
 
-      expect(itemContainer.querySelector('button')?.getAttribute('data-state')).toBe('open')
+      expect(itemContainer.querySelector('button')?.getAttribute('data-state')).toBe('closed')
     } finally {
       await act(async () => itemRoot.unmount())
       itemContainer.remove()
@@ -764,7 +785,7 @@ describe('interaction assistant message list', () => {
   it('keeps observing a long final message with tool cards after streaming completes', async () => {
     const finalMessage = complexMessage()
     await render({ messages: [finalMessage], recentStart: 0, live: true })
-    expect((captured.props as VirtuosoProps).totalCount).toBe(2)
+    expect((captured.props as VirtuosoProps).totalCount).toBe(1)
     const lastIndex = (captured.props as VirtuosoProps).totalCount - 1
     const streamingContent = (captured.props as VirtuosoProps).itemContent(lastIndex)
     act(() => (captured.props as VirtuosoProps).atBottomStateChange(true))
@@ -888,6 +909,171 @@ describe('interaction assistant message list', () => {
     expect(props.computeItemKey(1)).toBe('second-0')
   })
 
+  it('labels an interrupted activity history as aborted', async () => {
+    const response = {
+      id: 'aborted-history',
+      role: 'assistant',
+      metadata: { outcome: 'aborted' },
+      parts: [
+        {
+          type: 'dynamic-tool',
+          toolName: 'agent_show_progress',
+          toolCallId: 'aborted-progress',
+          state: 'output-available',
+          input: { title: '检查实现' },
+          output: 'Progress shown.'
+        },
+        { type: 'reasoning', text: 'interrupted work', state: 'done' }
+      ]
+    } as UIMessage
+
+    await render({ messages: [response], recentStart: 0, live: false })
+    await act(async () => root.render((captured.props as VirtuosoProps).itemContent(0)))
+
+    expect(container.textContent).toContain('已中断')
+    expect(container.textContent).not.toContain('处理过程')
+    act(() =>
+      container.querySelector<HTMLButtonElement>('[data-activity-history] > button')?.click()
+    )
+    expect(container.querySelectorAll('[data-stage-status="completed"]')).toHaveLength(1)
+  })
+
+  it('starts named stages before work with show progress independently of reset', async () => {
+    const response = {
+      id: 'progress-before-work',
+      role: 'assistant',
+      parts: [
+        {
+          type: 'dynamic-tool',
+          toolName: 'agent_show_progress',
+          toolCallId: 'progress-one',
+          state: 'output-available',
+          input: { title: '列出当前目录' },
+          output: 'Progress shown.'
+        },
+        { type: 'reasoning', text: 'stage one work', state: 'done' },
+        {
+          type: 'dynamic-tool',
+          toolName: 'agent_reset_context',
+          toolCallId: 'context-only-reset',
+          state: 'output-available',
+          input: { handoff: 'Continue.' },
+          output: 'Context reset requested.'
+        },
+        {
+          type: 'dynamic-tool',
+          toolName: 'agent_show_progress',
+          toolCallId: 'progress-two',
+          state: 'output-available',
+          input: { title: '读取 package.json' },
+          output: 'Progress shown.'
+        },
+        { type: 'reasoning', text: 'stage two work', state: 'done' },
+        {
+          type: 'dynamic-tool',
+          toolName: 'agent_show_progress',
+          toolCallId: 'duplicate-progress-two',
+          state: 'output-available',
+          input: { title: '读取 package.json' },
+          output: 'Progress shown.'
+        },
+        { type: 'reasoning', text: 'more stage two work', state: 'done' }
+      ]
+    } as UIMessage
+
+    const switching = { ...response, parts: response.parts.slice(0, 4) } as UIMessage
+    await render({ messages: [switching], recentStart: 0, live: true })
+
+    let props = captured.props as VirtuosoProps
+    let content = props.itemContent(0).props.children
+    let history = content.props.sections ? content : content.props.children[0]
+    expect(history.props.sections.map(({ title }) => title)).toEqual(['列出当前目录'])
+    expect(history.props.sections[0].streaming).toBe(true)
+
+    await render({ messages: [response], recentStart: 0, live: true })
+
+    props = captured.props as VirtuosoProps
+    content = props.itemContent(0).props.children
+    history = content.props.sections ? content : content.props.children[0]
+    expect(history.props.sections.map(({ title }) => title)).toEqual([
+      '列出当前目录',
+      '读取 package.json'
+    ])
+    expect(history.props.sections[0].item.partIndexes).toEqual([1])
+    expect(history.props.sections[1].item.partIndexes).toEqual([4])
+    expect(history.props.sections[1].continuations).toHaveLength(1)
+    expect(history.props.sections[1].continuations[0].item.partIndexes).toEqual([6])
+  })
+
+  it('keeps progress stages together across the historical and recent boundary', async () => {
+    const stage = (id: string, title: string, additions: number): UIMessage => ({
+      id,
+      role: 'assistant',
+      parts: [
+        {
+          type: 'dynamic-tool',
+          toolName: 'agent_show_progress',
+          toolCallId: `progress-${id}`,
+          state: 'output-available',
+          input: { title },
+          output: 'Progress shown.'
+        },
+        { type: 'reasoning', text: `${id} work`, state: 'done' },
+        {
+          type: 'data-git-snapshot',
+          data: {
+            files: [
+              {
+                path: 'task.md',
+                additions,
+                deletions: 0,
+                patch: '@@ -0,0 +1 @@\n+stage'
+              }
+            ]
+          }
+        }
+      ]
+    })
+
+    await render({
+      messages: [stage('recent-stage', '实现', 2)],
+      recentStart: 1,
+      olderMessages: new Map([[0, stage('historical-stage', '调研', 1)]])
+    })
+
+    const props = captured.props as VirtuosoProps
+    expect(props.totalCount).toBe(1)
+    expect(props.computeItemKey(0)).toBe('historical-stage-activity-history')
+    const fragment = props.itemContent(0).props.children
+    const history = fragment.props.children[0]
+    expect(history.props.sections.map(({ title }) => title)).toEqual(['调研', '实现'])
+    expect(fragment.props.children[1][0].props.children.props.additions).toBe(2)
+  })
+
+  it('hides reset context without treating its old title as a stage', async () => {
+    const response = {
+      id: 'legacy-reset-stage',
+      role: 'assistant',
+      parts: [
+        { type: 'reasoning', text: 'legacy work', state: 'done' },
+        {
+          type: 'dynamic-tool',
+          toolName: 'agent_reset_context',
+          toolCallId: 'legacy-reset',
+          state: 'output-available',
+          input: { toolCallTitle: '切换上下文', title: '旧阶段', handoff: 'Continue.' },
+          output: 'Context reset requested.'
+        }
+      ]
+    } as UIMessage
+
+    await render({ messages: [response], recentStart: 0 })
+
+    const props = captured.props as VirtuosoProps
+    expect(props.totalCount).toBe(1)
+    expect(props.itemContent(0).props.children.props.renderItem.partIndexes).toEqual([0])
+  })
+
   it('keeps the live changes card after every renderable response fragment', async () => {
     const response = {
       id: 'response-with-changes',
@@ -914,13 +1100,12 @@ describe('interaction assistant message list', () => {
     await render({ messages: [response], recentStart: 0, live: true })
 
     const props = captured.props as VirtuosoProps
-    expect(props.totalCount).toBe(3)
-    expect(props.itemContent(0).props.children.props.renderItem.partIndexes).toEqual([0])
-    expect(props.itemContent(1).props.children.props.renderItem.partIndexes).toEqual([2])
-    expect(props.itemContent(2).props.children.props.files[0].path).toBe('file.ts')
-    expect(props.itemContent(2).props.className).toContain('pt-4')
-    expect(props.itemContent(1).props.className).toContain('[contain:layout_paint_style]')
-    expect(props.itemContent(2).props.className).not.toContain('[contain:layout_paint_style]')
+    expect(props.totalCount).toBe(2)
+    expect(props.itemContent(0).props.children.props.renderItem.partIndexes).toEqual([0, 2])
+    expect(props.itemContent(1).props.children.props.files[0].path).toBe('file.ts')
+    expect(props.itemContent(1).props.className).toContain('pt-4')
+    expect(props.itemContent(0).props.className).toContain('[contain:layout_paint_style]')
+    expect(props.itemContent(1).props.className).not.toContain('[contain:layout_paint_style]')
   })
 
   it('keeps existing fragment keys stable when output continues after a change', async () => {
@@ -936,7 +1121,7 @@ describe('interaction assistant message list', () => {
       parts: [{ type: 'text', text: 'before edit' }, snapshot]
     } as UIMessage
     await render({ messages: [response], recentStart: 0, live: true })
-    expect((captured.props as VirtuosoProps).computeItemKey(0)).toBe('stable-response-0')
+    expect((captured.props as VirtuosoProps).computeItemKey(0)).toBe('stable-response-activity')
 
     await render({
       messages: [
@@ -950,9 +1135,8 @@ describe('interaction assistant message list', () => {
     })
 
     const props = captured.props as VirtuosoProps
-    expect(props.computeItemKey(0)).toBe('stable-response-0')
-    expect(props.computeItemKey(1)).toBe('stable-response-2')
-    expect(props.computeItemKey(2)).toBe('stable-response-changes')
+    expect(props.computeItemKey(0)).toBe('stable-response-activity')
+    expect(props.computeItemKey(1)).toBe('stable-response-changes')
   })
 
   it('does not replace long streamed output above a changes card when streaming completes', async () => {
@@ -977,7 +1161,7 @@ describe('interaction assistant message list', () => {
     await render({ messages: [response], recentStart: 0, live: true })
     const liveProps = captured.props as VirtuosoProps
     expect(liveProps.totalCount).toBe(2)
-    expect(liveProps.computeItemKey(0)).toBe('long-streamed-response-0')
+    expect(liveProps.computeItemKey(0)).toBe('long-streamed-response-activity')
 
     await render({
       messages: [

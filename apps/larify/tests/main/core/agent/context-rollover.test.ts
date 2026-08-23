@@ -24,6 +24,12 @@ function options(
 }
 
 describe('contextRollover', () => {
+  it('keeps context reset independent from visible progress', () => {
+    expect(contextRolloverPrompt).toContain('Markdown handoff')
+    expect(contextRolloverPrompt).not.toContain('show_progress')
+    expect(contextRolloverPrompt).not.toContain('`title`')
+  })
+
   it('does not remind below the threshold', async () => {
     expect(await contextRollover(10_000)(options(9_999))).toBeUndefined()
   })

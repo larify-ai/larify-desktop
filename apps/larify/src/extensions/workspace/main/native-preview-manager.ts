@@ -1,7 +1,7 @@
 import { pathToFileURL } from 'node:url'
 import { type BrowserWindow, type Rectangle } from 'electron'
 import { BrowserTab } from '../../browser/main/tab'
-import { BROWSER_PARTITION } from '../../browser/main/tab-manager'
+import { BROWSER_PARTITION } from '../../browser/shared/types'
 
 interface Preview {
   appliedBounds?: Rectangle

@@ -38,9 +38,9 @@ try {
   for (const resourceId of created) {
     assert.equal(
       await cdp.evaluate(
-        `document.querySelector('[data-resource-id="${resourceId}"]')?.classList.contains('hidden')`
+        `document.querySelector('[data-resource-id="${resourceId}"]')?.getAttribute('aria-hidden')`
       ),
-      true
+      'true'
     )
   }
 

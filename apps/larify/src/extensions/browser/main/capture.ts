@@ -16,6 +16,24 @@ export interface ScreenshotResult {
 type Size = { width: number; height: number }
 type Viewport = Size & { x: number; y: number }
 
+function validSize(size?: Size): size is Size {
+  return Boolean(
+    size &&
+    Number.isFinite(size.width) &&
+    Number.isFinite(size.height) &&
+    size.width > 0 &&
+    size.height > 0
+  )
+}
+
+function validViewport(viewport?: Viewport): viewport is Viewport {
+  return Boolean(
+    validSize(viewport) &&
+    Number.isFinite(viewport.x) &&
+    Number.isFinite(viewport.y)
+  )
+}
+
 export function mapFrameBoxToTopLevel(
   box: { x: number; y: number; width: number; height: number },
   contentQuad: number[],
@@ -92,7 +110,7 @@ export async function screenshot(
       cssContentSize?: Size
       contentSize?: Size
     }
-    const size = metrics.cssContentSize ?? metrics.contentSize
+    const size = [metrics.cssContentSize, metrics.contentSize].find(validSize)
     if (size) {
       params.clip = { x: 0, y: 0, width: size.width, height: size.height, scale: 1 }
       params.captureBeyondViewport = true
@@ -112,14 +130,15 @@ export async function screenshot(
         clientHeight: number
       }
     }
-    const visualViewport = metrics.cssVisualViewport ?? metrics.visualViewport
-    const viewport: Viewport | undefined = visualViewport && {
-      x: visualViewport.pageX,
-      y: visualViewport.pageY,
-      width: visualViewport.clientWidth,
-      height: visualViewport.clientHeight
-    }
-    if (!viewport || viewport.width <= 0 || viewport.height <= 0) {
+    const viewport = [metrics.cssVisualViewport, metrics.visualViewport]
+      .map((value): Viewport | undefined => value && ({
+        x: value.pageX,
+        y: value.pageY,
+        width: value.clientWidth,
+        height: value.clientHeight
+      }))
+      .find(validViewport)
+    if (!viewport) {
       throw new Error('Current viewport is not available for capture.')
     }
     params.clip = { ...viewport, scale: 1 }

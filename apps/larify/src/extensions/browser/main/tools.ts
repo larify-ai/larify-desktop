@@ -152,6 +152,16 @@ async function withTab<T>(
   return service.withUnthrottled(sessionId, id, async () => action(tab))
 }
 
+async function withRenderedTab<T>(
+  service: BrowserService,
+  sessionId: string,
+  id: number,
+  action: (tab: BrowserTab) => Promise<T> | T,
+): Promise<T> {
+  const tab = getTab(service, sessionId, id)
+  return service.withRendered(sessionId, id, async () => action(tab))
+}
+
 async function closeCreatedTab(
   service: BrowserService,
   sessionId: string,
@@ -298,10 +308,8 @@ export function createBrowserTools(service: BrowserService): Record<string, Tool
         inputSchema: cdpCallSchema,
         execute: async (args, ctx) => {
           const { id, method, params, sessionId, timeout } = args
-          const tab = getTab(service, ctx.sessionId, id)
-          const call = (): Promise<unknown> =>
-            tab.sendCdp(method, params, sessionId, secondsToMs(timeout), ctx.signal)
-          const value = await service.withRendered(ctx.sessionId, id, call)
+          const value = await withRenderedTab(service, ctx.sessionId, id, (tab) =>
+            tab.sendCdp(method, params, sessionId, secondsToMs(timeout), ctx.signal))
           return spill(
             JSON.stringify(value, null, 2),
           )
@@ -535,7 +543,7 @@ function interactionTools(service: BrowserService): Record<string, Tool> {
             url: href,
           }
         }
-        return withTab(service, ctx.sessionId, id, async (tab) => {
+        return withRenderedTab(service, ctx.sessionId, id, async (tab) => {
           await tab.click(selector)
           return { clicked: selector }
         })
@@ -547,7 +555,7 @@ function interactionTools(service: BrowserService): Record<string, Tool> {
       inputSchema: elementActionInputSchema,
       execute: async (args, ctx) => {
         const { id, selector, action } = args
-        return withTab(service, ctx.sessionId, id, async (tab) => {
+        return withRenderedTab(service, ctx.sessionId, id, async (tab) => {
           if (action === "dblclick") await tab.dblclick(selector)
           else if (action === "hover") await tab.hover(selector)
           else if (action === "focus") await tab.focus(selector)
@@ -565,7 +573,7 @@ function interactionTools(service: BrowserService): Record<string, Tool> {
       inputSchema: dragSchema,
       execute: async (args, ctx) => {
         const { id, source, target } = args
-        return withTab(service, ctx.sessionId, id, async (tab) => {
+        return withRenderedTab(service, ctx.sessionId, id, async (tab) => {
           await tab.drag(source, target)
           return { dragged: true, source, target }
         })
@@ -583,7 +591,7 @@ function interactionTools(service: BrowserService): Record<string, Tool> {
           if (!stats) throw new Error(`Upload file does not exist: ${path}`)
           if (!stats.isFile()) throw new Error(`Upload path is not a file: ${path}`)
         }
-        return withTab(service, ctx.sessionId, id, async (tab) => {
+        return withRenderedTab(service, ctx.sessionId, id, async (tab) => {
           await tab.upload(selector, paths)
           return { uploaded: files.length }
         })
@@ -595,7 +603,7 @@ function interactionTools(service: BrowserService): Record<string, Tool> {
       inputSchema: downloadSchema,
       execute: async (args, ctx) => {
         const { id, selector, path, timeout } = args
-        return withTab(service, ctx.sessionId, id, async (tab) => ({
+        return withRenderedTab(service, ctx.sessionId, id, async (tab) => ({
           path: await tab.download(
             selector,
             resolveToolPath(ctx.cwd, path),
@@ -611,7 +619,7 @@ function interactionTools(service: BrowserService): Record<string, Tool> {
       inputSchema: fillSchema,
       execute: async (args, ctx) => {
         const { id, selector, text } = args
-        return withTab(service, ctx.sessionId, id, async (tab) => {
+        return withRenderedTab(service, ctx.sessionId, id, async (tab) => {
           await tab.fill(selector, text)
           return { filled: selector }
         })
@@ -623,7 +631,7 @@ function interactionTools(service: BrowserService): Record<string, Tool> {
       inputSchema: typeSchema,
       execute: async (args, ctx) => {
         const { id, selector, text, clear, delay } = args
-        return withTab(service, ctx.sessionId, id, async (tab) => {
+        return withRenderedTab(service, ctx.sessionId, id, async (tab) => {
           await tab.type(selector, text, clear, secondsToMs(delay), ctx.signal)
           return { typed: text }
         })
@@ -635,7 +643,7 @@ function interactionTools(service: BrowserService): Record<string, Tool> {
       inputSchema: pressSchema,
       execute: async (args, ctx) => {
         const { id, key } = args
-        return withTab(service, ctx.sessionId, id, async (tab) => {
+        return withRenderedTab(service, ctx.sessionId, id, async (tab) => {
           await tab.press(key)
           return { pressed: key }
         })
@@ -647,7 +655,7 @@ function interactionTools(service: BrowserService): Record<string, Tool> {
       inputSchema: selectSchema,
       execute: async (args, ctx) => {
         const { id, selector, values } = args
-        return withTab(service, ctx.sessionId, id, async (tab) => {
+        return withRenderedTab(service, ctx.sessionId, id, async (tab) => {
           await tab.select(selector, values)
           return { selected: values }
         })
@@ -659,7 +667,7 @@ function interactionTools(service: BrowserService): Record<string, Tool> {
       inputSchema: scrollSchema,
       execute: async (args, ctx) => {
         const { id, selector, direction, amount } = args
-        return withTab(service, ctx.sessionId, id, async (tab) => {
+        return withRenderedTab(service, ctx.sessionId, id, async (tab) => {
           await tab.scroll(selector, direction, amount)
           return { scrolled: true }
         })
@@ -745,8 +753,8 @@ function captureTools(service: BrowserService): Record<string, Tool> {
       inputSchema: screenshotSchema,
       execute: async (args, ctx) => {
         const { id, path, ...opts } = args
-        const tab = getTab(service, ctx.sessionId, id)
-        const result = await service.withRendered(ctx.sessionId, id, () => tab.screenshot(opts))
+        const result = await withRenderedTab(service, ctx.sessionId, id, (tab) =>
+          tab.screenshot(opts))
         return writeDataUrl(
           path ? resolveToolPath(ctx.cwd, path) : tempPath(opts.format),
           result.data,
@@ -862,7 +870,7 @@ function inputTools(service: BrowserService): Record<string, Tool> {
       inputSchema: keyboardActionSchema,
       execute: async (args, ctx) => {
         const { id, action, key } = args
-        return withTab(service, ctx.sessionId, id, async (tab) => {
+        return withRenderedTab(service, ctx.sessionId, id, async (tab) => {
           if (action === "down") await tab.keyDown(key)
           else await tab.keyUp(key)
           return { action, key }
@@ -875,7 +883,7 @@ function inputTools(service: BrowserService): Record<string, Tool> {
       inputSchema: keyboardTextSchema,
       execute: async (args, ctx) => {
         const { id, text } = args
-        return withTab(service, ctx.sessionId, id, async (tab) => {
+        return withRenderedTab(service, ctx.sessionId, id, async (tab) => {
           await tab.keyboardType(text)
           return { typed: text }
         })
@@ -887,7 +895,7 @@ function inputTools(service: BrowserService): Record<string, Tool> {
       inputSchema: keyboardTextSchema,
       execute: async (args, ctx) => {
         const { id, text } = args
-        return withTab(service, ctx.sessionId, id, async (tab) => {
+        return withRenderedTab(service, ctx.sessionId, id, async (tab) => {
           await tab.keyboardInsertText(text)
           return { inserted: text }
         })
@@ -899,7 +907,7 @@ function inputTools(service: BrowserService): Record<string, Tool> {
       inputSchema: mouseMoveSchema,
       execute: async (args, ctx) => {
         const { id, x, y } = args
-        return withTab(service, ctx.sessionId, id, async (tab) => {
+        return withRenderedTab(service, ctx.sessionId, id, async (tab) => {
           await tab.mouseMove(x, y)
           return { x, y }
         })
@@ -911,7 +919,7 @@ function inputTools(service: BrowserService): Record<string, Tool> {
       inputSchema: mouseButtonSchema,
       execute: async (args, ctx) => {
         const { id, action, button } = args
-        return withTab(service, ctx.sessionId, id, async (tab) => {
+        return withRenderedTab(service, ctx.sessionId, id, async (tab) => {
           if (action === "down") await tab.mouseDown(button)
           else await tab.mouseUp(button)
           return { action, button }
@@ -924,7 +932,7 @@ function inputTools(service: BrowserService): Record<string, Tool> {
       inputSchema: mouseWheelSchema,
       execute: async (args, ctx) => {
         const { id, dx, dy } = args
-        return withTab(service, ctx.sessionId, id, async (tab) => {
+        return withRenderedTab(service, ctx.sessionId, id, async (tab) => {
           await tab.mouseWheel(dx, dy)
           return { dx, dy }
         })

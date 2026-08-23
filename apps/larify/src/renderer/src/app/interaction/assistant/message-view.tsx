@@ -23,7 +23,9 @@ export function MessageView({
   onActivityOpenChange,
   firstFragment = true,
   lastFragment = true,
-  hideChanges = false
+  hideChanges = false,
+  replayFinal = false,
+  onFinalReplayComplete
 }: {
   message: UIMessage
   streaming?: boolean
@@ -34,6 +36,8 @@ export function MessageView({
   firstFragment?: boolean
   lastFragment?: boolean
   hideChanges?: boolean
+  replayFinal?: boolean
+  onFinalReplayComplete?: () => void
 }): React.JSX.Element | null {
   const files = firstFragment ? message.parts.filter(isFileUIPart) : []
   const changeSummary =
@@ -53,6 +57,13 @@ export function MessageView({
   if (!files.length && !hasContent && !changeSummary) return null
 
   const lastStreamingIndex = message.parts.findLastIndex(hasVisibleTextPart)
+  const finalText =
+    renderItem?.kind === 'final-text'
+      ? selectedParts
+          .filter((part) => part?.type === 'text')
+          .map((part) => part.text)
+          .join('')
+      : undefined
   const content =
     renderItem && isActivityRenderItem(renderItem)
       ? [
@@ -70,6 +81,16 @@ export function MessageView({
             }}
           />
         ]
+      : finalText !== undefined
+        ? [
+            <MessagePart
+              key={`${message.id}-final-text`}
+              part={{ type: 'text', text: finalText }}
+              streaming={false}
+              replay={replayFinal}
+              onReplayComplete={onFinalReplayComplete}
+            />
+          ]
       : selectedParts.map((part, selectedIndex) => {
           if (!part) return null
           const index = renderItem?.partIndexes[selectedIndex] ?? selectedIndex

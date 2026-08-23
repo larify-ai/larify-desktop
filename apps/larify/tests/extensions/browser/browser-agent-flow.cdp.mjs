@@ -8,7 +8,9 @@ const targets = await fetch(`http://127.0.0.1:${port}/json/list`).then((response
   response.json()
 )
 const target = targets.find(
-  ({ type, url }) => type === 'page' && url.startsWith('http://localhost:')
+  ({ type, url }) =>
+    type === 'page' &&
+    (url.startsWith('http://localhost:') || url.endsWith('/out/renderer/index.html'))
 )
 if (!target?.webSocketDebuggerUrl) throw new Error(`Larify page not found on port ${port}`)
 
@@ -77,10 +79,11 @@ const marker = `LARIFY_BROWSER_AGENT_${Date.now()}`
 const fixture = resolve('tests/extensions/browser/fixtures/interaction.html')
 const prompt = [
   '这是浏览器自动化端到端测试，必须实际调用工具，不要用终端或其他工具替代。',
-  '请严格依次调用 browser_list_tabs、browser_create_tab、browser_read_page、browser_fill、browser_click、browser_query_element、browser_scroll、browser_screenshot、browser_close_tab。',
+  '请严格依次调用 browser_list_tabs、browser_create_tab、browser_snapshot、browser_read_page、browser_cdp_call、browser_fill、browser_click、browser_query_element、browser_scroll、browser_screenshot、browser_close_tab。',
   `browser_create_tab 打开本地文件 ${fixture}，只能创建一个浏览器标签页。`,
+  'browser_cdp_call 使用 Runtime.evaluate 执行 document.title，并返回其值。',
   `用 browser_fill 将 #text 填为 ${marker}，点击 #increment，再读取 #count 的 value 并确认等于 1。`,
-  '向下滚动页面并截图，然后关闭刚创建的浏览器标签页。',
+  '向下滚动页面，然后调用 browser_screenshot，并且必须设置 fullPage 为 true，再关闭刚创建的浏览器标签页。',
   `最终回复必须包含 ${marker} 和数字 1。`
 ].join(' ')
 
@@ -168,10 +171,13 @@ try {
       .map(({ type, input, output }) => ({ type, input, output })))
   })()`)
   const called = new Set(calls.map(({ type }) => type.replace('tool-browser_', '')))
+  const snapshotCalls = calls.filter(({ type }) => type === 'tool-browser_snapshot')
   for (const name of [
     'list_tabs',
     'create_tab',
+    'snapshot',
     'read_page',
+    'cdp_call',
     'fill',
     'click',
     'query_element',
@@ -182,11 +188,44 @@ try {
     assert.equal(called.has(name), true, `Agent should call browser_${name}`)
   }
   assert.ok(
+    snapshotCalls.some(
+      ({ output }) =>
+        (JSON.stringify(output) ?? '').includes('Increment') &&
+        (JSON.stringify(output) ?? '').includes('[ref=')
+    ),
+    `Agent snapshot should include the real page accessibility tree: ${JSON.stringify(snapshotCalls)}`
+  )
+  assert.ok(
+    calls.some(
+      ({ type, output }) =>
+        type === 'tool-browser_read_page' &&
+        (JSON.stringify(output) ?? '').includes('Browser Interaction Test') &&
+        (JSON.stringify(output) ?? '').includes('Next page')
+    ),
+    `Agent read_page should return real page markdown: ${JSON.stringify(
+      calls.filter(({ type }) => type === 'tool-browser_read_page')
+    )}`
+  )
+  assert.ok(
+    calls.some(
+      ({ type, output }) =>
+        type === 'tool-browser_cdp_call' &&
+        (JSON.stringify(output) ?? '').includes('Browser Interaction Test')
+    ),
+    'Agent cdp_call should evaluate the real page title'
+  )
+  assert.ok(
     calls.some(
       ({ type, output }) =>
         type === 'tool-browser_query_element' && (JSON.stringify(output) ?? '').includes('1')
     ),
     'Agent should observe the incremented value'
+  )
+  assert.ok(
+    calls.some(
+      ({ type, input }) => type === 'tool-browser_screenshot' && input?.fullPage === true
+    ),
+    'Agent should request a full-page screenshot'
   )
 
   console.log(JSON.stringify({ marker, observed, sessionId, tools: [...called] }, null, 2))

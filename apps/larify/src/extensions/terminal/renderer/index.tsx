@@ -40,7 +40,7 @@ const plugin: RendererPlugin = {
             <TerminalView {...props} />
           </Suspense>
         ),
-        icon: <SquareTerminalIcon aria-hidden />,
+        icon: <SquareTerminalIcon aria-hidden className="larify-workbench-icon-terminal" />,
         order: 30,
         title: '终端'
       })

@@ -219,7 +219,6 @@ async function main(): Promise<void> {
     const initialWindowCount = BrowserWindow.getAllWindows().length
     const initialClosedListeners = window.listenerCount('closed')
     service.state('unused')
-    service.setBounds('unused', 1, { x: 0, y: 0, width: 800, height: 600 })
     service.close('unused', 1)
     if (
       BrowserWindow.getAllWindows().length !== initialWindowCount ||
@@ -228,41 +227,10 @@ async function main(): Promise<void> {
       throw new Error('empty browser session allocated native resources')
     }
     service.createTab('used')
-    if (window.listenerCount('closed') !== initialClosedListeners + 1) {
-      throw new Error('browser session did not register its host cleanup listener')
-    }
     await resources.destroy('used')
     if (window.listenerCount('closed') !== initialClosedListeners) {
       throw new Error('destroyed browser session retained its host cleanup listener')
     }
-    const hiddenId = service.createTab('hidden-capture')
-    const hiddenTab = service.tab('hidden-capture', hiddenId)
-    if (!hiddenTab) throw new Error('hidden capture tab was not created')
-    await hiddenTab.navigateAndWait(url(rootServer, 'localhost'))
-    const hiddenScreenshot = await service.withRendered('hidden-capture', hiddenId, () =>
-      hiddenTab.screenshot({ format: 'png' })
-    )
-    const hiddenSize = nativeImage
-      .createFromBuffer(Buffer.from(hiddenScreenshot.data, 'base64'))
-      .getSize()
-    if (hiddenSize.width <= 0 || hiddenSize.height <= 0) {
-      throw new Error(`hidden viewport screenshot was empty: ${JSON.stringify(hiddenSize)}`)
-    }
-    console.log(`PASS hidden viewport screenshot: ${hiddenSize.width}x${hiddenSize.height}`)
-    const hiddenCdpCapture = await service.withRendered('hidden-capture', hiddenId, () =>
-      hiddenTab.screenshot({ format: 'png', fullPage: true })
-    )
-    if (hiddenTab.view.getVisible()) {
-      throw new Error('hidden CDP capture did not restore the view visibility')
-    }
-    const hiddenCdpSize = nativeImage
-      .createFromBuffer(Buffer.from(hiddenCdpCapture.data, 'base64'))
-      .getSize()
-    if (hiddenCdpSize.width <= 0 || hiddenCdpSize.height <= 0) {
-      throw new Error(`hidden CDP viewport screenshot was empty: ${JSON.stringify(hiddenCdpSize)}`)
-    }
-    console.log(`PASS hidden CDP viewport screenshot: ${hiddenCdpSize.width}x${hiddenCdpSize.height}`)
-    await resources.destroy('hidden-capture')
     await service.destroy()
     console.log('PASS BrowserService empty session resources and listener cleanup')
 

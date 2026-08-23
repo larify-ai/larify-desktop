@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { ChangesIcon } from '../../../../../extensions/workspace/renderer/changes/changes-icon'
 import {
   changesRootForFile,
@@ -7,7 +7,7 @@ import {
 import type { ChangeSummary } from './change-summary'
 import { ReviewHoverDiff } from './review-hover-diff'
 
-const HIDE_DELAY = 600
+const HIDE_DELAY = 500
 const UPWARD_SWITCH_DELAY = 150
 
 export function ChangesSummaryCard({
@@ -17,6 +17,9 @@ export function ChangesSummaryCard({
   root
 }: ChangeSummary): React.JSX.Element {
   const [activePath, setActivePath] = useState<string | null>(null)
+  const [previewPlacement, setPreviewPlacement] = useState<'above' | 'below'>('above')
+  const cardRef = useRef<HTMLDivElement | null>(null)
+  const previewRef = useRef<HTMLDivElement | null>(null)
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const switchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const moveDir = useRef<'up' | 'down' | null>(null)
@@ -63,6 +66,38 @@ export function ChangesSummaryCard({
     []
   )
 
+  useEffect(() => {
+    if (activePath && !files.some(({ path }) => path === activePath)) setActivePath(null)
+  }, [activePath, files])
+
+  useLayoutEffect(() => {
+    if (!activeFile || !cardRef.current || !previewRef.current) return
+
+    const viewport = cardRef.current.closest<HTMLElement>('[data-message-scroll-viewport]')
+    const updatePlacement = (): void => {
+      if (!cardRef.current || !previewRef.current) return
+      const card = cardRef.current.getBoundingClientRect()
+      const previewHeight = previewRef.current.getBoundingClientRect().height
+      const viewportRect = viewport?.getBoundingClientRect()
+      const viewportTop = viewportRect?.top ?? 0
+      const viewportBottom = viewportRect?.bottom ?? window.innerHeight
+      const spaceAbove = card.top - viewportTop
+      const spaceBelow = viewportBottom - card.bottom
+      const nextPlacement =
+        spaceAbove >= previewHeight || spaceAbove >= spaceBelow ? 'above' : 'below'
+
+      setPreviewPlacement((current) => (current === nextPlacement ? current : nextPlacement))
+    }
+
+    updatePlacement()
+    viewport?.addEventListener('scroll', updatePlacement, { passive: true })
+    window.addEventListener('resize', updatePlacement)
+    return () => {
+      viewport?.removeEventListener('scroll', updatePlacement)
+      window.removeEventListener('resize', updatePlacement)
+    }
+  }, [activeFile])
+
   const openChanges = (selectedPath?: string): void => {
     const targetRoot = root && selectedPath ? changesRootForFile(root, selectedPath) : root
     window.dispatchEvent(
@@ -84,6 +119,7 @@ export function ChangesSummaryCard({
 
   return (
     <div
+      ref={cardRef}
       className="relative mt-3"
       onBlur={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget)) scheduleHide()
@@ -96,12 +132,15 @@ export function ChangesSummaryCard({
     >
       {activeFile && (
         <div
+          ref={previewRef}
           onMouseEnter={() => {
             clearHide()
             clearSwitch()
           }}
           onMouseLeave={scheduleHide}
-          className="pointer-events-auto absolute inset-x-0 bottom-full z-50 mb-1"
+          className={`pointer-events-auto absolute inset-x-0 z-50 ${
+            previewPlacement === 'above' ? 'bottom-full mb-1' : 'top-full mt-1'
+          }`}
         >
           <ReviewHoverDiff file={activeFile} />
         </div>

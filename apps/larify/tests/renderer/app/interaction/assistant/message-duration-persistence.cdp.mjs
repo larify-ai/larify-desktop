@@ -73,7 +73,6 @@ try {
     'agent start',
     30_000
   )
-  await waitFor(`!document.querySelector('button[aria-label="停止"]')`, 'agent completion')
   await waitFor(
     `[...document.querySelectorAll('.is-assistant')].some((node) =>
       node.textContent?.includes(${JSON.stringify(marker)}))`,
@@ -95,7 +94,7 @@ try {
     30_000
   )
 
-  const liveLabel = await waitFor(durationLabelExpression, 'live duration label', 10_000)
+  const liveLabel = await waitFor(durationLabelExpression, 'live duration label')
   const persistedMetadata = await evaluate(`(async () => {
     const messages = await window.bridge.invoke('session:msgs', ${JSON.stringify(sessionId)})
     const response = messages.findLast(({ role, parts = [] }) =>

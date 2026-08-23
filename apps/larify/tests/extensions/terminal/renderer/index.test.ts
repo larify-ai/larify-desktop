@@ -27,6 +27,9 @@ describe('terminal renderer registration', () => {
 
   it('registers its launcher metadata', () => {
     expect(renderer.get('terminal')).toMatchObject({ order: 30, title: '终端' })
+    expect(renderer.get('terminal')?.icon).toMatchObject({
+      props: { className: 'larify-workbench-icon-terminal' }
+    })
   })
 
   it('loads the initial terminal title without mounting its component', async () => {

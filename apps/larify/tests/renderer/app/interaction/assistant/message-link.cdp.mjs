@@ -15,11 +15,14 @@ const fixtureRoot = join(
 )
 const port = process.env.LARIFY_CDP_PORT ?? '9222'
 const fixtureFile = join(fixtureRoot, 'workspace-link.ts')
+const reusedUrl = `http://127.0.0.1:${port}/json/version`
+const differentUrl = `http://127.0.0.1:${port}/json/list`
 
 await mkdir(fixtureRoot, { recursive: true })
 await writeFile(fixtureFile, 'export const linked = true\n')
 
 const app = await connectLarifyCdp(port)
+let browserFixture
 
 const targets = () =>
   fetch(`http://127.0.0.1:${port}/json/list`).then((response) => response.json())
@@ -71,6 +74,25 @@ try {
   })()`)
   await wait(800)
 
+  browserFixture = await app.evaluate(`(async () => {
+    const resources = await window.bridge.invoke('resource:list')
+    const sessionId = resources.findLast(({ type }) => type === 'workspace')?.sessionId
+    if (!sessionId) throw new Error('active session is unavailable')
+    const initial = await window.bridge.invoke('resource:list', { sessionId, type: 'browser' })
+    const resourceId = await window.bridge.invoke('resource:create', 'browser', sessionId, {
+      url: ${JSON.stringify(reusedUrl)}
+    })
+    return { initialIds: initial.map(({ id }) => id), resourceId, sessionId }
+  })()`)
+  await waitFor(
+    `(async () => (await window.bridge.invoke(
+      'browser:getState',
+      ${JSON.stringify(browserFixture.sessionId)},
+      ${browserFixture.resourceId}
+    ))?.url === ${JSON.stringify(reusedUrl)})()`,
+    'agent-created browser fixture should finish opening'
+  )
+
   const mounted = await app.evaluate(`(async () => {
     const [react, reactDom, reactDomClient, { MessageLink }, { createMessageLinkHandler }] =
       await Promise.all([
@@ -87,11 +109,16 @@ try {
     host.id = 'message-link-cdp-root'
     host.style.display = 'none'
     document.body.append(host)
-    const handler = createMessageLinkHandler('', 'message-link-cdp')
+    const resources = await window.bridge.invoke('resource:list')
+    const sessionId = resources.findLast(({ type }) => type === 'workspace')?.sessionId
+    if (!sessionId) throw new Error('active session is unavailable')
+    const handler = createMessageLinkHandler('', sessionId)
     const root = createRoot(host)
     flushSync(() => root.render(createElement('div', null,
       createElement(MessageLink, { href: ${JSON.stringify(fixtureRoot)}, onOpenLink: handler }, 'fixture-directory'),
-      createElement(MessageLink, { href: ${JSON.stringify(fixtureFile)}, onOpenLink: handler }, 'workspace-link.ts')
+      createElement(MessageLink, { href: ${JSON.stringify(fixtureFile)}, onOpenLink: handler }, 'workspace-link.ts'),
+      createElement(MessageLink, { href: ${JSON.stringify(reusedUrl)}, onOpenLink: handler }, 'reused-browser-url'),
+      createElement(MessageLink, { href: ${JSON.stringify(differentUrl)}, onOpenLink: handler }, 'different-browser-url')
     )))
     window.__messageLinkCdpCleanup = () => {
       handler.dispose()
@@ -101,7 +128,34 @@ try {
     }
     return host.querySelectorAll('.larify-message-link').length
   })()`)
-  assert.equal(mounted, 2, 'the real MessageLink components should mount')
+  assert.equal(mounted, 4, 'the real MessageLink components should mount')
+
+  const browserCount = () =>
+    app.evaluate(`window.bridge.invoke('resource:list', {
+      sessionId: ${JSON.stringify(browserFixture.sessionId)},
+      type: 'browser'
+    }).then((resources) => resources.length)`)
+  const countWithAgentTab = await browserCount()
+  assert.equal(await clickLink('reused-browser-url'), true)
+  await waitFor(
+    `document.querySelector('[data-workbench-view="browser"][data-resource-id="${browserFixture.resourceId}"]')
+      ?.getAttribute('aria-hidden') === 'false'`,
+    'the agent-created browser tab should be selected'
+  )
+  assert.equal(await browserCount(), countWithAgentTab, 'same URL should reuse the agent tab')
+
+  assert.equal(await clickLink('reused-browser-url'), true)
+  await wait(300)
+  assert.equal(await browserCount(), countWithAgentTab, 'repeated clicks should not create tabs')
+
+  assert.equal(await clickLink('different-browser-url'), true)
+  await waitFor(
+    `(async () => (await window.bridge.invoke('resource:list', {
+      sessionId: ${JSON.stringify(browserFixture.sessionId)},
+      type: 'browser'
+    })).length === ${countWithAgentTab + 1})()`,
+    'a different URL should create a browser tab'
+  )
 
   assert.equal(await clickLink('fixture-directory'), true)
   await waitFor(
@@ -163,6 +217,21 @@ try {
     )
     .catch(() => undefined)
   await wait(500)
+  if (typeof browserFixture !== 'undefined') {
+    const resources = await app
+      .evaluate(`window.bridge.invoke('resource:list', {
+        sessionId: ${JSON.stringify(browserFixture.sessionId)},
+        type: 'browser'
+      })`)
+      .catch(() => [])
+    for (const resource of resources) {
+      if (!browserFixture.initialIds.includes(resource.id)) {
+        await app
+          .evaluate(`window.bridge.invoke('resource:close', ${resource.id})`)
+          .catch(() => undefined)
+      }
+    }
+  }
   app.close()
   await rm(fixtureRoot, { recursive: true, force: true }).catch(() => undefined)
 }

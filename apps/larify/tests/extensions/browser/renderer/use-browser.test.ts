@@ -65,12 +65,12 @@ describe('useBrowser', () => {
 
     const tab = { id: 42, title: 'OpenAI' } as BrowserTabState
     await act(async () => {
-      stateListener({ sessionId: 'session-a', state: { activeId: 7, tabs: [{ id: 7 }, tab] } })
+      stateListener({ sessionId: 'session-a', state: { tabs: [{ id: 7 }, tab] } })
     })
     expect(browser.state).toBe(tab)
 
     await act(async () => {
-      stateListener({ sessionId: 'other', state: { activeId: 42, tabs: [] } })
+      stateListener({ sessionId: 'other', state: { tabs: [] } })
     })
     expect(browser.state).toBe(tab)
   })
@@ -107,7 +107,7 @@ describe('useBrowser', () => {
     )
     const current = { id: 42, title: 'Current' } as BrowserTabState
     await act(async () => {
-      stateListener({ sessionId: 'session-a', state: { activeId: 42, tabs: [current] } })
+      stateListener({ sessionId: 'session-a', state: { tabs: [current] } })
       resolveInitial({ id: 42, title: 'Stale' })
       await Promise.resolve()
     })
@@ -123,7 +123,7 @@ describe('useBrowser', () => {
     const recovered = { id: 42, title: 'Recovered' } as BrowserTabState
 
     await act(async () => {
-      stateListener({ sessionId: 'session-a', state: { activeId: 42, tabs: [recovered] } })
+      stateListener({ sessionId: 'session-a', state: { tabs: [recovered] } })
     })
 
     expect(browser.state).toBe(recovered)
@@ -152,7 +152,7 @@ describe('useBrowser', () => {
       resolveOld({ id: 42, title: 'Stale' })
       oldListener({
         sessionId: 'session-a',
-        state: { activeId: 42, tabs: [{ id: 42, title: 'Stale event' }] }
+        state: { tabs: [{ id: 42, title: 'Stale event' }] }
       })
       await Promise.resolve()
     })

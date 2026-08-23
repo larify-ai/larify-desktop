@@ -5,10 +5,12 @@ import {
   type RefMap,
   type IframeSessions
 } from './refResolve'
-import { dispatchClick, dispatchHover, dispatchKey, insertText, type MouseButton } from './input'
-import { namedKeyInfo, parseKeyChord } from './keymap'
+import { dispatchClick, dispatchHover, type MouseButton } from './input'
+import { namedKeyInfo, parseKeyChord, type KeyInfo } from './keymap'
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+const FOCUS_JS = 'function(){ this.focus(); }'
+const SELECT_ALL_MODIFIER = process.platform === 'darwin' ? 4 : 2
 
 const sleepWhileActive = (ms: number, signal?: AbortSignal): Promise<void> => {
   if (!signal) return sleep(ms)
@@ -62,6 +64,11 @@ export async function callOn(
 
 export interface Interactions {
   send: CdpSend
+  input: {
+    dispatchKey: (info: KeyInfo, modifiers?: number) => Promise<void>
+    pressKey: (info: KeyInfo, modifiers?: number, heldModifiers?: number) => Promise<void>
+    insertText: (text: string) => Promise<void>
+  }
   waitForEvent?: (method: string, sessionId?: string, timeoutMs?: number) => Promise<unknown>
   refMap: RefMap
   sessions?: IframeSessions
@@ -176,15 +183,10 @@ export async function fill(ctx: Interactions, selector: string, text: string): P
     selector,
     ctx.sessions
   )
-  await callOn(ctx.send, objectId, 'function(){ this.focus(); }', [], sessionId)
-  await callOn(
-    ctx.send,
-    objectId,
-    "function(){ if (this.isContentEditable) { this.textContent=''; } else { this.select && this.select(); this.value=''; } this.dispatchEvent(new Event('input',{bubbles:true})); }",
-    [],
-    sessionId
-  )
-  await insertText(ctx.send, text, sessionId)
+  await callOn(ctx.send, objectId, FOCUS_JS, [], sessionId)
+  await ctx.input.pressKey(namedKeyInfo('a'), SELECT_ALL_MODIFIER)
+  await ctx.input.pressKey(namedKeyInfo('backspace'))
+  await ctx.input.insertText(text)
 }
 
 export async function type(
@@ -202,30 +204,25 @@ export async function type(
     selector,
     ctx.sessions
   )
-  await callOn(ctx.send, objectId, 'function(){ this.focus(); }', [], sessionId)
+  await callOn(ctx.send, objectId, FOCUS_JS, [], sessionId)
   if (clear) {
-    await callOn(
-      ctx.send,
-      objectId,
-      "function(){ if (this.isContentEditable) { this.textContent=''; } else { this.select && this.select(); this.value=''; } this.dispatchEvent(new Event('input',{bubbles:true})); }",
-      [],
-      sessionId
-    )
+    await ctx.input.pressKey(namedKeyInfo('a'), SELECT_ALL_MODIFIER)
+    await ctx.input.pressKey(namedKeyInfo('backspace'))
   }
   const chars = [...text]
   for (let i = 0; i < chars.length; i++) {
     const ch = chars[i]
     if (signal?.aborted) throw new Error("typing was cancelled")
-    if (ch === '\n' || ch === '\r') await dispatchKey(ctx.send, namedKeyInfo('enter'), 0, sessionId)
-    else if (ch === '\t') await dispatchKey(ctx.send, namedKeyInfo('tab'), 0, sessionId)
-    else await insertText(ctx.send, ch, sessionId)
+    if (ch === '\n' || ch === '\r') await ctx.input.dispatchKey(namedKeyInfo('enter'))
+    else if (ch === '\t') await ctx.input.dispatchKey(namedKeyInfo('tab'))
+    else await ctx.input.insertText(ch)
     if (delayMs > 0 && i < chars.length - 1) await sleepWhileActive(delayMs, signal)
   }
 }
 
 export async function press(ctx: Interactions, key: string, heldModifiers = 0): Promise<void> {
   const { modifiers, info } = parseKeyChord(key)
-  await dispatchKey(ctx.send, info, modifiers | heldModifiers)
+  await ctx.input.pressKey(info, modifiers, heldModifiers)
 }
 
 export async function focus(ctx: Interactions, selector: string): Promise<void> {
@@ -235,7 +232,7 @@ export async function focus(ctx: Interactions, selector: string): Promise<void> 
     selector,
     ctx.sessions
   )
-  await callOn(ctx.send, objectId, 'function(){ this.focus(); }', [], sessionId)
+  await callOn(ctx.send, objectId, FOCUS_JS, [], sessionId)
 }
 
 export const IS_CHECKED_JS = `function(){

@@ -28,7 +28,10 @@ const plugin: RendererPlugin = {
     subscriptions.push(
       renderers.register('browser', {
         bindTab: ({ resourceId, sessionId, updateTab }) => {
-          updateTab({ icon: <GlobeIcon aria-hidden />, title: '新标签页' })
+          updateTab({
+            icon: <GlobeIcon aria-hidden className="larify-workbench-icon-browser" />,
+            title: '新标签页'
+          })
           let currentTitle = '新标签页'
           let currentFavicon = ''
           const apply = (tab: BrowserTabState | null | undefined): void => {
@@ -71,7 +74,7 @@ const plugin: RendererPlugin = {
             <BrowserView {...props} />
           </Suspense>
         ),
-        icon: <GlobeIcon aria-hidden />,
+        icon: <GlobeIcon aria-hidden className="larify-workbench-icon-browser" />,
         order: 40,
         title: '浏览器'
       })

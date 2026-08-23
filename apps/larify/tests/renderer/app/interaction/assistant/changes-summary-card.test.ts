@@ -68,6 +68,7 @@ describe('ChangesSummaryCard', () => {
   afterEach(() => {
     act(() => root.unmount())
     vi.useRealTimers()
+    vi.restoreAllMocks()
     window.removeEventListener('larify:workbench-open', captureOpen)
     container.remove()
     openRequest = undefined
@@ -207,6 +208,57 @@ describe('ChangesSummaryCard', () => {
     expect(container.querySelector('[data-testid="hover-diff"]')?.textContent).toBe('a.ts')
   })
 
+  it('places the preview below the card when the viewport clips the space above it', async () => {
+    await render()
+    const card = container.querySelector<HTMLElement>('.relative.mt-3')!
+    container.setAttribute('data-message-scroll-viewport', '')
+    vi.spyOn(container, 'getBoundingClientRect').mockReturnValue({
+      bottom: 700,
+      height: 700,
+      left: 0,
+      right: 900,
+      top: 0,
+      width: 900,
+      x: 0,
+      y: 0,
+      toJSON: () => ({})
+    })
+    vi.spyOn(card, 'getBoundingClientRect').mockReturnValue({
+      bottom: 180,
+      height: 100,
+      left: 0,
+      right: 900,
+      top: 80,
+      width: 900,
+      x: 0,
+      y: 80,
+      toJSON: () => ({})
+    })
+
+    const originalRect = HTMLElement.prototype.getBoundingClientRect
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      if (this.querySelector?.('[data-testid="hover-diff"]')) {
+        return {
+          bottom: 0,
+          height: 320,
+          left: 0,
+          right: 900,
+          top: -320,
+          width: 900,
+          x: 0,
+          y: -320,
+          toJSON: () => ({})
+        }
+      }
+      return originalRect.call(this)
+    })
+    hoverRow('a.ts')
+    const preview = container.querySelector<HTMLElement>('[data-testid="hover-diff"]')!.parentElement!
+
+    expect(preview.classList).toContain('top-full')
+    expect(preview.classList).not.toContain('bottom-full')
+  })
+
   it('hides a keyboard preview after focus leaves the card', async () => {
     vi.useFakeTimers()
     await render()
@@ -220,7 +272,7 @@ describe('ChangesSummaryCard', () => {
     expect(hoverDiff()).toBe('a.ts')
     act(() => {
       outside.focus()
-      vi.advanceTimersByTime(600)
+      vi.advanceTimersByTime(500)
     })
 
     expect(hoverDiff()).toBeUndefined()
@@ -241,6 +293,28 @@ describe('ChangesSummaryCard', () => {
     expect(hoverDiff()).toBe('a.ts')
     expect(list.hasAttribute('data-message-local-scroll')).toBe(true)
     expect(list.classList).toContain('overscroll-contain')
+  })
+
+  it('repositions an open preview when the conversation scrolls', async () => {
+    await render()
+    container.setAttribute('data-message-scroll-viewport', '')
+    const card = container.querySelector<HTMLElement>('.relative.mt-3')!
+    let cardTop = 500
+    vi.spyOn(container, 'getBoundingClientRect').mockReturnValue(rect(0, 700))
+    vi.spyOn(card, 'getBoundingClientRect').mockImplementation(() => rect(cardTop, 100))
+    const originalRect = HTMLElement.prototype.getBoundingClientRect
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      if (this.querySelector?.('[data-testid="hover-diff"]')) return rect(0, 320)
+      return originalRect.call(this)
+    })
+
+    hoverRow('a.ts')
+    const preview = container.querySelector<HTMLElement>('[data-testid="hover-diff"]')!.parentElement!
+    expect(preview.classList).toContain('bottom-full')
+
+    cardTop = 80
+    act(() => container.dispatchEvent(new Event('scroll')))
+    expect(preview.classList).toContain('top-full')
   })
 
   it('drops the preview when the active file disappears', async () => {
@@ -264,18 +338,75 @@ describe('ChangesSummaryCard', () => {
     expect(container.querySelector('[data-testid="hover-diff"]')).toBeNull()
   })
 
+  it('keeps the preview when streaming updates the hovered file', async () => {
+    await render()
+    const row = Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent.includes('a.ts')
+    )!
+    act(() => row.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })))
+    expect(hoverDiff()).toBe('a.ts')
+
+    await act(async () => {
+      root.render(
+        createElement(ChangesSummaryCard, {
+          additions: 3,
+          deletions: 1,
+          files: files.map((file) => ({ ...file })),
+          root: 'D:\\repo'
+        })
+      )
+    })
+
+    expect(hoverDiff()).toBe('a.ts')
+  })
+
+  it('keeps the preview when streaming recreates unchanged change data', async () => {
+    await render()
+    hoverRow('a.ts')
+    expect(hoverDiff()).toBe('a.ts')
+
+    await act(async () => {
+      root.render(
+        createElement(ChangesSummaryCard, {
+          additions: 2,
+          deletions: 1,
+          files: files.map((file) => ({ ...file })),
+          root: 'D:\\repo'
+        })
+      )
+    })
+
+    expect(hoverDiff()).toBe('a.ts')
+  })
+
   const hoverDiff = (): string | undefined =>
     container.querySelector('[data-testid="hover-diff"]')?.textContent
 
   const hoverRow = (path: string): HTMLElement => {
-    const row = Array.from(container.querySelectorAll('button')).find((button) =>
-      button.textContent.includes(path)
-    )!
+    const row = rowFor(path)
     act(() => {
       row.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
     })
     return row
   }
+
+  const rowFor = (path: string): HTMLButtonElement =>
+    Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent.includes(path)
+    )!
+
+  const rect = (top: number, height: number): DOMRect =>
+    ({
+      bottom: top + height,
+      height,
+      left: 0,
+      right: 900,
+      top,
+      width: 900,
+      x: 0,
+      y: top,
+      toJSON: () => ({})
+    }) as DOMRect
 
   it('delays switching while moving up through rows toward the preview', async () => {
     vi.useFakeTimers()

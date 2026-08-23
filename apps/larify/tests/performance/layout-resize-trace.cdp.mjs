@@ -171,6 +171,13 @@ const staleStressResourceCount = await evaluate(`(async () => {
   return stale.length
 })()`)
 if (cleanupStressOnly) {
+  await evaluate(`new Promise((resolve) => {
+    const button = Array.from(document.querySelectorAll('button')).find(
+      (candidate) => candidate.textContent?.trim() === '新建任务'
+    )
+    button?.click()
+    requestAnimationFrame(() => requestAnimationFrame(resolve))
+  })`)
   const pageDiagnostics = await evaluate(`({
     title: document.title,
     bodyText: document.body?.innerText?.slice(0, 500),

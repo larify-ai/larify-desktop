@@ -18,6 +18,7 @@ import { MessageMarkdown } from './message-markdown'
 import { ToolIcon } from '@renderer/components/ai-elements/tool'
 import { ReasoningBody } from '@renderer/components/ai-elements/reasoning'
 import { cn } from '@renderer/lib/utils'
+import { ActivityShimmer } from './activity-shimmer'
 
 const icons: Partial<Record<AssistantRenderItemKind, LucideIcon>> = {
   reasoning: BrainIcon,
@@ -52,14 +53,22 @@ export function ActivityGroupPart({
   item,
   message,
   streaming,
+  summaryIcon,
+  summaryClassName,
   initialOpen,
-  onOpenChange
+  onOpenChange,
+  additionalContent,
+  contentOnly = false
 }: {
   item: AssistantRenderItem
   message: UIMessage
   streaming: boolean
+  summaryIcon?: React.ReactNode
+  summaryClassName?: string
   initialOpen?: boolean
   onOpenChange?: (open: boolean) => void
+  additionalContent?: React.ReactNode
+  contentOnly?: boolean
 }): React.JSX.Element | null {
   const [open, setOpen] = useState(initialOpen ?? item.defaultOpen)
   const wasDefaultOpen = useRef(item.defaultOpen)
@@ -68,7 +77,7 @@ export function ActivityGroupPart({
     wasDefaultOpen.current = item.defaultOpen
   }, [item.defaultOpen])
   const summary =
-    streaming && item.startedAt !== undefined ? (
+    !summaryIcon && streaming && item.startedAt !== undefined ? (
       <LiveProcessingDuration key={item.startedAt} startedAt={item.startedAt} />
     ) : (
       item.summary
@@ -83,9 +92,35 @@ export function ActivityGroupPart({
     return <div className="text-sm text-muted-foreground">{summary}</div>
   }
   if (!indexedParts.length) return null
+  const content = item.children
+    ? item.children.map((child) => (
+        <ActivityGroupPart
+          key={`${child.kind}-${child.partIndexes.join('-')}`}
+          item={child}
+          message={message}
+          streaming={streaming && isStreamingChild(child, message, fallbackStreamingIndex)}
+        />
+      ))
+    : indexedParts.map(({ index, part }, position) =>
+        part.type === 'reasoning' || (part.type === 'text' && item.kind === 'intermediate-text') ? (
+          <ReasoningBody key={index} data-reasoning-content className="text-foreground">
+            <MessageMarkdown isAnimating={streaming && position === indexedParts.length - 1}>
+              {part.text}
+            </MessageMarkdown>
+          </ReasoningBody>
+        ) : (
+          <MessagePart
+            key={index}
+            part={part}
+            streaming={streaming && position === indexedParts.length - 1}
+          />
+        )
+      )
+  if (contentOnly) return <div className="flex flex-col gap-3">{content}</div>
   return (
     <Collapsible
       data-activity-group
+      data-activity-kind={item.kind}
       open={open}
       onOpenChange={(nextOpen) => {
         onOpenChange?.(nextOpen)
@@ -95,50 +130,42 @@ export function ActivityGroupPart({
     >
       <CollapsibleTrigger
         className={cn(
-          'group/summary flex w-full min-w-0 cursor-pointer items-center gap-x-2 text-sm',
-          isGroup ? 'flex-wrap gap-y-2 text-muted-foreground' : 'flex-nowrap text-foreground'
+          'group/summary flex w-full min-w-0 cursor-pointer select-none items-center gap-x-2 text-sm',
+          isGroup ? 'flex-wrap gap-y-3' : 'flex-nowrap',
+          summaryClassName ?? (isGroup ? 'text-muted-foreground' : 'text-foreground')
         )}
       >
-        {isGroup ? null : <SummaryIcon item={item} />}
-        <span className="min-w-0 truncate">
-          {summary || (item.kind === 'reasoning' ? '思考' : '处理中')}
-        </span>
+        {streaming && !isGroup ? (
+          <>
+            {summaryIcon ?? <SummaryIcon item={item} />}
+            <ActivityShimmer className="min-w-0 text-foreground">
+              <span className="min-w-0 truncate">
+                {summary || (item.kind === 'reasoning' ? '思考' : '处理中')}
+              </span>
+            </ActivityShimmer>
+          </>
+        ) : (
+          <>
+            {summaryIcon ?? (isGroup ? null : <SummaryIcon item={item} />)}
+            <span className="min-w-0 truncate">
+              {summary || (item.kind === 'reasoning' ? '思考' : '处理中')}
+            </span>
+          </>
+        )}
         <ChevronRightIcon
           className={cn(
             'size-3.5 shrink-0 transition-[opacity,transform]',
             open ? 'rotate-90 opacity-100' : 'opacity-0 group-hover/summary:opacity-100'
           )}
         />
-        {isGroup ? <span className="order-last h-px w-full basis-full bg-border" /> : null}
+        {isGroup && !summaryIcon ? (
+          <span className="order-last h-px w-full basis-full bg-border" />
+        ) : null}
       </CollapsibleTrigger>
       {open ? (
-        <CollapsibleContent className="mt-2 space-y-3">
-          {item.children
-            ? item.children.map((child) => (
-                <ActivityGroupPart
-                  key={`${child.kind}-${child.partIndexes.join('-')}`}
-                  item={child}
-                  message={message}
-                  streaming={streaming && isStreamingChild(child, message, fallbackStreamingIndex)}
-                />
-              ))
-            : indexedParts.map(({ index, part }, position) =>
-                part.type === 'reasoning' ? (
-                  <ReasoningBody key={index} data-reasoning-content>
-                    <MessageMarkdown
-                      isAnimating={streaming && position === indexedParts.length - 1}
-                    >
-                      {part.text}
-                    </MessageMarkdown>
-                  </ReasoningBody>
-                ) : (
-                  <MessagePart
-                    key={index}
-                    part={part}
-                    streaming={streaming && position === indexedParts.length - 1}
-                  />
-                )
-              )}
+        <CollapsibleContent className="mt-3 flex flex-col gap-3">
+          {content}
+          {additionalContent}
         </CollapsibleContent>
       ) : null}
     </Collapsible>

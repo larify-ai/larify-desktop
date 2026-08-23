@@ -7,7 +7,8 @@ const promptPath = process.argv[2]
 if (!promptPath) throw new Error('Usage: node tests/manual/run-prompt.cdp.mjs <prompt.md>')
 const promptFile = resolve(promptPath)
 const source = await readFile(promptFile, 'utf8')
-const prompt = source.includes('## PROMPT') ? source.split('## PROMPT', 2)[1].trim() : source.trim()
+const body = source.includes('## PROMPT') ? source.split('## PROMPT', 2)[1].trim() : source.trim()
+const prompt = `${body}\n\n这是无人值守自动验收：不要调用 ask_user，不要等待确认。每个指定步骤只执行一次；失败时记录真实结果后继续下一项，不要诊断、追加实验或重试。`
 const { close, evaluate, send } = await connectLarifyCdp()
 const wait = (ms) => new Promise((resolveWait) => setTimeout(resolveWait, ms))
 const waitFor = async (expression, label, timeout = 300_000) => {
@@ -22,14 +23,23 @@ const waitFor = async (expression, label, timeout = 300_000) => {
 
 try {
   await send('Page.bringToFront')
+  const previousSessionId = await evaluate(`localStorage.getItem('larify.activeSessionId')`)
+  if (previousSessionId) {
+    await evaluate(`window.bridge.invoke('agent:cancel', ${JSON.stringify(previousSessionId)})`)
+  }
+  await send('Page.reload', { ignoreCache: true })
+  await waitFor('Boolean(window.bridge)', 'renderer reload', 10_000)
+  await wait(500)
   await waitFor(
     `(() => {
-      const button = document.querySelector('.lucide-message-circle-plus')?.closest('button')
+      const button = [...document.querySelectorAll('button')].find((candidate) =>
+        candidate.textContent?.trim() === '新建任务'
+      ) ?? document.querySelector('.lucide-message-circle-plus')?.closest('button')
       button?.click()
       return Boolean(button)
     })()`,
     'new task button',
-    10_000
+    30_000
   )
   await waitFor(
     `(() => {
@@ -92,7 +102,21 @@ try {
     })()`,
     'persisted agent completion'
   )
-  console.log(JSON.stringify({ promptFile, sessionId, messages }, null, 2))
+  const browserCalls = messages.flatMap(({ parts = [] }) =>
+    parts.filter(({ type }) => type.startsWith('tool-browser_'))
+  )
+  if (browserCalls.length === 0) throw new Error('Prompt completed without browser tool calls')
+  if (process.env.LARIFY_PROMPT_SUMMARY === '1') {
+    const calls = browserCalls.map(({ type, state, input, rawInput, output, errorText }) => ({
+      tool: type.slice('tool-browser_'.length),
+      state,
+      input: input ?? rawInput,
+      result: errorText ?? JSON.stringify(output)?.slice(0, 500)
+    }))
+    console.log(JSON.stringify({ promptFile, sessionId, calls }, null, 2))
+  } else {
+    console.log(JSON.stringify({ promptFile, sessionId, messages }, null, 2))
+  }
 } finally {
   close()
 }

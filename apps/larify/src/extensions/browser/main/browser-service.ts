@@ -1,20 +1,27 @@
-import { session, type BrowserWindow, type Rectangle } from "electron"
+import { nativeTheme, session, type BrowserWindow, type WebContents } from "electron"
 import { addListener, type Listener } from "../../../main/utils/listener"
 import { prepareResponseOutput, type ToolPayload } from "../../../main/utils/tool-output"
 import { SessionScopedManagers } from "../../../main/utils/session-scoped-managers"
 import type { ResourceManager } from "../../../main/core/resource"
 import type { Disposable } from "../../../shared/infra/disposable"
-import type { BrowserState } from "../shared/types"
-import { BROWSER_PARTITION, BrowserTabManager } from "./tab-manager"
+import { BROWSER_PARTITION, type BrowserState } from "../shared/types"
+import { BrowserTabManager } from "./tab-manager"
 import type { BrowserTab } from "./tab"
 import { resolveAddress } from "./url"
 import { isText } from "./content-type"
 
 interface ActiveRecording {
   generation: number | null
+  previous?: ActiveRecording
+  rendererLease: boolean
   resourceId: number
   sessionId: string
   stopping: boolean
+}
+
+interface RendererRenderLease {
+  count: number
+  ready: Promise<void>
 }
 
 export class BrowserService {
@@ -25,10 +32,14 @@ export class BrowserService {
   private readonly changeListeners = new Set<Listener<[string, BrowserState]>>()
   private readonly resourceRegistration: Disposable
   private readonly sessionCleanupRegistration: Disposable
-  private visibleResource?: { id: number; sessionId: string }
+  private readonly rendererRenderLeases = new Map<number, RendererRenderLease>()
   private recording?: ActiveRecording
   private destroyTask: Promise<void> | null = null
   private destroyed = false
+  private readonly handleThemeUpdated = (): void => {
+    const colorScheme = nativeTheme.shouldUseDarkColors ? "dark" : "light"
+    this.managers.forEach((manager) => manager.setColorScheme(colorScheme))
+  }
 
   constructor(
     private readonly window: BrowserWindow,
@@ -41,13 +52,10 @@ export class BrowserService {
       try {
         await this.stopRecordingForSession(sessionId)
       } finally {
-        try {
-          await this.managers.destroySession(sessionId)
-        } finally {
-          if (this.visibleResource?.sessionId === sessionId) this.visibleResource = undefined
-        }
+        await this.managers.destroySession(sessionId)
       }
     })
+    nativeTheme?.on("updated", this.handleThemeUpdated)
   }
 
   bindChange(callback: (sessionId: string, state: BrowserState) => void): () => void {
@@ -55,15 +63,45 @@ export class BrowserService {
   }
 
   state(sessionId: string): BrowserState {
-    return this.managers.peek(sessionId)?.state() ?? { tabs: [], activeId: null }
+    return this.managers.peek(sessionId)?.state() ?? { tabs: [] }
   }
 
   tab(sessionId: string, id: number): BrowserTab | undefined {
     return this.managers.peek(sessionId)?.get(id)
   }
 
+  attach(sessionId: string, id: number, contents: WebContents): void {
+    const manager = this.managers.peek(sessionId)
+    if (!manager) throw new Error("browser session not found")
+    manager.attach(id, contents)
+  }
+
   createTab(sessionId: string, url?: string): number {
     return this.resources.create('browser', sessionId, { url })
+  }
+
+  openUrl(sessionId: string, url: string): number {
+    const target = resolveAddress(url)
+    if (!target) throw new Error(`invalid url: ${url}`)
+    const targetUrl = new URL(target)
+    const targetHref = targetUrl.href
+    targetUrl.hash = ""
+    const key = targetUrl.href
+    const manager = this.managers.peek(sessionId)
+    if (!manager) return this.resources.create('browser', sessionId, { url: target })
+    const existing = manager.state().tabs.find((tab) => {
+      if (!manager.get(tab.id)) return false
+      try {
+        const tabUrl = new URL(tab.url)
+        tabUrl.hash = ""
+        return tabUrl.href === key
+      } catch {
+        return false
+      }
+    })
+    if (!existing) return this.resources.create('browser', sessionId, { url: target })
+    if (new URL(existing.url).href !== targetHref) manager.navigate(existing.id, targetHref)
+    return existing.id
   }
 
   private openResource(
@@ -74,7 +112,7 @@ export class BrowserService {
     const existingManager = this.managers.peek(sessionId)
     const manager = this.manager(sessionId)
     try {
-      manager.createTab(id, options?.url, false)
+      manager.createTab(id, options?.url)
     } catch (error) {
       if (!existingManager) void this.managers.destroySession(sessionId).catch(() => {})
       throw error
@@ -82,6 +120,7 @@ export class BrowserService {
     return {
       dispose: async () => {
         let recordingError: unknown
+        let closeError: unknown
         try {
           await this.stopRecordingForResource(sessionId, id)
         } catch (error) {
@@ -89,20 +128,17 @@ export class BrowserService {
         }
         try {
           await manager.close(id)
-        } catch (closeError) {
-          if (recordingError) {
-            throw new AggregateError(
-              [recordingError, closeError],
-              "failed to stop recording and close browser tab"
-            )
-          }
-          throw closeError
-        } finally {
-          if (this.visibleResource?.id === id) {
-            manager.setVisible(false)
-            this.visibleResource = undefined
-          }
+        } catch (error) {
+          closeError = error
         }
+        await this.discardRendererRendering(id)
+        if (recordingError && closeError) {
+          throw new AggregateError(
+            [recordingError, closeError],
+            "failed to stop recording and close browser tab"
+          )
+        }
+        if (closeError) throw closeError
         if (recordingError) throw recordingError
       }
     }
@@ -116,8 +152,15 @@ export class BrowserService {
     return this.manager(sessionId).withTemporaryTab(url, callback)
   }
 
-  withRendered<T>(sessionId: string, id: number, operation: () => Promise<T>): Promise<T> {
-    return this.manager(sessionId).withRendered(id, operation)
+  async withRendered<T>(sessionId: string, id: number, operation: () => Promise<T>): Promise<T> {
+    return this.manager(sessionId).withRendered(id, async () => {
+      await this.acquireRendererRendering(id)
+      try {
+        return await operation()
+      } finally {
+        await this.releaseRendererRendering(id)
+      }
+    })
   }
 
   withUnthrottled<T>(sessionId: string, id: number, operation: () => Promise<T>): Promise<T> {
@@ -155,6 +198,7 @@ export class BrowserService {
   }
 
   async recordStart(sessionId: string, tab: BrowserTab, path: string): Promise<number> {
+    await this.releaseStaleRecording()
     if (this.recording) throw new Error("another browser recording is already in progress")
     return this.beginRecording(sessionId, tab, path, false)
   }
@@ -165,13 +209,13 @@ export class BrowserService {
     recording.stopping = true
     const manager = this.managers.peek(sessionId)
     if (!manager) {
-      this.releaseRecording(recording)
+      await this.releaseRecording(recording)
       throw new Error("no recording in progress")
     }
     try {
       return await manager.recordStop()
     } finally {
-      this.releaseRecording(recording, manager)
+      await this.releaseRecording(recording, manager)
     }
   }
 
@@ -184,21 +228,30 @@ export class BrowserService {
     recording.stopping = true
     const manager = this.managers.peek(sessionId)
     if (!manager) {
-      this.releaseRecording(recording)
+      await this.releaseRecording(recording)
       return null
     }
     try {
       return await manager.recordStopIfCurrent(generation)
     } finally {
-      this.releaseRecording(recording, manager)
+      await this.releaseRecording(recording, manager)
     }
   }
 
   async recordRestart(sessionId: string, tab: BrowserTab, path: string): Promise<number> {
+    await this.releaseStaleRecording()
     if (this.recording && this.recording.sessionId !== sessionId) {
       throw new Error("another browser recording is already in progress")
     }
     return this.beginRecording(sessionId, tab, path, Boolean(this.recording))
+  }
+
+  private async releaseStaleRecording(): Promise<void> {
+    const recording = this.recording
+    if (!recording) return
+    const manager = this.managers.peek(recording.sessionId)
+    if (manager?.isRecording()) return
+    await this.releaseRecording(recording, manager)
   }
 
   private async beginRecording(
@@ -209,10 +262,35 @@ export class BrowserService {
   ): Promise<number> {
     const manager = this.managers.peek(sessionId)
     if (!manager) throw new Error("browser session is not active")
-    const claim: ActiveRecording = { generation: null, resourceId: tab.id, sessionId, stopping: false }
+    if (manager.get(tab.id) !== tab) throw new Error("browser tab not found")
+    const previous = restart ? this.recording : undefined
+    const movesToAnotherTab = previous !== undefined && previous.resourceId !== tab.id
+    const inheritedRendererLease = !movesToAnotherTab && (previous?.rendererLease ?? false)
+    if (inheritedRendererLease && previous) previous.rendererLease = false
+    const claim: ActiveRecording = {
+      generation: null,
+      previous: movesToAnotherTab ? previous : undefined,
+      rendererLease: inheritedRendererLease,
+      resourceId: tab.id,
+      sessionId,
+      stopping: false
+    }
     this.recording = claim
-    manager.setRecording(tab.id)
+    let restartAttempted = false
     try {
+      await tab.ready()
+      if (this.recording !== claim || claim.stopping) {
+        throw new Error("recording was cancelled during startup")
+      }
+      if (!claim.rendererLease) {
+        await this.acquireRendererRendering(tab.id)
+        claim.rendererLease = true
+      }
+      if (this.recording !== claim || claim.stopping) {
+        throw new Error("recording was cancelled during startup")
+      }
+      manager.setRecording(tab.id)
+      restartAttempted = restart
       const generation = restart
         ? await manager.recordRestart(tab, path)
         : await manager.recordStart(tab, path)
@@ -221,51 +299,31 @@ export class BrowserService {
         throw new Error("recording was cancelled during startup")
       }
       claim.generation = generation
+      if (claim.previous) {
+        await this.releaseRecordingLease(claim.previous)
+        claim.previous = undefined
+      }
       return generation
     } catch (error) {
-      if (!claim.stopping) this.releaseRecording(claim, manager)
+      if (previous && !restartAttempted && this.recording === claim && !claim.stopping) {
+        claim.previous = undefined
+        this.recording = previous
+        manager.setRecording(previous.resourceId)
+        if (inheritedRendererLease) {
+          claim.rendererLease = false
+          previous.rendererLease = true
+        } else {
+          await this.releaseRecordingLease(claim)
+        }
+        throw error
+      }
+      if (this.recording === claim) {
+        if (!claim.stopping) await this.releaseRecording(claim, manager)
+      } else if (!this.recording || !this.recordingIncludesClaim(this.recording, claim)) {
+        await this.releaseRecordingLease(claim)
+      }
       throw error
     }
-  }
-
-  setBounds(
-    sessionId: string,
-    id: number,
-    bounds: Rectangle,
-    live = false,
-    activate = false
-  ): boolean {
-    const manager = this.managers.peek(sessionId)
-    if (activate) manager?.setActive(id)
-    if (!manager?.isActive(id)) return false
-    manager.setBounds(bounds, live)
-    return true
-  }
-
-  setVisible(sessionId: string, id: number, visible: boolean): void {
-    if (!visible) {
-      if (this.visibleResource?.id === id) {
-        this.managers.peek(this.visibleResource.sessionId)?.setVisible(false)
-        this.visibleResource = undefined
-        return
-      }
-      const manager = this.managers.peek(sessionId)
-      if (!manager?.isActive(id)) return
-      manager.setVisible(false)
-      if (this.visibleResource?.sessionId === sessionId) this.visibleResource = undefined
-      return
-    }
-    const resource = this.resources.get(id)
-    const manager = this.managers.peek(sessionId)
-    if (resource?.type !== 'browser' || resource.sessionId !== sessionId || !manager) return
-    if (this.visibleResource?.id === id) return
-    const sessionAlreadyVisible = this.visibleResource?.sessionId === sessionId
-    this.managers.forEach((manager, managerSessionId) => {
-      if (managerSessionId !== sessionId) manager.setVisible(false)
-    })
-    this.visibleResource = { id, sessionId }
-    manager.setActive(id)
-    if (!sessionAlreadyVisible) manager.setVisible(true)
   }
 
   destroy(): Promise<void> {
@@ -273,6 +331,7 @@ export class BrowserService {
     this.destroyed = true
     this.resourceRegistration.dispose()
     this.sessionCleanupRegistration.dispose()
+    nativeTheme?.removeListener("updated", this.handleThemeUpdated)
     this.destroyTask = this.destroyResources()
     return this.destroyTask
   }
@@ -281,12 +340,33 @@ export class BrowserService {
     const ids = this.resources.list({ type: 'browser' }).map(({ id }) => id)
     await Promise.allSettled(ids.map((id) => this.resources.close(id)))
     await this.managers.destroyAll()
+    await Promise.allSettled(
+      [...this.rendererRenderLeases.keys()].map((id) => this.setRendererRendering(id, false))
+    )
+    this.rendererRenderLeases.clear()
     this.recording = undefined
   }
 
   private async stopRecordingForResource(sessionId: string, resourceId: number): Promise<void> {
-    if (this.recording?.sessionId !== sessionId || this.recording.resourceId !== resourceId) return
+    if (
+      this.recording?.sessionId !== sessionId ||
+      !this.recordingIncludesResource(this.recording, resourceId)
+    ) return
     await this.stopRecordingForSession(sessionId)
+  }
+
+  private recordingIncludesResource(recording: ActiveRecording, resourceId: number): boolean {
+    for (let current: ActiveRecording | undefined = recording; current; current = current.previous) {
+      if (current.resourceId === resourceId) return true
+    }
+    return false
+  }
+
+  private recordingIncludesClaim(recording: ActiveRecording, claim: ActiveRecording): boolean {
+    for (let current: ActiveRecording | undefined = recording; current; current = current.previous) {
+      if (current === claim) return true
+    }
+    return false
   }
 
   private async stopRecordingForSession(sessionId: string): Promise<void> {
@@ -305,17 +385,82 @@ export class BrowserService {
         }
       }
     } finally {
-      this.releaseRecording(recording, manager)
+      await this.releaseRecording(recording, manager)
     }
   }
 
-  private releaseRecording(
+  private async releaseRecording(
     recording: ActiveRecording,
     manager?: BrowserTabManager
-  ): void {
+  ): Promise<void> {
     if (this.recording !== recording) return
     manager?.setRecording(null)
     this.recording = undefined
+    await this.releaseRecordingLease(recording)
+  }
+
+  private async releaseRecordingLease(recording: ActiveRecording): Promise<void> {
+    const previous = recording.previous
+    recording.previous = undefined
+    if (recording.rendererLease) {
+      recording.rendererLease = false
+      await this.releaseRendererRendering(recording.resourceId)
+    }
+    if (previous) await this.releaseRecordingLease(previous)
+  }
+
+  private async setRendererRendering(id: number, enabled: boolean): Promise<void> {
+    if (this.window.isDestroyed?.() || !this.window.webContents?.executeJavaScript) return
+    const selector = JSON.stringify(`[data-browser-webview-host="${id}"]`)
+    await this.window.webContents
+      .executeJavaScript(`(() => {
+        const host = document.querySelector(${selector})
+        if (!(host instanceof HTMLElement)) return true
+        if (${enabled}) {
+          host.dataset.browserRendering = 'true'
+          if (host.dataset.active === 'true') return true
+          host.style.left = '0px'
+          host.style.top = '0px'
+          host.style.zIndex = '-1'
+          return new Promise((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))
+        }
+        if (host.dataset.browserRendering === 'true') {
+          delete host.dataset.browserRendering
+          if (host.dataset.active === 'true') return true
+          host.style.left = '-10000px'
+          host.style.top = '-10000px'
+          host.style.zIndex = ''
+        }
+        return true
+      })()`)
+      .catch(() => {})
+  }
+
+  private async acquireRendererRendering(id: number): Promise<void> {
+    const existing = this.rendererRenderLeases.get(id)
+    if (existing) {
+      existing.count++
+      await existing.ready
+      return
+    }
+    const lease = { count: 1, ready: this.setRendererRendering(id, true) }
+    this.rendererRenderLeases.set(id, lease)
+    await lease.ready
+  }
+
+  private async releaseRendererRendering(id: number): Promise<void> {
+    const lease = this.rendererRenderLeases.get(id)
+    if (!lease) return
+    lease.count--
+    if (lease.count > 0) return
+    this.rendererRenderLeases.delete(id)
+    await this.setRendererRendering(id, false)
+  }
+
+  private async discardRendererRendering(id: number): Promise<void> {
+    if (!this.rendererRenderLeases.delete(id)) return
+    await this.setRendererRendering(id, false)
   }
 
   private manager(sessionId: string): BrowserTabManager {
@@ -324,14 +469,17 @@ export class BrowserService {
   }
 
   private createManager(sessionId: string): BrowserTabManager {
-    const manager = new BrowserTabManager(this.window, (url) => {
-      const resourceId = this.createTab(sessionId, url)
-      this.window.webContents.send("resource:select", {
-        rendererId: "browser",
-        resourceId,
-        sessionId
-      })
-    })
+    const manager = new BrowserTabManager(
+      (url) => {
+        const resourceId = this.createTab(sessionId, url)
+        this.window.webContents.send("resource:select", {
+          rendererId: "browser",
+          resourceId,
+          sessionId
+        })
+      },
+      nativeTheme?.shouldUseDarkColors ? "dark" : "light",
+    )
     manager.bindChange((state) => {
       for (const listener of this.changeListeners) listener(sessionId, state)
     })

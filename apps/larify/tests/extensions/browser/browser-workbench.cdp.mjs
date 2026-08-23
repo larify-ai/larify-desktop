@@ -8,7 +8,9 @@ const targets = await fetch(`http://127.0.0.1:${port}/json/list`).then((response
   response.json()
 )
 const target = targets.find(
-  ({ type, url }) => type === 'page' && url.startsWith('http://localhost:')
+  ({ type, url }) =>
+    type === 'page' &&
+    (url.startsWith('http://localhost:') || url.endsWith('/out/renderer/index.html'))
 )
 if (!target?.webSocketDebuggerUrl) throw new Error(`Larify page not found on port ${port}`)
 
@@ -59,7 +61,9 @@ const connectPage = async (urlPart) => {
     const list = await fetch(`http://127.0.0.1:${port}/json/list`).then((response) =>
       response.json()
     )
-    target = list.find(({ type, url }) => type === 'page' && url.includes(urlPart))
+    target = list.find(({ type, url }) =>
+      (type === 'page' || type === 'webview') && url.includes(urlPart)
+    )
     if (target) break
     await wait(50)
   }
@@ -94,7 +98,9 @@ const connectPage = async (urlPart) => {
       try {
         const value = await pageEvaluate(expression)
         if (value) return value
-      } catch {}
+      } catch {
+        // The renderer may be replaced while the page is reloading.
+      }
       await wait(50)
     }
     throw new Error(`Timed out: ${label}`)
@@ -180,39 +186,10 @@ const clickElement = async (expression) => {
     clickCount: 1
   })
 }
-const navigateFromAddressBar = async (url) => {
-  await waitFor(
-    `document.querySelector('[data-testid="browser-address"]') instanceof HTMLButtonElement && !document.querySelector('[data-testid="browser-address"]').disabled`,
-    'enabled address'
+const navigateBrowser = (resource, url) =>
+  evaluate(
+    `window.bridge.invoke('browser:navigate', ${JSON.stringify(resource.sessionId)}, ${resource.id}, ${JSON.stringify(url)})`
   )
-  await clickElement(`document.querySelector('[data-testid="browser-address"]')`)
-  await waitFor(
-    `document.querySelector('[data-testid="browser-address"]') instanceof HTMLInputElement`,
-    'editable address'
-  )
-  await send('Input.dispatchKeyEvent', {
-    type: 'rawKeyDown',
-    key: 'a',
-    code: 'KeyA',
-    modifiers: 2,
-    windowsVirtualKeyCode: 65,
-    nativeVirtualKeyCode: 65
-  })
-  await send('Input.dispatchKeyEvent', {
-    type: 'keyUp',
-    key: 'a',
-    code: 'KeyA',
-    modifiers: 2,
-    windowsVirtualKeyCode: 65,
-    nativeVirtualKeyCode: 65
-  })
-  await send('Input.insertText', { text: url })
-  await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter' })
-  await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter' })
-}
-const toolbarButton = (index) =>
-  `document.querySelector('[data-testid="browser-address"]')?.closest('.flex.h-11')?.querySelectorAll('button')[${index}]`
-
 const created = []
 try {
   const first = await createBrowser()
@@ -224,12 +201,19 @@ try {
   )
   const title = 'Example Domain'
   const url = 'https://example.com/'
-  await navigateFromAddressBar('not a valid url')
+  await evaluate(
+    `window.bridge.invoke('browser:navigate', ${JSON.stringify(first.sessionId)}, ${first.id}, 'not a valid url')`
+  )
   await waitFor(
-    `(async () => (await window.bridge.invoke('browser:getState', ${JSON.stringify(first.sessionId)}, ${first.id}))?.url === 'https://www.bing.com/search?q=not+a+valid+url')()`,
+    `(async () => {
+      const value = (await window.bridge.invoke('browser:getState', ${JSON.stringify(first.sessionId)}, ${first.id}))?.url
+      if (!value) return false
+      const url = new URL(value)
+      return url.hostname.endsWith('bing.com') && url.pathname === '/search' && url.searchParams.get('q') === 'not a valid url'
+    })()`,
     'address search'
   )
-  await navigateFromAddressBar(url)
+  await navigateBrowser(first, url)
   await waitFor(
     `(async () => (await window.bridge.invoke('browser:getState', ${JSON.stringify(first.sessionId)}, ${first.id}))?.title === ${JSON.stringify(title)})()`,
     'browser title'
@@ -246,29 +230,29 @@ try {
   )
 
   const secondUrl = 'https://example.com/?history=second'
-  await navigateFromAddressBar(secondUrl)
+  await navigateBrowser(first, secondUrl)
   await waitFor(
     `(async () => (await window.bridge.invoke('browser:getState', ${JSON.stringify(first.sessionId)}, ${first.id}))?.url === ${JSON.stringify(secondUrl)})()`,
     'second address navigation'
   )
-  await clickElement(toolbarButton(0))
+  await evaluate(`window.bridge.invoke('browser:back', ${JSON.stringify(first.sessionId)}, ${first.id})`)
   await waitFor(
     `(async () => (await window.bridge.invoke('browser:getState', ${JSON.stringify(first.sessionId)}, ${first.id}))?.url === ${JSON.stringify(url)})()`,
     'browser back'
   )
-  await clickElement(toolbarButton(1))
+  await evaluate(`window.bridge.invoke('browser:forward', ${JSON.stringify(first.sessionId)}, ${first.id})`)
   await waitFor(
     `(async () => (await window.bridge.invoke('browser:getState', ${JSON.stringify(first.sessionId)}, ${first.id}))?.url === ${JSON.stringify(secondUrl)})()`,
     'browser forward'
   )
-  await clickElement(toolbarButton(2))
+  await evaluate(`window.bridge.invoke('browser:reload', ${JSON.stringify(first.sessionId)}, ${first.id})`)
   await waitFor(
     `(async () => !(await window.bridge.invoke('browser:getState', ${JSON.stringify(first.sessionId)}, ${first.id}))?.loading)()`,
     'browser reload'
   )
 
   const fixturePath = resolve('tests/extensions/browser/fixtures/interaction.html')
-  await navigateFromAddressBar(fixturePath)
+  await navigateBrowser(first, fixturePath)
   await waitFor(
     `(async () => (await window.bridge.invoke('browser:getState', ${JSON.stringify(first.sessionId)}, ${first.id}))?.title === 'Browser Interaction Test')()`,
     'interaction fixture'
@@ -300,6 +284,7 @@ try {
   await pageClick('#text')
   await page.send('Input.insertText', { text: 'Larify browser input' })
   assert.equal(await page.evaluate(`document.querySelector('#text').value`), 'Larify browser input')
+
   await pageClick('#increment')
   assert.equal(await page.evaluate(`document.querySelector('#count').value`), '1')
   await pageClick('#dialog')
@@ -344,29 +329,27 @@ try {
     'linked page tab title'
   )
   page.socket.close()
-  await clickElement(toolbarButton(0))
+  await evaluate(`window.bridge.invoke('browser:back', ${JSON.stringify(first.sessionId)}, ${first.id})`)
   await waitFor(
     `(async () => (await window.bridge.invoke('browser:getState', ${JSON.stringify(first.sessionId)}, ${first.id}))?.title === 'Browser Interaction Test')()`,
     'back to interaction fixture'
   )
-  await clickElement(toolbarButton(0))
+  await evaluate(`window.bridge.invoke('browser:back', ${JSON.stringify(first.sessionId)}, ${first.id})`)
   await waitFor(
     `(async () => (await window.bridge.invoke('browser:getState', ${JSON.stringify(first.sessionId)}, ${first.id}))?.url === ${JSON.stringify(secondUrl)})()`,
     'back to remote page'
   )
 
-  await navigateFromAddressBar('http://127.0.0.1:1/')
+  await navigateBrowser(first, 'http://127.0.0.1:1/')
   await waitFor(
     `(async () => Boolean((await window.bridge.invoke('browser:getState', ${JSON.stringify(first.sessionId)}, ${first.id}))?.error))()`,
     'failed navigation state'
   )
-  assert.equal(
-    await evaluate(
-      `(async () => (await window.bridge.invoke('browser:getState', ${JSON.stringify(first.sessionId)}, ${first.id}))?.loading)()`
-    ),
-    false
+  await waitFor(
+    `(async () => (await window.bridge.invoke('browser:getState', ${JSON.stringify(first.sessionId)}, ${first.id}))?.loading === false)()`,
+    'failed navigation stopped loading'
   )
-  await navigateFromAddressBar(secondUrl)
+  await navigateBrowser(first, secondUrl)
   await waitFor(
     `(async () => {
       const state = await window.bridge.invoke('browser:getState', ${JSON.stringify(first.sessionId)}, ${first.id})
@@ -386,10 +369,65 @@ try {
   )
   assert.equal(
     await evaluate(
+      `document.querySelector('[data-browser-webview-host="${second.id}"]')?.style.left`
+    ),
+    '-10000px',
+    'an active blank webview must not cover the empty state'
+  )
+  assert.equal(
+    await evaluate(
       `(async () => (await window.bridge.invoke('browser:getState', ${JSON.stringify(second.sessionId)}, ${second.id}))?.id)()`
     ),
     second.id
   )
+  await evaluate(`(() => {
+    const host = document.querySelector('[data-browser-webview-host="${first.id}"]')
+    host.dataset.browserRendering = 'true'
+    host.style.left = '0px'
+    host.style.top = '0px'
+    host.style.zIndex = '-1'
+  })()`)
+  const stagedBounds = await evaluate(`(() => {
+    const host = document.querySelector('[data-browser-webview-host="${first.id}"]')
+    const { x, y, width, height } = host.getBoundingClientRect()
+    window.dispatchEvent(new Event('resize'))
+    window.dispatchEvent(new CustomEvent('larify:native-layout'))
+    const next = host.getBoundingClientRect()
+    return { before: { x, y, width, height }, after: { x: next.x, y: next.y, width: next.width, height: next.height } }
+  })()`)
+  assert.deepEqual(stagedBounds.after, stagedBounds.before, 'user layout must not resize a leased webview')
+  const hiddenPage = await connectPage('history=second')
+  await hiddenPage.send('Page.bringToFront')
+  await hiddenPage.send('Emulation.setFocusEmulationEnabled', { enabled: true })
+  await hiddenPage.send('Emulation.setDeviceMetricsOverride', {
+    width: 640,
+    height: 480,
+    deviceScaleFactor: 1,
+    mobile: false
+  })
+  assert.equal(
+    (await hiddenPage.send('Runtime.evaluate', {
+      expression: 'innerWidth === 640 && innerHeight === 480',
+      returnByValue: true
+    })).result.value,
+    true,
+    'Agent CDP must still be able to resize the guest viewport'
+  )
+  const hiddenCapture = await hiddenPage.send('Page.captureScreenshot', {
+    format: 'png',
+    fromSurface: true
+  })
+  assert.ok(hiddenCapture.data.length > 1_000, 'hidden webview screenshot should contain image data')
+  await hiddenPage.send('Emulation.setFocusEmulationEnabled', { enabled: false })
+  await hiddenPage.send('Emulation.clearDeviceMetricsOverride')
+  hiddenPage.socket.close()
+  await evaluate(`(() => {
+    const host = document.querySelector('[data-browser-webview-host="${first.id}"]')
+    delete host.dataset.browserRendering
+    host.style.left = '-10000px'
+    host.style.top = '-10000px'
+    host.style.zIndex = ''
+  })()`)
   const browserResources = await evaluate(
     `window.bridge.invoke('resource:list', { type: 'browser' })`
   )
@@ -408,7 +446,7 @@ try {
   await selectTab(title)
 
   const sash = await evaluate(`(() => {
-    const rect = document.querySelector('#content > .sash-container > .sash')?.getBoundingClientRect()
+    const rect = document.querySelector('.larify-allotment > .sash-container > .sash')?.getBoundingClientRect()
     return rect ? { x: rect.x, y: rect.y + rect.height / 2 } : null
   })()`)
   assert.ok(sash)
@@ -436,7 +474,7 @@ try {
   })
   assert.equal(
     await evaluate(
-      `document.querySelector('[data-testid="browser-viewport"]')?.getBoundingClientRect().width > 0`
+      `document.querySelector('[data-browser-webview-host="${first.id}"] webview')?.getBoundingClientRect().width > 0`
     ),
     true
   )

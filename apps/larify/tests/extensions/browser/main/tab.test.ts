@@ -7,6 +7,8 @@ const h = vi.hoisted(() => ({
   clickMock: vi.fn(),
   pressMock: vi.fn(),
   sendCommandMock: vi.fn(),
+  sendInputEventMock: vi.fn(),
+  insertTextMock: vi.fn(),
   viewOptions: [] as unknown[],
 }))
 
@@ -121,6 +123,12 @@ vi.mock("electron", () => {
     capturePage(): Promise<unknown> {
       return h.capturePageMock()
     }
+    sendInputEvent(event: unknown): void {
+      h.sendInputEventMock(event)
+    }
+    insertText(text: string): Promise<void> {
+      return h.insertTextMock(text)
+    }
     navigationHistory = {
       canGoBack: () => false,
       canGoForward: () => false,
@@ -230,10 +238,13 @@ describe("BrowserTab", () => {
     h.clickMock.mockReset()
     h.pressMock.mockReset()
     h.sendCommandMock.mockReset()
+    h.sendInputEventMock.mockReset()
+    h.insertTextMock.mockReset()
     h.viewOptions.length = 0
     h.clickMock.mockResolvedValue(undefined)
     h.pressMock.mockResolvedValue(undefined)
     h.sendCommandMock.mockResolvedValue({})
+    h.insertTextMock.mockResolvedValue(undefined)
   })
 
   it("enables background throttling for idle automation tabs", () => {
@@ -244,10 +255,21 @@ describe("BrowserTab", () => {
     })
   })
 
-  it("falls back to CDP when the display surface is unavailable", async () => {
-    h.capturePageMock.mockRejectedValue(
-      new Error("Current display surface not available for capture"),
-    )
+  it("rolls back a rendering lease when rendering setup fails", async () => {
+    const tab = new BrowserTab(1, "p")
+    const enableRendering = vi
+      .spyOn(tab as unknown as { enableRendering(): Promise<void> }, "enableRendering")
+      .mockRejectedValueOnce(new Error("rendering setup failed"))
+
+    await expect(tab.acquireRendering()).rejects.toThrow("rendering setup failed")
+    enableRendering.mockResolvedValueOnce(undefined)
+    await expect(tab.acquireRendering()).resolves.toBeUndefined()
+    await tab.releaseRendering()
+
+    expect(enableRendering).toHaveBeenCalledTimes(2)
+  })
+
+  it("captures the viewport through CDP", async () => {
     h.sendCommandMock.mockImplementation(async (method: string) => {
       if (method === "Page.getLayoutMetrics") {
         return {
@@ -277,19 +299,6 @@ describe("BrowserTab", () => {
         captureBeyondViewport: false,
       },
       undefined,
-    )
-  })
-
-  it("does not hide unrelated capturePage failures", async () => {
-    h.capturePageMock.mockRejectedValue(new Error("renderer crashed"))
-
-    await expect(new BrowserTab(1, "p").screenshot({ format: "png" })).rejects.toThrow(
-      "renderer crashed",
-    )
-    expect(h.sendCommandMock).not.toHaveBeenCalledWith(
-      "Page.captureScreenshot",
-      expect.anything(),
-      expect.anything(),
     )
   })
 
@@ -805,6 +814,33 @@ describe("BrowserTab", () => {
     messageHandler({}, "Network.loadingFinished", { requestId: "already-running" })
     await vi.advanceTimersByTimeAsync(500)
     await expect(promise).resolves.toBeUndefined()
+    vi.useRealTimers()
+  })
+
+  it("waits for CDP network tracking before reporting networkidle", async () => {
+    vi.useFakeTimers()
+    let enableNetwork!: () => void
+    h.sendCommandMock.mockImplementation(
+      (method: string) =>
+        method === "Network.enable"
+          ? new Promise<void>((resolve) => {
+              enableNetwork = resolve
+            })
+          : Promise.resolve({}),
+    )
+    const tab = new BrowserTab(1, "p")
+
+    const pending = tab.waitForLoad("networkidle", 3000)
+    let settled = false
+    void pending.then(() => {
+      settled = true
+    })
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(settled).toBe(false)
+
+    enableNetwork()
+    await vi.advanceTimersByTimeAsync(500)
+    await expect(pending).resolves.toBeUndefined()
     vi.useRealTimers()
   })
 
@@ -1334,44 +1370,32 @@ describe("BrowserTab", () => {
   it("tracks a held modifier across raw keyboard down and up calls", async () => {
     const tab = new BrowserTab(1, "p")
     await Promise.resolve()
-    h.sendCommandMock.mockClear()
+    h.sendInputEventMock.mockClear()
 
     await tab.keyDown("Ctrl")
     await tab.keyDown("c")
     await tab.keyUp("c")
     await tab.keyUp("Ctrl")
 
-    const keys = h.sendCommandMock.mock.calls
-      .filter(([method]) => method === "Input.dispatchKeyEvent")
-      .map(([, params]) => params)
-    expect(keys).toMatchObject([
-      { type: "keyDown", key: "Control", modifiers: 2 },
-      { type: "keyDown", key: "c", modifiers: 2 },
-      { type: "keyUp", key: "c", modifiers: 2 },
-      { type: "keyUp", key: "Control", modifiers: 0 },
+    expect(h.sendInputEventMock.mock.calls.map(([event]) => event)).toEqual([
+      { type: "keyDown", keyCode: "Control", modifiers: ["control"] },
+      { type: "keyDown", keyCode: "c", modifiers: ["control"] },
+      { type: "keyUp", keyCode: "c", modifiers: ["control"] },
+      { type: "keyUp", keyCode: "Control", modifiers: [] },
     ])
   })
 
   it("serializes concurrent raw keyboard calls so modifiers are preserved", async () => {
     const tab = new BrowserTab(1, "p")
     await Promise.resolve()
-    h.sendCommandMock.mockClear()
+    h.sendInputEventMock.mockClear()
     let releaseControl!: () => void
     const controlSent = new Promise<void>((resolve) => {
       releaseControl = resolve
     })
-    h.sendCommandMock.mockImplementation(
-      async (method: string, params: { key?: string; type?: string }) => {
-        if (
-          method === "Input.dispatchKeyEvent" &&
-          params.type === "keyDown" &&
-          params.key === "Control"
-        ) {
-          await controlSent
-        }
-        return {}
-      },
-    )
+    h.sendInputEventMock.mockImplementation(async (event: { keyCode?: string; type?: string }) => {
+      if (event.type === "keyDown" && event.keyCode === "Control") await controlSent
+    })
 
     const control = tab.keyDown("Ctrl")
     const letter = tab.keyDown("a")
@@ -1379,19 +1403,18 @@ describe("BrowserTab", () => {
     releaseControl()
     await Promise.all([control, letter])
 
-    const letterDown = h.sendCommandMock.mock.calls.find(
-      ([method, params]) =>
-        method === "Input.dispatchKeyEvent" &&
-        (params as { key?: string; type?: string }).type === "keyDown" &&
-        (params as { key?: string }).key === "a",
+    const letterDown = h.sendInputEventMock.mock.calls.find(
+      ([event]) =>
+        (event as { keyCode?: string; type?: string }).type === "keyDown" &&
+        (event as { keyCode?: string }).keyCode === "a",
     )
-    expect(letterDown?.[1]).toMatchObject({ modifiers: 2 })
+    expect(letterDown?.[0]).toMatchObject({ modifiers: ["control"] })
   })
 
   it("serializes high-level and raw input operations", async () => {
     const tab = new BrowserTab(1, "p")
     await Promise.resolve()
-    h.sendCommandMock.mockClear()
+    h.sendInputEventMock.mockClear()
     let releaseClick!: () => void
     h.clickMock.mockImplementation(
       () =>
@@ -1403,15 +1426,11 @@ describe("BrowserTab", () => {
     const click = tab.click("#button")
     const key = tab.keyDown("a")
     await Promise.resolve()
-    expect(
-      h.sendCommandMock.mock.calls.some(([method]) => method === "Input.dispatchKeyEvent"),
-    ).toBe(false)
+    expect(h.sendInputEventMock).not.toHaveBeenCalled()
     releaseClick()
     await Promise.all([click, key])
-    expect(h.sendCommandMock).toHaveBeenCalledWith(
-      "Input.dispatchKeyEvent",
-      expect.objectContaining({ key: "a", type: "keyDown" }),
-      undefined,
+    expect(h.sendInputEventMock).toHaveBeenCalledWith(
+      expect.objectContaining({ keyCode: "a", type: "keyDown" }),
     )
   })
 
@@ -1455,18 +1474,9 @@ describe("BrowserTab", () => {
     const controlSent = new Promise<void>((resolve) => {
       releaseControl = resolve
     })
-    h.sendCommandMock.mockImplementation(
-      async (method: string, params: { key?: string; type?: string }) => {
-        if (
-          method === "Input.dispatchKeyEvent" &&
-          params.type === "keyDown" &&
-          params.key === "Control"
-        ) {
-          await controlSent
-        }
-        return {}
-      },
-    )
+    h.sendInputEventMock.mockImplementation(async (event: { keyCode?: string; type?: string }) => {
+      if (event.type === "keyDown" && event.keyCode === "Control") await controlSent
+    })
 
     const control = tab.keyDown("Control")
     const press = tab.press("a")
@@ -1480,50 +1490,48 @@ describe("BrowserTab", () => {
   it("does not retain a modifier whose keyDown command failed", async () => {
     const tab = new BrowserTab(1, "p")
     await Promise.resolve()
-    h.sendCommandMock.mockClear()
+    h.sendInputEventMock.mockClear()
     let failModifier = true
-    h.sendCommandMock.mockImplementation(async (method: string) => {
-      if (method === "Input.dispatchKeyEvent" && failModifier) {
+    h.sendInputEventMock.mockImplementation(() => {
+      if (failModifier) {
         failModifier = false
         throw new Error("modifier down failed")
       }
-      return {}
     })
 
     await expect(tab.keyDown("Ctrl")).rejects.toThrow("modifier down failed")
     await tab.keyDown("c")
 
-    const cDown = h.sendCommandMock.mock.calls.find(
-      ([method, params]) =>
-        method === "Input.dispatchKeyEvent" &&
-        (params as { type?: string; key?: string }).type === "keyDown" &&
-        (params as { key?: string }).key === "c",
+    const cDown = h.sendInputEventMock.mock.calls.find(
+      ([event]) =>
+        (event as { type?: string; keyCode?: string }).type === "keyDown" &&
+        (event as { keyCode?: string }).keyCode === "c",
     )
-    expect(cDown?.[1]).toMatchObject({ modifiers: 0 })
+    expect(cDown?.[0]).toMatchObject({ modifiers: [] })
   })
 
   it("resets synthetic input state after the renderer process is replaced", async () => {
     const tab = new BrowserTab(1, "p")
     await Promise.resolve()
-    h.sendCommandMock.mockClear()
+    h.sendInputEventMock.mockClear()
 
     await tab.keyDown("Ctrl")
     await tab.mouseDown("left")
     webContents(tab).emit("render-process-gone", {}, { reason: "crashed" })
+    h.sendInputEventMock.mockClear()
     h.sendCommandMock.mockClear()
     await tab.keyDown("c")
     await tab.mouseMove(10, 20)
 
-    const keyDownCall = h.sendCommandMock.mock.calls.find(
-      ([method, params]) =>
-        method === "Input.dispatchKeyEvent" && (params as { type?: string }).type === "keyDown",
+    const keyDownCall = h.sendInputEventMock.mock.calls.find(
+      ([event]) => (event as { type?: string }).type === "keyDown",
     )
     const mouseMoveCall = h.sendCommandMock.mock.calls.find(
       ([method, params]) =>
         method === "Input.dispatchMouseEvent" &&
         (params as { type?: string }).type === "mouseMoved",
     )
-    expect(keyDownCall?.[1]).toMatchObject({ modifiers: 0 })
+    expect(keyDownCall?.[0]).toMatchObject({ modifiers: [] })
     expect(mouseMoveCall?.[1]).toMatchObject({ buttons: 0 })
   })
 

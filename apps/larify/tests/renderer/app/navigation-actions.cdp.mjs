@@ -97,6 +97,33 @@ try {
   const initial = await measure()
   assert.ok(initial, 'workspace navigation should be visible')
   assert.equal(initial.workspaceOpacity, '0')
+  const initialActionSelector = JSON.stringify(`[aria-label="${initial.workspaceLabel}"]`)
+
+  await cdp.evaluate(`(() => {
+    const action = document.querySelector(${initialActionSelector})
+    action?.parentElement?.querySelector('button[aria-expanded]')?.focus()
+  })()`)
+  await wait(100)
+  assert.equal(
+    await actionOpacity(initial.workspaceLabel),
+    '0',
+    'focusing the workspace toggle should not reveal its create action'
+  )
+
+  await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab' })
+  await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab' })
+  await wait(300)
+  assert.equal(
+    await cdp.evaluate('document.activeElement?.getAttribute("aria-label") ?? null'),
+    initial.workspaceLabel,
+    'Tab should focus the workspace create action'
+  )
+  assert.equal(
+    await actionOpacity(initial.workspaceLabel),
+    '1',
+    'focusing the create action should reveal it'
+  )
+  await cdp.evaluate('document.activeElement?.blur()')
 
   const hoveredPoint = await hoverAction(initial.workspaceLabel)
   assert.equal(await actionOpacity(initial.workspaceLabel), '1')

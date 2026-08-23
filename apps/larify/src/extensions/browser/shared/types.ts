@@ -1,3 +1,5 @@
+export const BROWSER_PARTITION = 'persist:larify-browser'
+
 export interface BrowserTabError {
   code: number
   description: string
@@ -16,5 +18,4 @@ export interface BrowserTabState {
 
 export interface BrowserState {
   tabs: BrowserTabState[]
-  activeId: number | null
 }

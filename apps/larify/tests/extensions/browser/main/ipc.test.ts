@@ -4,7 +4,14 @@ const h = vi.hoisted(() => ({
   handlers: new Map<string, (...args: unknown[]) => unknown>(),
   listeners: new Map<string, (...args: unknown[]) => unknown>(),
   sent: [] as Array<{ channel: string; payload: unknown }>,
-  error: vi.fn()
+  error: vi.fn(),
+  fromId: vi.fn(),
+  browserSession: {},
+  guest: null as null | {
+    hostWebContents: unknown
+    getType(): string
+    session: object
+  }
 }))
 
 vi.mock('electron', () => ({
@@ -17,7 +24,9 @@ vi.mock('electron', () => ({
       if (h.listeners.get(channel) === listener) h.listeners.delete(channel)
     },
     removeHandler: (channel: string) => h.handlers.delete(channel)
-  }
+  },
+  session: { fromPartition: () => h.browserSession },
+  webContents: { fromId: h.fromId }
 }))
 
 import { registerBrowserIpc } from '../../../../src/extensions/browser/main/ipc'
@@ -50,8 +59,8 @@ function fakeService(): BrowserService {
     goBack: vi.fn(),
     goForward: vi.fn(),
     reload: vi.fn(),
-    setBounds: vi.fn(),
-    setVisible: vi.fn()
+    openUrl: vi.fn(),
+    attach: vi.fn()
   } as unknown as BrowserService
 }
 
@@ -61,18 +70,22 @@ describe('registerBrowserIpc', () => {
     h.listeners.clear()
     h.sent.length = 0
     h.error.mockReset()
+    h.fromId.mockImplementation(() => h.guest)
+    h.fromId.mockClear()
+    h.guest = null
     vi.spyOn(console, 'error').mockImplementation(h.error)
   })
 
   it('registers only resource operations and browser-specific commands', () => {
     registerBrowserIpc(fakeService())
     expect([...h.handlers.keys()].sort()).toEqual([
+      'browser:attach',
       'browser:back',
       'browser:forward',
       'browser:getState',
       'browser:navigate',
-      'browser:reload',
-      'browser:setVisible'
+      'browser:openUrl',
+      'browser:reload'
     ])
     expect(h.handlers.has('browser:create')).toBe(false)
     expect(h.handlers.has('browser:close')).toBe(false)
@@ -85,75 +98,75 @@ describe('registerBrowserIpc', () => {
     h.handlers.get('browser:back')!({ sender: sender() }, 'session-a', 7)
     h.handlers.get('browser:forward')!({ sender: sender() }, 'session-a', 7)
     h.handlers.get('browser:reload')!({ sender: sender() }, 'session-a', 7)
-    h.handlers.get('browser:setVisible')!({ sender: sender() }, 'session-a', 7, true)
-    const event = { returnValue: null }
-    h.listeners.get('browser:setBoundsSync')!(
-      event,
-      'session-a',
-      7,
-      { x: 1, y: 2, width: 300, height: 200 },
-      false,
-      false
-    )
     expect(service.navigate).toHaveBeenCalledWith('session-a', 7, 'openai.com')
     expect(service.goBack).toHaveBeenCalledWith('session-a', 7)
     expect(service.goForward).toHaveBeenCalledWith('session-a', 7)
     expect(service.reload).toHaveBeenCalledWith('session-a', 7)
-    expect(service.setVisible).toHaveBeenCalledWith('session-a', 7, true)
-    expect(service.setBounds).toHaveBeenCalledWith(
-      'session-a',
-      7,
-      { x: 1, y: 2, width: 300, height: 200 },
-      false,
-      false
-    )
-    expect(event.returnValue).toBe(true)
   })
 
-  it('always replies to synchronous bounds updates when the service fails', () => {
+  it('opens message URLs through the browser reuse operation', () => {
     const service = fakeService()
-    const error = new Error('view was destroyed')
-    vi.mocked(service.setBounds).mockImplementation(() => {
-      throw error
-    })
+    vi.mocked(service.openUrl).mockReturnValue(7)
     registerBrowserIpc(service)
-    const event = { returnValue: null as unknown }
+
+    expect(
+      h.handlers.get('browser:openUrl')!({ sender: sender() }, 'session-a', 'https://example.com')
+    ).toBe(7)
+    expect(service.openUrl).toHaveBeenCalledWith('session-a', 'https://example.com')
+  })
+
+  it('attaches only a webview owned by the invoking renderer', () => {
+    const service = fakeService()
+    const host = sender()
+    const guest = {
+      hostWebContents: host,
+      getType: () => 'webview',
+      session: h.browserSession
+    }
+    h.guest = guest
+    registerBrowserIpc(service)
+
+    h.handlers.get('browser:attach')!({ sender: host }, 'session-a', 7, 99)
+    expect(h.fromId).toHaveBeenCalledWith(99)
+    expect(service.attach).toHaveBeenCalledWith('session-a', 7, guest)
+    expect(() =>
+      h.handlers.get('browser:attach')!({ sender: sender() }, 'session-a', 7, 99)
+    ).toThrow('browser guest WebContents is unavailable')
+  })
+
+  it('rejects a guest from another webview partition or WebContents type', () => {
+    const service = fakeService()
+    const host = sender()
+    registerBrowserIpc(service)
+
+    h.guest = {
+      hostWebContents: host,
+      getType: () => 'webview',
+      session: {}
+    }
+    expect(() =>
+      h.handlers.get('browser:attach')!({ sender: host }, 'session-a', 7, 99)
+    ).toThrow('browser guest WebContents is unavailable')
+
+    h.guest = {
+      hostWebContents: host,
+      getType: () => 'window',
+      session: h.browserSession
+    }
+    expect(() =>
+      h.handlers.get('browser:attach')!({ sender: host }, 'session-a', 7, 99)
+    ).toThrow('browser guest WebContents is unavailable')
+    expect(service.attach).not.toHaveBeenCalled()
+  })
+
+  it('rejects an unavailable webview guest', () => {
+    const service = fakeService()
+    registerBrowserIpc(service)
 
     expect(() =>
-      h.listeners.get('browser:setBoundsSync')!(
-        event,
-        'session-a',
-        7,
-        { x: 1, y: 2, width: 300, height: 200 },
-        false
-      )
-    ).not.toThrow()
-    expect(event.returnValue).toBe(false)
-    expect(h.error).toHaveBeenCalledWith('[browser] Failed to update bounds:', error)
-  })
-
-  it('forwards live resize and activation flags', () => {
-    const service = fakeService()
-    registerBrowserIpc(service)
-    const event = { returnValue: null as unknown }
-
-    h.listeners.get('browser:setBoundsSync')!(
-      event,
-      'session-a',
-      7,
-      { x: 5, y: 6, width: 300, height: 200 },
-      true,
-      true
-    )
-
-    expect(service.setBounds).toHaveBeenCalledWith(
-      'session-a',
-      7,
-      { x: 5, y: 6, width: 300, height: 200 },
-      true,
-      true
-    )
-    expect(event.returnValue).toBe(true)
+      h.handlers.get('browser:attach')!({ sender: sender() }, 'session-a', 7, 99)
+    ).toThrow('browser guest WebContents is unavailable')
+    expect(service.attach).not.toHaveBeenCalled()
   })
 
   it('returns one resource state and subscribes for changes', () => {
@@ -167,11 +180,11 @@ describe('registerBrowserIpc', () => {
       title: 'Page'
     })
     const listener = vi.mocked(service.bindChange).mock.calls[0][0]
-    listener('session-a', { tabs: [], activeId: null })
+    listener('session-a', { tabs: [] })
     expect(h.sent).toEqual([
       {
         channel: 'browser:state',
-        payload: { sessionId: 'session-a', state: { tabs: [], activeId: null } }
+        payload: { sessionId: 'session-a', state: { tabs: [] } }
       }
     ])
   })
@@ -187,7 +200,7 @@ describe('registerBrowserIpc', () => {
 
     webContents.destroy()
     const listener = vi.mocked(service.bindChange).mock.calls[0][0]
-    listener('session-a', { tabs: [], activeId: null })
+    listener('session-a', { tabs: [] })
     expect(h.sent).toEqual([])
   })
 
@@ -198,7 +211,7 @@ describe('registerBrowserIpc', () => {
     h.handlers.get('browser:getState')!({ sender: webContents }, 'session-a', 7)
 
     const listener = vi.mocked(service.bindChange).mock.calls[0][0]
-    listener('session-a', { tabs: [], activeId: null })
+    listener('session-a', { tabs: [] })
 
     expect(webContents.off).toHaveBeenCalledWith('destroyed', expect.any(Function))
     expect(h.sent).toEqual([])
@@ -214,8 +227,8 @@ describe('registerBrowserIpc', () => {
     h.handlers.get('browser:getState')!({ sender: webContents }, 'session-a', 7)
 
     const listener = vi.mocked(service.bindChange).mock.calls[0][0]
-    listener('session-a', { tabs: [], activeId: null })
-    listener('session-a', { tabs: [], activeId: null })
+    listener('session-a', { tabs: [] })
+    listener('session-a', { tabs: [] })
 
     expect(webContents.send).toHaveBeenCalledOnce()
     expect(webContents.off).toHaveBeenCalledWith('destroyed', expect.any(Function))

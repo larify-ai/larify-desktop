@@ -113,8 +113,9 @@ export function WorkbenchShell({
 const ActivatedWorkbenchRenderer = memo(function ActivatedWorkbenchRenderer(
   props: React.ComponentProps<typeof WorkbenchRenderer> & { rendererRevision: number }
 ): React.JSX.Element | null {
-  const [activated, setActivated] = useState(Boolean(props.active))
-  if (props.active && !activated) setActivated(true)
+  const shouldMount = Boolean(props.active || props.view?.rendererId === 'browser')
+  const [activated, setActivated] = useState(shouldMount)
+  if (shouldMount && !activated) setActivated(true)
   return activated || props.active ? <WorkbenchRenderer {...props} /> : null
 }, sameRendererProps)
 

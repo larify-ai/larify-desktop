@@ -543,6 +543,27 @@ describe('Workbench', () => {
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith('resource:close-many', [7]))
   })
 
+  it('mounts a background browser resource without selecting it', async () => {
+    const mounted: number[] = []
+    invoke.mockResolvedValue([{ id: 7, sessionId, type: 'browser' }])
+    registry.get<WorkbenchRendererRegistry>(workbenchRendererRegistryToken)?.register('browser', {
+      component: function BackgroundBrowser({ resourceId }) {
+        useEffect(() => {
+          mounted.push(resourceId)
+        }, [resourceId])
+        return null
+      },
+      icon: createElement('span'),
+      order: 20,
+      title: 'Browser'
+    })
+
+    await renderWorkbench(root, registry, sessionId)
+
+    expect(mounted).toEqual([7])
+    expect(container.querySelector('[data-state="active"]')).toBeNull()
+  })
+
   it('does not initialize renderers merely because an inactive session owns resources', async () => {
     const mounted: number[] = []
     const firstSessionId = sessionId

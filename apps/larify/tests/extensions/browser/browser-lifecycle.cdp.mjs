@@ -6,7 +6,11 @@ import WebSocket from 'ws'
 const port = process.env.LARIFY_CDP_PORT ?? '9222'
 const listTargets = () => fetch(`http://127.0.0.1:${port}/json/list`).then((response) => response.json())
 const targets = await listTargets()
-const appTarget = targets.find(({ type, url }) => type === 'page' && url.startsWith('http://localhost:'))
+const appTarget = targets.find(
+  ({ type, url }) =>
+    type === 'page' &&
+    (url.startsWith('http://localhost:') || url.endsWith('/out/renderer/index.html'))
+)
 if (!appTarget?.webSocketDebuggerUrl) throw new Error(`Larify page not found on port ${port}`)
 
 const socket = new WebSocket(appTarget.webSocketDebuggerUrl)
@@ -45,65 +49,100 @@ const waitFor = async (expression, label, timeout = 8_000) => {
   throw new Error(`Timed out: ${label}`)
 }
 
-const marker = Date.now()
-const sessionA = `browser-lifecycle-a-${marker}`
-const sessionB = `browser-lifecycle-b-${marker}`
+let sessionId = await evaluate(
+  `document.querySelector('[data-workbench-session][data-active]')?.dataset.workbenchSession`
+)
+if (!sessionId) {
+  await evaluate(`document.querySelector('.lucide-message-circle-plus')?.closest('button')?.click()`)
+  sessionId = await waitFor(
+    `document.querySelector('[data-workbench-session][data-active]')?.dataset.workbenchSession`,
+    'active session'
+  )
+}
 const fixture = resolve('tests/extensions/browser/fixtures/interaction.html')
 const beforeTargetIds = new Set(targets.map(({ id }) => id))
 const created = []
 
 try {
   const first = await evaluate(
-    `window.bridge.invoke('resource:create', 'browser', ${JSON.stringify(sessionA)}, { url: ${JSON.stringify(fixture)} })`
+    `window.bridge.invoke('resource:create', 'browser', ${JSON.stringify(sessionId)}, {})`
   )
   created.push(first)
+  await evaluate(
+    `window.bridge.invoke('browser:navigate', ${JSON.stringify(sessionId)}, ${first}, ${JSON.stringify(fixture)})`
+  )
+  await waitFor(
+    `(async () => (await window.bridge.invoke('browser:getState', ${JSON.stringify(sessionId)}, ${first}))?.title === 'Browser Interaction Test')()`,
+    'background agent browser'
+  )
+  assert.equal(
+    await evaluate(
+      `document.querySelector('[data-workbench-view="browser"][data-resource-id="${first}"]')?.getAttribute('aria-hidden')`
+    ),
+    'true',
+    'an agent-created browser must remain in the background'
+  )
+  assert.ok(
+    await waitFor(
+      `(() => {
+        const webview = document.querySelector('[data-browser-webview-host="${first}"] webview')
+        if (!webview) return false
+        const { width, height } = webview.getBoundingClientRect()
+        return width > 0 && height > 0
+      })()`,
+      'background agent browser viewport'
+    ),
+    'an agent-created browser must retain a usable viewport while hidden'
+  )
+  await evaluate(
+    `window.dispatchEvent(new CustomEvent('larify:workbench-select-resource', { detail: { rendererId: 'browser', resourceId: ${first}, sessionId: ${JSON.stringify(sessionId)} } }))`
+  )
+  await waitFor(
+    `(async () => (await window.bridge.invoke('browser:getState', ${JSON.stringify(sessionId)}, ${first}))?.title === 'Browser Interaction Test')()`,
+    'first browser'
+  )
+
   const second = await evaluate(
-    `window.bridge.invoke('resource:create', 'browser', ${JSON.stringify(sessionB)}, { url: ${JSON.stringify(fixture)} })`
+    `window.bridge.invoke('resource:create', 'browser', ${JSON.stringify(sessionId)}, {})`
   )
   created.push(second)
-
-  await waitFor(
-    `(async () => (await window.bridge.invoke('browser:getState', ${JSON.stringify(sessionA)}, ${first}))?.title === 'Browser Interaction Test')()`,
-    'session A browser'
+  await evaluate(
+    `window.dispatchEvent(new CustomEvent('larify:workbench-select-resource', { detail: { rendererId: 'browser', resourceId: ${second}, sessionId: ${JSON.stringify(sessionId)} } }))`
+  )
+  await evaluate(
+    `window.bridge.invoke('browser:navigate', ${JSON.stringify(sessionId)}, ${second}, ${JSON.stringify(fixture)})`
   )
   await waitFor(
-    `(async () => (await window.bridge.invoke('browser:getState', ${JSON.stringify(sessionB)}, ${second}))?.title === 'Browser Interaction Test')()`,
-    'session B browser'
+    `(async () => (await window.bridge.invoke('browser:getState', ${JSON.stringify(sessionId)}, ${second}))?.title === 'Browser Interaction Test')()`,
+    'second browser'
   )
 
   assert.deepEqual(
-    await evaluate(`window.bridge.invoke('resource:list', { sessionId: ${JSON.stringify(sessionA)} })`),
-    [{ id: first, type: 'browser', sessionId: sessionA }]
-  )
-  assert.deepEqual(
-    await evaluate(`window.bridge.invoke('resource:list', { sessionId: ${JSON.stringify(sessionB)} })`),
-    [{ id: second, type: 'browser', sessionId: sessionB }]
+    await evaluate(`window.bridge.invoke('resource:list', { sessionId: ${JSON.stringify(sessionId)} }).then((resources) => resources.filter(({ id }) => [${first}, ${second}].includes(id)))`),
+    [
+      { id: first, type: 'browser', sessionId },
+      { id: second, type: 'browser', sessionId }
+    ]
   )
 
-  await evaluate(
-    `window.bridge.invoke('browser:setVisible', ${JSON.stringify(sessionA)}, ${first}, true)`
-  )
-  await evaluate(
-    `window.bridge.invoke('browser:setVisible', ${JSON.stringify(sessionB)}, ${second}, true)`
-  )
   assert.ok(await evaluate(
-    `(async () => Boolean(await window.bridge.invoke('browser:getState', ${JSON.stringify(sessionA)}, ${first})))()`
+    `(async () => Boolean(await window.bridge.invoke('browser:getState', ${JSON.stringify(sessionId)}, ${first})))()`
   ))
 
   await evaluate(`window.bridge.invoke('resource:close', ${first})`)
   await waitFor(
     `(async () => !(await window.bridge.invoke('resource:list')).some(({ id }) => id === ${first}))()`,
-    'session A resource close'
+    'first resource close'
   )
   created.splice(created.indexOf(first), 1)
   assert.ok(await evaluate(
-    `(async () => Boolean(await window.bridge.invoke('browser:getState', ${JSON.stringify(sessionB)}, ${second})))()`
+    `(async () => Boolean(await window.bridge.invoke('browser:getState', ${JSON.stringify(sessionId)}, ${second})))()`
   ))
 
   await evaluate(`window.bridge.invoke('resource:close', ${second})`)
   await waitFor(
     `(async () => !(await window.bridge.invoke('resource:list')).some(({ id }) => id === ${second}))()`,
-    'session B resource close'
+    'second resource close'
   )
   created.splice(created.indexOf(second), 1)
   await wait(200)
@@ -113,7 +152,7 @@ try {
   )
   assert.deepEqual(leakedTargets, [])
 
-  console.log(JSON.stringify({ isolation: 'passed', cleanup: 'passed', sessions: 2 }))
+  console.log(JSON.stringify({ isolation: 'passed', cleanup: 'passed', resources: 2 }))
 } finally {
   for (const resourceId of created) await evaluate(`window.bridge.invoke('resource:close', ${resourceId})`)
   socket.close()

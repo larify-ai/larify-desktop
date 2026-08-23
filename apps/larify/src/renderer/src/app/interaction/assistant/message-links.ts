@@ -10,14 +10,9 @@ export type DisposableMessageLinkHandler = MessageLinkHandler & { dispose(): voi
 
 function openUrlInBrowser(sessionId: string, url: string, isCurrent: () => boolean): void {
   void window.bridge
-    .invoke('resource:create', 'browser', sessionId, { url })
+    .invoke('browser:openUrl', sessionId, url)
     .then((browserResourceId) => {
-      if (!isCurrent()) {
-        void window.bridge
-          .invoke('resource:close', browserResourceId)
-          .catch((error) => console.error('[message-link:close-browser]', error))
-        return
-      }
+      if (!isCurrent()) return
       window.dispatchEvent(
         new CustomEvent('larify:workbench-select-resource', {
           detail: { rendererId: 'browser', resourceId: browserResourceId, sessionId }

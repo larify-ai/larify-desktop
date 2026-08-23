@@ -78,7 +78,7 @@ export function Workspace({ workspace }: { workspace: WorkspacePreview }): React
           <button
             type="button"
             aria-label={`在 ${workspace.name} 中新建任务`}
-            className="absolute top-1/2 right-3 grid size-6 -translate-y-1/2 place-items-center rounded-md text-muted-foreground opacity-0 transition-[color,background-color,opacity] hover:bg-sidebar-accent hover:text-foreground focus-visible:bg-sidebar-accent focus-visible:text-foreground focus-visible:opacity-100 focus-visible:outline-none group-hover:opacity-100 group-focus-within:opacity-100"
+            className="absolute top-1/2 right-3 grid size-6 -translate-y-1/2 place-items-center rounded-md text-muted-foreground opacity-0 transition-[color,background-color,opacity] hover:bg-sidebar-accent hover:text-foreground focus-visible:bg-sidebar-accent focus-visible:text-foreground focus-visible:opacity-100 focus-visible:outline-none group-hover:opacity-100"
             onClick={workspace.onCreate}
           >
             <PlusIcon aria-hidden="true" className="size-4" />

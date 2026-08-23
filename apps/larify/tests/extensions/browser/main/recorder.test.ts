@@ -39,7 +39,9 @@ vi.mock("electron", () => ({
     constructor() {
       h.createdWindows.push(this)
     }
-    setPosition(): void {}
+    setPosition(): void {
+      // Positioning is irrelevant to the recorder unit tests.
+    }
     isDestroyed(): boolean {
       return false
     }
@@ -48,6 +50,10 @@ vi.mock("electron", () => ({
 }))
 
 import { Recorder } from "../../../../src/extensions/browser/main/recorder"
+
+function recordingTab(): { releaseRendering: ReturnType<typeof vi.fn> } {
+  return { releaseRendering: vi.fn(async () => {}) }
+}
 
 describe("Recorder guards", () => {
   beforeEach(() => {
@@ -74,6 +80,7 @@ describe("Recorder guards", () => {
     expect(html).toContain("c.captureStream(0)")
     expect(html).toContain("videoTrack.requestFrame()")
     expect(html).toContain("setInterval(emitFrame, 1000 / o.fps)")
+    expect(html).toContain("300 - (Date.now() - startedAt)")
   })
 
   it("reports recording while start is still in progress", () => {
@@ -109,6 +116,7 @@ describe("Recorder guards", () => {
       dbg: { off: vi.fn(), sendCommand: vi.fn(async () => ({})) },
       onMessage: () => {},
       path: "x",
+      tab: recordingTab(),
     }
     ;(recorder as unknown as { win: unknown }).win = { isDestroyed: () => false }
 
@@ -122,15 +130,40 @@ describe("Recorder guards", () => {
     await expect(recorder.start({} as never, "out.webm")).rejects.toThrow("already in progress")
   })
 
+  it("clears starting state when rendering cannot be acquired", async () => {
+    const recorder = new Recorder()
+    const tab = {
+      id: 1,
+      acquireRendering: vi.fn(async () => {
+        throw new Error("rendering unavailable")
+      }),
+      releaseRendering: vi.fn(async () => {}),
+    }
+
+    await expect(recorder.start(tab as never, "out.webm")).rejects.toThrow(
+      "rendering unavailable",
+    )
+    expect(recorder.isRecording()).toBe(false)
+    expect(tab.releaseRendering).not.toHaveBeenCalled()
+  })
+
   it("rejects start immediately when the output directory cannot be created", async () => {
     const root = await mkdtemp(join(tmpdir(), "larify-recorder-"))
     const blockingFile = join(root, "not-a-directory")
+    const releaseRendering = vi.fn(async () => {})
+    const tab = {
+      id: 1,
+      acquireRendering: vi.fn(async () => {}),
+      releaseRendering,
+      webContents: { debugger: {} },
+    }
     try {
       await writeFile(blockingFile, "x")
       await expect(
-        new Recorder().start({} as never, join(blockingFile, "recording.webm")),
+        new Recorder().start(tab as never, join(blockingFile, "recording.webm")),
       ).rejects.toThrow()
       expect(h.createdWindows).toHaveLength(0)
+      expect(releaseRendering).toHaveBeenCalledOnce()
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -161,6 +194,7 @@ describe("Recorder guards", () => {
       onMessage: () => {},
       path: "out.webm",
       frameCount: () => 7,
+      tab: recordingTab(),
     }
     finishStart()
 
@@ -176,6 +210,7 @@ describe("Recorder guards", () => {
       onMessage: () => {},
       path: "old.webm",
       frameCount: () => 7,
+      tab: recordingTab(),
     }
     ;(recorder as unknown as { win: unknown }).win = {
       isDestroyed: () => false,
@@ -227,6 +262,7 @@ describe("Recorder guards", () => {
       onMessage: () => {},
       path: "out.webm",
       frameCount: () => 7,
+      tab: recordingTab(),
     }
     finishStart()
     await destroying
@@ -263,6 +299,7 @@ describe("Recorder guards", () => {
   it("finalizes an active recording before destroying its window", async () => {
     const recorder = new Recorder()
     const destroy = vi.fn()
+    const tab = recordingTab()
     const sender = {
       send: vi.fn((channel: string) => {
         if (channel === "record:stop") queueMicrotask(() => h.emit("record:done", { sender }, { bytes: 10 }))
@@ -274,6 +311,7 @@ describe("Recorder guards", () => {
       onMessage: () => {},
       path: "out.webm",
       frameCount: () => 7,
+      tab,
     }
     ;(recorder as unknown as { win: unknown }).win = {
       isDestroyed: () => false,
@@ -285,6 +323,7 @@ describe("Recorder guards", () => {
 
     expect(sender.send).toHaveBeenCalledWith("record:stop")
     expect(dbg.sendCommand).toHaveBeenCalledWith("Page.stopScreencast")
+    expect(tab.releaseRendering).toHaveBeenCalledOnce()
     expect(destroy).toHaveBeenCalledOnce()
   })
 
@@ -301,6 +340,7 @@ describe("Recorder guards", () => {
       onMessage: () => {},
       path: "out.webm",
       frameCount: () => 7,
+      tab: recordingTab(),
     }
     ;(recorder as unknown as { win: unknown }).win = {
       isDestroyed: () => false,
@@ -326,6 +366,7 @@ describe("Recorder guards", () => {
       onMessage: () => {},
       path: "out.webm",
       frameCount: () => 7,
+      tab: recordingTab(),
     }
     ;(recorder as unknown as { win: unknown }).win = {
       isDestroyed: () => false,
@@ -339,6 +380,7 @@ describe("Recorder guards", () => {
   it("drops stale recording state when the recorder window has crashed", async () => {
     const recorder = new Recorder()
     const onMessage = vi.fn()
+    const tab = recordingTab()
     const dbg = {
       sendCommand: vi.fn(async () => ({})),
       off: vi.fn(),
@@ -350,6 +392,7 @@ describe("Recorder guards", () => {
       tabId: 1,
       generation: 1,
       frameCount: () => 7,
+      tab,
     }
     ;(recorder as unknown as { win: unknown }).win = {
       isDestroyed: () => true,
@@ -359,6 +402,7 @@ describe("Recorder guards", () => {
     expect(recorder.isRecording()).toBe(false)
     expect(dbg.off).toHaveBeenCalledWith("message", onMessage)
     expect(dbg.sendCommand).toHaveBeenCalledWith("Page.stopScreencast")
+    await vi.waitFor(() => expect(tab.releaseRendering).toHaveBeenCalledOnce())
     await expect(recorder.stop()).rejects.toThrow("no recording in progress")
   })
 
@@ -376,6 +420,7 @@ describe("Recorder guards", () => {
       tabId: 7,
       generation: 1,
       frameCount: () => 7,
+      tab: recordingTab(),
     }
     ;(recorder as unknown as { win: unknown }).win = {
       isDestroyed: () => true,
@@ -411,6 +456,7 @@ describe("Recorder guards", () => {
       tabId: 1,
       generation: 1,
       frameCount: () => 7,
+      tab: recordingTab(),
     }
     ;(recorder as unknown as { win: unknown }).win = {
       isDestroyed: () => false,
@@ -448,6 +494,7 @@ describe("Recorder guards", () => {
       tabId: 1,
       generation: 1,
       frameCount: () => 7,
+      tab: recordingTab(),
     }
     ;(recorder as unknown as { win: unknown }).win = {
       isDestroyed: () => false,

@@ -236,6 +236,10 @@ describe('ChangesView', () => {
     )
     expect(container.querySelector('[data-testid="navigator"]')).not.toBeNull()
     expect(h.treeProps.mock.lastCall?.[0].entries[0].children).toHaveLength(1)
+    expect(updateTab).toHaveBeenLastCalledWith({
+      title: 'changed.ts',
+      tooltip: changed.path
+    })
 
     await act(async () =>
       (container.querySelector('[aria-label="切换到拆分视图"]') as HTMLButtonElement).click()
@@ -280,6 +284,7 @@ describe('ChangesView', () => {
     expect(container.querySelector('[data-testid="diff"]')?.getAttribute('data-path')).toBe(
       second.path
     )
+    expect(updateTab).toHaveBeenLastCalledWith({ title: 'second.ts', tooltip: second.path })
   })
 
   it('selects a Windows change when the requested path uses different casing', async () => {

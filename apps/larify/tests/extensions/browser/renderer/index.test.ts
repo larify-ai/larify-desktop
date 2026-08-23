@@ -46,7 +46,6 @@ describe('browser renderer plugin', () => {
     stateListener({
       sessionId: 'session-a',
       state: {
-        activeId: 7,
         tabs: [{ id: 7, title: 'Updated', favIconUrl: 'https://example.com/favicon.ico' }]
       }
     })
@@ -55,7 +54,6 @@ describe('browser renderer plugin', () => {
     stateListener({
       sessionId: 'session-a',
       state: {
-        activeId: 7,
         tabs: [{ id: 7, title: 'Updated', favIconUrl: 'https://example.com/favicon.ico' }]
       }
     })
@@ -64,7 +62,6 @@ describe('browser renderer plugin', () => {
     stateListener({
       sessionId: 'session-a',
       state: {
-        activeId: 7,
         tabs: [{ id: 7, title: 'Renamed', favIconUrl: 'https://example.com/favicon.ico' }]
       }
     })
@@ -115,7 +112,7 @@ describe('browser renderer plugin', () => {
 
     stateListener({
       sessionId: 'session-a',
-      state: { activeId: 8, tabs: [{ id: 8, title: 'Other', favIconUrl: '' }] }
+      state: { tabs: [{ id: 8, title: 'Other', favIconUrl: '' }] }
     })
     resolveState({ id: 7, title: 'Initial', favIconUrl: '' })
     await Promise.resolve()

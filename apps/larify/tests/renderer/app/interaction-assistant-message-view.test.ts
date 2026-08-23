@@ -289,7 +289,7 @@ describe('interaction assistant message view', () => {
       'user'
     )
 
-    const renderItem = item('current-text', [1])
+    const renderItem = item('final-text', [1])
     expect(render(value, { renderItem, firstFragment: true })).toContain('notes.txt')
     expect(render(value, { renderItem, firstFragment: false })).not.toContain('notes.txt')
   })
@@ -329,7 +329,7 @@ function message(parts: unknown[], role: UIMessage['role'] = 'assistant'): UIMes
   return { id: 'message-1', role, parts } as UIMessage
 }
 
-function item(kind: 'current-text' | 'final-text', partIndexes: number[]) {
+function item(kind: 'final-text', partIndexes: number[]) {
   return { kind, partIndexes, summary: '' } as const
 }
 

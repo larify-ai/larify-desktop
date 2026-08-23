@@ -79,10 +79,26 @@ describe('meta tools', () => {
     const schema = await asSchema(tool.inputSchema).jsonSchema
 
     await expect(
-      run(tool, { handoff: 'Continue from task.md.' }, { requestContextReset })
+      run(
+        tool,
+        {
+          handoff: 'Continue from task.md.'
+        },
+        { requestContextReset }
+      )
     ).resolves.toBe('Context reset requested.')
     expect(requestContextReset).toHaveBeenCalledWith('Continue from task.md.')
     expect(schema.required).toEqual(expect.arrayContaining(['handoff', 'toolCallTitle']))
+    expect(schema.properties).not.toHaveProperty('title')
+  })
+
+  it('starts a user-visible progress stage', async () => {
+    const tool = (await createTools()).agent_show_progress
+    const schema = await asSchema(tool.inputSchema).jsonSchema
+
+    await expect(run(tool, { title: '读取 package.json' })).resolves.toBe('Progress shown.')
+    expect(schema.required).toEqual(expect.arrayContaining(['title', 'toolCallTitle']))
+    expect(schema.properties?.title).toMatchObject({ type: 'string', minLength: 1 })
   })
 
   it('searches shared memory without a workspace argument', async () => {
@@ -134,7 +150,7 @@ describe('meta tools', () => {
       {
         name: 'agent',
         description:
-          'List plugins, list tools, list skills, read schemas, ask user, search memory, and reset context. (7 tools, 0 skills)'
+          'List plugins, list tools, list skills, read schemas, search memory, ask user, show progress, and reset context. (8 tools, 0 skills)'
       },
       { name: 'demo', description: 'Demo plugin (2 tools, 2 skills)' }
     ])
@@ -205,7 +221,7 @@ describe('meta tools', () => {
       {
         name: 'agent',
         description:
-          'List plugins, list tools, list skills, read schemas, ask user, search memory, and reset context. (7 tools, 0 skills)'
+          'List plugins, list tools, list skills, read schemas, search memory, ask user, show progress, and reset context. (8 tools, 0 skills)'
       },
       { name: 'demo', description: 'Demo plugin (2 tools, 2 skills)' },
       { name: 'eager-only', description: '(1 tools, 0 skills)' },

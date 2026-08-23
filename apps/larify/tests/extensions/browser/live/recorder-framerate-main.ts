@@ -15,7 +15,9 @@ async function main(): Promise<void> {
   const recorder = new Recorder()
   const tab = {
     id: 1,
-    view: { webContents: page.webContents },
+    webContents: page.webContents,
+    acquireRendering: async () => {},
+    releaseRendering: async () => {},
     sendCdp: (method: string, params?: object) =>
       page.webContents.debugger.sendCommand(method, params),
   }

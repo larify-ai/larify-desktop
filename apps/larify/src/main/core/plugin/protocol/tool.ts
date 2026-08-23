@@ -30,7 +30,7 @@ export function wrapTool(tool: Tool): Tool {
           .string()
           .trim()
           .min(1)
-          .describe('Short user-facing phrase describing the step in Chinese, required')
+          .describe('Short user-facing step in Chinese')
       })
       .strict(),
     execute:

@@ -150,6 +150,11 @@ try {
     `document.querySelector(${JSON.stringify(`${view} .workspace-file-preview`)})?.getAttribute('data-diff-mode') === 'unified'`,
     'selected file diff'
   )
+  const selectedTitle = selectedFile.split(/[\\/]/).at(-1)
+  await waitFor(
+    `document.querySelector(${JSON.stringify(`${session} .larify-workbench-tab-trigger[data-state="active"] .larify-workbench-tab-title`)})?.textContent?.trim() === ${JSON.stringify(selectedTitle)}`,
+    'selected file tab title'
+  )
   const jsonTokenClasses = selectedFile.toLowerCase().endsWith('.json')
     ? await waitFor(
         `(() => {
@@ -255,7 +260,9 @@ try {
   })()`)
   if (!gutterGeometry || gutterGeometry.codeLeft === undefined)
     throw new Error('Unified gutter geometry could not be measured')
-  if (Math.abs(gutterGeometry.homeRight - gutterGeometry.lineNumberRight) > 1)
+  // Monaco's independently positioned gutter layers can round by a few CSS pixels at
+  // fractional Windows display scales (for example 150%).
+  if (Math.abs(gutterGeometry.homeRight - gutterGeometry.lineNumberRight) > 4)
     throw new Error(`Unified gutter is misaligned: ${JSON.stringify(gutterGeometry)}`)
   if (gutterGeometry.codeLeft - gutterGeometry.lineNumberRight < 8)
     throw new Error(`Unified gutter has no content gap: ${JSON.stringify(gutterGeometry)}`)
@@ -330,6 +337,7 @@ try {
         jsonTokenClasses,
         gutterGeometry,
         selectedFile,
+        selectedTitle,
         splitGutterGeometry,
         splitEditorWidths
       },

@@ -335,7 +335,7 @@ describe('layout with the real resizable component', () => {
     })
 
     expect(pane.style.width).toBe('800px')
-    expect(nativeLayouts).toHaveBeenCalledOnce()
+    expect(nativeLayouts).toHaveBeenCalledTimes(2)
 
     await act(async () => window.dispatchEvent(pointerEvent('pointerup', 900)))
     window.removeEventListener('larify:native-layout', nativeLayouts)

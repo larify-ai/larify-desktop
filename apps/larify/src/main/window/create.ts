@@ -1,6 +1,7 @@
 import { join } from 'node:path'
 import { BrowserWindow, nativeTheme, screen } from 'electron'
 import { is } from '@electron-toolkit/utils'
+import { BROWSER_PARTITION } from '../../extensions/browser/shared/types'
 import { resourcePath } from '../utils/app-paths'
 
 export const titleBarHeight = 46
@@ -34,8 +35,22 @@ export function createWindow(): BrowserWindow {
       : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: true
+      sandbox: true,
+      webviewTag: true
     }
+  })
+  window.webContents.on('will-attach-webview', (event, webPreferences, params) => {
+    if (params.partition !== BROWSER_PARTITION || params.src !== 'about:blank') {
+      event.preventDefault()
+      return
+    }
+    delete webPreferences.preload
+    webPreferences.nodeIntegration = false
+    webPreferences.contextIsolation = true
+    webPreferences.sandbox = true
+    webPreferences.backgroundThrottling = true
+    webPreferences.webSecurity = true
+    webPreferences.allowRunningInsecureContent = false
   })
   window.on('ready-to-show', () => window.show())
   const loading =

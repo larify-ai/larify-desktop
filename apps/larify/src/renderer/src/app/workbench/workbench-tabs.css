@@ -118,6 +118,25 @@
   width: 16px;
 }
 
+.larify-workbench-tab-icon > .larify-workbench-icon-changes,
+.larify-workbench-tab-icon > .larify-workbench-icon-terminal {
+  transform: scale(1.3333);
+}
+
+.larify-workbench-tab-icon > .larify-workbench-icon-file {
+  transform: scale(1.25);
+}
+
+.larify-workbench-tab-icon > .larify-workbench-icon-browser {
+  transform: scale(1.2);
+}
+
+[data-testid='workbench-empty'] [aria-hidden] > svg {
+  flex: 0 0 24px;
+  height: 24px;
+  width: 24px;
+}
+
 .larify-workbench-tab-title {
   min-width: 0;
   overflow: hidden;
@@ -168,6 +187,11 @@
 .larify-workbench-home > svg {
   height: 16px;
   width: 16px;
+}
+
+.larify-workbench-home > svg {
+  height: 22px;
+  width: 22px;
 }
 
 .larify-workbench-home {

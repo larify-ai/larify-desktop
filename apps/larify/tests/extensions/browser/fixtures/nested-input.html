@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Nested Input Test</title>
+  </head>
+  <body>
+    <div id="editable" contenteditable="true" aria-label="Editable"></div>
+    <div id="shadow-host"></div>
+    <iframe
+      title="Input frame"
+      srcdoc="<!doctype html><html><body><input aria-label='Frame input'></body></html>"
+    ></iframe>
+    <input id="shortcut" aria-label="Shortcut input" />
+    <script>
+      const shadow = document.querySelector('#shadow-host').attachShadow({ mode: 'open' })
+      const input = document.createElement('input')
+      input.setAttribute('aria-label', 'Shadow input')
+      shadow.appendChild(input)
+    </script>
+  </body>
+</html>

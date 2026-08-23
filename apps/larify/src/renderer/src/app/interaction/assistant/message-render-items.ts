@@ -1,10 +1,11 @@
 import { getToolName, isFileUIPart, isToolUIPart, type UIMessage } from 'ai'
+import { fromMarkdown } from 'mdast-util-from-markdown'
+import type { Nodes } from 'mdast'
 import { isVisibleToolPart } from './message-parts/tool-visibility'
 import { formatProcessingDuration } from './processing-duration'
 
 export type AssistantRenderItemKind =
   | 'final-text'
-  | 'current-text'
   | 'status'
   | 'reasoning'
   | 'intermediate-text'
@@ -51,15 +52,25 @@ function hasValidDuration(
 }
 
 export function isActivityRenderItem(item: AssistantRenderItem): boolean {
-  return (
-    item.kind !== 'final-text' && item.kind !== 'current-text' && item.kind !== 'pending-ask-user'
-  )
+  return item.kind !== 'final-text' && item.kind !== 'pending-ask-user'
 }
 
 const sentenceSegmenter = new Intl.Segmenter(undefined, { granularity: 'sentence' })
 
+function markdownPlainText(node: Nodes): string {
+  if ('value' in node) {
+    return node.type === 'html' ? '' : node.value
+  }
+  if (node.type === 'image') return node.alt ?? ''
+  if (node.type === 'break') return ' '
+  if (!('children' in node)) return ''
+
+  const separator = ['root', 'blockquote', 'list', 'listItem'].includes(node.type) ? ' ' : ''
+  return node.children.map(markdownPlainText).filter(Boolean).join(separator)
+}
+
 function textSummary(text: string): string {
-  const normalized = text.replace(/\s+/g, ' ').trim()
+  const normalized = markdownPlainText(fromMarkdown(text)).replace(/\s+/g, ' ').trim()
   const first = sentenceSegmenter.segment(normalized)[Symbol.iterator]().next()
   return first.done ? normalized : first.value.segment.trim()
 }
@@ -136,7 +147,14 @@ export function buildAssistantRenderItems(
     (part, index) => index > lastStepStartIndex && (part.type === 'reasoning' || isToolUIPart(part))
   )
   const directTextStartIndex = Math.max(lastStepStartIndex, lastStepActivityIndex)
-  const directTextKind = interrupted ? undefined : streaming ? 'current-text' : 'final-text'
+  const canRenderFinalText = !interrupted && !streaming
+  const trailingTextParts = canRenderFinalText
+    ? message.parts.flatMap((part, index) =>
+        part.type === 'text' && index > directTextStartIndex ? [{ index, text: part.text }] : []
+      )
+    : []
+  const firstVisibleFinalTextIndex = trailingTextParts.find(({ text }) => text.trim())?.index
+  const finalText = trailingTextParts.map(({ text }) => text).join('')
   const items: AssistantRenderItem[] = []
   const pendingAskIndex = interrupted ? -1 : pendingAskUserIndex(message)
   const waitingForAnswer = pendingAskIndex >= 0
@@ -146,11 +164,12 @@ export function buildAssistantRenderItems(
     const part = message.parts[partIndex]
     if (!part) continue
 
-    if (directTextKind && part.type === 'text' && partIndex > directTextStartIndex) {
+    if (canRenderFinalText && part.type === 'text' && partIndex > directTextStartIndex) {
+      if (partIndex !== firstVisibleFinalTextIndex) continue
       items.push({
-        kind: directTextKind,
-        partIndexes: [partIndex],
-        summary: textSummary(part.text),
+        kind: 'final-text',
+        partIndexes: trailingTextParts.map(({ index }) => index),
+        summary: textSummary(finalText),
         defaultOpen: true
       })
       continue
@@ -169,7 +188,7 @@ export function buildAssistantRenderItems(
         kind: 'intermediate-text',
         partIndexes: [partIndex],
         summary: textSummary(part.text),
-        defaultOpen: streaming && offset === visibleIndexes.length - 1
+        defaultOpen: false
       })
       continue
     }

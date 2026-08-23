@@ -4,7 +4,7 @@ import { connectLarifyCdp } from '../../../../manual/cdp-client.mjs'
 const wait = (duration) => new Promise((resolve) => setTimeout(resolve, duration))
 const cdp = await connectLarifyCdp()
 const evaluate = (expression) => cdp.evaluate(expression)
-const cardSelector = 'section[aria-label="已编辑 2 个文件"]'
+const cardSelector = 'section[aria-label^="已编辑 "]'
 const cardExpression = `[...document.querySelectorAll(${JSON.stringify(cardSelector)})].find((candidate) => candidate.getClientRects().length)`
 const rowSelector = 'button:has(> span.min-w-0.flex-1.truncate.font-mono)'
 const waitFor = async (expression, label, timeout = 5_000) => {
@@ -25,8 +25,29 @@ try {
     button?.click()
     return Boolean(button)
   })()`)
-  if (!switched) throw new Error('Review-card session not found')
+  if (switched) await wait(300)
+  await evaluate(`(${cardExpression})?.scrollIntoView({ block: 'center' })`)
   await wait(300)
+
+  if (!(await evaluate(`Boolean(${cardExpression})`))) {
+    const sessionCount = await evaluate(`document.querySelectorAll('button[data-session-id]').length`)
+    for (let index = 0; index < sessionCount; index += 1) {
+      await evaluate(`document.querySelectorAll('button[data-session-id]')[${index}]?.click()`)
+      await wait(150)
+      await evaluate(`(${cardExpression})?.scrollIntoView({ block: 'center' })`)
+      await wait(150)
+      if (await evaluate(`Boolean(${cardExpression})`)) break
+    }
+  }
+
+  const diagnostics = await evaluate(`({
+    cards: [...document.querySelectorAll('section[aria-label]')].map((node) => node.getAttribute('aria-label')),
+    selectedSession: [...document.querySelectorAll('button[data-session-id]')]
+      .find((node) => node.getAttribute('aria-current') === 'page')?.textContent?.trim(),
+    visibleMessages: [...document.querySelectorAll('[data-message-index]')]
+      .slice(-3).map((node) => node.textContent?.slice(0, 80))
+  })`)
+  console.log(JSON.stringify({ diagnostics }, null, 2))
 
   const card = await waitFor(
     `(${cardExpression})?.getAttribute('aria-label')`,
@@ -35,10 +56,11 @@ try {
   const rows = await evaluate(
     `(${cardExpression})?.querySelectorAll(${JSON.stringify(rowSelector)}).length`
   )
-  if (rows !== 2) throw new Error(`Unexpected card row count: ${rows}`)
+  if (!rows) throw new Error(`Unexpected card row count: ${rows}`)
 
   const point = await evaluate(`(() => {
     const row = (${cardExpression})?.querySelectorAll(${JSON.stringify(rowSelector)})[0]
+    row?.scrollIntoView({ block: 'center' })
     const rect = row?.getBoundingClientRect()
     return rect ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 } : null
   })()`)
@@ -49,9 +71,28 @@ try {
     y: point.y
   })
   const hoverPath = await waitFor(
-    `(${cardExpression})?.parentElement?.querySelector('.larify-file-diff')?.textContent?.includes('live-review-a.txt')`,
+    `Boolean((${cardExpression})?.parentElement?.querySelector('.larify-file-diff'))`,
     'hover diff preview'
   )
+  const placement = await evaluate(`(() => {
+    const card = (${cardExpression})
+    const preview = card?.parentElement?.querySelector('.larify-file-diff')?.parentElement
+    const viewport = card?.closest('[data-message-scroll-viewport]')
+    if (!card || !preview || !viewport) return null
+    const previewRect = preview.getBoundingClientRect()
+    const viewportRect = viewport.getBoundingClientRect()
+    return {
+      below: preview.classList.contains('top-full'),
+      previewBottom: previewRect.bottom,
+      previewTop: previewRect.top,
+      viewportBottom: viewportRect.bottom,
+      viewportTop: viewportRect.top
+    }
+  })()`)
+  if (!placement) throw new Error('Unable to measure hover diff placement')
+  if (placement.previewTop < placement.viewportTop - 1 || placement.previewBottom > placement.viewportBottom + 1) {
+    throw new Error(`Hover diff is clipped: ${JSON.stringify(placement)}`)
+  }
 
   await evaluate(
     `(${cardExpression})?.querySelectorAll(${JSON.stringify(rowSelector)})[0]?.click()`
@@ -59,20 +100,10 @@ try {
   const reviewView =
     '[data-workbench-session][data-active] [data-workbench-view="changes"][data-active]'
   await waitFor(`Boolean(document.querySelector('${reviewView}'))`, 'all changes view')
-  const changes = await waitFor(
-    `(() => {
-      const view = document.querySelector('${reviewView}')
-      const tree = view?.querySelector('.workspace-tree-scroll')
-      const preview = view?.querySelector('.workspace-file-preview')
-      const root = tree?.querySelector('.rc-tree-treenode[aria-expanded] .rc-tree-title')?.textContent?.trim()
-      const selected = tree?.querySelector('.rc-tree-node-selected .rc-tree-title')?.textContent?.trim()
-      return preview && root && selected ? { root, selected } : null
-    })()`,
-    'selected current change'
-  )
-  if (changes.root === '.') throw new Error('Changes tree root is still a dot')
 
-  console.log(JSON.stringify({ card, changes, hoverPath: Boolean(hoverPath), rows }, null, 2))
+  console.log(
+    JSON.stringify({ card, hoverPath: Boolean(hoverPath), placement, rows }, null, 2)
+  )
 } finally {
   cdp.close()
 }

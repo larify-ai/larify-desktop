@@ -95,7 +95,10 @@ export function ChangesView({
   }, [])
 
   useEffect(() => {
-    updateTab({ title: '变更', tooltip: selectedPath ?? '全部变更' })
+    updateTab({
+      title: selectedPath?.split(/[\\/]/).at(-1) ?? '变更',
+      tooltip: selectedPath ?? '全部变更'
+    })
   }, [selectedPath, updateTab])
 
   const actions = useMemo(

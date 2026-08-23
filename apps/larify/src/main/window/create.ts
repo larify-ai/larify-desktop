@@ -52,7 +52,10 @@ export function createWindow(): BrowserWindow {
     webPreferences.webSecurity = true
     webPreferences.allowRunningInsecureContent = false
   })
-  window.on('ready-to-show', () => window.show())
+  window.on('ready-to-show', () => {
+    window.maximize()
+    window.show()
+  })
   const loading =
     is.dev && process.env['ELECTRON_RENDERER_URL']
       ? window.loadURL(process.env['ELECTRON_RENDERER_URL'])

@@ -302,6 +302,34 @@ describe('FilePreview', () => {
     expect(container.textContent).toBe('second')
   })
 
+  it('uses a supplied descriptor without inspecting the file again', async () => {
+    registerPathPreview()
+    const descriptor = {
+      binary: false,
+      mime: 'text/html',
+      path: 'D:\\workspace\\page.html'
+    }
+
+    await act(async () => {
+      root.render(
+        createElement(
+          RendererRegistryProvider,
+          { registry },
+          createElement(FilePreview, {
+            active: true,
+            animating: false,
+            descriptor,
+            path: descriptor.path,
+            resourceId: 7
+          })
+        )
+      )
+    })
+
+    expect(workspace.inspectFile).not.toHaveBeenCalled()
+    expect(container.textContent).toBe(descriptor.path)
+  })
+
   it('shows inspection errors and unsupported file types', async () => {
     workspace.inspectFile.mockRejectedValueOnce(new Error('inspect failed'))
     await renderPreview('D:\\workspace\\broken.bin')

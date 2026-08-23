@@ -155,8 +155,8 @@ describe('workbench layout specification', () => {
     const titlebar = markup.slice(markup.indexOf('<header'), markup.indexOf('</header>'))
 
     expect(titlebar).not.toContain('新任务')
-    expect(markup).toContain('border-b-[0.5px]')
-    expect(markup.indexOf('border-b-[0.5px]')).toBeLessThan(
+    expect(markup).toContain('border-b border-border-strong')
+    expect(markup.indexOf('border-b border-border-strong')).toBeLessThan(
       markup.indexOf('aria-label="Interaction"')
     )
     expect(markup).not.toContain('larify-allotment-animated')
@@ -166,9 +166,9 @@ describe('workbench layout specification', () => {
   it('uses one divider style for every region boundary', () => {
     expect(panels).toContain("navigation.animating ? ' larify-allotment-animated' : ''")
     expect(panels).toContain('<WorkbenchSplit')
-    expect(header).toContain('border-b-[0.5px] border-border-strong')
+    expect(header).toContain('border-b border-border-strong')
     expect(panels).toContain('<MainSurfaceCorners />')
-    expect(panels).toContain('border-[0.5px] border-border-strong')
+    expect(panels).toContain('larify-main-surface relative')
   })
 
   it('provides independent navigation and workbench collapse controls', () => {

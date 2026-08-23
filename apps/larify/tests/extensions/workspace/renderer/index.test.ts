@@ -31,7 +31,6 @@ vi.mock('../../../../src/extensions/workspace/renderer/changes/changes-loaders',
   return { ...actual, preloadChangesEditor: changesLoaders.preloadChangesEditor }
 })
 import plugin from '../../../../src/extensions/workspace/renderer'
-import { NativeFilePreview } from '../../../../src/extensions/workspace/renderer/preview/native-file-preview'
 import { Registry } from '../../../../src/shared/infra/registry'
 import {
   PreviewRegistry,
@@ -53,7 +52,7 @@ describe('workspace renderer plugin', () => {
       plugin.activate({ registry, subscriptions })
 
       expect(changesLoaders.preloadChangesEditor).not.toHaveBeenCalled()
-      expect(subscriptions).toHaveLength(5)
+      expect(subscriptions).toHaveLength(4)
     } finally {
       vi.unstubAllGlobals()
     }
@@ -61,10 +60,13 @@ describe('workspace renderer plugin', () => {
 
   it('preloads the changes editor only after the idle callback runs', async () => {
     let idleCallback: IdleRequestCallback | undefined
-    vi.stubGlobal('requestIdleCallback', vi.fn((callback: IdleRequestCallback) => {
-      idleCallback = callback
-      return 42
-    }))
+    vi.stubGlobal(
+      'requestIdleCallback',
+      vi.fn((callback: IdleRequestCallback) => {
+        idleCallback = callback
+        return 42
+      })
+    )
     vi.stubGlobal('cancelIdleCallback', vi.fn())
     changesLoaders.preloadChangesEditor.mockClear()
     try {
@@ -81,10 +83,13 @@ describe('workspace renderer plugin', () => {
 
   it('contains idle preload failures because opening the editor remains lazy', async () => {
     let idleCallback: IdleRequestCallback | undefined
-    vi.stubGlobal('requestIdleCallback', vi.fn((callback: IdleRequestCallback) => {
-      idleCallback = callback
-      return 42
-    }))
+    vi.stubGlobal(
+      'requestIdleCallback',
+      vi.fn((callback: IdleRequestCallback) => {
+        idleCallback = callback
+        return 42
+      })
+    )
     vi.stubGlobal('cancelIdleCallback', vi.fn())
     changesLoaders.preloadChangesEditor.mockClear()
     changesLoaders.preloadChangesEditor.mockRejectedValueOnce(new Error('preload failed'))
@@ -131,18 +136,12 @@ describe('workspace renderer plugin', () => {
     expect(renderers.get('changes')?.icon).toMatchObject({
       props: { className: 'larify-workbench-icon-changes' }
     })
-    for (const mime of ['application/pdf', 'image/png']) {
-      expect(previews.find({ binary: false, mime, path: 'file' })?.component).toBe(
-        NativeFilePreview
-      )
-    }
-    for (const mime of ['audio/mpeg', 'video/mp4']) {
-      expect(previews.find({ binary: true, mime, path: 'file' })?.component).toBe(NativeFilePreview)
+    for (const mime of ['application/pdf', 'image/png', 'audio/mpeg', 'video/mp4']) {
+      expect(previews.find({ binary: true, mime, path: 'file' })).toBeUndefined()
     }
 
     const textRenderer = previews.find({ binary: false, mime: 'text/plain', path: 'file.txt' })
     expect(textRenderer).toBeDefined()
-    expect(textRenderer?.component).not.toBe(NativeFilePreview)
     const markdownRenderer = previews.find({
       binary: false,
       mime: 'text/markdown',
@@ -153,14 +152,12 @@ describe('workspace renderer plugin', () => {
     expect(previews.find({ binary: false, mime: 'text/plain', path: 'README.MD' })).toBe(
       markdownRenderer
     )
+    expect(previews.find({ binary: false, mime: 'text/plain', path: 'notes.markdown' })).toBe(
+      markdownRenderer
+    )
     expect(previews.find({ binary: false, mime: 'text/markdown', path: 'notes.txt' })).toBe(
       markdownRenderer
     )
-    for (const mime of ['application/pdf', 'image/png']) {
-      expect(previews.find({ binary: false, mime, path: 'README.md' })?.component).toBe(
-        NativeFilePreview
-      )
-    }
     const typescriptRenderer = previews.find({
       binary: false,
       mime: 'video/mp2t',
@@ -175,7 +172,6 @@ describe('workspace renderer plugin', () => {
     ).toBeUndefined()
     const htmlRenderer = previews.find({ binary: false, mime: 'text/html', path: 'page.html' })
     expect(htmlRenderer).toBe(textRenderer)
-    expect(htmlRenderer?.component).not.toBe(NativeFilePreview)
     expect(
       previews.find({ binary: false, mime: 'application/octet-stream', path: 'unknown' })
     ).toBe(textRenderer)

@@ -20,7 +20,7 @@ export function Titlebar({
 }: TitlebarProps): React.JSX.Element {
   return (
     <header
-      className="relative flex h-(--titlebar-h) shrink-0 items-center border-b-[0.5px] border-border-strong px-2 [-webkit-app-region:drag]"
+      className="relative flex h-(--titlebar-h) shrink-0 items-center border-b border-border-strong px-2 [-webkit-app-region:drag]"
       style={
         navigationCollapsed ? { paddingLeft: 'calc(var(--titlebar-inset-left) - 6px)' } : undefined
       }

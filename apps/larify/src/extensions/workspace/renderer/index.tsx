@@ -13,7 +13,6 @@ import {
   type PreviewRendererProps,
   previewRegistryToken
 } from '@renderer/app/registry/file-previews'
-import { NativeFilePreview } from './preview/native-file-preview'
 import { ChangesIcon } from './changes/changes-icon'
 import { loadChangesView, preloadChangesEditor } from './changes/changes-loaders'
 
@@ -57,18 +56,10 @@ const plugin: RendererPlugin = {
 
     subscriptions.push(
       previews.register({
-        component: NativeFilePreview,
-        priority: 100,
-        supports: ({ binary, mime }) =>
-          mime === 'application/pdf' ||
-          mime.startsWith('image/') ||
-          (binary && (mime.startsWith('audio/') || mime.startsWith('video/')))
-      }),
-      previews.register({
         component: renderMarkdownFilePreview,
         priority: 50,
         supports: ({ binary, mime, path }) =>
-          !binary && (mime === 'text/markdown' || /\.md$/i.test(path))
+          !binary && (mime === 'text/markdown' || /\.(?:md|markdown)$/i.test(path))
       }),
       previews.register({
         component: (props) => (

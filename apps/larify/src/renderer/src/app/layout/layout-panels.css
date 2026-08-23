@@ -5,46 +5,85 @@
   --sash-size: 8px;
 }
 
-/* Keep rounded clipping local to two tiny corner decorations. The resizable
-   main surface itself stays rectangular, so resizing does not rebuild a
-   full-window rounded border mask in Chromium's compositor. */
+/* Draw only the three visible edges. The horizontal lines start at the corner
+   tangent so they cannot extend underneath the rounded decorations. */
+.larify-main-surface {
+  --larify-main-border-left-inset: 12px;
+
+  padding: 1px;
+}
+
+.larify-main-surface::before {
+  position: absolute;
+  z-index: 31;
+  inset: 0;
+  pointer-events: none;
+  content: '';
+  background:
+    linear-gradient(var(--border-strong), var(--border-strong)) top right /
+      calc(100% - var(--larify-main-border-left-inset)) 1px no-repeat,
+    linear-gradient(var(--border-strong), var(--border-strong)) bottom right /
+      calc(100% - var(--larify-main-border-left-inset)) 1px no-repeat,
+    linear-gradient(var(--border-strong), var(--border-strong)) right / 1px 100% no-repeat;
+}
+
+.larify-main-surface-navigation-collapsed {
+  --larify-main-border-left-inset: 0px;
+}
+
+/* Keep the rounded pixels local to two tiny vector paths. The resizable main
+   surface stays rectangular, and each anti-aliased arc meets its straight
+   outline edges without overlapping painted CSS borders. */
 .larify-main-surface-corner {
   position: absolute;
   z-index: 30;
-  left: -0.5px;
-  width: 12.5px;
-  height: 12.5px;
-  overflow: hidden;
+  left: 0;
+  width: 12px;
+  height: 12px;
   pointer-events: none;
   background: var(--sidebar);
 }
 
 .larify-main-surface-corner-top {
-  top: -0.5px;
+  top: 0;
 }
 
 .larify-main-surface-corner-bottom {
-  bottom: -0.5px;
+  bottom: 0;
+}
+
+.larify-main-surface-corner-top::before,
+.larify-main-surface-corner-bottom::before {
+  position: absolute;
+  z-index: 1;
+  right: 0;
+  left: 0;
+  height: 1px;
+  content: '';
+  background: var(--sidebar);
+}
+
+.larify-main-surface-corner-top::before {
+  top: 0;
+}
+
+.larify-main-surface-corner-bottom::before {
+  bottom: 0;
 }
 
 .larify-main-surface-corner::after {
   position: absolute;
-  left: 0;
-  width: 24px;
-  height: 24px;
-  box-sizing: border-box;
+  inset: 0;
   content: '';
-  border: 0.5px solid var(--border-strong);
-  border-radius: 50%;
   background: var(--background);
 }
 
 .larify-main-surface-corner-top::after {
-  top: 0;
+  clip-path: circle(12px at 12px 12px);
 }
 
 .larify-main-surface-corner-bottom::after {
-  bottom: 0;
+  clip-path: circle(12px at 12px 0);
 }
 
 .larify-workbench-split {

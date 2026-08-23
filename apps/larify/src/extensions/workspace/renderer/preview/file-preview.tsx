@@ -10,6 +10,7 @@ import './file-preview.css'
 export function FilePreview({
   active,
   animating,
+  descriptor,
   mode,
   path,
   resourceId,
@@ -17,6 +18,7 @@ export function FilePreview({
 }: {
   active: boolean
   animating: boolean
+  descriptor?: FileDescriptor
   mode?: 'preview' | 'source'
   path: string
   resourceId: number
@@ -33,6 +35,7 @@ export function FilePreview({
   }>({ key: requestKey })
 
   useEffect(() => {
+    if (descriptor) return
     let cancelled = false
     void workspaceClient.inspectFile(resourceId, path).then(
       (file) => !cancelled && setState({ file, key: requestKey }),
@@ -46,9 +49,11 @@ export function FilePreview({
     return () => {
       cancelled = true
     }
-  }, [path, requestKey, resourceId])
+  }, [descriptor, path, requestKey, resourceId])
 
-  const { error, file } = state.key === requestKey ? state : { error: undefined, file: undefined }
+  const inspected = state.key === requestKey ? state : { error: undefined, file: undefined }
+  const error = descriptor ? undefined : inspected.error
+  const file = descriptor ?? inspected.file
   if (error) return <UnsupportedPreview message={error} />
   if (!file) return <div className="h-full" />
   const renderer = registry.find(file)

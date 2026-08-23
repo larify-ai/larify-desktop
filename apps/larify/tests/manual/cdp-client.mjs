@@ -18,10 +18,14 @@ export async function connectLarifyCdp(port = process.env.LARIFY_CDP_PORT ?? '92
 
   let nextId = 0
   const pending = new Map()
+  const eventListeners = new Set()
   socket.on('message', (raw) => {
     const message = JSON.parse(String(raw))
     const command = pending.get(message.id)
-    if (!command) return
+    if (!command) {
+      for (const listener of eventListeners) listener(message)
+      return
+    }
     pending.delete(message.id)
     if (message.error) command.reject(new Error(message.error.message))
     else command.resolve(message.result)
@@ -52,5 +56,13 @@ export async function connectLarifyCdp(port = process.env.LARIFY_CDP_PORT ?? '92
     return result.result.value
   }
 
-  return { close: () => socket.close(), evaluate, send }
+  return {
+    close: () => socket.close(),
+    evaluate,
+    onEvent(listener) {
+      eventListeners.add(listener)
+      return () => eventListeners.delete(listener)
+    },
+    send
+  }
 }

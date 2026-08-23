@@ -23,6 +23,8 @@ import {
   takeWorkspaceNavigation,
   type WorkspaceNavigationRequest
 } from './workspace-navigation'
+import { workspaceClient } from './workspace-client'
+import type { FileDescriptor } from '../shared/types'
 
 const loadFilePreview = async (): Promise<{
   default: typeof import('./preview/file-preview').FilePreview
@@ -36,6 +38,11 @@ const FilePreview = lazy(loadFilePreview)
 type WorkspaceViewProps = Omit<WorkbenchRendererProps, 'cwd'>
 
 const isMarkdownPath = (path: string): boolean => /\.(?:md|markdown)$/i.test(path)
+const opensInBrowser = ({ mime }: FileDescriptor): boolean =>
+  mime === 'application/pdf' ||
+  mime.startsWith('image/') ||
+  mime.startsWith('audio/') ||
+  mime.startsWith('video/')
 
 export function WorkspaceView({
   active = false,
@@ -58,39 +65,20 @@ export function WorkspaceView({
   const [revealPath, setRevealPath] = useState<string | null>(null)
   const [revealingDirectory, setRevealingDirectory] = useState(false)
   const [previewPath, setPreviewPath] = useState<string | null>(null)
+  const [previewDescriptor, setPreviewDescriptor] = useState<FileDescriptor | undefined>()
   const [target, setTarget] = useState<{ hash: string } | undefined>()
   const { entries, loadDirectory, revealDirectory, revealFile, root } =
     useWorkspaceExplorer(resourceId)
   const { decorations: gitDecorations } = useGitDecorations(resourceId, root)
 
-  const showFile = useCallback((path: string, hash?: string): void => {
+  const showFile = useCallback((path: string, hash?: string, descriptor?: FileDescriptor): void => {
     setMarkdownMode('preview')
     setTarget(hash ? { hash } : undefined)
     setRevealPath(path)
     setRevealingDirectory(false)
     setPreviewPath(path)
+    setPreviewDescriptor(descriptor)
   }, [])
-
-  const selectFile = useCallback(
-    (path: string, hash?: string): void => {
-      navigationRequestRef.current += 1
-      showFile(path, hash)
-    },
-    [showFile]
-  )
-
-  const revealWorkspaceFile = useCallback(
-    (path: string, hash: string | undefined, errorContext: string): void => {
-      const request = ++navigationRequestRef.current
-      void revealFile(path)
-        .then((resolved) => {
-          if (!resolved || request !== navigationRequestRef.current) return
-          showFile(resolved, hash)
-        })
-        .catch((error) => console.error(errorContext, error))
-    },
-    [revealFile, showFile]
-  )
 
   const revealWorkspaceDirectory = useCallback(
     (path: string): void => {
@@ -100,6 +88,7 @@ export function WorkspaceView({
           if (!resolved || request !== navigationRequestRef.current) return
           setTarget(undefined)
           setPreviewPath(null)
+          setPreviewDescriptor(undefined)
           setRevealPath(resolved)
           setRevealingDirectory(true)
         })
@@ -129,6 +118,45 @@ export function WorkspaceView({
         .catch((error) => console.error(errorContext, error))
     },
     [sessionId]
+  )
+
+  const routeFile = useCallback(
+    (path: string, hash: string | undefined, request: number, errorContext: string): void => {
+      void workspaceClient.inspectFile(resourceId, path).then(
+        (file) => {
+          if (request !== navigationRequestRef.current) return
+          if (opensInBrowser(file)) openInBrowser(file.path, errorContext)
+          else showFile(file.path, hash, file)
+        },
+        (error) => {
+          if (request !== navigationRequestRef.current) return
+          console.error(errorContext, error)
+          showFile(path, hash)
+        }
+      )
+    },
+    [openInBrowser, resourceId, showFile]
+  )
+
+  const selectFile = useCallback(
+    (path: string, hash?: string): void => {
+      const request = ++navigationRequestRef.current
+      routeFile(path, hash, request, '[workspace:open-file]')
+    },
+    [routeFile]
+  )
+
+  const revealWorkspaceFile = useCallback(
+    (path: string, hash: string | undefined, errorContext: string): void => {
+      const request = ++navigationRequestRef.current
+      void revealFile(path)
+        .then((resolved) => {
+          if (!resolved || request !== navigationRequestRef.current) return
+          routeFile(resolved, hash, request, errorContext)
+        })
+        .catch((error) => console.error(errorContext, error))
+    },
+    [revealFile, routeFile]
   )
 
   useEffect(
@@ -269,8 +297,7 @@ export function WorkspaceView({
         navigatorOpen={navigatorOpen}
         onMarkdownModeChange={setMarkdownMode}
         onOpenInBrowser={() => {
-          if (!previewPath) return
-          openInBrowser(previewPath, '[workspace:open-in-browser]')
+          if (previewPath) openInBrowser(previewPath, '[workspace:open-in-browser]')
         }}
         onToggleNavigator={() => setNavigatorOpen((open) => !open)}
       />
@@ -311,6 +338,7 @@ export function WorkspaceView({
             <FilePreview
               active={active && (workbenchVisible || workbenchAnimating)}
               animating={workbenchAnimating}
+              descriptor={previewDescriptor}
               key={`${resourceId}:${previewPath}`}
               mode={isMarkdownPath(previewPath) ? markdownMode : undefined}
               resourceId={resourceId}

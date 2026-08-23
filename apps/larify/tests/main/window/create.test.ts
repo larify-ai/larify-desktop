@@ -2,17 +2,26 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const electron = vi.hoisted(() => ({
   options: undefined as Electron.BrowserWindowConstructorOptions | undefined,
+  maximize: vi.fn(),
   show: vi.fn(),
   loadFile: vi.fn(() => Promise.resolve()),
-  webContentsOn: vi.fn()
+  webContentsIsDestroyed: vi.fn(() => false),
+  webContentsOn: vi.fn(),
+  webContentsSend: vi.fn(),
+  windowOn: vi.fn()
 }))
 
 vi.mock('electron', () => ({
   BrowserWindow: vi.fn(function (options: Electron.BrowserWindowConstructorOptions) {
     electron.options = options
     return {
-      webContents: { on: electron.webContentsOn },
-      on: vi.fn(),
+      webContents: {
+        isDestroyed: electron.webContentsIsDestroyed,
+        on: electron.webContentsOn,
+        send: electron.webContentsSend
+      },
+      on: electron.windowOn,
+      maximize: electron.maximize,
       show: electron.show,
       loadFile: electron.loadFile,
       loadURL: vi.fn(() => Promise.resolve())
@@ -35,10 +44,30 @@ import { createWindow } from '../../../src/main/window/create'
 beforeEach(() => {
   electron.options = undefined
   electron.loadFile.mockClear()
+  electron.maximize.mockClear()
+  electron.show.mockClear()
   electron.webContentsOn.mockClear()
+  electron.webContentsSend.mockClear()
+  electron.windowOn.mockClear()
 })
 
 describe('createWindow', () => {
+  it('maximizes the window before showing it', () => {
+    createWindow()
+    const readyToShow = electron.windowOn.mock.calls.find(
+      ([event]) => event === 'ready-to-show'
+    )?.[1]
+
+    expect(readyToShow).toBeTypeOf('function')
+    readyToShow()
+
+    expect(electron.maximize).toHaveBeenCalledOnce()
+    expect(electron.show).toHaveBeenCalledOnce()
+    expect(electron.maximize.mock.invocationCallOrder[0]).toBeLessThan(
+      electron.show.mock.invocationCallOrder[0]
+    )
+  })
+
   it('enables webviews without disabling the renderer sandbox', () => {
     createWindow()
 

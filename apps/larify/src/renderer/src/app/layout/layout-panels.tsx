@@ -35,6 +35,7 @@ function MainSurfaceCorners(): React.JSX.Element {
 export function LayoutPanels(): React.JSX.Element {
   const { activeId, activeSession, sessions } = useAssistantSessions()
   const { heading } = activeSession
+
   const navigation = useAllotmentToggle()
   const workbench = useAllotmentToggle(true)
   const setWorkbenchCollapsed = workbench.setCollapsed
@@ -87,8 +88,8 @@ export function LayoutPanels(): React.JSX.Element {
         minSize={workbench.collapsed ? layoutSpec.interaction.minSize : expandedContentMinSize}
       >
         <div
-          className={`relative flex h-full min-w-0 flex-col overflow-hidden border-[0.5px] border-border-strong bg-background ${
-            navigation.collapsed ? 'border-l-0' : ''
+          className={`larify-main-surface relative flex h-full min-w-0 flex-col overflow-hidden bg-background ${
+            navigation.collapsed ? 'larify-main-surface-navigation-collapsed' : ''
           }`}
         >
           {!navigation.collapsed && <MainSurfaceCorners />}

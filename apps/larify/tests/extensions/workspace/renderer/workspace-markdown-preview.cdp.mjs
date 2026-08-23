@@ -7,13 +7,15 @@ import { join } from 'node:path'
 import { connectLarifyCdp } from '../../../manual/cdp-client.mjs'
 
 const wait = (duration) => new Promise((resolve) => setTimeout(resolve, duration))
+const activeWorkspaceSelector =
+  '[data-workbench-session][data-active] [data-workbench-view="workspace"][data-active]'
 const fixtureName = '__markdown-preview-cdp__'
 const fixtureRoot = join(homedir(), '.larify', 'workspace', fixtureName)
 
 await mkdir(fixtureRoot, { recursive: true })
 await Promise.all([
   writeFile(
-    join(fixtureRoot, '01-basic.md'),
+    join(fixtureRoot, '01-basic.markdown'),
     `---
 title: Hidden frontmatter
 author: Larify
@@ -44,7 +46,7 @@ flowchart LR
   A --> B
 \`\`\`
 
-[Basic fixture](./01-basic.md)
+[Basic fixture](./01-basic.markdown)
 `
   ),
   writeFile(
@@ -54,6 +56,14 @@ flowchart LR
 ])
 
 const app = await connectLarifyCdp()
+const waitFor = async (expression, label, timeout = 8_000) => {
+  const started = Date.now()
+  while (Date.now() - started < timeout) {
+    if (await app.evaluate(expression)) return
+    await wait(50)
+  }
+  throw new Error(`Timed out: ${label}`)
+}
 
 const click = (selector) =>
   app.evaluate(`(() => {
@@ -64,12 +74,14 @@ const click = (selector) =>
 
 const clickTreeItem = (name) =>
   app.evaluate(`(() => {
-    const item = Array.from(document.querySelectorAll('[role="treeitem"]')).find(
+    const workspace = document.querySelector(${JSON.stringify(activeWorkspaceSelector)})
+    const item = Array.from(workspace?.querySelectorAll('[role="treeitem"]') ?? []).find(
       (element) => element.querySelector('.rc-tree-title')?.textContent?.trim() === ${JSON.stringify(name)}
     )
     item?.querySelector('.rc-tree-node-content-wrapper')?.click()
     return Boolean(item)
   })()`)
+let workspaceTabId
 
 try {
   await app.send('Page.reload', { ignoreCache: true })
@@ -87,15 +99,22 @@ try {
     true,
     'workspace renderer should be available'
   )
+  workspaceTabId = await app.evaluate(
+    `document.querySelector('[role="tab"][data-state="active"]')?.closest('[data-tab-id]')?.getAttribute('data-tab-id')`
+  )
   await wait(800)
 
   assert.equal(await clickTreeItem(fixtureName), true, 'CDP fixture folder is missing')
   await wait(300)
   assert.equal(await clickTreeItem('02-rich-content.md'), true, 'rich Markdown fixture is missing')
-  await wait(2000)
+  await waitFor(
+    `Boolean(document.querySelector(${JSON.stringify(activeWorkspaceSelector)})?.querySelector('.ant-mermaid-graph svg, svg[id^="mermaid-"]'))`,
+    'Mermaid preview'
+  )
 
   const preview = await app.evaluate(`(() => {
-    const element = document.querySelector('.workspace-markdown-preview')
+    const workspace = document.querySelector(${JSON.stringify(activeWorkspaceSelector)})
+    const element = workspace?.querySelector('.workspace-markdown-preview')
     const text = element?.innerText ?? ''
     return {
       activeTab: Array.from(document.querySelectorAll('[role="tab"]')).find(
@@ -128,8 +147,8 @@ try {
   assert.deepEqual(
     await app.evaluate(`({
       action: document.querySelector('.larify-workbench-tab-actions button')?.getAttribute('aria-label'),
-      monaco: Boolean(document.querySelector('.monaco-editor')),
-      preview: Boolean(document.querySelector('.workspace-markdown-preview'))
+      monaco: Boolean(document.querySelector(${JSON.stringify(activeWorkspaceSelector)})?.querySelector('.monaco-editor')),
+      preview: Boolean(document.querySelector(${JSON.stringify(activeWorkspaceSelector)})?.querySelector('.workspace-markdown-preview'))
     })`),
     { action: '阅读预览', monaco: true, preview: false }
   )
@@ -137,13 +156,16 @@ try {
   assert.equal(await click('button[aria-label="阅读预览"]'), true)
   await wait(500)
   assert.equal(
-    await app.evaluate(`Boolean(document.querySelector('.workspace-markdown-preview'))`),
+    await app.evaluate(
+      `Boolean(document.querySelector(${JSON.stringify(activeWorkspaceSelector)})?.querySelector('.workspace-markdown-preview'))`
+    ),
     true
   )
 
   assert.equal(
     await app.evaluate(`(() => {
-      const link = Array.from(document.querySelectorAll('.workspace-markdown-preview a')).find(
+      const workspace = document.querySelector(${JSON.stringify(activeWorkspaceSelector)})
+      const link = Array.from(workspace?.querySelectorAll('.workspace-markdown-preview a') ?? []).find(
         (element) => element.textContent === 'Basic fixture'
       )
       link?.click()
@@ -159,10 +181,10 @@ try {
         (tab) => tab.getAttribute('aria-selected') === 'true'
       )?.textContent?.trim(),
       hasFrontmatter: /(?:^|\\n)(?:title|author|tags):/.test(
-        document.querySelector('.workspace-markdown-preview')?.innerText ?? ''
+        document.querySelector(${JSON.stringify(activeWorkspaceSelector)})?.querySelector('.workspace-markdown-preview')?.innerText ?? ''
       )
     })`),
-    { activeTab: '01-basic.md', hasFrontmatter: false }
+    { activeTab: '01-basic.markdown', hasFrontmatter: false }
   )
 
   assert.equal(await clickTreeItem('fixture.html'), true, 'HTML fixture is missing')
@@ -173,26 +195,40 @@ try {
         (tab) => tab.getAttribute('aria-selected') === 'true'
       )?.textContent?.trim(),
       action: document.querySelector('.larify-workbench-tab-actions button')?.getAttribute('aria-label'),
-      monaco: Boolean(document.querySelector('.monaco-editor'))
+      monaco: Boolean(document.querySelector(${JSON.stringify(activeWorkspaceSelector)})?.querySelector('.monaco-editor'))
     })`),
     { activeTab: 'fixture.html', action: '在内置浏览器中打开', monaco: true }
   )
 
   assert.equal(await click('button[aria-label="在内置浏览器中打开"]'), true)
-  await wait(900)
+  await waitFor(
+    `Array.from(document.querySelectorAll('[role="tab"]')).some(
+      (tab) => tab.getAttribute('aria-selected') === 'true' && tab.textContent?.trim() === 'Larify Markdown CDP Fixture'
+    )`,
+    'HTML browser title'
+  )
   assert.deepEqual(
-    await app.evaluate(`Array.from(document.querySelectorAll('[role="tab"]')).map((tab) => ({
-      text: tab.textContent?.trim(),
-      selected: tab.getAttribute('aria-selected') === 'true'
-    }))`),
-    [
-      { text: 'fixture.html', selected: false },
-      { text: 'Larify Markdown CDP Fixture', selected: true }
-    ]
+    await app.evaluate(`({
+      active: Array.from(document.querySelectorAll('[role="tab"]')).find(
+        (tab) => tab.getAttribute('aria-selected') === 'true'
+      )?.textContent?.trim(),
+      workspace: Array.from(document.querySelectorAll('[role="tab"]')).some(
+        (tab) => tab.textContent?.trim() === 'fixture.html' && tab.getAttribute('aria-selected') !== 'true'
+      )
+    })`),
+    { active: 'Larify Markdown CDP Fixture', workspace: true }
   )
 
   console.log('workspace Markdown preview CDP regression passed')
 } finally {
+  if (workspaceTabId) {
+    await app
+      .evaluate(
+        `document.querySelector(${JSON.stringify(`[data-tab-id="${workspaceTabId}"] .larify-workbench-tab-close`)})?.click()`
+      )
+      .catch(() => undefined)
+    await wait(300)
+  }
   app.close()
   await rm(fixtureRoot, { recursive: true, force: true })
 }

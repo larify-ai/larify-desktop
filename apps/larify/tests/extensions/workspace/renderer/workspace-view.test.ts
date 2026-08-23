@@ -18,6 +18,7 @@ const h = vi.hoisted(() => ({
   actions: null as ReactNode,
   entries: [] as Record<string, unknown>[],
   filePreviewProps: null as Record<string, unknown> | null,
+  inspectFile: vi.fn(async (path: string) => ({ binary: false, mime: 'text/plain', path })),
   invoke: vi.fn(async () => 73),
   revealDirectory: vi.fn(async (path: string) => path),
   revealFile: vi.fn(async (path: string) => `D:\\workspace\\${path}`),
@@ -83,6 +84,10 @@ vi.mock('../../../../src/extensions/workspace/renderer/preview/monaco-preview', 
   MonacoPreview: () => null
 }))
 
+vi.mock('../../../../src/extensions/workspace/renderer/workspace-client', () => ({
+  workspaceClient: { inspectFile: h.inspectFile }
+}))
+
 import { WorkspaceView } from '../../../../src/extensions/workspace/renderer/workspace-view'
 
 describe('WorkspaceView', () => {
@@ -94,6 +99,12 @@ describe('WorkspaceView', () => {
     h.actions = null
     h.filePreviewProps = null
     h.invoke.mockClear()
+    h.inspectFile.mockClear()
+    h.inspectFile.mockImplementation(async (_resourceId: number, path: string) => ({
+      binary: false,
+      mime: /\.html?$/i.test(path) ? 'text/html' : 'text/plain',
+      path
+    }))
     h.revealFile.mockClear()
     h.revealDirectory.mockClear()
     h.treeProps = null
@@ -279,7 +290,7 @@ describe('WorkspaceView', () => {
     expect(h.filePreviewProps?.active).toBe(true)
   })
 
-  it('shows file controls and opens HTML in the built-in browser', async () => {
+  it('shows HTML source and opens it in the browser only from the toolbar action', async () => {
     const selected = vi.fn()
     window.addEventListener('larify:workbench-select-resource', selected)
     await render()
@@ -295,6 +306,15 @@ describe('WorkspaceView', () => {
     expect(container.querySelector('button[aria-label="阅读预览"]')).not.toBeNull()
 
     await openFile('site/index.html')
+    expect(h.filePreviewProps).toMatchObject({
+      path: 'D:\\workspace\\site/index.html'
+    })
+    expect(h.invoke).not.toHaveBeenCalledWith(
+      'resource:create',
+      'browser',
+      'session-a',
+      expect.anything()
+    )
     const open = container.querySelector<HTMLButtonElement>(
       'button[aria-label="在内置浏览器中打开"]'
     )!
@@ -307,8 +327,39 @@ describe('WorkspaceView', () => {
       resourceId: 73,
       sessionId: 'session-a'
     })
-    expect(h.filePreviewProps?.mode).toBeUndefined()
+    expect(h.filePreviewProps).toMatchObject({ path: 'D:\\workspace\\site/index.html' })
     window.removeEventListener('larify:workbench-select-resource', selected)
+  })
+
+  it.each([
+    ['application/pdf', true, 'manual.pdf'],
+    ['image/png', true, 'image.png'],
+    ['audio/mpeg', true, 'sound.mp3'],
+    ['video/mp4', true, 'video.mp4']
+  ])('routes %s files directly to the browser', async (mime, binary, name) => {
+    h.inspectFile.mockResolvedValueOnce({ binary, mime, path: `D:\\workspace\\${name}` })
+    await render()
+
+    await openFile(name)
+
+    expect(h.invoke).toHaveBeenCalledWith('resource:create', 'browser', 'session-a', {
+      url: `D:\\workspace\\${name}`
+    })
+    expect(h.filePreviewProps).toBeNull()
+  })
+
+  it('lets the preview surface an inspection failure instead of keeping the previous file', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    await render()
+    await openFile('first.ts')
+    h.inspectFile.mockRejectedValueOnce(new Error('inspection failed'))
+
+    await openFile('missing.ts')
+
+    expect(h.filePreviewProps).toMatchObject({
+      descriptor: undefined,
+      path: 'D:\\workspace\\missing.ts'
+    })
   })
 
   it('only handles Markdown link events addressed to its workspace', async () => {

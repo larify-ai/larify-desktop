@@ -11,6 +11,7 @@ permissions:
 jobs:
   release:
     runs-on: windows-latest
+    timeout-minutes: 45
     env:
       NODE_OPTIONS: --max-old-space-size=4096
     steps:
@@ -51,32 +52,7 @@ jobs:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
 
       - name: Trigger CNB release sync
-        shell: pwsh
         env:
           CNB_TOKEN: ${{ secrets.CNB_TOKEN }}
-        run: |
-          if (-not $env:CNB_TOKEN) {
-            throw 'GitHub Actions secret CNB_TOKEN is not configured'
-          }
-
-          $auth = [Convert]::ToBase64String(
-            [Text.Encoding]::ASCII.GetBytes("cnb:$env:CNB_TOKEN")
-          )
-          $gitAuth = "http.extraHeader=AUTHORIZATION: basic $auth"
-          $repo = 'https://cnb.cool/larify-ai/larify-desktop'
-          $tag = '${{ github.ref_name }}'
-
-          git clone --depth 1 $repo cnb-release
-          Set-Location cnb-release
-
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-
-          git -c $gitAuth ls-remote --exit-code --tags origin "refs/tags/$tag"
-          if ($LASTEXITCODE -eq 0) {
-            Write-Host "CNB tag $tag already exists; nothing to do."
-            exit 0
-          }
-
-          git tag -a $tag -m "Release $tag"
-          git -c $gitAuth push origin "refs/tags/$tag"
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: node .github/scripts/sync-cnb-release.mjs

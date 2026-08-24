@@ -1,5 +1,19 @@
 import { describe, expect, it, vi } from 'vitest'
-import { checkForUpdates, type UpdateChecker } from '../../../src/main/update/service'
+
+const autoUpdater = vi.hoisted(() => ({
+  checkForUpdates: vi.fn().mockResolvedValue(undefined),
+  setFeedURL: vi.fn()
+}))
+
+vi.mock('electron-updater', () => ({
+  default: { autoUpdater }
+}))
+
+import {
+  checkForUpdates,
+  UPDATE_FEED_URL,
+  type UpdateChecker
+} from '../../../src/main/update/service'
 
 describe('checkForUpdates', () => {
   it('does not check from a development build', async () => {
@@ -18,5 +32,15 @@ describe('checkForUpdates', () => {
     await checkForUpdates(true, updater)
 
     expect(updater.checkForUpdates).toHaveBeenCalledOnce()
+  })
+
+  it('checks the CNB generic update feed from a packaged build', async () => {
+    await checkForUpdates(true)
+
+    expect(autoUpdater.setFeedURL).toHaveBeenCalledWith({
+      provider: 'generic',
+      url: UPDATE_FEED_URL
+    })
+    expect(autoUpdater.checkForUpdates).toHaveBeenCalledOnce()
   })
 })

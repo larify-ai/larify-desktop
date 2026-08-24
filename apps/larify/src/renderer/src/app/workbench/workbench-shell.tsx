@@ -1,4 +1,14 @@
-import { Activity, Fragment, memo, useDeferredValue, useEffect, useReducer, useState } from 'react'
+import {
+  Activity,
+  Fragment,
+  memo,
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useReducer,
+  useState
+} from 'react'
 import { useStore } from 'zustand'
 import { useRendererRegistry } from '../registry/renderer-registry'
 import {
@@ -11,6 +21,7 @@ import type { WorkbenchStore, WorkbenchView } from './workbench-store'
 import type { WorkbenchTab } from './workbench-tabs'
 import { WorkbenchTabsLayout } from './workbench-tabs-layout'
 import { WorkbenchTabActionScope } from './workbench-tab-actions'
+import { WorkbenchActivationProvider } from './workbench-activation'
 
 interface WorkbenchShellProps {
   active?: boolean
@@ -38,28 +49,38 @@ export function WorkbenchShell({
   const { activeViewId, closeViews, reorderView, selectView, showLauncher, updateTab, views } =
     useStore(store)
   const activeView = views.find((view) => view.id === activeViewId) ?? null
+  const tabs = useMemo(() => views.map((view) => toTab(view, renderers)), [renderers, views])
+  const handleClose = useCallback(
+    (ids: string[]): void => {
+      const viewIds = new Set(ids.map(Number))
+      const closing = views.filter((view) => viewIds.has(view.id))
+      if (closing.length === 0) return
+      closeViews(closing.map((view) => view.id))
+      window.setTimeout(() => {
+        void window.bridge
+          ?.invoke(
+            'resource:close-many',
+            closing.map((view) => view.resourceId)
+          )
+          .catch(() => undefined)
+      }, 0)
+    },
+    [closeViews, views]
+  )
+  const handleReorder = useCallback(
+    (id: string, _fromIndex: number, toIndex: number): void => reorderView(Number(id), toIndex),
+    [reorderView]
+  )
+  const handleSelect = useCallback((id: string): void => selectView(Number(id)), [selectView])
 
   return (
     <WorkbenchTabsLayout
       activeId={activeViewId === null ? null : String(activeViewId)}
-      tabs={views.map((view) => toTab(view, renderers))}
-      onClose={(ids) => {
-        const viewIds = new Set(ids.map(Number))
-        const closing = views.filter((view) => viewIds.has(view.id))
-        if (closing.length === 0) return
-        closeViews(closing.map((view) => view.id))
-        window.setTimeout(() => {
-          void window.bridge
-            ?.invoke(
-              'resource:close-many',
-              closing.map((view) => view.resourceId)
-            )
-            .catch(() => undefined)
-        }, 0)
-      }}
+      tabs={tabs}
+      onClose={handleClose}
       onHome={showLauncher}
-      onReorder={(id, _fromIndex, toIndex) => reorderView(Number(id), toIndex)}
-      onSelect={(id) => selectView(Number(id))}
+      onReorder={handleReorder}
+      onSelect={handleSelect}
     >
       <Fragment>
         {views.map((view) => (
@@ -124,10 +145,13 @@ const ActivatedWorkbenchRenderer = memo(function ActivatedWorkbenchRenderer(
   const deferredActive = useDeferredValue(Boolean(props.active))
   if (shouldMount && !activated) setActivated(true)
   const rendererActive = deferActivation ? deferredActive : Boolean(props.active)
+  const stableRendererActive = rendererId === 'workspace' ? true : rendererActive
   return activated || props.active ? (
     <WorkbenchTabActionScope active={rendererActive}>
       <Activity mode={props.active || persistent ? 'visible' : 'hidden'}>
-        <StableWorkbenchRenderer {...props} active={rendererActive} />
+        <WorkbenchActivationProvider active={rendererActive}>
+          <StableWorkbenchRenderer {...props} active={stableRendererActive} />
+        </WorkbenchActivationProvider>
       </Activity>
     </WorkbenchTabActionScope>
   ) : null

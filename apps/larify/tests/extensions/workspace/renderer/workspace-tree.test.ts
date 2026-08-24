@@ -5,6 +5,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DataNode, Key } from 'rc-tree/lib/interface'
 import { WorkspaceTree } from '../../../../src/extensions/workspace/renderer/explorer/workspace-tree'
+import { WorkbenchActivationProvider } from '../../../../src/renderer/src/app/workbench/workbench-activation'
 import {
   compactDirectoryTree,
   initialExpandedKeys,
@@ -209,6 +210,30 @@ describe('WorkspaceTree', () => {
     expect(treeProps.current?.scrollWidth).toBeGreaterThan(80)
   })
 
+  it('observes its size only while its workbench renderer is active', () => {
+    const observe = vi.fn()
+    const disconnect = vi.fn()
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe = observe
+        disconnect = disconnect
+      }
+    )
+    const entries = [directory('/workspace', [])]
+
+    render(entries, undefined, false, false, false)
+    expect(observe).not.toHaveBeenCalled()
+    expect(treeProps.current).toBeUndefined()
+
+    render(entries, undefined, false, false, true)
+    expect(observe).toHaveBeenCalledOnce()
+    expect(treeProps.current).toBeDefined()
+
+    render(entries, undefined, false, false, false)
+    expect(disconnect).toHaveBeenCalled()
+  })
+
   it('loads the deepest directory represented by a compact node', async () => {
     const entries = [
       directory('/workspace', [directory('/workspace/a', [directory('/workspace/a/b', [])])])
@@ -250,19 +275,23 @@ describe('WorkspaceTree', () => {
     entries: DataNode[],
     revealPath?: string,
     changesOnly = true,
-    revealDirectory = false
+    revealDirectory = false,
+    providerActive?: boolean
   ): void {
+    const tree = createElement(WorkspaceTree, {
+      changesOnly,
+      entries,
+      gitDecorations: new Map(),
+      onOpen,
+      onToggle,
+      revealDirectory,
+      revealPath
+    })
     act(() =>
       root.render(
-        createElement(WorkspaceTree, {
-          changesOnly,
-          entries,
-          gitDecorations: new Map(),
-          onOpen,
-          onToggle,
-          revealDirectory,
-          revealPath
-        })
+        providerActive === undefined
+          ? tree
+          : createElement(WorkbenchActivationProvider, { active: providerActive }, tree)
       )
     )
   }

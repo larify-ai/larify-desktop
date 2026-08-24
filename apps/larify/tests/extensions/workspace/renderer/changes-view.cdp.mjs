@@ -20,6 +20,17 @@ const view = `${session} [data-workbench-view="changes"][data-active]`
 const tree = `${view} .workspace-tree-scroll`
 const layout = `${view} .workspace-layout`
 const navigator = `${view} .workspace-layout-navigator`
+const diffHasVisibleGeometry = `(() => {
+  const preview = document.querySelector(${JSON.stringify(`${view} .workspace-file-preview`)})
+  const previewRect = preview?.getBoundingClientRect()
+  const editors = [...(preview?.querySelectorAll('.monaco-diff-editor, .workspace-added-only-editor .monaco-editor') ?? [])]
+  const editorRect = editors.map((editor) => editor.getBoundingClientRect()).find((rect) => rect.width > 0)
+  return Boolean(
+    previewRect && editorRect && previewRect.width > 0 && previewRect.height > 0 &&
+    editorRect.width >= previewRect.width - 1 && editorRect.height >= previewRect.height - 1 &&
+    preview.querySelectorAll('.view-line').length > 0
+  )
+})()`
 
 const clickAria = (label) =>
   evaluate(
@@ -67,10 +78,7 @@ try {
   if (!workspaceSession) throw new Error('Larify workspace session not found')
   await wait(300)
   await openChanges()
-  await waitFor(
-    `(() => { const preview = document.querySelector(${JSON.stringify(`${view} .workspace-file-preview`)}); const rect = preview?.getBoundingClientRect(); return Boolean(preview && rect.width > 0 && rect.height > 0 && preview.querySelectorAll('.view-line').length > 0) })()`,
-    'initial diff content'
-  )
+  await waitFor(diffHasVisibleGeometry, 'initial diff content')
   if (
     await evaluate(
       `Boolean(document.querySelector(${JSON.stringify(`${session} [aria-label="切换到统一视图"]`)}))`
@@ -95,6 +103,16 @@ try {
       `document.querySelector(${JSON.stringify(navigator)})?.hasAttribute('data-open')`,
       'initial changes navigator'
     )
+  }
+
+  for (let depth = 0; depth < 30; depth += 1) {
+    const expanded = await evaluate(`(() => {
+      const node = document.querySelector(${JSON.stringify(`${tree} .rc-tree-treenode[aria-expanded="false"] .rc-tree-node-content-wrapper`)})
+      node?.click()
+      return Boolean(node)
+    })()`)
+    if (!expanded) break
+    await wait(30)
   }
 
   const initial = await evaluate(`(() => {
@@ -138,6 +156,22 @@ try {
     throw new Error(`Read-only diff shows code-action lightbulbs: ${initial.visibleLightbulbs}`)
   }
 
+  const activeTabId = await evaluate(`document
+    .querySelector(${JSON.stringify(`${session} .larify-workbench-tab-trigger[data-state="active"]`)})
+    ?.closest('[data-tab-id]')?.getAttribute('data-tab-id')`)
+  assert.ok(activeTabId, 'active Changes tab id is missing')
+  await evaluate(
+    `document.querySelector(${JSON.stringify(`${session} .larify-workbench-home`)})?.click()`
+  )
+  await waitFor(
+    `!document.querySelector(${JSON.stringify(view)}) || document.querySelector(${JSON.stringify(view)})?.getBoundingClientRect().width === 0`,
+    'hidden Changes view'
+  )
+  await evaluate(
+    `document.querySelector(${JSON.stringify(`${session} [data-tab-id="${activeTabId}"] .larify-workbench-tab-trigger`)})?.click()`
+  )
+  await waitFor(diffHasVisibleGeometry, 'reactivated diff geometry')
+
   const selectedFile = await evaluate(`(() => {
     const leaves = Array.from(document.querySelectorAll(
       ${JSON.stringify(`${tree} .rc-tree-treenode:not([aria-expanded]) .rc-tree-node-content-wrapper`)}
@@ -153,7 +187,7 @@ try {
   })()`)
   if (!selectedFile) throw new Error('Changed file could not be resolved')
   await waitFor(
-    `(() => { const preview = document.querySelector(${JSON.stringify(`${view} .workspace-file-preview`)}); return preview?.getAttribute('data-diff-mode') === 'unified' && preview.querySelectorAll('.view-line').length > 0 })()`,
+    `document.querySelector(${JSON.stringify(`${view} .workspace-file-preview`)})?.getAttribute('data-diff-mode') === 'unified' && ${diffHasVisibleGeometry}`,
     'selected file diff content'
   )
   const selectedTitle = selectedFile.split(/[\\/]/).at(-1)
@@ -190,7 +224,7 @@ try {
       editor.getBoundingClientRect().width
     )
   })()`)
-  if (splitEditorWidths.length < 2 || splitEditorWidths.some((width) => width <= 0)) {
+  if (splitEditorWidths.length < 2 || splitEditorWidths.some((width) => width < 100)) {
     throw new Error(`Split diff editors are not visible: ${splitEditorWidths.join(', ')}`)
   }
   const splitGutterGeometry = await evaluate(`(() => {

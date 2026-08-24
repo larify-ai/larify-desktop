@@ -117,6 +117,23 @@ describe('BrowserView', () => {
     expect(h.reload).toHaveBeenCalledOnce()
   })
 
+  it('reveals a resized page only after two animation frames', async () => {
+    const frames: FrameRequestCallback[] = []
+    const requestFrame = vi
+      .spyOn(window, 'requestAnimationFrame')
+      .mockImplementation((callback) => frames.push(callback))
+    h.state = { id: 42, url: 'https://example.com' } as BrowserTabState
+    await renderView()
+
+    const host = webview().parentElement!
+    expect(host.style.visibility).toBe('hidden')
+    act(() => frames.shift()!(0))
+    expect(host.style.visibility).toBe('hidden')
+    act(() => frames.shift()!(16))
+    expect(host.style.visibility).toBe('')
+    requestFrame.mockRestore()
+  })
+
   it('updates the visible host when native layout changes without a resize', async () => {
     h.state = { id: 42, url: 'https://example.com' } as BrowserTabState
     await renderView()
@@ -180,7 +197,7 @@ describe('BrowserView', () => {
     )
   })
 
-  it('parks an inactive webview without shrinking its last visible backing size over time', async () => {
+  it('parks an inactive webview at the default rendering size', async () => {
     vi.useFakeTimers()
     h.state = { id: 42, url: 'https://example.com' } as BrowserTabState
     await renderView()
@@ -204,11 +221,11 @@ describe('BrowserView', () => {
     const style = webview().parentElement!.style
     expect(style.left).toBe('-10000px')
     expect(style.top).toBe('-10000px')
-    expect(style.width).toBe('2560px')
-    expect(style.height).toBe('1400px')
+    expect(style.width).toBe('1280px')
+    expect(style.height).toBe('800px')
     await act(async () => vi.advanceTimersByTimeAsync(30_000))
-    expect(style.width).toBe('2560px')
-    expect(style.height).toBe('1400px')
+    expect(style.width).toBe('1280px')
+    expect(style.height).toBe('800px')
     vi.useRealTimers()
   })
 

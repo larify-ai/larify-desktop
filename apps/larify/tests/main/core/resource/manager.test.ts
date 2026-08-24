@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
-import { ResourceManager } from '../../../../src/main/core/resource/manager'
+import {
+  ResourceManager,
+  SESSION_RESOURCE_IDLE_TIMEOUT_MS
+} from '../../../../src/main/core/resource/manager'
 
 const testManager = (): ResourceManager => {
   const manager = new ResourceManager()
@@ -114,6 +117,22 @@ describe('ResourceManager', () => {
     expect(states).toEqual([[]])
   })
 
+  it('disposes a large resource batch with one state change', async () => {
+    const manager = testManager()
+    const dispose = vi.fn()
+    for (let index = 0; index < 500; index += 1) {
+      manager.create('terminal', 'session-a', () => ({ dispose }))
+    }
+    const listener = vi.fn()
+    manager.bindChange(listener)
+
+    await manager.destroy('session-a')
+
+    expect(dispose).toHaveBeenCalledTimes(500)
+    expect(listener).toHaveBeenCalledOnce()
+    expect(listener).toHaveBeenCalledWith([])
+  })
+
   it('starts every disposal and removes the batch when one disposal fails', async () => {
     const manager = testManager()
     const first = vi.fn(() => Promise.reject(new Error('close failed')))
@@ -124,6 +143,22 @@ describe('ResourceManager', () => {
     await expect(manager.closeMany([1, 2])).rejects.toThrow('close failed')
 
     expect(first).toHaveBeenCalledOnce()
+    expect(second).toHaveBeenCalledOnce()
+    expect(manager.list()).toEqual([])
+  })
+
+  it('starts every disposal when one disposal throws synchronously', async () => {
+    const manager = testManager()
+    const second = vi.fn()
+    manager.create('terminal', 'session-a', () => ({
+      dispose: () => {
+        throw new Error('close failed')
+      }
+    }))
+    manager.create('browser', 'session-a', () => ({ dispose: second }))
+
+    await expect(manager.closeMany([1, 2])).rejects.toThrow('close failed')
+
     expect(second).toHaveBeenCalledOnce()
     expect(manager.list()).toEqual([])
   })
@@ -178,6 +213,19 @@ describe('ResourceManager', () => {
     expect(manager.list()).toEqual([{ id: 3, type: 'terminal', sessionId: 'session-b' }])
   })
 
+  it('emits one resource change while destroying a session', async () => {
+    const manager = testManager()
+    const states: number[][] = []
+    manager.create('terminal', 'session-a', () => ({ dispose: vi.fn() }))
+    manager.create('browser', 'session-a', () => ({ dispose: vi.fn() }))
+    manager.create('terminal', 'session-b', () => ({ dispose: vi.fn() }))
+    manager.bindChange((resources) => states.push(resources.map(({ id }) => id)))
+
+    await manager.destroy('session-a')
+
+    expect(states).toEqual([[3]])
+  })
+
   it('runs session cleanup after closing its resources', async () => {
     const manager = testManager()
     manager.create('browser', 'session-a', () => ({ dispose: vi.fn() }))
@@ -209,6 +257,27 @@ describe('ResourceManager', () => {
     expect(manager.create('browser', 'session-a', () => ({ dispose: vi.fn() }))).toBe(1)
   })
 
+  it('shares one destruction task between concurrent callers', async () => {
+    const manager = testManager()
+    let finish!: () => void
+    const cleanup = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve
+        })
+    )
+    manager.registerSessionCleanup(cleanup)
+
+    const first = manager.destroy('session-a')
+    const second = manager.destroy('session-a')
+
+    expect(second).toBe(first)
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
+    finish()
+    await Promise.all([first, second])
+    expect(cleanup).toHaveBeenCalledOnce()
+  })
+
   it('continues closing a session when one resource fails', async () => {
     const manager = testManager()
     const second = vi.fn()
@@ -221,6 +290,142 @@ describe('ResourceManager', () => {
 
     expect(second).toHaveBeenCalledOnce()
     expect(manager.list()).toEqual([])
+  })
+
+  it('destroys resources after their session has been inactive for the configured timeout', async () => {
+    vi.useFakeTimers()
+    const manager = new ResourceManager(1000)
+    const dispose = vi.fn()
+    manager.register('terminal', () => ({ dispose }))
+    manager.setActiveSession('session-a')
+    manager.create('terminal', 'session-a')
+
+    manager.setActiveSession('session-b')
+    await vi.advanceTimersByTimeAsync(999)
+    expect(dispose).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1)
+
+    expect(dispose).toHaveBeenCalledOnce()
+    expect(manager.list()).toEqual([])
+    vi.useRealTimers()
+  })
+
+  it('cleans up an inactive session even after its last resource was already closed', async () => {
+    vi.useFakeTimers()
+    const manager = new ResourceManager(1000)
+    const cleanup = vi.fn()
+    manager.registerSessionCleanup(cleanup)
+    manager.setActiveSession('session-a')
+
+    manager.setActiveSession('session-b')
+    await vi.advanceTimersByTimeAsync(1000)
+
+    expect(cleanup).toHaveBeenCalledWith('session-a')
+    vi.useRealTimers()
+  })
+
+  it('resets idle cleanup when a session becomes active again', async () => {
+    vi.useFakeTimers()
+    const manager = new ResourceManager(1000)
+    const dispose = vi.fn()
+    manager.register('terminal', () => ({ dispose }))
+    manager.setActiveSession('session-a')
+    manager.create('terminal', 'session-a')
+
+    manager.setActiveSession('session-b')
+    await vi.advanceTimersByTimeAsync(900)
+    manager.setActiveSession('session-a')
+    await vi.advanceTimersByTimeAsync(200)
+
+    expect(dispose).not.toHaveBeenCalled()
+    vi.useRealTimers()
+  })
+
+  it('uses exactly seven days as the production idle timeout', async () => {
+    vi.useFakeTimers()
+    const manager = new ResourceManager()
+    const dispose = vi.fn()
+    manager.register('terminal', () => ({ dispose }))
+    manager.setActiveSession('session-a')
+    manager.create('terminal', 'session-a')
+    manager.setActiveSession('session-b')
+
+    await vi.advanceTimersByTimeAsync(SESSION_RESOURCE_IDLE_TIMEOUT_MS - 1)
+    expect(dispose).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1)
+
+    expect(dispose).toHaveBeenCalledOnce()
+    vi.useRealTimers()
+  })
+
+  it('never destroys the currently active session', async () => {
+    vi.useFakeTimers()
+    const manager = new ResourceManager(1000)
+    const dispose = vi.fn()
+    manager.register('terminal', () => ({ dispose }))
+    manager.setActiveSession('session-a')
+    manager.create('terminal', 'session-a')
+
+    await vi.advanceTimersByTimeAsync(10_000)
+
+    expect(dispose).not.toHaveBeenCalled()
+    expect(manager.list()).toHaveLength(1)
+    vi.useRealTimers()
+  })
+
+  it('starts a fresh full timeout after repeated session use', async () => {
+    vi.useFakeTimers()
+    const manager = new ResourceManager(1000)
+    const dispose = vi.fn()
+    manager.register('terminal', () => ({ dispose }))
+    manager.setActiveSession('session-a')
+    manager.create('terminal', 'session-a')
+
+    manager.setActiveSession('session-b')
+    await vi.advanceTimersByTimeAsync(900)
+    manager.setActiveSession('session-a')
+    manager.setActiveSession('session-b')
+    await vi.advanceTimersByTimeAsync(999)
+    expect(dispose).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1)
+
+    expect(dispose).toHaveBeenCalledOnce()
+    vi.useRealTimers()
+  })
+
+  it('restarts the idle timeout when an inactive session opens another resource', async () => {
+    vi.useFakeTimers()
+    const manager = new ResourceManager(1000)
+    const dispose = vi.fn()
+    manager.register('terminal', () => ({ dispose }))
+    manager.setActiveSession('session-a')
+    manager.create('terminal', 'session-b')
+
+    await vi.advanceTimersByTimeAsync(900)
+    manager.create('terminal', 'session-b')
+    await vi.advanceTimersByTimeAsync(999)
+    expect(dispose).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1)
+
+    expect(dispose).toHaveBeenCalledTimes(2)
+    vi.useRealTimers()
+  })
+
+  it('cancels pending idle cleanup when the manager is disposed', async () => {
+    vi.useFakeTimers()
+    const manager = new ResourceManager(1000)
+    const cleanup = vi.fn()
+    manager.register('terminal', () => ({ dispose: vi.fn() }))
+    manager.registerSessionCleanup(cleanup)
+    manager.setActiveSession('session-a')
+    manager.create('terminal', 'session-a')
+    manager.setActiveSession('session-b')
+
+    await manager.dispose()
+    await vi.advanceTimersByTimeAsync(1000)
+
+    expect(cleanup).not.toHaveBeenCalled()
+    vi.useRealTimers()
   })
 
   it('does not retain a resource when opening fails', () => {

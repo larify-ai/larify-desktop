@@ -17,6 +17,7 @@ describe('EmptyFilePreview', () => {
     expect(container.textContent).toBe('打开文件')
     expect(container.firstElementChild?.classList).toContain('gap-4')
     expect(container.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true')
+    expect(container.querySelector('.lucide-square-code')).not.toBeNull()
 
     act(() => root.unmount())
   })

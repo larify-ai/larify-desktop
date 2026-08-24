@@ -86,10 +86,9 @@ const navigatorWidth = () =>
   )
 
 try {
-  await cdp.send('Page.reload', { ignoreCache: true })
   await waitFor(
     `Boolean(document.querySelector('.larify-main-surface'))`,
-    'renderer readiness after reload',
+    'renderer readiness',
     10_000
   )
   if (!(await evaluate(`Boolean(document.querySelector(${JSON.stringify(layoutSelector)}))`))) {
@@ -137,7 +136,7 @@ try {
   )
   const selectedFile = await evaluate(`(() => {
     const leaf = document.querySelector(
-      ${JSON.stringify(`${treeSelector} .rc-tree-treenode[aria-selected] .rc-tree-node-content-wrapper`)}
+      ${JSON.stringify(`${treeSelector} .rc-tree-treenode-selected .rc-tree-node-content-wrapper`)}
     ) ?? Array.from(document.querySelectorAll(
       ${JSON.stringify(`${treeSelector} .rc-tree-node-content-wrapper`)}
     )).find((node) => node.closest('.rc-tree-treenode')?.getAttribute('aria-expanded') === null)
@@ -148,11 +147,27 @@ try {
   })()`)
   if (!selectedFile) throw new Error('Workspace file was not available for the tab-title test')
   await waitFor(
-    `Array.from(document.querySelectorAll('[data-tab-id]')).some(
+    `Array.from(document.querySelectorAll(${JSON.stringify(`${activeSessionSelector} [role="tab"]`)})).some(
       (tab) => tab.textContent?.includes(${JSON.stringify(selectedFile)})
     )`,
-    'workspace tab title update'
+    'workspace tab title update',
+    5_000
   )
+  const selectedTreeRow = await evaluate(`(() => {
+    const row = document.querySelector(
+      ${JSON.stringify(`${treeSelector} .rc-tree-treenode-selected`)}
+    )
+    if (!row) return null
+    const style = getComputedStyle(row)
+    return {
+      backgroundColor: style.backgroundColor,
+      color: style.color,
+      text: row.textContent?.trim() ?? ''
+    }
+  })()`)
+  if (!selectedTreeRow || selectedTreeRow.backgroundColor === 'rgba(0, 0, 0, 0)') {
+    throw new Error(`Selected workspace row is not highlighted: ${JSON.stringify(selectedTreeRow)}`)
+  }
 
   const panesBeforeNavigationCollapse = await evaluate(`(() =>
     Array.from(document.querySelectorAll(
@@ -215,11 +230,16 @@ try {
     const horizontal = tree?.querySelector('.rc-tree-list-scrollbar-horizontal')
     const thumb = tree?.querySelector('.rc-tree-list-scrollbar-thumb')
     if (!vertical || !horizontal) {
+      const listRect = tree?.querySelector('.rc-tree-list')?.getBoundingClientRect()
+      const horizontalRect = horizontal?.getBoundingClientRect()
+      const verticalRect = vertical?.getBoundingClientRect()
       return {
         bothVisible: false,
+        bottomGap: listRect && verticalRect ? listRect.bottom - verticalRect.bottom : null,
         cursor: thumb && getComputedStyle(thumb).cursor,
         horizontal: Boolean(horizontal),
         nodes: tree?.querySelectorAll('.rc-tree-treenode').length,
+        rightGap: listRect && horizontalRect ? listRect.right - horizontalRect.right : null,
         vertical: Boolean(vertical)
       }
     }
@@ -237,6 +257,12 @@ try {
   })()`)
   if (scrollbars.cursor && scrollbars.cursor !== 'default') {
     throw new Error(`Unexpected workspace scrollbar cursor: ${scrollbars.cursor}`)
+  }
+  if (scrollbars.horizontal && !scrollbars.vertical && Math.abs(scrollbars.rightGap) > 1) {
+    throw new Error(`Single horizontal scrollbar is shortened: ${JSON.stringify(scrollbars)}`)
+  }
+  if (scrollbars.vertical && !scrollbars.horizontal && Math.abs(scrollbars.bottomGap) > 1) {
+    throw new Error(`Single vertical scrollbar is shortened: ${JSON.stringify(scrollbars)}`)
   }
   if (scrollbars.overlaps) throw new Error('Workspace scrollbars overlap')
 
@@ -368,6 +394,7 @@ try {
         selectedFile,
         minimumWidth,
         retainedWidth,
+        selectedTreeRow,
         scrollLayers,
         scrollbars,
         overflowScrollbars,

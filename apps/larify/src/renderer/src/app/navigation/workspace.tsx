@@ -93,7 +93,7 @@ export function Workspace({ workspace }: { workspace: WorkspacePreview }): React
               type="button"
               data-session-id={session.id}
               aria-current={session.active ? 'page' : undefined}
-              className={`${navigationItemClassName} relative h-8 pr-9 ${session.active ? 'bg-sidebar-accent' : ''}`}
+              className={`${navigationItemClassName} relative h-8 pr-5 ${session.active ? 'bg-sidebar-accent' : ''}`}
               onClick={session.onClick}
             >
               <span aria-hidden="true" />

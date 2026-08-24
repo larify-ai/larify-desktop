@@ -65,7 +65,7 @@ async function openLauncher() {
   )
 }
 
-async function createTerminal() {
+async function createTerminal(createdIds) {
   await openLauncher()
   const before = await evaluate(`window.bridge.invoke('resource:list')`)
   const opened = await evaluate(`(() => {
@@ -84,6 +84,8 @@ async function createTerminal() {
     'terminal resource creation'
   )
   const created = resources.find(({ id }) => !before.some((resource) => resource.id === id))
+  assert.ok(created, 'new terminal resource should be identifiable')
+  createdIds.push(created.id)
   await waitFor(`Boolean(document.querySelector('.xterm'))`, 'xterm mount')
   await waitFor(`Boolean(document.querySelector('.xterm-helper-textarea'))`, 'xterm input mount')
   return created
@@ -93,8 +95,7 @@ const initialResources = await evaluate(`window.bridge.invoke('resource:list')`)
 const createdIds = []
 
 try {
-  const first = await createTerminal()
-  createdIds.push(first.id)
+  const first = await createTerminal(createdIds)
 
   const firstState = await waitFor(
     `(async () => {
@@ -121,23 +122,33 @@ try {
     'terminal keyboard output'
   )
 
-  const second = await createTerminal()
-  createdIds.push(second.id)
-  const tabs = await evaluate(`
-    [...document.querySelectorAll('.larify-workbench-tab')].map((tab) => ({
-      active: tab.querySelector('[data-state="active"]') !== null,
-      id: tab.dataset.tabId,
-      title: tab.querySelector('.larify-workbench-tab-title')?.textContent
-    }))
-  `)
-  assert.ok(tabs.filter(({ title }) => title === 'PowerShell').length >= 2)
+  const second = await createTerminal(createdIds)
+  const createdTabs = await evaluate(`(() =>
+    ${JSON.stringify([first.id, second.id])}.map((resourceId) => {
+      const view = document.querySelector(
+        '[data-workbench-view="terminal"][data-resource-id="' + resourceId + '"]'
+      )
+      const id = view?.getAttribute('data-view-id')
+      const tab = id
+        ? document.querySelector('.larify-workbench-tab[data-tab-id="' + id + '"]')
+        : null
+      return {
+        id,
+        resourceId,
+        title: tab?.querySelector('.larify-workbench-tab-title')?.textContent ?? null
+      }
+    })
+  )()`)
+  assert.deepEqual(
+    createdTabs.map(({ resourceId, title }) => ({ resourceId, title })),
+    [first, second].map(({ id }) => ({ resourceId: id, title: 'PowerShell' }))
+  )
 
-  const createdTabs = tabs.slice(-2)
   await evaluate(`document
     .querySelector('.larify-workbench-tab[data-tab-id="${createdTabs[0].id}"] .larify-workbench-tab-trigger')
-    ?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }))`)
+    ?.click()`)
   await waitFor(
-    `document.querySelector('.larify-workbench-tab[data-tab-id="${createdTabs[0].id}"] [data-state="active"]') !== null`,
+    `document.querySelector('.larify-workbench-tab[data-tab-id="${createdTabs[0].id}"] [role="tab"]')?.getAttribute('aria-selected') === 'true'`,
     'first terminal tab selection'
   )
 
@@ -164,7 +175,7 @@ try {
   )
 } finally {
   for (const id of createdIds) {
-    await evaluate(`window.bridge.invoke('resource:close', ${id})`).catch(() => undefined)
+    await evaluate(`window.bridge.invoke('resource:close', ${id})`)
   }
   const leaked = await evaluate(`window.bridge.invoke('resource:list')`)
   assert.deepEqual(leaked, initialResources, 'CDP test should restore initial resources')

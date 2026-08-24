@@ -77,6 +77,7 @@ export function TerminalView({
   const exitedRef = useRef(false)
   const pendingExitRef = useRef<TerminalExitEvent | null>(null)
   const suppressResizeRef = useRef(false)
+  const activeRef = useRef(active)
   const { resolvedTheme } = useTheme()
 
   useEffect(() => {
@@ -138,10 +139,12 @@ export function TerminalView({
   }, [resolvedTheme])
 
   useLayoutEffect(() => {
+    activeRef.current = active
     const terminal = terminalRef.current
     if (!terminal) return
-    if (!active) terminal.blur()
-  }, [active])
+    if (active) scheduleFit()
+    else terminal.blur()
+  }, [active, scheduleFit])
 
   useEffect(() => {
     let active = true
@@ -185,7 +188,7 @@ export function TerminalView({
         terminal.write(`\r\n[process exited: ${pendingExitRef.current.exitCode}]\r\n`)
         pendingExitRef.current = null
       }
-      scheduleFit()
+      if (activeRef.current) scheduleFit()
     }
 
     const offData = window.bridge.on('terminal:data', (payload) => {
@@ -258,7 +261,9 @@ export function TerminalView({
       })
       .catch(finishRestore)
 
-    const observer = new ResizeObserver(scheduleFit)
+    const observer = new ResizeObserver(() => {
+      if (activeRef.current) scheduleFit()
+    })
     observer.observe(container)
     return () => {
       active = false

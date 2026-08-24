@@ -74,6 +74,15 @@ import {
   MonacoDiff
 } from '../../../../src/extensions/workspace/renderer/changes/monaco-diff'
 
+const setPreviewSize = (container: HTMLElement, width = 900, height = 600): void => {
+  const preview = container.querySelector<HTMLElement>('.workspace-file-preview')
+  if (!preview) throw new Error('Workspace preview is missing')
+  Object.defineProperties(preview, {
+    clientHeight: { configurable: true, value: height },
+    clientWidth: { configurable: true, value: width }
+  })
+}
+
 const status = (values: Partial<FileStatusResult> = {}): FileStatusResult => ({
   index: ' ',
   path: 'D:\\workspace\\file.ts',
@@ -151,15 +160,16 @@ describe('MonacoDiff', () => {
       })
     )
     const diffEditorProps = harness.props.mock.lastCall?.[0] as {
-      onMount(editor: { layout(): void }): void
+      onMount(editor: { layout(dimension?: { height: number; width: number }): void }): void
     }
     const layout = vi.fn()
+    setPreviewSize(container)
     const frame = vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((callback) => {
       callback(0)
       return 1
     })
     diffEditorProps.onMount({ layout })
-    expect(layout).toHaveBeenCalledOnce()
+    expect(layout).toHaveBeenCalledWith({ height: 600, width: 900 })
     frame.mockRestore()
     expect(container.querySelector('[data-diff-mode="unified"]')).not.toBeNull()
     await act(async () => root.unmount())
@@ -227,8 +237,9 @@ describe('MonacoDiff', () => {
     }
 
     await render(false)
+    setPreviewSize(container, 960, 640)
     const props = harness.props.mock.lastCall?.[0] as {
-      onMount(editor: { layout(): void }): void
+      onMount(editor: { layout(dimension?: { height: number; width: number }): void }): void
       options: unknown
     }
     const initialOptions = props.options
@@ -239,7 +250,7 @@ describe('MonacoDiff', () => {
     await render(true)
     expect((harness.props.mock.lastCall?.[0] as { options: unknown }).options).toBe(initialOptions)
     frames.shift()?.(0)
-    expect(layout).toHaveBeenCalledOnce()
+    expect(layout).toHaveBeenLastCalledWith({ height: 640, width: 960 })
 
     await render(false)
     await render(true)
@@ -476,6 +487,7 @@ describe('MonacoDiff', () => {
     const range = { endColumn: 1, endLineNumber: 2, startColumn: 1, startLineNumber: 1 }
     const createDecorationsCollection = vi.fn()
     const layout = vi.fn()
+    setPreviewSize(container)
     const frame = vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((callback) => {
       callback(0)
       return 1
@@ -491,7 +503,7 @@ describe('MonacoDiff', () => {
         range
       }
     ])
-    expect(layout).toHaveBeenCalledOnce()
+    expect(layout).toHaveBeenCalledWith({ height: 600, width: 900 })
     frame.mockRestore()
     expect(container.querySelector('[data-original-empty="true"]')).not.toBeNull()
     expect(container.querySelector('[data-modified-empty="false"]')).not.toBeNull()

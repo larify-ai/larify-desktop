@@ -173,15 +173,11 @@
   transition: none;
 }
 
-/* Workbench tabs stay mounted to preserve state, but inactive renderers do not
-   need paint work while another tab is visible. Terminals keep layout so xterm
-   retains its measured viewport while inactive. */
+/* Keep each renderer's outer box measured for fast tab reactivation, while
+   skipping layout and paint for its inactive subtree. */
 [data-workbench-view][aria-hidden='true'] {
-  visibility: hidden;
-}
-
-[data-workbench-view][aria-hidden='true']:not([data-workbench-view='terminal']) {
   content-visibility: hidden;
+  visibility: hidden;
 }
 
 @media (prefers-reduced-motion: reduce) {

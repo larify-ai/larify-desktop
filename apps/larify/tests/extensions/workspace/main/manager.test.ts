@@ -11,6 +11,7 @@ const workspace = vi.hoisted(() => ({
     readFile: ReturnType<typeof vi.fn>
     reveal: ReturnType<typeof vi.fn>
     rootPath: ReturnType<typeof vi.fn>
+    setActive: ReturnType<typeof vi.fn>
   }>
 }))
 
@@ -36,6 +37,7 @@ vi.mock('../../../../src/extensions/workspace/main/service', () => ({
       await this.opening
       return this.currentRoot
     })
+    setActive = vi.fn(async () => undefined)
     private currentRoot: string
 
     constructor(root: string, onChange: (directory: string, changedPath: string) => void) {
@@ -67,6 +69,83 @@ describe('WorkspaceManager', () => {
     expect(workspace.instances).toHaveLength(2)
     expect(workspace.open).toHaveBeenCalledWith('D:\\first')
     expect(workspace.open).toHaveBeenCalledWith('D:\\second')
+  })
+
+  it('activates watchers only for the current session', async () => {
+    const manager = new WorkspaceManager()
+    manager.open(1, 'first-session', 'D:\\first')
+    manager.open(2, 'second-session', 'D:\\second')
+
+    await manager.setActiveSession('first-session')
+
+    expect(workspace.instances[0].setActive).toHaveBeenCalledWith(true)
+    expect(workspace.instances[1].setActive).toHaveBeenCalledWith(false)
+
+    await manager.setActiveSession('second-session')
+    expect(workspace.instances[0].setActive).toHaveBeenLastCalledWith(false)
+    expect(workspace.instances[1].setActive).toHaveBeenLastCalledWith(true)
+  })
+
+  it('does not refresh a stale session after a newer activation wins', async () => {
+    const manager = new WorkspaceManager()
+    const listener = vi.fn()
+    manager.bindChange(listener)
+    manager.open(1, 'first-session', 'D:\\first')
+    manager.open(2, 'second-session', 'D:\\second')
+    let releaseFirst: () => void = () => undefined
+    workspace.instances[0].setActive.mockImplementationOnce(
+      () => new Promise<void>((resolve) => (releaseFirst = resolve))
+    )
+
+    const firstActivation = manager.setActiveSession('first-session')
+    await Promise.resolve()
+    const secondActivation = manager.setActiveSession('second-session')
+    releaseFirst()
+    await Promise.all([firstActivation, secondActivation])
+
+    expect(listener).not.toHaveBeenCalledWith(1, 'D:\\first', 'D:\\first')
+    expect(listener).toHaveBeenCalledWith(2, 'D:\\second', 'D:\\second')
+  })
+
+  it('does not refresh a resource closed while its session is activating', async () => {
+    const manager = new WorkspaceManager()
+    const listener = vi.fn()
+    manager.bindChange(listener)
+    const resource = manager.open(1, 'first-session', 'D:\\first')
+    let releaseActivation: () => void = () => undefined
+    workspace.instances[0].setActive.mockImplementationOnce(
+      () => new Promise<void>((resolve) => (releaseActivation = resolve))
+    )
+
+    const activation = manager.setActiveSession('first-session')
+    await Promise.resolve()
+    await resource.dispose()
+    releaseActivation()
+    await activation
+
+    expect(listener).not.toHaveBeenCalled()
+  })
+
+  it('makes repeated activation wait for the in-flight session transition', async () => {
+    const manager = new WorkspaceManager()
+    manager.open(1, 'first-session', 'D:\\first')
+    let releaseActivation: () => void = () => undefined
+    workspace.instances[0].setActive.mockImplementationOnce(
+      () => new Promise<void>((resolve) => (releaseActivation = resolve))
+    )
+
+    const first = manager.setActiveSession('first-session')
+    await Promise.resolve()
+    let repeatedResolved = false
+    const repeated = manager.setActiveSession('first-session').then(() => {
+      repeatedResolved = true
+    })
+    await Promise.resolve()
+    expect(repeatedResolved).toBe(false)
+
+    releaseActivation()
+    await Promise.all([first, repeated])
+    expect(repeatedResolved).toBe(true)
   })
 
   it('keeps resources for the same root isolated', async () => {

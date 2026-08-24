@@ -5,6 +5,7 @@ import type { DataNode, Key } from 'rc-tree/lib/interface'
 import { useTheme } from 'next-themes'
 import { basename } from 'path-unified'
 import { FileIcon } from '@renderer/components/file-icon/file-icon'
+import { useWorkbenchActivationStore } from '@renderer/app/workbench/workbench-activation'
 import { createWorkspaceDragData, workspaceEntryDragType } from '@renderer/lib/attachment-drag'
 import {
   compactDirectoryTree,
@@ -13,6 +14,7 @@ import {
 } from './workspace-tree-state'
 
 interface WorkspaceTreeProps {
+  active?: boolean
   changesOnly: boolean
   entries: DataNode[]
   gitDecorations: Map<string, string>
@@ -74,6 +76,7 @@ export const WorkspaceTree = memo(function WorkspaceTree({
 })
 
 function WorkspaceTreeContent({
+  active = true,
   changesOnly,
   entries,
   gitDecorations,
@@ -82,6 +85,7 @@ function WorkspaceTreeContent({
   revealDirectory = false,
   revealPath
 }: WorkspaceTreeProps): React.JSX.Element {
+  const activationStore = useWorkbenchActivationStore()
   const { resolvedTheme } = useTheme()
   const containerRef = useRef<HTMLDivElement>(null)
   const treeRef = useRef<RcTree<DataNode>>(null)
@@ -105,14 +109,28 @@ function WorkspaceTreeContent({
       setSize((current) =>
         current.height === height && current.width === width ? current : { height, width }
       )
-    updateSize(container.clientHeight, container.clientWidth)
-    if (typeof ResizeObserver === 'undefined') return
-    const observer = new ResizeObserver(([entry]) =>
-      updateSize(entry.contentRect.height, entry.contentRect.width)
-    )
-    observer.observe(container)
-    return () => observer.disconnect()
-  }, [])
+    let observer: ResizeObserver | null = null
+    const sync = (): void => {
+      const enabled = activationStore?.getSnapshot() ?? active
+      if (!enabled) {
+        observer?.disconnect()
+        observer = null
+        return
+      }
+      updateSize(container.clientHeight, container.clientWidth)
+      if (observer || typeof ResizeObserver === 'undefined') return
+      observer = new ResizeObserver(([entry]) =>
+        updateSize(entry.contentRect.height, entry.contentRect.width)
+      )
+      observer.observe(container)
+    }
+    sync()
+    const unsubscribe = activationStore?.subscribe(sync)
+    return () => {
+      unsubscribe?.()
+      observer?.disconnect()
+    }
+  }, [activationStore, active])
 
   useEffect(() => {
     if (initialized.current || entries.length === 0) return

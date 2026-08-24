@@ -1,8 +1,8 @@
 {
   "name": "larify",
   "version": "0.0.6",
-  "description": "Self-driving AI for embedded product delivery",
-  "author": "InfAGI",
+  "description": "From reference design to customer delivery",
+  "author": "递归探索",
   "private": true,
   "main": "./out/main/index.js",
   "scripts": {

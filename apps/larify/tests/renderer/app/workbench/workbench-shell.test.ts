@@ -66,7 +66,7 @@ describe('WorkbenchShell', () => {
     await act(async () => {
       container
         .querySelector<HTMLElement>(`[data-tab-id="${first}"] .larify-workbench-tab-trigger`)
-        ?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }))
+        ?.click()
     })
     expect(store.getState().activeViewId).toBe(first)
     expect(

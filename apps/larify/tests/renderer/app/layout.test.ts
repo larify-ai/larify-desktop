@@ -251,7 +251,7 @@ describe('workbench layout specification', () => {
     expect(panelsCss).toContain(':has(> .sash-container > .sash-active)')
     expect(panelsCss).toContain('@media (prefers-reduced-motion: reduce)')
     expect(panelsCss).toContain("[data-workbench-view][aria-hidden='true']")
-    expect(panelsCss).toContain(
+    expect(panelsCss).not.toContain(
       "[data-workbench-view][aria-hidden='true']:not([data-workbench-view='terminal'])"
     )
     expect(groupToggle).not.toContain('requestAnimationFrame')

@@ -4,8 +4,13 @@ import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+const renderSpies = vi.hoisted(() => ({ interaction: vi.fn(), workbench: vi.fn() }))
+
 vi.mock('../../../src/renderer/src/app/interaction/interaction', () => ({
-  Interaction: () => createElement('div', { 'data-region': 'interaction' })
+  Interaction: () => {
+    renderSpies.interaction()
+    return createElement('div', { 'data-region': 'interaction' })
+  }
 }))
 
 vi.mock('../../../src/renderer/src/app/navigation/navigation', () => ({
@@ -14,7 +19,10 @@ vi.mock('../../../src/renderer/src/app/navigation/navigation', () => ({
 }))
 
 vi.mock('../../../src/renderer/src/app/workbench/workbench', () => ({
-  WorkbenchHost: () => createElement('div', { 'data-region': 'workbench' })
+  WorkbenchHost: () => {
+    renderSpies.workbench()
+    return createElement('div', { 'data-region': 'workbench' })
+  }
 }))
 
 vi.mock('../../../src/renderer/src/app/interaction/assistant/sessions-context', () => ({
@@ -28,6 +36,8 @@ describe('layout with the real resizable component', () => {
   let root: Root
 
   beforeEach(async () => {
+    renderSpies.interaction.mockClear()
+    renderSpies.workbench.mockClear()
     globalThis.IS_REACT_ACT_ENVIRONMENT = true
     vi.stubGlobal('matchMedia', () => ({ matches: false }))
     vi.stubGlobal(
@@ -123,6 +133,19 @@ describe('layout with the real resizable component', () => {
     expect(container.querySelector('.larify-workbench-split')).not.toBeNull()
   })
 
+  it('does not rerender pane contents while toggling layout panels', async () => {
+    expect(renderSpies.interaction).toHaveBeenCalledTimes(1)
+    expect(renderSpies.workbench).toHaveBeenCalledTimes(1)
+
+    await click('隐藏侧边栏')
+    await click('显示侧边栏')
+    await click('显示工作台')
+    await click('隐藏工作台')
+
+    expect(renderSpies.interaction).toHaveBeenCalledTimes(1)
+    expect(renderSpies.workbench).toHaveBeenCalledTimes(1)
+  })
+
   it('reports the current workbench animation state on request', () => {
     const states: Array<{ animating: boolean; visible: boolean }> = []
     const receiveState = (event: Event): void => {
@@ -207,7 +230,9 @@ describe('layout with the real resizable component', () => {
     Object.defineProperty(split, 'clientWidth', { configurable: true, value: 1200 })
 
     await act(async () => {
-      handle.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 1, clientX: 1000 }))
+      handle.dispatchEvent(
+        new MouseEvent('pointerdown', { bubbles: true, button: 1, clientX: 1000 })
+      )
       window.dispatchEvent(pointerEvent('pointermove', 800))
     })
 

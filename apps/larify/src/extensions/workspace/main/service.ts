@@ -1,4 +1,3 @@
-import { watch, type FSWatcher } from 'chokidar'
 import { readFile, realpath, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { fileTypeFromFile } from 'file-type'
@@ -6,12 +5,15 @@ import { lookup } from 'mime-types'
 import type { FileDescriptor, FileNode } from '../shared/types'
 import { readDirectory } from './directory'
 import { resolveWorkspace } from './workspace'
+import { workspaceWatcherPool, type WorkspaceWatcherSubscription } from './watcher-pool'
 
 export class WorkspaceService {
   private readonly root: Promise<string>
-  private watcher: FSWatcher | null = null
+  private subscription: WorkspaceWatcherSubscription | null = null
+  private active: boolean
 
-  constructor(root: string, onChange: (directory: string, path: string) => void) {
+  constructor(root: string, onChange: (directory: string, path: string) => void, active = true) {
+    this.active = active
     this.root = this.initialize(root, onChange)
   }
 
@@ -22,9 +24,8 @@ export class WorkspaceService {
   async list(directory?: string): Promise<FileNode[]> {
     const root = await this.root
     const target = directory ?? root
-    const entries = await readDirectory(target)
-    this.watcher?.add(target)
-    return entries
+    await this.subscription?.add(target)
+    return readDirectory(target)
   }
 
   async reveal(file: string): Promise<string[]> {
@@ -75,8 +76,14 @@ export class WorkspaceService {
 
   async dispose(): Promise<void> {
     await this.root.catch(() => undefined)
-    await this.watcher?.close()
-    this.watcher = null
+    await this.subscription?.dispose()
+    this.subscription = null
+  }
+
+  async setActive(active: boolean): Promise<void> {
+    this.active = active
+    await this.root
+    await this.subscription?.setActive(active)
   }
 
   private async initialize(
@@ -84,11 +91,16 @@ export class WorkspaceService {
     onChange: (directory: string, path: string) => void
   ): Promise<string> {
     const resolved = await resolveWorkspace(root)
-    this.watcher = watch(resolved, { atomic: true, depth: 0, ignoreInitial: true })
-    this.watcher.on('all', (_event, changedPath) => {
-      const normalized = path.normalize(changedPath)
-      onChange(path.dirname(normalized), normalized)
-    })
+    const subscription = workspaceWatcherPool.acquire(
+      resolved,
+      (changedPath) => {
+        const normalized = path.normalize(changedPath)
+        onChange(path.dirname(normalized), normalized)
+      },
+      this.active
+    )
+    this.subscription = subscription
+    await subscription.add(resolved)
     return resolved
   }
 }

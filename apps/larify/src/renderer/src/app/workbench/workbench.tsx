@@ -235,6 +235,15 @@ export function WorkbenchHost({
     }
   }, [])
 
+  useLayoutEffect(() => {
+    void Promise.resolve(window.bridge.invoke('resource:set-active-session', activeId)).catch(
+      () => undefined
+    )
+    void Promise.resolve(window.bridge.invoke('workspace:set-active-session', activeId)).catch(
+      () => undefined
+    )
+  }, [activeId])
+
   const sessionIdsWithResources = new Set(resources.map((resource) => resource.sessionId))
   return (
     <div className="h-full">

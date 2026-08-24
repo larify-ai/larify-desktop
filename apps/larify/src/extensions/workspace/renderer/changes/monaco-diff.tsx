@@ -71,20 +71,25 @@ const useActiveEditorLayout = (
   active: boolean
 ): {
   containerRef: React.RefObject<HTMLDivElement | null>
-  mountEditor(instance: { layout(): void }): void
+  mountEditor(instance: { layout(dimension?: editor.IDimension): void }): void
 } => {
   const containerRef = useRef<HTMLDivElement>(null)
-  const editorRef = useRef<{ layout(): void } | null>(null)
+  const editorRef = useRef<{ layout(dimension?: editor.IDimension): void } | null>(null)
   const frameRef = useRef<number | null>(null)
   const scheduleLayout = useCallback(() => {
     if (frameRef.current !== null) cancelAnimationFrame(frameRef.current)
     frameRef.current = requestAnimationFrame(() => {
       frameRef.current = null
-      editorRef.current?.layout()
+      const container = containerRef.current
+      if (!container) return
+      const width = container.clientWidth
+      const height = container.clientHeight
+      if (width <= 0 || height <= 0) return
+      editorRef.current?.layout({ height, width })
     })
   }, [])
   const mountEditor = useCallback(
-    (instance: { layout(): void }) => {
+    (instance: { layout(dimension?: editor.IDimension): void }) => {
       editorRef.current = instance
       if (active) scheduleLayout()
     },

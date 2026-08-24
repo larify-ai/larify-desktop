@@ -86,7 +86,7 @@ describe('WorkbenchTabs', () => {
     await act(async () => {
       container
         .querySelector<HTMLElement>('[data-tab-id="browser:1"] .larify-workbench-tab-trigger')
-        ?.dispatchEvent(mouseDown())
+        ?.click()
       container
         .querySelector<HTMLButtonElement>('[data-tab-id="terminal:1"] .larify-workbench-tab-close')
         ?.click()
@@ -128,7 +128,7 @@ describe('WorkbenchTabs', () => {
     ).toBe('active')
   })
 
-  it('selects the adjacent tab with Radix keyboard navigation', async () => {
+  it('selects tabs with keyboard navigation', async () => {
     const onSelect = vi.fn()
     await renderTabs({ onSelect })
     const activeTab = container.querySelector<HTMLElement>(
@@ -143,6 +143,18 @@ describe('WorkbenchTabs', () => {
     })
 
     expect(onSelect).toHaveBeenCalledWith('browser:1')
+
+    await act(async () => {
+      activeTab.dispatchEvent(
+        new KeyboardEvent('keydown', { bubbles: true, code: 'End', key: 'End' })
+      )
+      container
+        .querySelector<HTMLElement>('[data-tab-id="browser:1"] [role="tab"]')
+        ?.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, code: 'Home', key: 'Home' }))
+    })
+
+    expect(onSelect).toHaveBeenCalledWith('browser:1')
+    expect(onSelect).toHaveBeenCalledWith('terminal:1')
   })
 
   it('scrolls a newly active tab into view', async () => {
@@ -339,6 +351,24 @@ describe('WorkbenchTabs', () => {
     )
   })
 
+  it('keeps the first tab keyboard reachable while the launcher is active', async () => {
+    await renderTabs({ activeId: null })
+
+    const triggers = container.querySelectorAll<HTMLElement>('[role="tab"]')
+    expect(triggers[0].tabIndex).toBe(0)
+    expect(triggers[0].getAttribute('aria-selected')).toBe('false')
+    expect(triggers[1].tabIndex).toBe(-1)
+  })
+
+  it('keeps the first tab keyboard reachable while the active id is stale', async () => {
+    await renderTabs({ activeId: 'missing' })
+
+    const triggers = container.querySelectorAll<HTMLElement>('[role="tab"]')
+    expect(triggers[0].tabIndex).toBe(0)
+    expect(triggers[0].getAttribute('aria-selected')).toBe('false')
+    expect(triggers[1].tabIndex).toBe(-1)
+  })
+
   it('reorders tabs through the pointer sensor without selecting the dragged tab', async () => {
     const onReorder = vi.fn()
     const onSelect = vi.fn()
@@ -349,6 +379,9 @@ describe('WorkbenchTabs', () => {
     vi.spyOn(second, 'getBoundingClientRect').mockReturnValue(rect(100, 100))
 
     await act(async () => first.dispatchEvent(pointer('pointerdown', 20)))
+    await act(async () =>
+      first.querySelector<HTMLElement>('.larify-workbench-tab-trigger')?.dispatchEvent(mouseDown())
+    )
     await act(async () => document.dispatchEvent(pointer('pointermove', 30)))
     await act(async () => document.dispatchEvent(pointer('pointermove', 160)))
     await act(async () => {

@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode, type WheelEvent } from 'react'
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+  type WheelEvent
+} from 'react'
 import {
   closestCenter,
   DndContext,
@@ -11,10 +20,10 @@ import { restrictToHorizontalAxis } from '@dnd-kit/modifiers'
 import { horizontalListSortingStrategy, SortableContext, useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { HouseIcon, XIcon } from 'lucide-react'
-import { DropdownMenu, Tabs } from 'radix-ui'
+import { DropdownMenu } from 'radix-ui'
 import type { WorkbenchTabPresentation } from '../registry/workbench-renderers'
 import { resolveTabReorder } from './tab-reorder'
-import { resolveTabCloseTargets, type WorkbenchTabCloseAction } from './tab-close-actions'
+import { resolveTabCloseTargets } from './tab-close-actions'
 import './workbench-tabs.css'
 
 export interface WorkbenchTab extends WorkbenchTabPresentation {
@@ -45,6 +54,7 @@ export function WorkbenchTabs({
   const tabListRef = useRef<HTMLDivElement>(null)
   const suppressClickRef = useRef(false)
   const [scrollEdges, setScrollEdges] = useState('')
+  const activeTabIndex = tabs.findIndex((tab) => tab.id === activeId)
 
   const updateScrollEdges = useCallback((): void => {
     const scroller = scrollerRef.current
@@ -73,7 +83,7 @@ export function WorkbenchTabs({
     updateScrollEdges()
   }, [activeId, updateScrollEdges])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     revealActiveTab()
   }, [tabs, revealActiveTab])
 
@@ -121,13 +131,10 @@ export function WorkbenchTabs({
       }}
     >
       <SortableContext items={tabs.map((tab) => tab.id)} strategy={horizontalListSortingStrategy}>
-        <Tabs.Root
-          activationMode="automatic"
+        <div
           className="larify-workbench-tabs"
-          data-has-active-tab={activeId !== null || undefined}
+          data-has-active-tab={activeTabIndex >= 0 || undefined}
           data-theme-source="workbench"
-          value={activeId ?? ''}
-          onValueChange={onSelect}
         >
           <button
             aria-label="工作台首页"
@@ -146,37 +153,50 @@ export function WorkbenchTabs({
             onScroll={updateScrollEdges}
             onWheel={handleWheel}
           >
-            <Tabs.List className="larify-workbench-tab-list" loop ref={tabListRef}>
+            <div className="larify-workbench-tab-list" ref={tabListRef} role="tablist">
               {tabs.map((tab, index) => (
                 <SortableTab
+                  active={tab.id === activeId}
                   canCloseRight={index < tabs.length - 1}
+                  focusable={index === Math.max(activeTabIndex, 0)}
+                  index={index}
                   key={tab.id}
                   suppressClickRef={suppressClickRef}
                   tab={tab}
-                  onClose={(action) => {
-                    onClose(resolveTabCloseTargets(tabs, tab.id, action))
-                  }}
+                  tabs={tabs}
+                  onClose={onClose}
+                  onSelect={onSelect}
                 />
               ))}
-            </Tabs.List>
+            </div>
           </div>
           {actions && <div className="larify-workbench-tab-actions">{actions}</div>}
-        </Tabs.Root>
+        </div>
       </SortableContext>
     </DndContext>
   )
 }
 
-function SortableTab({
+const SortableTab = memo(function SortableTab({
+  active,
   canCloseRight,
+  focusable,
+  index,
   suppressClickRef,
   tab,
-  onClose
+  tabs,
+  onClose,
+  onSelect
 }: {
+  active: boolean
   canCloseRight: boolean
+  focusable: boolean
+  index: number
   suppressClickRef: React.RefObject<boolean>
   tab: WorkbenchTab
-  onClose(action: WorkbenchTabCloseAction): void
+  tabs: WorkbenchTab[]
+  onClose(ids: string[]): void
+  onSelect(id: string): void
 }): React.JSX.Element {
   const { isDragging, listeners, setNodeRef, transform, transition } = useSortable({ id: tab.id })
   const triggerRef = useRef<HTMLButtonElement>(null)
@@ -224,11 +244,39 @@ function SortableTab({
           setMenuOpen(true)
         }}
       >
-        <Tabs.Trigger
+        <button
+          aria-selected={active}
           className="larify-workbench-tab-trigger"
+          data-state={active ? 'active' : 'inactive'}
           ref={triggerRef}
+          role="tab"
+          tabIndex={focusable ? 0 : -1}
           title={tab.tooltip ?? tab.title}
-          value={tab.id}
+          type="button"
+          onClick={() => {
+            if (!active) onSelect(tab.id)
+          }}
+          onKeyDown={(event) => {
+            const targetIndex =
+              event.key === 'ArrowLeft'
+                ? (index - 1 + tabs.length) % tabs.length
+                : event.key === 'ArrowRight'
+                  ? (index + 1) % tabs.length
+                  : event.key === 'Home'
+                    ? 0
+                    : event.key === 'End'
+                      ? tabs.length - 1
+                      : -1
+            if (targetIndex < 0) return
+            event.preventDefault()
+            const target = tabs[targetIndex]
+            onSelect(target.id)
+            event.currentTarget
+              .closest('[role="tablist"]')
+              ?.querySelectorAll<HTMLElement>('[role="tab"]')
+              .item(targetIndex)
+              .focus()
+          }}
         >
           <span aria-hidden className="larify-workbench-tab-icon">
             {tab.icon}
@@ -240,7 +288,7 @@ function SortableTab({
           >
             {tab.title}
           </span>
-        </Tabs.Trigger>
+        </button>
         <button
           aria-label={`关闭 ${tab.title}`}
           className="larify-workbench-tab-close"
@@ -248,7 +296,7 @@ function SortableTab({
           type="button"
           onClick={(event) => {
             event.stopPropagation()
-            onClose('current')
+            onClose(resolveTabCloseTargets(tabs, tab.id, 'current'))
           }}
           onPointerDown={(event) => event.stopPropagation()}
         >
@@ -278,7 +326,7 @@ function SortableTab({
           <DropdownMenu.Item
             className="larify-workbench-tab-menu-item"
             disabled={!canCloseRight}
-            onSelect={() => onClose('right')}
+            onSelect={() => onClose(resolveTabCloseTargets(tabs, tab.id, 'right'))}
           >
             关闭右侧标签页
           </DropdownMenu.Item>
@@ -286,4 +334,4 @@ function SortableTab({
       </DropdownMenu.Portal>
     </DropdownMenu.Root>
   )
-}
+})

@@ -8,6 +8,10 @@ import {
 } from '@renderer/app/layout/native-layout'
 import { Button } from '@renderer/components/ui/button'
 import { useWorkbenchTabActions } from '@renderer/app/workbench/workbench-tab-actions'
+import {
+  useWorkbenchActivation,
+  useWorkbenchActivationStore
+} from '@renderer/app/workbench/workbench-activation'
 import { WorkspaceTree } from './explorer/workspace-tree'
 import { useGitDecorations } from './changes/use-git-decorations'
 import { useWorkspaceExplorer } from './explorer/use-workspace-explorer'
@@ -35,6 +39,14 @@ const loadFilePreview = async (): Promise<{
 
 const FilePreview = lazy(loadFilePreview)
 
+function ActivatedFilePreview(
+  props: Omit<React.ComponentProps<typeof FilePreview>, 'active'> & { enabled: boolean }
+): React.JSX.Element {
+  const { enabled, ...previewProps } = props
+  const active = useWorkbenchActivation()
+  return <FilePreview {...previewProps} active={active && enabled} />
+}
+
 type WorkspaceViewProps = Omit<WorkbenchRendererProps, 'cwd'>
 
 const isMarkdownPath = (path: string): boolean => /\.(?:md|markdown)$/i.test(path)
@@ -48,6 +60,7 @@ export function WorkspaceView({
   sessionId,
   updateTab
 }: WorkspaceViewProps): React.JSX.Element {
+  const activationStore = useWorkbenchActivationStore()
   const [navigatorOpen, setNavigatorOpen] = useState(true)
   const [markdownMode, setMarkdownMode] = useState<'preview' | 'source'>('preview')
   const [navigatorWidth, setNavigatorWidth] = useState(workspaceNavigatorDefaultWidth)
@@ -173,6 +186,7 @@ export function WorkspaceView({
 
   useEffect(() => {
     const updateAnimation = (event: Event): void => {
+      if (!(activationStore?.getSnapshot() ?? active)) return
       const { animating, visible } = (event as CustomEvent<WorkbenchAnimationState>).detail
       if (animating) {
         if (releasePreviewFrameRef.current !== null) {
@@ -217,7 +231,17 @@ export function WorkspaceView({
       }
       window.removeEventListener(workbenchAnimationEvent, updateAnimation)
     }
-  }, [])
+  }, [activationStore, active])
+
+  useEffect(() => {
+    if (!activationStore) return
+    const syncVisibility = (): void => {
+      if (activationStore.getSnapshot()) {
+        window.dispatchEvent(new Event(workbenchStateRequestEvent))
+      }
+    }
+    return activationStore.subscribe(syncVisibility)
+  }, [activationStore])
 
   useEffect(() => {
     updateTab({
@@ -335,10 +359,10 @@ export function WorkspaceView({
       >
         {previewPath ? (
           <Suspense fallback={null}>
-            <FilePreview
-              active={active && (workbenchVisible || workbenchAnimating)}
+            <ActivatedFilePreview
               animating={workbenchAnimating}
               descriptor={previewDescriptor}
+              enabled={workbenchVisible || workbenchAnimating}
               key={`${resourceId}:${previewPath}`}
               mode={isMarkdownPath(previewPath) ? markdownMode : undefined}
               resourceId={resourceId}

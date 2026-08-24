@@ -83,7 +83,7 @@
   background: color-mix(in srgb, var(--accent) 55%, transparent);
 }
 
-.workspace-tree .rc-tree-treenode:has(> .rc-tree-node-content-wrapper.rc-tree-node-selected) {
+.workspace-tree .rc-tree-treenode-selected {
   background: var(--accent);
   color: var(--accent-foreground);
 }

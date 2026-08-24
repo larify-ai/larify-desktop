@@ -14,6 +14,7 @@ import {
   previewRegistryToken
 } from '@renderer/app/registry/file-previews'
 import { ChangesIcon } from './changes/changes-icon'
+import { EmptyChangesPreview } from './changes/empty-changes-preview'
 import { loadChangesView, preloadChangesEditor } from './changes/changes-loaders'
 import { invalidateGitStatus } from './changes/git-status-invalidation'
 
@@ -99,7 +100,7 @@ const plugin: RendererPlugin = {
     subscriptions.push(
       renderers.register('changes', {
         component: (props) => (
-          <Suspense fallback={<EmptyFilePreview />}>
+          <Suspense fallback={<EmptyChangesPreview />}>
             <ChangesView {...props} />
           </Suspense>
         ),

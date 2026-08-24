@@ -5,6 +5,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode
 } from 'react'
+import { useWorkbenchActivationStore } from '@renderer/app/workbench/workbench-activation'
 
 export const workspaceNavigatorDefaultWidth = 260
 const navigatorSize = { default: workspaceNavigatorDefaultWidth, min: 160, max: 520, step: 10 }
@@ -40,6 +41,7 @@ export function WorkspaceLayout({
   onNavigatorWidthChange,
   visible = true
 }: WorkspaceLayoutProps): React.JSX.Element {
+  const activationStore = useWorkbenchActivationStore()
   const [navigatorWidth, setNavigatorWidth] = useState(navigatorSize.default)
   const [navigatorFits, setNavigatorFits] = useState(true)
   const [resizingNavigator, setResizingNavigator] = useState(false)
@@ -62,7 +64,6 @@ export function WorkspaceLayout({
   }, [navigatorWidth, onNavigatorWidthChange])
 
   useLayoutEffect(() => {
-    if (!visible) return
     const body = bodyRef.current
     if (!body) return
     if (typeof ResizeObserver === 'undefined') return
@@ -70,11 +71,26 @@ export function WorkspaceLayout({
       const fits = measureNavigatorFit(body, layoutStateRef.current)
       if (fits !== undefined) setNavigatorFits(fits)
     }
-    const observer = new ResizeObserver(update)
-    observer.observe(body)
-    update()
-    return () => observer.disconnect()
-  }, [visible])
+    let observer: ResizeObserver | null = null
+    const sync = (): void => {
+      const enabled = visible && (activationStore?.getSnapshot() ?? true)
+      if (!enabled) {
+        observer?.disconnect()
+        observer = null
+        return
+      }
+      update()
+      if (observer) return
+      observer = new ResizeObserver(update)
+      observer.observe(body)
+    }
+    sync()
+    const unsubscribe = activationStore?.subscribe(sync)
+    return () => {
+      unsubscribe?.()
+      observer?.disconnect()
+    }
+  }, [activationStore, visible])
 
   const clampToAvailableWidth = (width: number): number => {
     const bodyWidth = bodyRef.current?.clientWidth ?? 0

@@ -73,7 +73,8 @@ describe('workspace IPC', () => {
       inspectFile: vi.fn(async () => ({ binary: false, mime: 'text/plain', path: 'file.ts' })),
       readAsset: vi.fn(async () => ({ bytes: new Uint8Array([1]), mime: 'image/png' })),
       readFile: vi.fn(async () => 'content'),
-      reveal: vi.fn(async () => ['D:\\workspace\\file.ts'])
+      reveal: vi.fn(async () => ['D:\\workspace\\file.ts']),
+      setActiveSession: vi.fn(async () => undefined)
     }
     const window = createWindow()
     registerWorkspaceIpc(manager as never, window as never)
@@ -84,7 +85,8 @@ describe('workspace IPC', () => {
       'workspace:path-kind',
       'workspace:read',
       'workspace:read-asset',
-      'workspace:reveal'
+      'workspace:reveal',
+      'workspace:set-active-session'
     ])
 
     await electron.handlers.get('workspace:list')?.(
@@ -111,6 +113,9 @@ describe('workspace IPC', () => {
     await electron.handlers.get('workspace:reveal')?.({} as never, 7 as never, 'file.ts' as never)
     expect(manager.reveal).toHaveBeenCalledWith(7, 'file.ts')
 
+    await electron.handlers.get('workspace:set-active-session')?.({} as never, 'session-1' as never)
+    expect(manager.setActiveSession).toHaveBeenCalledWith('session-1')
+
     listener(7, 'D:\\workspace', 'D:\\workspace\\file.ts')
     expect(window.webContents.send).toHaveBeenCalledWith(
       'workspace:change',
@@ -132,6 +137,19 @@ describe('workspace IPC', () => {
     expect(electron.handlers.size).toBe(0)
   })
 
+  it('propagates active-session failures', async () => {
+    const error = new Error('activation failed')
+    const manager = {
+      bindChange: vi.fn(() => vi.fn()),
+      setActiveSession: vi.fn(async () => Promise.reject(error))
+    }
+    registerWorkspaceIpc(manager as never, createWindow() as never)
+
+    await expect(
+      electron.handlers.get('workspace:set-active-session')?.({} as never, 'session-1' as never)
+    ).rejects.toBe(error)
+  })
+
   it('does not send changes to a destroyed window', () => {
     let listener!: (id: number, directory: string, changedPath: string) => void
     const manager = {
@@ -142,6 +160,23 @@ describe('workspace IPC', () => {
     }
     const window = createWindow()
     window.isDestroyed.mockReturnValue(true)
+    registerWorkspaceIpc(manager as never, window as never)
+
+    listener(7, 'D:\\workspace', 'D:\\workspace\\file.ts')
+
+    expect(window.webContents.send).not.toHaveBeenCalled()
+  })
+
+  it('does not send changes to destroyed web contents', () => {
+    let listener!: (id: number, directory: string, changedPath: string) => void
+    const manager = {
+      bindChange: vi.fn((value) => {
+        listener = value
+        return vi.fn()
+      })
+    }
+    const window = createWindow()
+    window.webContents.isDestroyed.mockReturnValue(true)
     registerWorkspaceIpc(manager as never, window as never)
 
     listener(7, 'D:\\workspace', 'D:\\workspace\\file.ts')

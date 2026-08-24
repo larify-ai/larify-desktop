@@ -4,6 +4,7 @@
 import { act, createElement, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { WorkbenchActivationProvider } from '../../../../src/renderer/src/app/workbench/workbench-activation'
 import { WorkspaceLayout } from '../../../../src/extensions/workspace/renderer/layout/workspace-layout'
 
 describe('WorkspaceLayout', () => {
@@ -148,6 +149,32 @@ describe('WorkspaceLayout', () => {
     expect(observeCount).toBe(2)
   })
 
+  it('observes only while its workbench renderer is active', () => {
+    let observeCount = 0
+    let disconnectCount = 0
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe(): void {
+          observeCount += 1
+        }
+        disconnect(): void {
+          disconnectCount += 1
+        }
+        unobserve(): void {}
+      }
+    )
+
+    render(true, createElement('div'), false, true, false)
+    expect(observeCount).toBe(0)
+
+    render(true, createElement('div'), false, true, true)
+    expect(observeCount).toBe(1)
+
+    render(true, createElement('div'), false, true, false)
+    expect(disconnectCount).toBe(1)
+  })
+
   it('reports navigator width only when the width changes', () => {
     const onNavigatorWidthChange = vi.fn()
     const navigatorNode = createElement('div')
@@ -275,15 +302,19 @@ describe('WorkspaceLayout', () => {
     navigatorOpen: boolean,
     navigator?: ReactNode,
     animating = false,
-    visible = true
+    visible = true,
+    providerActive?: boolean
   ): void {
+    const layout = createElement(
+      WorkspaceLayout,
+      { animating, navigator, navigatorOpen, visible },
+      createElement('div', { 'data-content': true })
+    )
     act(() =>
       root.render(
-        createElement(
-          WorkspaceLayout,
-          { animating, navigator, navigatorOpen, visible },
-          createElement('div', { 'data-content': true })
-        )
+        providerActive === undefined
+          ? layout
+          : createElement(WorkbenchActivationProvider, { active: providerActive }, layout)
       )
     )
   }

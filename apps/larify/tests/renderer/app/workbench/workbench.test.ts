@@ -117,9 +117,7 @@ describe('Workbench', () => {
     await renderWorkbench(root, registry, firstSessionId)
 
     await act(async () => {
-      container
-        .querySelector<HTMLElement>('[data-tab-id] .larify-workbench-tab-trigger')
-        ?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, cancelable: true }))
+      container.querySelector<HTMLElement>('[data-tab-id] .larify-workbench-tab-trigger')?.click()
     })
     expect(container.querySelector('[data-state="active"]')).not.toBeNull()
 
@@ -485,8 +483,10 @@ describe('Workbench', () => {
     expect(invoke.mock.calls.filter(([channel]) => channel === 'resource:create')).toHaveLength(1)
     created.resolve(7)
     await act(async () => created.promise)
-    await vi.waitFor(() => expect(first).toHaveBeenCalledWith(7))
-    expect(second).toHaveBeenCalledWith(7)
+    await vi.waitFor(() => {
+      expect(first).toHaveBeenCalledWith(7)
+      expect(second).toHaveBeenCalledWith(7)
+    })
     expect(container.querySelectorAll('[data-tab-id]')).toHaveLength(1)
   })
 
@@ -525,13 +525,13 @@ describe('Workbench', () => {
     await act(async () => {
       container
         .querySelector<HTMLElement>('[data-tab-id="1"] .larify-workbench-tab-trigger')
-        ?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }))
+        ?.click()
     })
     expect(mounted).toEqual([7])
     await act(async () => {
       container
         .querySelector<HTMLElement>('[data-tab-id="2"] .larify-workbench-tab-trigger')
-        ?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }))
+        ?.click()
     })
     expect(mounted).toEqual([7, 8])
     await act(async () => {
@@ -592,6 +592,24 @@ describe('Workbench', () => {
       )
     })
     expect(mounted).toEqual([])
+    expect(invoke).toHaveBeenCalledWith('resource:set-active-session', firstSessionId)
+    expect(invoke).toHaveBeenCalledWith('workspace:set-active-session', firstSessionId)
+
+    await act(async () => {
+      root.render(
+        createElement(
+          RendererRegistryProvider,
+          { registry },
+          createElement(WorkbenchHost, { activeId: firstSessionId, sessions })
+        )
+      )
+    })
+    expect(
+      invoke.mock.calls.filter(([channel]) => channel === 'resource:set-active-session')
+    ).toHaveLength(1)
+    expect(
+      invoke.mock.calls.filter(([channel]) => channel === 'workspace:set-active-session')
+    ).toHaveLength(1)
 
     await act(async () => {
       root.render(
@@ -603,6 +621,8 @@ describe('Workbench', () => {
       )
     })
     expect(mounted).toEqual([])
+    expect(invoke).toHaveBeenCalledWith('resource:set-active-session', secondSessionId)
+    expect(invoke).toHaveBeenCalledWith('workspace:set-active-session', secondSessionId)
   })
 })
 

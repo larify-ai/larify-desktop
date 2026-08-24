@@ -111,14 +111,15 @@ describe('navigation workspace', () => {
     for (const className of classes) expect(indicator?.classList).toContain(className)
   })
 
-  it('reserves the status area and renders no indicator while idle', () => {
+  it('uses the title fade for the status overlap and renders no indicator while idle', () => {
     renderWorkspace({
       sessions: [{ id: 'idle', name: 'Session idle', attentionState: 'idle' }]
     })
 
     const session = container.querySelector('[data-session-id="idle"]')
     const title = session?.querySelector<HTMLElement>('span[style*="mask-image"]')
-    expect(session?.classList).toContain('pr-9')
+    expect(session?.classList).toContain('pr-5')
+    expect(session?.classList).not.toContain('pr-9')
     expect(title?.style.maskImage).toContain('linear-gradient')
     expect(session?.querySelector('[aria-label]')).toBeNull()
   })

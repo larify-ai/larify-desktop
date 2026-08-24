@@ -1,4 +1,4 @@
-import { useLayoutEffect } from 'react'
+import { useLayoutEffect, useMemo } from 'react'
 import { Allotment } from 'allotment'
 import 'allotment/dist/style.css'
 import { Interaction } from '../interaction/interaction'
@@ -39,6 +39,11 @@ export function LayoutPanels(): React.JSX.Element {
   const navigation = useAllotmentToggle()
   const workbench = useAllotmentToggle(true)
   const setWorkbenchCollapsed = workbench.setCollapsed
+  const interaction = useMemo(() => <Interaction />, [])
+  const workbenchHost = useMemo(
+    () => <WorkbenchHost activeId={activeId} sessions={sessions} />,
+    [activeId, sessions]
+  )
 
   useLayoutEffect(() => {
     const showWorkbench = (): void => setWorkbenchCollapsed(false)
@@ -104,8 +109,8 @@ export function LayoutPanels(): React.JSX.Element {
           <WorkbenchSplit
             animated={workbench.animating}
             collapsed={workbench.collapsed}
-            interaction={<Interaction />}
-            workbench={<WorkbenchHost activeId={activeId} sessions={sessions} />}
+            interaction={interaction}
+            workbench={workbenchHost}
           />
         </div>
       </Allotment.Pane>

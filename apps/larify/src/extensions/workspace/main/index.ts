@@ -19,9 +19,9 @@ const plugin: Plugin = {
     const window = mainWindow.get()
     const manager = new WorkspaceManager()
     context.subscriptions.push(manager)
-    const openWorkspace = (id: number, _sessionId: string, options: unknown): Disposable => {
+    const openWorkspace = (id: number, sessionId: string, options: unknown): Disposable => {
       const root = (options as { root?: string } | undefined)?.root || larifyWorkspacePath()
-      return manager.open(id, root)
+      return manager.open(id, sessionId, root)
     }
     context.subscriptions.push(resources.register('workspace', openWorkspace))
     context.subscriptions.push(resources.register('changes', openWorkspace))

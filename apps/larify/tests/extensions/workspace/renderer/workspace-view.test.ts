@@ -3,6 +3,7 @@
 import { act, createElement, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { WorkbenchActivationProvider } from '../../../../src/renderer/src/app/workbench/workbench-activation'
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
@@ -128,15 +129,18 @@ describe('WorkspaceView', () => {
     vi.unstubAllGlobals()
   })
 
-  const render = async (active = true): Promise<void> => {
+  const render = async (active = true, providerActive?: boolean): Promise<void> => {
+    const view = createElement(WorkspaceView, {
+      active,
+      resourceId: 42,
+      sessionId: 'session-a',
+      updateTab: vi.fn()
+    })
     await act(async () => {
       root.render(
-        createElement(WorkspaceView, {
-          active,
-          resourceId: 42,
-          sessionId: 'session-a',
-          updateTab: vi.fn()
-        })
+        providerActive === undefined
+          ? view
+          : createElement(WorkbenchActivationProvider, { active: providerActive }, view)
       )
     })
   }
@@ -280,6 +284,8 @@ describe('WorkspaceView', () => {
           updateTab: vi.fn()
         })
       )
+    })
+    await act(async () => {
       window.dispatchEvent(
         new CustomEvent('larify:workbench-animation', {
           detail: { animating: false, visible: true }
@@ -288,6 +294,26 @@ describe('WorkspaceView', () => {
     })
 
     expect(h.filePreviewProps?.active).toBe(true)
+  })
+
+  it('reactivates a file preview through the workbench activation provider', async () => {
+    const respondWithVisibleState = (): void => {
+      window.dispatchEvent(
+        new CustomEvent('larify:workbench-animation', {
+          detail: { animating: false, visible: true }
+        })
+      )
+    }
+    window.addEventListener('larify:workbench-state-request', respondWithVisibleState)
+
+    await render(true, false)
+    await openFile('file.ts')
+    expect(h.filePreviewProps?.active).toBe(false)
+
+    await render(true, true)
+    expect(h.filePreviewProps?.active).toBe(true)
+
+    window.removeEventListener('larify:workbench-state-request', respondWithVisibleState)
   })
 
   it('shows HTML source and opens it in the browser only from the toolbar action', async () => {

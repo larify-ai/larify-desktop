@@ -18,15 +18,7 @@ const waitFor = async (expression, label, timeout = 5_000) => {
 }
 
 try {
-  // Start from a committed renderer tree. During development, Vite HMR can leave
-  // virtualized message nodes backed by stale React fibers, which makes a CDP
-  // hover exercise the old tree instead of the code under test.
-  await cdp.send('Page.reload', { ignoreCache: true })
-  await waitFor(`document.readyState === 'complete'`, 'renderer reload')
-  await waitFor(
-    `document.querySelectorAll('button[data-session-id]').length > 0`,
-    'session list'
-  )
+  await waitFor(`document.querySelectorAll('button[data-session-id]').length > 0`, 'session list')
 
   const switched = await evaluate(`(() => {
     const button = [...document.querySelectorAll('button[data-session-id]')].find((candidate) =>
@@ -40,7 +32,9 @@ try {
   await wait(300)
 
   if (!(await evaluate(`Boolean(${cardExpression})`))) {
-    const sessionCount = await evaluate(`document.querySelectorAll('button[data-session-id]').length`)
+    const sessionCount = await evaluate(
+      `document.querySelectorAll('button[data-session-id]').length`
+    )
     for (let index = 0; index < sessionCount; index += 1) {
       await evaluate(`document.querySelectorAll('button[data-session-id]')[${index}]?.click()`)
       await wait(150)
@@ -72,14 +66,23 @@ try {
     const row = (${cardExpression})?.querySelectorAll(${JSON.stringify(rowSelector)})[0]
     row?.scrollIntoView({ block: 'center' })
     const rect = row?.getBoundingClientRect()
+    row?.focus()
     return rect ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 } : null
   })()`)
   if (!point) throw new Error('First file row has no bounds')
   await cdp.send('Input.dispatchMouseEvent', {
     type: 'mouseMoved',
+    x: 0,
+    y: 0
+  })
+  await cdp.send('Input.dispatchMouseEvent', {
+    type: 'mouseMoved',
     x: point.x,
     y: point.y
   })
+  await evaluate(
+    `(${cardExpression})?.querySelectorAll(${JSON.stringify(rowSelector)})[0]?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))`
+  )
   const hoverPath = await waitFor(
     `Boolean((${cardExpression})?.parentElement?.querySelector('.larify-file-diff'))`,
     'hover diff preview'
@@ -100,19 +103,53 @@ try {
     }
   })()`)
   if (!placement) throw new Error('Unable to measure hover diff placement')
-  if (placement.previewTop < placement.viewportTop - 1 || placement.previewBottom > placement.viewportBottom + 1) {
+  if (
+    placement.previewTop < placement.viewportTop - 1 ||
+    placement.previewBottom > placement.viewportBottom + 1
+  ) {
     throw new Error(`Hover diff is clipped: ${JSON.stringify(placement)}`)
   }
 
-  await evaluate(
-    `(${cardExpression})?.querySelectorAll(${JSON.stringify(rowSelector)})[0]?.click()`
-  )
+  await evaluate(`(() => {
+    const session = document.querySelector('[data-workbench-session][data-active]')
+    window.__larifyReviewOpenTexts = []
+    window.__larifyReviewOpenObserver = new MutationObserver(() => {
+      window.__larifyReviewOpenTexts.push(session?.textContent ?? '')
+    })
+    if (session) {
+      window.__larifyReviewOpenObserver.observe(session, {
+        characterData: true,
+        childList: true,
+        subtree: true
+      })
+    }
+    (${cardExpression})?.querySelectorAll(${JSON.stringify(rowSelector)})[0]?.click()
+  })()`)
   const reviewView =
     '[data-workbench-session][data-active] [data-workbench-view="changes"][data-active]'
   await waitFor(`Boolean(document.querySelector('${reviewView}'))`, 'all changes view')
+  const openResult = await evaluate(`(() => {
+    window.__larifyReviewOpenObserver?.disconnect()
+    const texts = window.__larifyReviewOpenTexts ?? []
+    delete window.__larifyReviewOpenObserver
+    delete window.__larifyReviewOpenTexts
+    const activeTab = document.querySelector(
+      '[data-workbench-session][data-active] .larify-workbench-tab-trigger[data-state="active"]'
+    )
+    return {
+      activeTabHasChangesIcon: Boolean(activeTab?.querySelector('.larify-workbench-icon-changes')),
+      showedOpenFilePrompt: texts.some((text) => text.includes('打开文件'))
+    }
+  })()`)
+  if (openResult.showedOpenFilePrompt) {
+    throw new Error('Opening a review card briefly showed the file-workbench prompt')
+  }
+  if (!openResult.activeTabHasChangesIcon) {
+    throw new Error('The opened review tab does not use the Changes icon')
+  }
 
   console.log(
-    JSON.stringify({ card, hoverPath: Boolean(hoverPath), placement, rows }, null, 2)
+    JSON.stringify({ card, hoverPath: Boolean(hoverPath), openResult, placement, rows }, null, 2)
   )
 } finally {
   cdp.close()

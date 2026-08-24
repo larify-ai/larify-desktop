@@ -8,7 +8,13 @@ const appRoot = fileURLToPath(new URL('../../', import.meta.url))
 const wait = (duration) => new Promise((resolve) => setTimeout(resolve, duration))
 const cdp = await connectLarifyCdp()
 const evaluate = (expression) => cdp.evaluate(expression)
-const desiredCounts = { browser: 8, changes: 4, terminal: 4, workspace: 4 }
+const requestedTabs = Number(process.env.LARIFY_WORKBENCH_TAB_COUNT ?? 20)
+assert.ok(
+  Number.isInteger(requestedTabs) && requestedTabs >= 5 && requestedTabs % 5 === 0,
+  'LARIFY_WORKBENCH_TAB_COUNT must be a positive multiple of 5'
+)
+const unit = requestedTabs / 5
+const desiredCounts = { browser: unit * 2, changes: unit, terminal: unit, workspace: unit }
 const desiredTotal = Object.values(desiredCounts).reduce((sum, count) => sum + count, 0)
 const waitFor = async (expression, label, timeout = 10_000) => {
   const started = Date.now()
@@ -24,7 +30,14 @@ try {
   await waitFor(`Boolean(window.bridge)`, 'bridge')
   if (sessionId) {
     await waitFor(
-      `(() => { const button = document.querySelector('button[data-session-id="${sessionId}"]'); button?.click(); return Boolean(button) })()`,
+      `(() => {
+        const target = document.querySelector('button[data-session-id="${sessionId}"]')
+        if (target) { target.click(); return true }
+        const more = [...document.querySelectorAll('button')]
+          .find((item) => item.textContent?.trim() === '更多')
+        more?.click()
+        return false
+      })()`,
       'configured workbench session'
     )
   } else {
@@ -45,11 +58,26 @@ try {
       sessionId: ${JSON.stringify(sessionId)}
     })
     const resources = []
-    const extras = []
+    const normalizeRoot = (value) =>
+      value?.replaceAll('\\\\', '/').replace(/[/]+$/, '').toLocaleLowerCase()
     for (const [type, count] of Object.entries(desired)) {
-      const matching = existing.filter((resource) => resource.type === type)
+      const candidates = existing.filter((resource) => resource.type === type)
+      const matching = []
+      for (const resource of candidates) {
+        if (type !== 'workspace' && type !== 'changes') {
+          matching.push(resource)
+          continue
+        }
+        try {
+          const listing = await window.bridge.invoke('workspace:list', resource.id)
+          if (normalizeRoot(listing?.root) === normalizeRoot(options[type].root)) {
+            matching.push(resource)
+          }
+        } catch {
+          // Keep unrelated user resources, but do not use them as this test's fixture.
+        }
+      }
       resources.push(...matching.slice(0, count))
-      extras.push(...matching.slice(count))
       for (let index = matching.length; index < count; index += 1) {
         const id = await window.bridge.invoke(
           'resource:create',
@@ -59,10 +87,6 @@ try {
         )
         resources.push({ id, sessionId: ${JSON.stringify(sessionId)}, type })
       }
-    }
-    extras.push(...existing.filter((resource) => !(resource.type in desired)))
-    if (extras.length) {
-      await window.bridge.invoke('resource:close-many', extras.map(({ id }) => id))
     }
     return resources
   })()`)
@@ -87,8 +111,9 @@ try {
   ]
   const browsers = resources.filter(({ type }) => type === 'browser')
   for (let index = 0; index < browsers.length; index += 1) {
+    const browserUrl = browserUrls[index % browserUrls.length]
     await evaluate(
-      `window.bridge.invoke('browser:navigate', ${JSON.stringify(sessionId)}, ${browsers[index].id}, ${JSON.stringify(browserUrls[index])})`
+      `window.bridge.invoke('browser:navigate', ${JSON.stringify(sessionId)}, ${browsers[index].id}, ${JSON.stringify(browserUrl)})`
     )
     await waitFor(
       `(async () => (await window.bridge.invoke('browser:getState', ${JSON.stringify(sessionId)}, ${browsers[index].id}))?.url?.startsWith('http'))()`,
@@ -111,7 +136,20 @@ try {
     if (resource.type === 'workspace')
       return `${JSON.stringify(root)} && (() => { const view = document.querySelector(${JSON.stringify(root)}); return view?.querySelectorAll('.workspace-file-preview .view-line').length > 0 && Boolean(view.querySelector('.rc-tree-treenode-selected')) })()`
     if (resource.type === 'changes')
-      return `(() => { const view = document.querySelector(${JSON.stringify(root)}); const title = document.querySelector('[data-workbench-session][data-active] .larify-workbench-tab-trigger[data-state="active"] .larify-workbench-tab-title')?.textContent?.trim(); return view?.querySelectorAll('.workspace-file-preview .view-line').length > 0 && title && title !== '变更' })()`
+      return `(() => {
+        const view = document.querySelector(${JSON.stringify(root)})
+        const preview = view?.querySelector('.workspace-file-preview')
+        const previewRect = preview?.getBoundingClientRect()
+        const editorRect = [...(preview?.querySelectorAll('.monaco-diff-editor, .workspace-added-only-editor .monaco-editor') ?? [])]
+          .map((editor) => editor.getBoundingClientRect())
+          .find((rect) => rect.width > 0)
+        const title = document.querySelector('[data-workbench-session][data-active] .larify-workbench-tab-trigger[data-state="active"] .larify-workbench-tab-title')?.textContent?.trim()
+        return Boolean(
+          previewRect && editorRect && editorRect.width >= previewRect.width - 1 &&
+          editorRect.height >= previewRect.height - 1 &&
+          preview.querySelectorAll('.view-line').length > 0 && title && title !== '变更'
+        )
+      })()`
     if (resource.type === 'terminal')
       return `Boolean(document.querySelector(${JSON.stringify(`${root} .larify-terminal-surface[data-terminal-active="true"] .xterm-rows`)}))`
     return `(async () => { const view = document.querySelector(${JSON.stringify(root)}); const state = await window.bridge.invoke('browser:getState', ${JSON.stringify(sessionId)}, ${resource.id}); return Boolean(view && state?.url?.startsWith('http') && state?.title) })()`
@@ -236,11 +274,13 @@ try {
   const after = await evaluate(`({
     nodes: document.querySelectorAll('*').length,
     views: document.querySelectorAll('[data-workbench-view]').length,
-    active: document.querySelectorAll('[data-workbench-view][data-active]').length
+    active: document.querySelectorAll('[data-workbench-view][data-active]').length,
+    targetViews: [...document.querySelectorAll('[data-workbench-view]')]
+      .filter((view) => ${JSON.stringify(resources.map(({ id }) => String(id)))}.includes(view.dataset.resourceId)).length
   })`)
   await cdp.send('HeapProfiler.collectGarbage')
   const afterHeap = await cdp.send('Runtime.getHeapUsage')
-  assert.equal(after.views, desiredTotal, 'switching must preserve all views')
+  assert.equal(after.targetViews, desiredTotal, 'switching must preserve all target views')
   assert.equal(after.active, 1, 'switching must leave one active view')
   assert.ok(
     after.nodes - before.nodes <= 50,
@@ -270,7 +310,20 @@ try {
     ])
   )
   const heapGrowthMiB = (afterHeap.usedSize - beforeHeap.usedSize) / 1024 / 1024
-  console.log(JSON.stringify({ before, after, byType, heapGrowthMiB, idle, switches }, null, 2))
+  console.log(
+    JSON.stringify(
+      {
+        before,
+        after,
+        byType,
+        heapGrowthMiB,
+        idle,
+        ...(process.env.LARIFY_PERF_SUMMARY_ONLY === '1' ? {} : { switches })
+      },
+      null,
+      2
+    )
+  )
   assert.deepEqual(idleFailures, [], idleFailures.join('; '))
   assert.ok(byType.workspace.averageMs < 125, 'workspace warm-switch average reached 125ms')
   assert.ok(byType.browser.averageMs < 110, 'browser warm-switch average reached 110ms')

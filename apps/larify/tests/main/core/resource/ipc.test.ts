@@ -34,10 +34,22 @@ describe('registerResourceIpc', () => {
     )
     const close = vi.fn()
     const factory = vi.fn(() => ({ dispose: close }))
+    const setActiveSession = vi.spyOn(manager, 'setActiveSession')
+    const list = vi.spyOn(manager, 'list')
     manager.register('terminal', factory)
+
+    expect(mocks.removeHandler.mock.calls.map(([channel]) => channel)).toEqual([
+      'resource:create',
+      'resource:list',
+      'resource:close',
+      'resource:close-many',
+      'resource:set-active-session'
+    ])
+    mocks.removeHandler.mockClear()
 
     const id = handlers.get('resource:create')?.({}, 'terminal', 'session-a', { cwd: '/tmp' })
     expect(factory).toHaveBeenCalledWith(id, 'session-a', { cwd: '/tmp' })
+    expect(list).toHaveBeenCalledOnce()
     expect(send).toHaveBeenLastCalledWith('resource:change', [
       { id, type: 'terminal', sessionId: 'session-a' }
     ])
@@ -45,6 +57,8 @@ describe('registerResourceIpc', () => {
       { id, type: 'terminal', sessionId: 'session-a' }
     ])
     expect(handlers.get('resource:list')?.({}, { type: 'browser' })).toEqual([])
+    handlers.get('resource:set-active-session')?.({}, 'session-a')
+    expect(setActiveSession).toHaveBeenCalledWith('session-a')
 
     await handlers.get('resource:close')?.({}, id)
     expect(close).toHaveBeenCalledOnce()
@@ -58,7 +72,8 @@ describe('registerResourceIpc', () => {
       'resource:create',
       'resource:list',
       'resource:close',
-      'resource:close-many'
+      'resource:close-many',
+      'resource:set-active-session'
     ])
   })
 
@@ -68,6 +83,20 @@ describe('registerResourceIpc', () => {
     registerResourceIpc(manager, {
       isDestroyed: () => true,
       webContents: { isDestroyed: () => false, send }
+    } as never)
+    manager.register('terminal', () => ({ dispose: vi.fn() }))
+
+    manager.create('terminal', 'session-a')
+
+    expect(send).not.toHaveBeenCalled()
+  })
+
+  it('does not send after its web contents has been destroyed', () => {
+    const manager = new ResourceManager()
+    const send = vi.fn()
+    registerResourceIpc(manager, {
+      isDestroyed: () => false,
+      webContents: { isDestroyed: () => true, send }
     } as never)
     manager.register('terminal', () => ({ dispose: vi.fn() }))
 

@@ -8,7 +8,8 @@ const channels = [
   'workspace:list',
   'workspace:read',
   'workspace:read-asset',
-  'workspace:reveal'
+  'workspace:reveal',
+  'workspace:set-active-session'
 ] as const
 
 export function registerWorkspaceIpc(manager: WorkspaceManager, window: BrowserWindow): () => void {
@@ -32,6 +33,9 @@ export function registerWorkspaceIpc(manager: WorkspaceManager, window: BrowserW
     manager.readAsset(id, file)
   )
   ipcMain.handle('workspace:reveal', (_event, id: number, file: string) => manager.reveal(id, file))
+  ipcMain.handle('workspace:set-active-session', (_event, sessionId: string) =>
+    manager.setActiveSession(sessionId)
+  )
   return () => {
     unbindChange()
     for (const channel of channels) ipcMain.removeHandler(channel)

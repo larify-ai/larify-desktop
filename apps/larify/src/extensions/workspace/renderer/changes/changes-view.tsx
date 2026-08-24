@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import { Columns2Icon, FilesIcon, Rows3Icon } from 'lucide-react'
 import type { WorkbenchRendererProps } from '@renderer/app/registry/workbench-renderers'
 import { useWorkbenchTabActions } from '@renderer/app/workbench/workbench-tab-actions'
@@ -24,6 +24,7 @@ import {
 import { loadMonacoDiff } from './changes-loaders'
 
 const MonacoDiff = lazy(() => loadMonacoDiff().then(({ MonacoDiff }) => ({ default: MonacoDiff })))
+const ignoreDirectoryToggle = async (): Promise<void> => undefined
 
 interface ChangeSelection {
   missing: boolean
@@ -70,6 +71,16 @@ export function ChangesView({
     : (changes[0] ?? null)
   const selectedPath = current?.path ?? null
   const previewActive = active && (workbenchState.visible || workbenchState.animating)
+  const selectChange = useCallback(
+    (path: string) =>
+      setSelection({
+        missing: false,
+        origin: 'tree',
+        path,
+        resourceId
+      }),
+    [resourceId]
+  )
 
   useEffect(() => {
     if (!selected || current || loading || error || !root) return
@@ -136,13 +147,13 @@ export function ChangesView({
   }, [resourceId])
 
   useEffect(() => {
-    const update = (event: Event): void => {
+    if (!active) return
+    const update = (event: Event): void =>
       setWorkbenchState((event as CustomEvent<WorkbenchAnimationState>).detail)
-    }
     window.addEventListener(workbenchAnimationEvent, update)
     window.dispatchEvent(new Event(workbenchStateRequestEvent))
     return () => window.removeEventListener(workbenchAnimationEvent, update)
-  }, [])
+  }, [active])
 
   useEffect(() => {
     updateTab({
@@ -195,15 +206,8 @@ export function ChangesView({
             entries={entries}
             gitDecorations={decorations}
             revealPath={selectedPath}
-            onOpen={(path) =>
-              setSelection({
-                missing: false,
-                origin: 'tree',
-                path,
-                resourceId
-              })
-            }
-            onToggle={async () => undefined}
+            onOpen={selectChange}
+            onToggle={ignoreDirectoryToggle}
           />
         ) : null
       }
@@ -228,6 +232,8 @@ export function ChangesView({
         <div className="grid h-full place-items-center text-sm text-muted-foreground">
           文件不存在
         </div>
+      ) : selected && selection.origin === 'navigation' ? (
+        <div className="h-full" />
       ) : (
         <div className="grid h-full place-items-center text-sm text-muted-foreground">暂无变更</div>
       )}

@@ -24,7 +24,6 @@ export function BrowserView({
   const webviewRef = useRef<Electron.WebviewTag>(null)
   const viewportRef = useRef<HTMLDivElement>(null)
   const hostRef = useRef<HTMLDivElement>(null)
-  const lastVisibleSizeRef = useRef({ height: parkedBounds.height, width: parkedBounds.width })
 
   useLayoutEffect(() => {
     const host = hostRef.current
@@ -36,16 +35,7 @@ export function BrowserView({
         return
       }
       const viewportBounds = shown ? viewport.getBoundingClientRect() : null
-      if (viewportBounds?.width && viewportBounds.height) {
-        lastVisibleSizeRef.current = {
-          height: viewportBounds.height,
-          width: viewportBounds.width
-        }
-      }
-      const bounds = viewportBounds ?? {
-        ...parkedBounds,
-        ...lastVisibleSizeRef.current
-      }
+      const bounds = viewportBounds?.width && viewportBounds.height ? viewportBounds : parkedBounds
       host.style.zIndex = ''
       Object.assign(host.style, {
         left: `${bounds.left}px`,
@@ -54,17 +44,36 @@ export function BrowserView({
         height: `${bounds.height}px`
       })
     }
-    place()
+    let revealFrame: number | null = null
+    let settleFrame: number | null = null
+    if (shown && host.dataset.browserRendering !== 'true') {
+      host.style.visibility = 'hidden'
+      place()
+      revealFrame = requestAnimationFrame(() => {
+        settleFrame = requestAnimationFrame(() => {
+          place()
+          host.style.visibility = ''
+        })
+      })
+    } else {
+      host.style.visibility = ''
+      place()
+    }
     const observer = new ResizeObserver(place)
     const leaseObserver = new MutationObserver(place)
     leaseObserver.observe(host, { attributeFilter: ['data-browser-rendering'] })
-    if (shown) observer.observe(viewport)
-    window.addEventListener(nativeLayoutEvent, place)
+    if (shown) {
+      observer.observe(viewport)
+      window.addEventListener(nativeLayoutEvent, place)
+    }
     window.addEventListener('resize', place)
     return () => {
+      if (revealFrame !== null) cancelAnimationFrame(revealFrame)
+      if (settleFrame !== null) cancelAnimationFrame(settleFrame)
+      host.style.visibility = ''
       observer.disconnect()
       leaseObserver.disconnect()
-      window.removeEventListener(nativeLayoutEvent, place)
+      if (shown) window.removeEventListener(nativeLayoutEvent, place)
       window.removeEventListener('resize', place)
     }
   }, [shown])

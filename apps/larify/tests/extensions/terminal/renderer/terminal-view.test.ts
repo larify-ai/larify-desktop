@@ -5,6 +5,17 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const terminals: MockTerminal[] = []
+const fitAddons: MockFitAddon[] = []
+const resizeCallbacks: ResizeObserverCallback[] = []
+
+class MockFitAddon {
+  fit = vi.fn()
+  proposeDimensions = vi.fn(() => ({ cols: 80, rows: 24 }))
+
+  constructor() {
+    fitAddons.push(this)
+  }
+}
 
 class MockTerminal {
   unicode = { activeVersion: '' }
@@ -42,9 +53,7 @@ vi.mock('next-themes', () => ({
   useTheme: () => ({ resolvedTheme: 'dark' })
 }))
 vi.mock('@xterm/addon-fit', () => ({
-  FitAddon: class {
-    fit = vi.fn()
-  }
+  FitAddon: MockFitAddon
 }))
 vi.mock('@xterm/addon-unicode11', () => ({ Unicode11Addon: class {} }))
 vi.mock('@xterm/xterm', () => ({ Terminal: MockTerminal }))
@@ -58,6 +67,8 @@ describe('TerminalView', () => {
   beforeEach(() => {
     globalThis.IS_REACT_ACT_ENVIRONMENT = true
     terminals.length = 0
+    fitAddons.length = 0
+    resizeCallbacks.length = 0
     listeners = {}
     container = document.createElement('div')
     document.body.appendChild(container)
@@ -65,6 +76,9 @@ describe('TerminalView', () => {
     Object.defineProperty(window, 'ResizeObserver', {
       configurable: true,
       value: class {
+        constructor(callback: ResizeObserverCallback) {
+          resizeCallbacks.push(callback)
+        }
         observe = vi.fn()
         disconnect = vi.fn()
       }
@@ -153,15 +167,23 @@ describe('TerminalView', () => {
 
     await render(true)
     const terminal = terminals[0]
+    await act(async () => new Promise((resolve) => window.setTimeout(resolve, 0)))
     await render(false)
     expect(terminals).toHaveLength(1)
     expect(terminal.dispose).not.toHaveBeenCalled()
     expect(terminal.constructorOptions).toEqual(expect.objectContaining({ cursorBlink: false }))
     expect(terminal.blur).toHaveBeenCalledOnce()
 
+    fitAddons[0].fit.mockClear()
+    resizeCallbacks[0]([], {} as ResizeObserver)
+    await act(async () => new Promise((resolve) => window.setTimeout(resolve, 0)))
+    expect(fitAddons[0].fit).not.toHaveBeenCalled()
+
     await render(true)
     expect(terminals).toHaveLength(1)
     expect(terminal.constructorOptions).toEqual(expect.objectContaining({ cursorBlink: false }))
+    await act(async () => new Promise((resolve) => window.setTimeout(resolve, 0)))
+    expect(fitAddons[0].fit).toHaveBeenCalledOnce()
   })
 
   it('routes live output only to the matching resource', async () => {

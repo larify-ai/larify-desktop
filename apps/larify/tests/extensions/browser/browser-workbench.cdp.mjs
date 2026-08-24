@@ -131,60 +131,23 @@ const createBrowser = async () => {
   )
   return resources.find(({ id }) => !before.some((resource) => resource.id === id))
 }
-const selectTab = async (title) => {
-  const position = await evaluate(`(() => {
-    const trigger = [...document.querySelectorAll('.larify-workbench-tab-trigger')]
-      .find((element) => element.querySelector('.larify-workbench-tab-title')?.textContent === ${JSON.stringify(title)})
-    if (!trigger) return null
-    const rect = trigger.getBoundingClientRect()
-    return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }
+const selectTab = async (resourceId, title) => {
+  const clicked = await evaluate(`(() => {
+    const view = document.querySelector('[data-resource-id="${resourceId}"]')
+    const tab = document.querySelector('[data-tab-id="' + view?.dataset.viewId + '"]')
+    const trigger = tab?.querySelector('.larify-workbench-tab-trigger')
+    trigger?.click()
+    return Boolean(trigger)
   })()`)
-  assert.ok(position, `tab not found: ${title}`)
-  await send('Input.dispatchMouseEvent', {
-    type: 'mousePressed',
-    x: position.x,
-    y: position.y,
-    button: 'left',
-    buttons: 1,
-    clickCount: 1
-  })
-  await send('Input.dispatchMouseEvent', {
-    type: 'mouseReleased',
-    x: position.x,
-    y: position.y,
-    button: 'left',
-    buttons: 0,
-    clickCount: 1
-  })
+  assert.equal(clicked, true, `tab not found: ${title}`)
   await waitFor(
-    `document.querySelector('.larify-workbench-tab-trigger[data-state="active"] .larify-workbench-tab-title')?.textContent === ${JSON.stringify(title)}`,
+    `(() => {
+      const view = document.querySelector('[data-resource-id="${resourceId}"]')
+      const tab = document.querySelector('[data-tab-id="' + view?.dataset.viewId + '"]')
+      return tab?.querySelector('.larify-workbench-tab-trigger')?.getAttribute('data-state') === 'active'
+    })()`,
     `active tab ${title}`
   )
-}
-const clickElement = async (expression) => {
-  const position = await evaluate(`(() => {
-    const element = ${expression}
-    if (!element) return null
-    const rect = element.getBoundingClientRect()
-    return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }
-  })()`)
-  assert.ok(position, `element not found: ${expression}`)
-  await send('Input.dispatchMouseEvent', {
-    type: 'mousePressed',
-    x: position.x,
-    y: position.y,
-    button: 'left',
-    buttons: 1,
-    clickCount: 1
-  })
-  await send('Input.dispatchMouseEvent', {
-    type: 'mouseReleased',
-    x: position.x,
-    y: position.y,
-    button: 'left',
-    buttons: 0,
-    clickCount: 1
-  })
 }
 const navigateBrowser = (resource, url) =>
   evaluate(
@@ -452,9 +415,14 @@ try {
   )
   assert.ok(browserResources.some(({ id }) => id === first.id))
   assert.ok(browserResources.some(({ id }) => id === second.id))
-  assert.equal(await evaluate(`document.querySelectorAll('.larify-workbench-tabs').length`), 1)
+  assert.equal(
+    await evaluate(
+      `document.querySelectorAll('[data-workbench-session][data-active] .larify-workbench-tabs').length`
+    ),
+    1
+  )
 
-  await selectTab(title)
+  await selectTab(first.id, title)
   await waitFor(
     `(async () => (await window.bridge.invoke('browser:getState', ${JSON.stringify(first.sessionId)}, ${first.id}))?.id === ${first.id})()`,
     'first browser active'
@@ -462,7 +430,7 @@ try {
 
   await evaluate(`document.querySelector('.larify-workbench-home')?.click()`)
   await waitFor(`Boolean(document.querySelector('[data-testid="workbench-empty"]'))`, 'launcher')
-  await selectTab(title)
+  await selectTab(first.id, title)
 
   const sash = await evaluate(`(() => {
     const rect = document.querySelector('.larify-allotment > .sash-container > .sash')?.getBoundingClientRect()
@@ -498,19 +466,26 @@ try {
     true
   )
 
-  const secondTab = `[...document.querySelectorAll('.larify-workbench-tab')]
-    .filter((tab) => tab.querySelector('.larify-workbench-tab-title')?.textContent === ${JSON.stringify(secondTitle)})
-    .at(-1)`
-  const secondViewId = await evaluate(`${secondTab}?.dataset.tabId`)
-  await clickElement(`${secondTab}?.querySelector('.larify-workbench-tab-trigger')`)
+  await selectTab(second.id, secondTitle)
   await waitFor(
-    `document.querySelector('.larify-workbench-tab-trigger[data-state="active"]')?.parentElement?.dataset.tabId === ${JSON.stringify(secondViewId)}`,
+    `(() => {
+      const view = document.querySelector('[data-resource-id="${second.id}"]')
+      const tab = document.querySelector('[data-tab-id="' + view?.dataset.viewId + '"]')
+      return tab?.querySelector('.larify-workbench-tab-trigger')?.getAttribute('data-state') === 'active'
+    })()`,
     'second browser tab active'
   )
   await wait(50)
-  await clickElement(
-    `document.querySelector('.larify-workbench-tab-trigger[data-state="active"]')
-      ?.parentElement?.querySelector('.larify-workbench-tab-close')`
+  assert.equal(
+    await evaluate(`(() => {
+      const view = document.querySelector('[data-resource-id="${second.id}"]')
+      const tab = document.querySelector('[data-tab-id="' + view?.dataset.viewId + '"]')
+      const close = tab?.querySelector('.larify-workbench-tab-close')
+      close?.click()
+      return Boolean(close)
+    })()`),
+    true,
+    'second browser close button not found'
   )
   await waitFor(
     `(async () => !(await window.bridge.invoke('resource:list')).some(({ id }) => id === ${second.id}))()`,

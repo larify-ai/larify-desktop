@@ -174,7 +174,7 @@ describe('ChangesView', () => {
   })
 
   it('remeasures its layout when the native workbench becomes visible', async () => {
-    await render()
+    await render(7, false, true)
 
     await act(async () => {
       window.dispatchEvent(
@@ -186,6 +186,22 @@ describe('ChangesView', () => {
 
     expect(h.layoutProps).toHaveBeenLastCalledWith(
       expect.objectContaining({ animating: false, visible: true })
+    )
+  })
+
+  it('subscribes to workbench animation events only while active', async () => {
+    const addEventListener = vi.spyOn(window, 'addEventListener')
+
+    await render(7, false, false)
+    expect(addEventListener).not.toHaveBeenCalledWith(
+      'larify:workbench-animation',
+      expect.any(Function)
+    )
+
+    await render(7, false, true)
+    expect(addEventListener).toHaveBeenCalledWith(
+      'larify:workbench-animation',
+      expect.any(Function)
     )
   })
 
@@ -308,6 +324,15 @@ describe('ChangesView', () => {
 
     expect(h.inspectFile).toHaveBeenCalledWith(7, 'D:\\workspace\\deleted.ts')
     expect(container.textContent).toContain('文件不存在')
+  })
+
+  it('does not fall back to the empty review while a card file is being inspected', async () => {
+    h.inspectFile.mockImplementation(() => new Promise(() => undefined))
+    requestChangesNavigation({ path: 'pending.ts', resourceId: 7 })
+    await render()
+
+    expect(container.textContent).not.toContain('暂无变更')
+    expect(container.textContent).not.toContain('文件不存在')
   })
 
   it('clears a historical selection when the file still exists without changes', async () => {

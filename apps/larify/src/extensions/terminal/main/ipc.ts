@@ -73,6 +73,10 @@ export function registerTerminalIpc(service: TerminalService, window: BrowserWin
     batchers.delete(key)
     send('terminal:exit', { sessionId, terminalId, exitCode })
   })
+  const unbindCommandFinished = service.bindCommandFinished((sessionId, terminalId, event) => {
+    const cwd = service.terminalState(sessionId, terminalId)?.cwd
+    if (cwd) send('terminal:command-finished', { sessionId, terminalId, cwd, ...event })
+  })
 
   ipcMain.handle('terminal:getState', (_event, sessionId: string) => service.state(sessionId))
   ipcMain.handle('terminal:write', (_event, sessionId: string, terminalId: number, data: string) =>
@@ -97,6 +101,7 @@ export function registerTerminalIpc(service: TerminalService, window: BrowserWin
     unbindChange()
     unbindData()
     unbindExit()
+    unbindCommandFinished()
     for (const channel of channels) ipcMain.removeHandler(channel)
     for (const batcher of batchers.values()) batcher.flush()
     batchers.clear()

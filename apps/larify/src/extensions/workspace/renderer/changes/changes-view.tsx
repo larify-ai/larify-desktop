@@ -25,6 +25,13 @@ import { loadMonacoDiff } from './changes-loaders'
 
 const MonacoDiff = lazy(() => loadMonacoDiff().then(({ MonacoDiff }) => ({ default: MonacoDiff })))
 
+interface ChangeSelection {
+  missing: boolean
+  origin: 'navigation' | 'tree' | null
+  path: string | null
+  resourceId: number
+}
+
 export function ChangesView({
   active = false,
   cwd,
@@ -39,13 +46,20 @@ export function ChangesView({
   })
   const [workspace, setWorkspace] = useState({ resourceId, root: cwd || null })
   const root = workspace.resourceId === resourceId ? workspace.root : cwd || null
-  const [selection, setSelection] = useState(() => ({
-    path: peekChangesNavigation(resourceId)?.path ?? null,
-    resourceId
-  }))
+  const [selection, setSelection] = useState<ChangeSelection>(() => {
+    const pending = peekChangesNavigation(resourceId)
+    return {
+      missing: false,
+      origin: pending ? ('navigation' as const) : null,
+      path: pending?.path ?? null,
+      resourceId
+    }
+  })
   const selected = selection.resourceId === resourceId ? selection.path : null
   const { decorations, error, loading, statuses } = useGitDecorations(resourceId, root, {
-    includeIgnored: false
+    active,
+    includeIgnored: false,
+    preloadInactive: true
   })
   const changes = useMemo(() => statuses.filter(isGitChange), [statuses])
   const entries = useMemo(() => (root ? createGitChangeTree(root, statuses) : []), [root, statuses])
@@ -56,6 +70,42 @@ export function ChangesView({
     : (changes[0] ?? null)
   const selectedPath = current?.path ?? null
   const previewActive = active && (workbenchState.visible || workbenchState.animating)
+
+  useEffect(() => {
+    if (!selected || current || loading || error || !root) return
+    if (selection.origin !== 'navigation') {
+      let alive = true
+      void Promise.resolve().then(() => {
+        if (alive) setSelection({ missing: false, origin: null, path: null, resourceId })
+      })
+      return () => {
+        alive = false
+      }
+    }
+
+    let alive = true
+    void workspaceClient.inspectFile(resourceId, requestedPath!).then(
+      () => {
+        if (alive) setSelection({ missing: false, origin: null, path: null, resourceId })
+      },
+      (reason: unknown) => {
+        if (!alive) return
+        const message = reason instanceof Error ? reason.message : String(reason)
+        if (/\bENOENT\b/.test(message)) {
+          setSelection((currentSelection) =>
+            currentSelection.path === selected
+              ? { ...currentSelection, missing: true }
+              : currentSelection
+          )
+        } else {
+          setSelection({ missing: false, origin: null, path: null, resourceId })
+        }
+      }
+    )
+    return () => {
+      alive = false
+    }
+  }, [current, error, loading, requestedPath, resourceId, root, selected, selection.origin])
 
   useEffect(() => {
     let alive = true
@@ -72,7 +122,7 @@ export function ChangesView({
 
   useEffect(() => {
     const show = (request: ChangesNavigationRequest): void => {
-      setSelection({ path: request.path, resourceId })
+      setSelection({ missing: false, origin: 'navigation', path: request.path, resourceId })
     }
     const onNavigate = (event: Event): void => {
       const detail = (event as CustomEvent<ChangesNavigationRequest>).detail
@@ -109,23 +159,23 @@ export function ChangesView({
             aria-label={mode === 'unified' ? '切换到拆分视图' : '切换到统一视图'}
             title={mode === 'unified' ? '拆分视图' : '统一视图'}
             variant="ghost"
-            size="icon-sm"
+            size="icon"
             onClick={() => setMode((value) => (value === 'unified' ? 'split' : 'unified'))}
           >
             {mode === 'unified' ? (
-              <Columns2Icon className="size-4" />
+              <Columns2Icon className="size-[18px]" />
             ) : (
-              <Rows3Icon className="size-4" />
+              <Rows3Icon className="size-[18px]" />
             )}
           </Button>
           <Button
             aria-label={navigatorOpen ? '隐藏变更目录树' : '显示变更目录树'}
             title={navigatorOpen ? '隐藏变更目录树' : '显示变更目录树'}
             variant={navigatorOpen ? 'secondary' : 'ghost'}
-            size="icon-sm"
+            size="icon"
             onClick={() => setNavigatorOpen((open) => !open)}
           >
-            <FilesIcon className="size-4" />
+            <FilesIcon className="size-[17px]" />
           </Button>
         </>
       ) : null,
@@ -147,6 +197,8 @@ export function ChangesView({
             revealPath={selectedPath}
             onOpen={(path) =>
               setSelection({
+                missing: false,
+                origin: 'tree',
                 path,
                 resourceId
               })
@@ -172,9 +224,9 @@ export function ChangesView({
         <div className="grid h-full place-items-center text-sm text-muted-foreground">{error}</div>
       ) : loading ? (
         <div className="h-full" />
-      ) : selected ? (
+      ) : selected && selection.missing ? (
         <div className="grid h-full place-items-center text-sm text-muted-foreground">
-          无法定位该变更文件
+          文件不存在
         </div>
       ) : (
         <div className="grid h-full place-items-center text-sm text-muted-foreground">暂无变更</div>

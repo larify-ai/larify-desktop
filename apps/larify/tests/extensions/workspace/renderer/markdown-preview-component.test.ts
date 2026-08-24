@@ -107,6 +107,25 @@ describe('MarkdownPreview integration', () => {
     })
   })
 
+  it('defers reading an inactive preview until it becomes active', async () => {
+    const props = {
+      file: { binary: false, mime: 'text/markdown', path: 'D:\\workspace\\README.md' },
+      resourceId: 7
+    }
+    await act(async () => {
+      root.render(createElement(MarkdownPreview, { ...props, active: false }))
+      await Promise.resolve()
+    })
+    expect(h.readFile).not.toHaveBeenCalled()
+
+    await act(async () => {
+      root.render(createElement(MarkdownPreview, { ...props, active: true }))
+      await Promise.resolve()
+    })
+    expect(h.readFile).toHaveBeenCalledOnce()
+    expect(h.readFile).toHaveBeenCalledWith(7, 'D:\\workspace\\README.md')
+  })
+
   afterEach(async () => {
     await act(async () => root.unmount())
     container.remove()

@@ -22,7 +22,7 @@ export function WorkbenchEmpty({ renderers, onOpenTool }: WorkbenchEmptyProps): 
               type="button"
               onClick={() => onOpenTool(id)}
             >
-              <span aria-hidden className="flex size-5 items-center justify-center">
+              <span aria-hidden className="flex size-6 items-center justify-center">
                 {renderer.icon}
               </span>
               <span className="max-w-full truncate">{renderer.title}</span>

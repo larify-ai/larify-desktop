@@ -4,6 +4,7 @@ import { workspaceClient } from '../workspace-client'
 import { decodeUrlComponent, resolveWorkspacePath } from './markdown-navigation'
 
 export function MarkdownImage({
+  children: _children,
   currentFile,
   domNode: _domNode,
   resourceId,
@@ -12,6 +13,7 @@ export function MarkdownImage({
   ...props
 }: ComponentProps & { currentFile: string; resourceId: number }): React.JSX.Element {
   void _domNode
+  void _children
   void _streamStatus
   const source = typeof src === 'string' ? src : ''
   const remote = /^(?:data:|blob:|https?:|\/\/)/i.test(source)

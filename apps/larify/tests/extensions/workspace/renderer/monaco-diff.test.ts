@@ -112,6 +112,7 @@ describe('MonacoDiff', () => {
     await act(async () => {
       root.render(
         createElement(MonacoDiff, {
+          active: true,
           mode: 'unified',
           resourceId: 7,
           root: 'D:\\workspace',
@@ -127,10 +128,10 @@ describe('MonacoDiff', () => {
       expect.objectContaining({
         modified: 'after',
         modifiedLanguage: 'typescript',
-        modifiedModelPath: 'file:D:\\workspace\\file.ts',
+        modifiedModelPath: 'file:D:\\workspace\\file.ts?7',
         original: 'before',
         originalLanguage: 'typescript',
-        originalModelPath: 'git-original:D:\\workspace\\file.ts',
+        originalModelPath: 'git-original:D:\\workspace\\file.ts?7',
         options: expect.objectContaining({
           compactMode: true,
           glyphMargin: false,
@@ -149,7 +150,103 @@ describe('MonacoDiff', () => {
         keepCurrentOriginalModel: expect.anything()
       })
     )
+    const diffEditorProps = harness.props.mock.lastCall?.[0] as {
+      onMount(editor: { layout(): void }): void
+    }
+    const layout = vi.fn()
+    const frame = vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((callback) => {
+      callback(0)
+      return 1
+    })
+    diffEditorProps.onMount({ layout })
+    expect(layout).toHaveBeenCalledOnce()
+    frame.mockRestore()
     expect(container.querySelector('[data-diff-mode="unified"]')).not.toBeNull()
+    await act(async () => root.unmount())
+  })
+
+  it('defers file reads and Monaco mounting until an inactive diff becomes active', async () => {
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    const selectedStatus = status()
+    const render = async (active: boolean): Promise<void> => {
+      await act(async () => {
+        root.render(
+          createElement(MonacoDiff, {
+            active,
+            mode: 'unified',
+            resourceId: 7,
+            root: 'D:\\workspace',
+            status: selectedStatus
+          })
+        )
+        await Promise.resolve()
+      })
+    }
+
+    await render(false)
+    expect(harness.original).not.toHaveBeenCalled()
+    expect(harness.readFile).not.toHaveBeenCalled()
+    expect(container.querySelector('[data-testid="diff-editor"]')).toBeNull()
+
+    await render(true)
+    expect(harness.original).toHaveBeenCalledOnce()
+    expect(harness.readFile).toHaveBeenCalledOnce()
+    expect(container.querySelector('[data-testid="diff-editor"]')).not.toBeNull()
+
+    await render(false)
+    await render(true)
+    expect(harness.original).toHaveBeenCalledOnce()
+    expect(harness.readFile).toHaveBeenCalledOnce()
+    await act(async () => root.unmount())
+  })
+
+  it('lays out only while active and again after each reactivation', async () => {
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    const frames: FrameRequestCallback[] = []
+    const requestFrame = vi
+      .spyOn(globalThis, 'requestAnimationFrame')
+      .mockImplementation((callback) => {
+        frames.push(callback)
+        return frames.length
+      })
+    const render = async (active: boolean): Promise<void> => {
+      await act(async () =>
+        root.render(
+          createElement(MonacoContentDiff, {
+            active,
+            mode: 'unified',
+            modified: 'after',
+            modifiedPath: 'D:\\workspace\\file.ts',
+            original: 'before',
+            originalPath: 'D:\\workspace\\file.ts'
+          })
+        )
+      )
+    }
+
+    await render(false)
+    const props = harness.props.mock.lastCall?.[0] as {
+      onMount(editor: { layout(): void }): void
+      options: unknown
+    }
+    const initialOptions = props.options
+    const layout = vi.fn()
+    props.onMount({ layout })
+    expect(frames).toHaveLength(0)
+
+    await render(true)
+    expect((harness.props.mock.lastCall?.[0] as { options: unknown }).options).toBe(initialOptions)
+    frames.shift()?.(0)
+    expect(layout).toHaveBeenCalledOnce()
+
+    await render(false)
+    await render(true)
+    frames.shift()?.(0)
+    expect(layout).toHaveBeenCalledTimes(2)
+
+    requestFrame.mockRestore()
     await act(async () => root.unmount())
   })
 
@@ -261,6 +358,47 @@ describe('MonacoDiff', () => {
     await act(async () => root.unmount())
   })
 
+  it('gives simultaneous diff tabs distinct Monaco model URIs', async () => {
+    const container = document.createElement('div')
+    const root = createRoot(container)
+
+    await act(async () => {
+      root.render(
+        createElement(
+          'div',
+          null,
+          createElement(MonacoContentDiff, {
+            modelKey: '3',
+            mode: 'unified',
+            modified: 'after 3',
+            modifiedPath: 'D:\\workspace\\file.ts',
+            original: 'before 3',
+            originalPath: 'D:\\workspace\\file.ts'
+          }),
+          createElement(MonacoContentDiff, {
+            modelKey: '4',
+            mode: 'unified',
+            modified: 'after 4',
+            modifiedPath: 'D:\\workspace\\file.ts',
+            original: 'before 4',
+            originalPath: 'D:\\workspace\\file.ts'
+          })
+        )
+      )
+    })
+
+    const modelPaths = harness.props.mock.calls.map(([props]) => {
+      const value = props as { modifiedModelPath?: string; originalModelPath?: string }
+      return [value.originalModelPath, value.modifiedModelPath]
+    })
+    expect(modelPaths).toEqual([
+      ['git-original:D:\\workspace\\file.ts?3', 'file:D:\\workspace\\file.ts?3'],
+      ['git-original:D:\\workspace\\file.ts?4', 'file:D:\\workspace\\file.ts?4']
+    ])
+    expect(new Set(modelPaths.flat()).size).toBe(4)
+    await act(async () => root.unmount())
+  })
+
   it('keeps a recreated working file even when its deletion is staged', async () => {
     const container = document.createElement('div')
     const root = createRoot(container)
@@ -313,6 +451,7 @@ describe('MonacoDiff', () => {
     await act(async () => {
       root.render(
         createElement(MonacoDiff, {
+          active: true,
           mode: 'unified',
           resourceId: 7,
           root: 'D:\\workspace',
@@ -336,9 +475,15 @@ describe('MonacoDiff', () => {
     }
     const range = { endColumn: 1, endLineNumber: 2, startColumn: 1, startLineNumber: 1 }
     const createDecorationsCollection = vi.fn()
+    const layout = vi.fn()
+    const frame = vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((callback) => {
+      callback(0)
+      return 1
+    })
     addedEditorProps.onMount({
       createDecorationsCollection,
-      getModel: () => ({ getFullModelRange: () => range })
+      getModel: () => ({ getFullModelRange: () => range }),
+      layout
     })
     expect(createDecorationsCollection).toHaveBeenCalledWith([
       {
@@ -346,6 +491,8 @@ describe('MonacoDiff', () => {
         range
       }
     ])
+    expect(layout).toHaveBeenCalledOnce()
+    frame.mockRestore()
     expect(container.querySelector('[data-original-empty="true"]')).not.toBeNull()
     expect(container.querySelector('[data-modified-empty="false"]')).not.toBeNull()
     await act(async () => root.unmount())
@@ -477,6 +624,7 @@ describe('MonacoDiff', () => {
   it('does not show stale content while switching workspace resources', async () => {
     const container = document.createElement('div')
     const root = createRoot(container)
+    const selectedStatus = status()
 
     await act(async () => {
       root.render(
@@ -484,7 +632,7 @@ describe('MonacoDiff', () => {
           mode: 'unified',
           resourceId: 7,
           root: 'D:\\workspace',
-          status: status()
+          status: selectedStatus
         })
       )
       await Promise.resolve()
@@ -500,7 +648,7 @@ describe('MonacoDiff', () => {
           mode: 'unified',
           resourceId: 8,
           root: 'D:\\workspace',
-          status: status()
+          status: selectedStatus
         })
       )
       await Promise.resolve()

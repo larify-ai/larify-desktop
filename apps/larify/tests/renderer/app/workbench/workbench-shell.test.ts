@@ -470,6 +470,115 @@ describe('WorkbenchShell', () => {
     ).toBe('3')
   })
 
+  it('pauses an inactive non-browser renderer while preserving its component state', async () => {
+    const mounted: number[] = []
+    const disposed: number[] = []
+    registry.get<WorkbenchRendererRegistry>(workbenchRendererRegistryToken)?.register('custom', {
+      component: function PausableRenderer({ resourceId }) {
+        const [value, setValue] = useState(resourceId)
+        useEffect(() => {
+          mounted.push(resourceId)
+          return () => void disposed.push(resourceId)
+        }, [resourceId])
+        return createElement(
+          'button',
+          { 'data-testid': `custom-${resourceId}`, onClick: () => setValue(value + 1) },
+          value
+        )
+      },
+      icon: null,
+      order: 10,
+      title: 'Custom'
+    })
+    const store = createWorkbenchStore()
+    const first = store.getState().openView({ rendererId: 'custom', resourceId: 1 })
+    const second = store.getState().openView({ rendererId: 'custom', resourceId: 2 })
+    await act(async () => {
+      root.render(
+        createElement(
+          RendererRegistryProvider,
+          { registry },
+          createElement(WorkbenchShell, { onOpenTool: vi.fn(), store })
+        )
+      )
+    })
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="custom-2"]')?.click()
+    })
+
+    await act(async () => store.getState().selectView(first))
+    expect(disposed).toEqual([2])
+    expect(container.querySelector<HTMLElement>('[data-testid="custom-2"]')?.style.display).toBe(
+      'none'
+    )
+
+    await act(async () => store.getState().selectView(second))
+    expect(mounted).toEqual([2, 1, 2])
+    expect(container.querySelector('[data-testid="custom-2"]')?.textContent).toBe('3')
+  })
+
+  it('keeps an inactive terminal renderer mounted so it can pause without rebuilding xterm', async () => {
+    const disposed: number[] = []
+    const activeStates: boolean[] = []
+    registry.get<WorkbenchRendererRegistry>(workbenchRendererRegistryToken)?.register('terminal', {
+      component: function PersistentTerminal({ active, resourceId }) {
+        activeStates.push(active ?? true)
+        useEffect(() => () => void disposed.push(resourceId), [resourceId])
+        return createElement('div', { 'data-testid': `terminal-${resourceId}` })
+      },
+      icon: null,
+      order: 10,
+      title: 'Terminal'
+    })
+    const store = createWorkbenchStore()
+    store.getState().openView({ rendererId: 'terminal', resourceId: 1 })
+    await act(async () => {
+      root.render(
+        createElement(
+          RendererRegistryProvider,
+          { registry },
+          createElement(WorkbenchShell, { onOpenTool: vi.fn(), store })
+        )
+      )
+    })
+
+    await act(async () => store.getState().openView({ rendererId: 'missing', resourceId: 2 }))
+    expect(disposed).toEqual([])
+    expect(activeStates).toContain(false)
+    expect(container.querySelector('[data-testid="terminal-1"]')).not.toBeNull()
+  })
+
+  it('keeps an inactive changes renderer mounted so Monaco and cached diffs stay warm', async () => {
+    const disposed: number[] = []
+    const activeStates: boolean[] = []
+    registry.get<WorkbenchRendererRegistry>(workbenchRendererRegistryToken)?.register('changes', {
+      component: function PersistentChanges({ active, resourceId }) {
+        activeStates.push(active ?? true)
+        useEffect(() => () => void disposed.push(resourceId), [resourceId])
+        return createElement('div', { 'data-testid': `changes-${resourceId}` })
+      },
+      icon: null,
+      order: 20,
+      title: 'Changes'
+    })
+    const store = createWorkbenchStore()
+    store.getState().openView({ rendererId: 'changes', resourceId: 1 })
+    await act(async () => {
+      root.render(
+        createElement(
+          RendererRegistryProvider,
+          { registry },
+          createElement(WorkbenchShell, { onOpenTool: vi.fn(), store })
+        )
+      )
+    })
+
+    await act(async () => store.getState().openView({ rendererId: 'missing', resourceId: 2 }))
+    expect(disposed).toEqual([])
+    expect(activeStates).toContain(false)
+    expect(container.querySelector('[data-testid="changes-1"]')).not.toBeNull()
+  })
+
   it('keeps a mounted renderer inactive while its session is hidden', async () => {
     const activeStates: boolean[] = []
     registry.get<WorkbenchRendererRegistry>(workbenchRendererRegistryToken)?.register('browser', {

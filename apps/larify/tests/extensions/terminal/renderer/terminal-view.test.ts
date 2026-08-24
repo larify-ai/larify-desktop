@@ -22,6 +22,7 @@ class MockTerminal {
   }
 
   attachCustomKeyEventHandler = vi.fn()
+  blur = vi.fn()
   clearSelection = vi.fn()
   getSelection(): string {
     return ''
@@ -132,6 +133,35 @@ describe('TerminalView', () => {
     expect(terminal.constructorOptions).toEqual(
       expect.objectContaining({ cursorStyle: 'bar', cursorWidth: 2 })
     )
+  })
+
+  it('keeps the xterm instance and disables cursor blinking while inactive', async () => {
+    const { TerminalView } =
+      await import('../../../../src/extensions/terminal/renderer/terminal-view')
+    const render = async (active: boolean): Promise<void> => {
+      await act(async () => {
+        root.render(
+          createElement(TerminalView, {
+            active,
+            resourceId: 42,
+            sessionId: 'session-1',
+            updateTab: vi.fn()
+          })
+        )
+      })
+    }
+
+    await render(true)
+    const terminal = terminals[0]
+    await render(false)
+    expect(terminals).toHaveLength(1)
+    expect(terminal.dispose).not.toHaveBeenCalled()
+    expect(terminal.constructorOptions).toEqual(expect.objectContaining({ cursorBlink: false }))
+    expect(terminal.blur).toHaveBeenCalledOnce()
+
+    await render(true)
+    expect(terminals).toHaveLength(1)
+    expect(terminal.constructorOptions).toEqual(expect.objectContaining({ cursorBlink: false }))
   })
 
   it('routes live output only to the matching resource', async () => {

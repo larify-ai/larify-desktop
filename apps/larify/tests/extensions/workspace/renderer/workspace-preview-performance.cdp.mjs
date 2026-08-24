@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/explicit-function-return-type */
+import assert from 'node:assert/strict'
 import { connectLarifyCdp } from '../../../manual/cdp-client.mjs'
 
 const wait = (duration) => new Promise((resolve) => setTimeout(resolve, duration))
@@ -41,14 +42,40 @@ try {
     }
   }
 
+  const activatedWorkspace = await cdp.evaluate(`(() => {
+    const session = document.querySelector('[data-workbench-session][data-active]')
+    const view =
+      session?.querySelector('[data-workbench-view="workspace"][data-active]') ??
+      session?.querySelector('[data-workbench-view="workspace"]')
+    if (!session || !view) return false
+    window.dispatchEvent(new CustomEvent('larify:workbench-select-resource', {
+      detail: {
+        rendererId: 'workspace',
+        resourceId: Number(view.dataset.resourceId),
+        sessionId: session.dataset.workbenchSession
+      }
+    }))
+    return true
+  })()`)
+  assert.ok(activatedWorkspace, 'a workspace resource must exist before preview testing')
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    if (
+      await cdp.evaluate(
+        `Boolean(document.querySelector('[data-workbench-session][data-active] [data-workbench-view="workspace"][data-active]'))`
+      )
+    )
+      break
+    await wait(25)
+  }
+
   for (let depth = 0; depth < 4; depth += 1) {
     const hasFile = await cdp.evaluate(
-      `/\\.(?:css|html|js|json|md|mjs|ts|tsx|txt)$/i.test(document.querySelector('[data-workbench-session][data-active] .workspace-tree-scroll')?.textContent ?? '')`
+      `/\\.(?:css|html|js|json|md|mjs|ts|tsx|txt)$/i.test(document.querySelector('[data-workbench-session][data-active] [data-workbench-view="workspace"][data-active] .workspace-tree-scroll')?.textContent ?? '')`
     )
     if (hasFile) break
     const expanded = await cdp.evaluate(`(() => {
       const node = document.querySelector(
-        '[data-workbench-session][data-active] .workspace-tree-scroll .rc-tree-treenode[aria-expanded="false"]'
+        '[data-workbench-session][data-active] [data-workbench-view="workspace"][data-active] .workspace-tree-scroll .rc-tree-treenode[aria-expanded="false"]'
       )
       node?.querySelector('.rc-tree-node-content-wrapper')?.click()
       return Boolean(node)
@@ -57,9 +84,30 @@ try {
     await wait(100)
   }
 
+  for (let page = 0; page < 20; page += 1) {
+    const hasVisibleFile = await cdp.evaluate(`Array.from(document.querySelectorAll(
+      '[data-workbench-session][data-active] [data-workbench-view="workspace"][data-active] .workspace-tree-scroll .rc-tree-treenode'
+    )).some((node) =>
+      !node.hasAttribute('aria-expanded') &&
+      /\\.(?:css|html|js|json|md|mjs|ts|tsx|txt)$/i.test(node.textContent ?? '')
+    )`)
+    if (hasVisibleFile) break
+    const scrolled = await cdp.evaluate(`(() => {
+      const holder = document.querySelector(
+        '[data-workbench-session][data-active] [data-workbench-view="workspace"][data-active] .rc-tree-list-holder'
+      )
+      if (!holder || holder.scrollTop + holder.clientHeight >= holder.scrollHeight) return false
+      holder.scrollTop = Math.min(holder.scrollHeight, holder.scrollTop + holder.clientHeight * 0.8)
+      holder.dispatchEvent(new Event('scroll', { bubbles: true }))
+      return true
+    })()`)
+    if (!scrolled) break
+    await wait(50)
+  }
+
   const target = await cdp.evaluate(`(() => {
     const nodes = Array.from(document.querySelectorAll(
-      '[data-workbench-session][data-active] .workspace-tree-scroll .rc-tree-treenode'
+      '[data-workbench-session][data-active] [data-workbench-view="workspace"][data-active] .workspace-tree-scroll .rc-tree-treenode'
     ))
     const leaf = nodes.find(
       (node) =>
@@ -73,7 +121,7 @@ try {
   })()`)
   if (!target) {
     const tree = await cdp.evaluate(
-      `document.querySelector('[data-workbench-session][data-active] .workspace-tree-scroll')?.textContent`
+      `document.querySelector('[data-workbench-session][data-active] [data-workbench-view="workspace"][data-active] .workspace-tree-scroll')?.textContent`
     )
     throw new Error(`No visible workspace file found: ${tree}`)
   }
@@ -88,21 +136,23 @@ try {
         loading: Array.from(document.querySelectorAll('[role="status"], div')).some(
           (element) => element.textContent?.includes('\u6b63\u5728\u6253\u5f00\u6587\u4ef6')
         ),
-        lines: document.querySelectorAll('.monaco-editor .view-line').length,
-        monaco: Boolean(document.querySelector('.monaco-editor'))
+        lines: document.querySelectorAll('[data-workbench-session][data-active] [data-workbench-view="workspace"][data-active] .workspace-file-preview .view-line').length,
+        monaco: Boolean(document.querySelector('[data-workbench-session][data-active] [data-workbench-view="workspace"][data-active] .workspace-file-preview .monaco-editor')),
+        selected: document.querySelector('[data-workbench-session][data-active] [data-workbench-view="workspace"][data-active] .workspace-tree-scroll .rc-tree-treenode-selected .rc-tree-node-content-wrapper')?.getAttribute('title') ?? null,
+        text: document.querySelector('[data-workbench-session][data-active] [data-workbench-view="workspace"][data-active] .workspace-file-preview .view-lines')?.textContent ?? ''
       }
     })()`)
     if (result.loading && phases.loading === undefined) phases.loading = result.elapsed
     if (result.monaco && phases.monaco === undefined) phases.monaco = result.elapsed
     if (result.lines > 0 && phases.content === undefined) phases.content = result.elapsed
-    if (result.monaco && result.lines > 0) break
+    if (result.monaco && result.lines > 0 && result.selected === target.name) break
     await wait(10)
   }
 
   let tokenColors = []
   for (let attempt = 0; attempt < 200; attempt += 1) {
     tokenColors = await cdp.evaluate(`Array.from(
-      new Set(Array.from(document.querySelectorAll('.monaco-editor .view-line span')).map(
+      new Set(Array.from(document.querySelectorAll('[data-workbench-session][data-active] [data-workbench-view="workspace"][data-active] .workspace-file-preview .view-line span')).map(
         (element) => getComputedStyle(element).color
       ))
     )`)
@@ -112,17 +162,21 @@ try {
   if (tokenColors.length < 2) {
     const tokenDiagnostics = await cdp.evaluate(`({
       probe: window.__workspacePreviewProbe,
-      text: document.querySelector('.monaco-editor .view-lines')?.textContent,
-      tokens: Array.from(document.querySelectorAll('.monaco-editor .view-line span'))
+      text: document.querySelector('[data-workbench-session][data-active] [data-workbench-view="workspace"][data-active] .workspace-file-preview .view-lines')?.textContent,
+      tokens: Array.from(document.querySelectorAll('[data-workbench-session][data-active] [data-workbench-view="workspace"][data-active] .workspace-file-preview .view-line span'))
         .slice(0, 20)
         .map((element) => ({ className: element.className, text: element.textContent }))
     })`)
     throw new Error(`Monaco syntax highlighting is not active: ${JSON.stringify(tokenDiagnostics)}`)
   }
+  assert.equal(result?.selected, target.name, 'clicked workspace file must become selected')
+  assert.ok(result?.monaco, 'active workspace preview must mount Monaco')
+  assert.ok(result?.lines > 0, 'active workspace preview must render file contents')
+  assert.ok(result?.text?.trim(), 'active workspace preview must not be blank')
 
   const alignment = await cdp.evaluate(`(() => {
     const home = document.querySelector('.larify-workbench-home svg')
-    const lineNumber = document.querySelector('.monaco-editor .line-numbers')
+    const lineNumber = document.querySelector('[data-workbench-session][data-active] [data-workbench-view="workspace"][data-active] .workspace-file-preview .line-numbers')
     const rect = (element) => element && {
       left: element.getBoundingClientRect().left,
       right: element.getBoundingClientRect().right,

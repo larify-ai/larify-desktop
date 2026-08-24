@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import MonacoEditor, { DiffEditor } from '@monaco-editor/react'
 import { fileTypeFromBuffer } from 'file-type'
 import { editor, Uri } from 'monaco-editor/editor/editor.api'
@@ -14,7 +14,7 @@ import {
 } from '../preview/monaco'
 
 const editorOptions = {
-  automaticLayout: true,
+  automaticLayout: false,
   contextmenu: false,
   ...workspaceMonacoGutterOptions,
   lightbulb: { enabled: editor.ShowLightbulbIconMode.Off },
@@ -57,6 +57,7 @@ interface MonacoDiffProps {
 }
 
 interface MonacoContentDiffProps {
+  active?: boolean
   modelKey?: string
   mode: 'unified' | 'split'
   modified: string
@@ -64,6 +65,48 @@ interface MonacoContentDiffProps {
   original: string
   originalPath: string
   scheme?: string
+}
+
+const useActiveEditorLayout = (
+  active: boolean
+): {
+  containerRef: React.RefObject<HTMLDivElement | null>
+  mountEditor(instance: { layout(): void }): void
+} => {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const editorRef = useRef<{ layout(): void } | null>(null)
+  const frameRef = useRef<number | null>(null)
+  const scheduleLayout = useCallback(() => {
+    if (frameRef.current !== null) cancelAnimationFrame(frameRef.current)
+    frameRef.current = requestAnimationFrame(() => {
+      frameRef.current = null
+      editorRef.current?.layout()
+    })
+  }, [])
+  const mountEditor = useCallback(
+    (instance: { layout(): void }) => {
+      editorRef.current = instance
+      if (active) scheduleLayout()
+    },
+    [active, scheduleLayout]
+  )
+  useEffect(() => {
+    if (!active) return
+    scheduleLayout()
+    const container = containerRef.current
+    const observer =
+      container && typeof ResizeObserver !== 'undefined'
+        ? new ResizeObserver(scheduleLayout)
+        : undefined
+    if (container) observer?.observe(container)
+    return () => {
+      observer?.disconnect()
+      if (frameRef.current !== null) cancelAnimationFrame(frameRef.current)
+      frameRef.current = null
+    }
+  }, [active, scheduleLayout])
+  useEffect(() => () => void (editorRef.current = null), [])
+  return { containerRef, mountEditor }
 }
 
 const modelPath = (path: string, scheme?: string, query?: string): string => {
@@ -74,6 +117,7 @@ const modelPath = (path: string, scheme?: string, query?: string): string => {
 }
 
 export function MonacoContentDiff({
+  active = true,
   modelKey = '',
   mode,
   modified,
@@ -83,11 +127,23 @@ export function MonacoContentDiff({
   scheme = 'git-original'
 }: MonacoContentDiffProps): React.JSX.Element {
   const { resolvedTheme } = useTheme()
+  const { containerRef, mountEditor } = useActiveEditorLayout(active)
   const deletedOnly = mode === 'unified' && modified.length === 0 && original.length > 0
   const addedOnly = mode === 'unified' && original.length === 0 && modified.length > 0
   const renderedModified = deletedOnly ? original : modified
   const renderedOriginal = deletedOnly ? '' : original
   const split = mode === 'split'
+  const diffOptions = useMemo(
+    () => ({ ...options, compactMode: !split, renderSideBySide: split }),
+    [split]
+  )
+  const mountAddedEditor = useCallback(
+    (instance: editor.IStandaloneCodeEditor) => {
+      highlightAddedLines(instance)
+      mountEditor(instance)
+    },
+    [mountEditor]
+  )
   const modifiedModelPath = modelPath(
     modifiedPath,
     scheme === 'git-original' ? undefined : `${scheme}-modified`,
@@ -103,13 +159,14 @@ export function MonacoContentDiff({
         data-diff-mode={mode}
         data-modified-empty="false"
         data-original-empty="true"
+        ref={containerRef}
       >
         <MonacoEditor
           height="100%"
           key={modifiedModelPath}
           language={workspaceMonacoLanguage(modifiedPath, modified)}
           loading={null}
-          onMount={highlightAddedLines}
+          onMount={mountAddedEditor}
           options={editorOptions}
           path={modifiedModelPath}
           theme={workspaceMonacoTheme(resolvedTheme === 'dark')}
@@ -127,6 +184,7 @@ export function MonacoContentDiff({
       data-deleted-only={deletedOnly}
       data-modified-empty={renderedModified.length === 0}
       data-original-empty={renderedOriginal.length === 0}
+      ref={containerRef}
     >
       <DiffEditor
         height="100%"
@@ -137,11 +195,8 @@ export function MonacoContentDiff({
           renderedModified
         )}
         modifiedModelPath={modifiedModelPath}
-        options={{
-          ...options,
-          compactMode: !split,
-          renderSideBySide: split
-        }}
+        onMount={mountEditor}
+        options={diffOptions}
         original={renderedOriginal}
         originalLanguage={workspaceMonacoLanguage(originalPath, renderedOriginal)}
         originalModelPath={originalModelPath}
@@ -152,7 +207,7 @@ export function MonacoContentDiff({
 }
 
 export function MonacoDiff({
-  active = false,
+  active = true,
   animating = false,
   mode,
   resourceId,
@@ -160,6 +215,7 @@ export function MonacoDiff({
   status
 }: MonacoDiffProps): React.JSX.Element {
   const requestKey = `${resourceId}:${root}:${status.from ?? ''}:${status.path}:${status.index}${status.working_dir}`
+  const loadedRef = useRef<{ requestKey: string; status: FileStatusResult } | null>(null)
   const [state, setState] = useState<{
     binary?: boolean
     error?: string
@@ -169,6 +225,11 @@ export function MonacoDiff({
     original?: string
   }>({})
   useEffect(() => {
+    if (
+      !active ||
+      (loadedRef.current?.requestKey === requestKey && loadedRef.current.status === status)
+    )
+      return
     let alive = true
     const originalFile = status.from ?? status.path
     const missing =
@@ -187,6 +248,7 @@ export function MonacoDiff({
       .then(async ([original, current]) => {
         const binary = current.binary || Boolean(original && (await fileTypeFromBuffer(original)))
         if (alive) {
+          loadedRef.current = { requestKey, status }
           setState({
             binary,
             exists: current.exists,
@@ -207,7 +269,7 @@ export function MonacoDiff({
     return () => {
       alive = false
     }
-  }, [requestKey, resourceId, root, status])
+  }, [active, requestKey, resourceId, root, status])
 
   if (state.key === requestKey && state.error) {
     return (
@@ -237,6 +299,8 @@ export function MonacoDiff({
 
   return (
     <MonacoContentDiff
+      active={active}
+      modelKey={String(resourceId)}
       mode={mode}
       modified={state.modified}
       modifiedPath={status.path}

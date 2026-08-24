@@ -1,4 +1,4 @@
-import { Fragment, memo, useEffect, useReducer, useState } from 'react'
+import { Activity, Fragment, memo, useDeferredValue, useEffect, useReducer, useState } from 'react'
 import { useStore } from 'zustand'
 import { useRendererRegistry } from '../registry/renderer-registry'
 import {
@@ -19,6 +19,10 @@ interface WorkbenchShellProps {
   sessionId: string
   onOpenTool(id: string): void
 }
+
+const eagerRendererIds = new Set(['browser'])
+const persistentRendererIds = new Set(['browser', 'changes', 'terminal', 'workspace'])
+const deferredActivationRendererIds = new Set(['changes', 'workspace'])
 
 export function WorkbenchShell({
   active = true,
@@ -91,17 +95,15 @@ export function WorkbenchShell({
               data-workbench-view={view.rendererId}
               key={`view:${view.id}`}
             >
-              <WorkbenchTabActionScope active={viewActive}>
-                <ActivatedWorkbenchRenderer
-                  active={viewActive}
-                  cwd={cwd}
-                  onOpenTool={onOpenTool}
-                  onUpdateTab={updateTab}
-                  rendererRevision={rendererRevision}
-                  sessionId={sessionId}
-                  view={view}
-                />
-              </WorkbenchTabActionScope>
+              <ActivatedWorkbenchRenderer
+                active={viewActive}
+                cwd={cwd}
+                onOpenTool={onOpenTool}
+                onUpdateTab={updateTab}
+                rendererRevision={rendererRevision}
+                sessionId={sessionId}
+                view={view}
+              />
             </div>
           )
         })}
@@ -113,11 +115,25 @@ export function WorkbenchShell({
 const ActivatedWorkbenchRenderer = memo(function ActivatedWorkbenchRenderer(
   props: React.ComponentProps<typeof WorkbenchRenderer> & { rendererRevision: number }
 ): React.JSX.Element | null {
-  const shouldMount = Boolean(props.active || props.view?.rendererId === 'browser')
+  const rendererId = props.view?.rendererId ?? ''
+  const eager = eagerRendererIds.has(rendererId)
+  const persistent = persistentRendererIds.has(rendererId)
+  const deferActivation = deferredActivationRendererIds.has(rendererId)
+  const shouldMount = Boolean(props.active || eager)
   const [activated, setActivated] = useState(shouldMount)
+  const deferredActive = useDeferredValue(Boolean(props.active))
   if (shouldMount && !activated) setActivated(true)
-  return activated || props.active ? <WorkbenchRenderer {...props} /> : null
+  const rendererActive = deferActivation ? deferredActive : Boolean(props.active)
+  return activated || props.active ? (
+    <WorkbenchTabActionScope active={rendererActive}>
+      <Activity mode={props.active || persistent ? 'visible' : 'hidden'}>
+        <StableWorkbenchRenderer {...props} active={rendererActive} />
+      </Activity>
+    </WorkbenchTabActionScope>
+  ) : null
 }, sameRendererProps)
+
+const StableWorkbenchRenderer = memo(WorkbenchRenderer)
 
 function sameRendererProps(
   previous: React.ComponentProps<typeof WorkbenchRenderer> & { rendererRevision: number },

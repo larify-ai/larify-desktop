@@ -14,6 +14,7 @@ const h = vi.hoisted(() => ({
   loading: false,
   layoutProps: vi.fn(),
   openPath: '',
+  inspectFile: vi.fn(),
   readDirectory: vi.fn(),
   statuses: [] as FileStatusResult[],
   treeProps: vi.fn(),
@@ -35,6 +36,7 @@ vi.mock('../../../../src/extensions/workspace/renderer/changes/use-git-decoratio
 
 vi.mock('../../../../src/extensions/workspace/renderer/workspace-client', () => ({
   workspaceClient: {
+    inspectFile: (resourceId: number, path: string) => h.inspectFile(resourceId, path),
     readDirectory: (resourceId: number) => h.readDirectory(resourceId)
   }
 }))
@@ -139,6 +141,8 @@ describe('ChangesView', () => {
     h.loading = false
     h.layoutProps.mockClear()
     h.openPath = ''
+    h.inspectFile.mockReset()
+    h.inspectFile.mockRejectedValue(new Error('ENOENT'))
     h.readDirectory.mockReset()
     h.readDirectory.mockImplementation(() =>
       Promise.resolve({ entries: [], root: h.workspaceRoot })
@@ -162,7 +166,9 @@ describe('ChangesView', () => {
     expect(container.querySelector('[data-testid="navigator"]')).toBeNull()
     expect(container.querySelector('[data-testid="actions"]')?.childElementCount).toBe(0)
     expect(h.useGitDecorations).toHaveBeenCalledWith(7, 'D:\\workspace', {
-      includeIgnored: false
+      active: false,
+      includeIgnored: false,
+      preloadInactive: true
     })
     expect(updateTab).toHaveBeenLastCalledWith({ title: '变更', tooltip: '全部变更' })
   })
@@ -252,7 +258,7 @@ describe('ChangesView', () => {
     expect(container.querySelector('[data-testid="navigator"]')).toBeNull()
   })
 
-  it('does not open another file when the selected change disappears', async () => {
+  it('selects another change when the selected change disappears', async () => {
     const first = status('D:\\workspace\\first.ts')
     const second = status('D:\\workspace\\second.ts')
     h.statuses = [first, second]
@@ -267,10 +273,65 @@ describe('ChangesView', () => {
 
     h.statuses = [first]
     await render()
-    expect(container.querySelector('[data-testid="diff"]')).toBeNull()
-    expect(container.textContent).toContain('无法定位该变更文件')
+    expect(container.querySelector('[data-testid="diff"]')?.getAttribute('data-path')).toBe(
+      first.path
+    )
+    expect(container.textContent).not.toContain('文件不存在')
+    expect(h.inspectFile).not.toHaveBeenCalled()
 
+    expect(updateTab).toHaveBeenLastCalledWith({ title: 'first.ts', tooltip: first.path })
+  })
+
+  it('shows no changes when the selected live change is restored to its original content', async () => {
+    const changed = status('D:\\workspace\\restored.ts')
+    h.statuses = [changed]
+    h.openPath = changed.path
+    await render()
+    await act(async () =>
+      (container.querySelector('[data-testid="tree-open"]') as HTMLButtonElement).click()
+    )
+
+    h.statuses = []
+    await render()
+
+    expect(container.querySelector('[data-testid="diff"]')).toBeNull()
+    expect(container.querySelector('[data-testid="navigator"]')).toBeNull()
+    expect(container.textContent).toContain('暂无变更')
+    expect(container.textContent).not.toContain('文件不存在')
+    expect(h.inspectFile).not.toHaveBeenCalled()
     expect(updateTab).toHaveBeenLastCalledWith({ title: '变更', tooltip: '全部变更' })
+  })
+
+  it('reports a missing file requested by a historical card', async () => {
+    requestChangesNavigation({ path: 'deleted.ts', resourceId: 7 })
+    await render()
+
+    expect(h.inspectFile).toHaveBeenCalledWith(7, 'D:\\workspace\\deleted.ts')
+    expect(container.textContent).toContain('文件不存在')
+  })
+
+  it('clears a historical selection when the file still exists without changes', async () => {
+    h.inspectFile.mockResolvedValue({ mime: 'text/plain' })
+    requestChangesNavigation({ path: 'clean.ts', resourceId: 7 })
+    await render()
+
+    expect(container.textContent).toContain('暂无变更')
+    expect(container.textContent).not.toContain('文件不存在')
+  })
+
+  it('falls back to a live change when a historical card targets an unchanged file', async () => {
+    const changed = status('D:\\workspace\\current.ts')
+    h.statuses = [changed]
+    h.inspectFile.mockResolvedValue({ mime: 'text/plain' })
+    requestChangesNavigation({ path: 'clean.ts', resourceId: 7 })
+
+    await render()
+
+    expect(container.querySelector('[data-testid="diff"]')?.getAttribute('data-path')).toBe(
+      changed.path
+    )
+    expect(container.textContent).not.toContain('文件不存在')
+    expect(updateTab).toHaveBeenLastCalledWith({ title: 'current.ts', tooltip: changed.path })
   })
 
   it('selects a changed file requested by a card', async () => {
@@ -305,7 +366,7 @@ describe('ChangesView', () => {
 
     await render()
 
-    expect(container.textContent).not.toContain('无法定位该变更文件')
+    expect(container.textContent).not.toContain('文件不存在')
   })
 
   it('shows a status error before reporting a selected file as missing', async () => {
@@ -315,7 +376,7 @@ describe('ChangesView', () => {
     await render()
 
     expect(container.textContent).toContain('status failed')
-    expect(container.textContent).not.toContain('无法定位该变更文件')
+    expect(container.textContent).not.toContain('文件不存在')
   })
 
   it('resolves a card path from the workspace root instead of cwd', async () => {
@@ -327,7 +388,9 @@ describe('ChangesView', () => {
     await render()
 
     expect(h.useGitDecorations).toHaveBeenLastCalledWith(7, h.workspaceRoot, {
-      includeIgnored: false
+      active: false,
+      includeIgnored: false,
+      preloadInactive: true
     })
     expect(container.querySelector('[data-testid="diff"]')?.getAttribute('data-path')).toBe(
       changed.path
@@ -381,12 +444,16 @@ describe('ChangesView', () => {
     await render(8)
     await act(async () => resolveSecond?.({ entries: [], root: 'D:\\second' }))
     expect(h.useGitDecorations).toHaveBeenLastCalledWith(8, 'D:\\second', {
-      includeIgnored: false
+      active: false,
+      includeIgnored: false,
+      preloadInactive: true
     })
 
     await act(async () => resolveFirst?.({ entries: [], root: 'D:\\stale' }))
     expect(h.useGitDecorations).toHaveBeenLastCalledWith(8, 'D:\\second', {
-      includeIgnored: false
+      active: false,
+      includeIgnored: false,
+      preloadInactive: true
     })
   })
 })

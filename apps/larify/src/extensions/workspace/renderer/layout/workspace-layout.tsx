@@ -62,6 +62,7 @@ export function WorkspaceLayout({
   }, [navigatorWidth, onNavigatorWidthChange])
 
   useLayoutEffect(() => {
+    if (!visible) return
     const body = bodyRef.current
     if (!body) return
     if (typeof ResizeObserver === 'undefined') return
@@ -73,7 +74,7 @@ export function WorkspaceLayout({
     observer.observe(body)
     update()
     return () => observer.disconnect()
-  }, [])
+  }, [visible])
 
   const clampToAvailableWidth = (width: number): number => {
     const bodyWidth = bodyRef.current?.clientWidth ?? 0

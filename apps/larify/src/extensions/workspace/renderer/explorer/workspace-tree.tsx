@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import Tree from 'rc-tree'
 import type RcTree from 'rc-tree/lib/Tree'
 import type { DataNode, Key } from 'rc-tree/lib/interface'
@@ -60,7 +60,10 @@ const measureTreeWidth = (entries: DataNode[], expandedKeys: Set<Key>, depth = 0
     return Math.max(width, nodeWidth, childWidth)
   }, 0)
 
-export function WorkspaceTree({ changesOnly, ...props }: WorkspaceTreeProps): React.JSX.Element {
+export const WorkspaceTree = memo(function WorkspaceTree({
+  changesOnly,
+  ...props
+}: WorkspaceTreeProps): React.JSX.Element {
   return (
     <WorkspaceTreeContent
       key={changesOnly ? 'changes' : 'all'}
@@ -68,7 +71,7 @@ export function WorkspaceTree({ changesOnly, ...props }: WorkspaceTreeProps): Re
       {...props}
     />
   )
-}
+})
 
 function WorkspaceTreeContent({
   changesOnly,
@@ -98,9 +101,14 @@ function WorkspaceTreeContent({
   useLayoutEffect(() => {
     const container = containerRef.current
     if (!container) return
-    setSize({ height: container.clientHeight, width: container.clientWidth })
+    const updateSize = (height: number, width: number): void =>
+      setSize((current) =>
+        current.height === height && current.width === width ? current : { height, width }
+      )
+    updateSize(container.clientHeight, container.clientWidth)
+    if (typeof ResizeObserver === 'undefined') return
     const observer = new ResizeObserver(([entry]) =>
-      setSize({ height: entry.contentRect.height, width: entry.contentRect.width })
+      updateSize(entry.contentRect.height, entry.contentRect.width)
     )
     observer.observe(container)
     return () => observer.disconnect()
@@ -118,18 +126,23 @@ function WorkspaceTreeContent({
   }, [compactEntries, revealPath])
 
   const revealActive = revealed && !revealState.dismissed
-  const visibleExpandedKeys = revealActive
-    ? [
-        ...new Set([
-          ...expandedKeys,
-          ...revealed.parents,
-          ...(revealDirectory ? [revealed.path] : [])
-        ])
-      ]
-    : expandedKeys
+  const { visibleExpandedKeys, visibleExpandedKeySet } = useMemo(() => {
+    const keys = revealActive
+      ? [
+          ...new Set([
+            ...expandedKeys,
+            ...revealed.parents,
+            ...(revealDirectory ? [revealed.path] : [])
+          ])
+        ]
+      : expandedKeys
+    return { visibleExpandedKeys: keys, visibleExpandedKeySet: new Set(keys) }
+  }, [expandedKeys, revealActive, revealDirectory, revealed])
   const visibleSelectedKeys = revealActive ? [revealed.path] : selectedKeys
-  const visibleExpandedKeySet = new Set(visibleExpandedKeys)
-  const contentWidth = measureTreeWidth(compactEntries, visibleExpandedKeySet)
+  const contentWidth = useMemo(
+    () => measureTreeWidth(compactEntries, visibleExpandedKeySet),
+    [compactEntries, visibleExpandedKeySet]
+  )
   const scrollWidth = size.width > 0 && contentWidth > size.width ? contentWidth : undefined
 
   useEffect(() => {
@@ -179,7 +192,7 @@ function WorkspaceTreeContent({
             }}
             onSelect={(keys, { node }) => {
               setRevealState({ dismissed: true, path: revealPath })
-              setSelectedKeys(keys)
+              setSelectedKeys(node.isLeaf ? [node.key] : keys)
               if (node.isLeaf) onOpen(String(node.key))
             }}
           />

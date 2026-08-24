@@ -1,13 +1,22 @@
 import type { ChatTransport, UIMessage, UIMessageChunk } from 'ai'
 import type { AgentModelConfig } from '../../../../../main/core/model/config'
+import { invalidateGitStatus } from '../../../../../extensions/workspace/renderer/changes/git-status-invalidation'
+
+function isGitSnapshotChunk(chunk: unknown): boolean {
+  return Boolean(
+    chunk && typeof chunk === 'object' && (chunk as { type?: unknown }).type === 'data-git-snapshot'
+  )
+}
 
 function openAgentStream(
   sessionId: string,
   signal: AbortSignal | undefined,
   onTitle: ((title: string) => void) | undefined,
-  start: (cancelled: () => boolean) => Promise<void>
+  onGitChange: () => void,
+  start: (cancelled: () => boolean, markStarted: () => void) => Promise<void>
 ): ReadableStream<UIMessageChunk> {
   let finished = false
+  let started = false
   let cleanup: Array<() => void> = []
 
   const dispose = (): void => {
@@ -21,13 +30,17 @@ function openAgentStream(
         if (finished) return
         finished = true
         dispose()
+        if (started) onGitChange()
         if (error === undefined) controller.close()
         else controller.error(error)
       }
 
       cleanup.push(
         window.bridge.on(`agent:chunk:${sessionId}`, (chunk) => {
-          if (!finished) controller.enqueue(chunk as UIMessageChunk)
+          if (!finished) {
+            if (isGitSnapshotChunk(chunk)) onGitChange()
+            controller.enqueue(chunk as UIMessageChunk)
+          }
         }),
         window.bridge.on(`agent:title:${sessionId}`, (title) => {
           if (!finished && typeof title === 'string') onTitle?.(title)
@@ -37,6 +50,7 @@ function openAgentStream(
       )
 
       const cancel = (): void => {
+        if (!started) return finish()
         void window.bridge.invoke('agent:cancel', sessionId).then(() => finish(), finish)
       }
       if (signal?.aborted) return finish()
@@ -46,7 +60,14 @@ function openAgentStream(
       }
 
       void Promise.resolve()
-        .then(() => start(() => finished || signal?.aborted === true))
+        .then(() =>
+          start(
+            () => finished || signal?.aborted === true,
+            () => {
+              started = true
+            }
+          )
+        )
         .catch(finish)
     },
 
@@ -54,7 +75,12 @@ function openAgentStream(
       if (finished) return
       finished = true
       dispose()
-      await window.bridge.invoke('agent:cancel', sessionId)
+      if (!started) return
+      try {
+        await window.bridge.invoke('agent:cancel', sessionId)
+      } finally {
+        onGitChange()
+      }
     }
   })
 }
@@ -72,20 +98,27 @@ export function createIpcTransport(
       const cwd = getCwd()
       const modelConfig = getModelConfig()
 
-      return openAgentStream(chatId, abortSignal, onTitle, async (cancelled) => {
-        const saved = (await window.bridge.invoke('attachment:save', chatId, message)) ?? message
-        if (cancelled()) return
-        await window.bridge.invoke('agent:send', {
-          sessionId: chatId,
-          message: saved,
-          cwd,
-          modelConfig
-        })
-        if (onSaved)
-          void Promise.resolve()
-            .then(onSaved)
-            .catch(() => undefined)
-      })
+      return openAgentStream(
+        chatId,
+        abortSignal,
+        onTitle,
+        () => invalidateGitStatus(cwd),
+        async (cancelled, markStarted) => {
+          const saved = (await window.bridge.invoke('attachment:save', chatId, message)) ?? message
+          if (cancelled()) return
+          markStarted()
+          await window.bridge.invoke('agent:send', {
+            sessionId: chatId,
+            message: saved,
+            cwd,
+            modelConfig
+          })
+          if (onSaved)
+            void Promise.resolve()
+              .then(onSaved)
+              .catch(() => undefined)
+        }
+      )
     },
 
     async reconnectToStream() {

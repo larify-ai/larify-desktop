@@ -27,6 +27,11 @@ vi.mock('../../../../src/extensions/workspace/renderer/workspace-client', () => 
 }))
 
 import { useGitDecorations } from '../../../../src/extensions/workspace/renderer/changes/use-git-decorations'
+import { invalidateGitStatus } from '../../../../src/extensions/workspace/renderer/changes/git-status-invalidation'
+import {
+  GitStatusCoordinator,
+  gitStatusCoordinator
+} from '../../../../src/extensions/workspace/renderer/changes/git-status-coordinator'
 
 const status = (path: string): FileStatusResult =>
   ({ index: ' ', path, working_dir: 'M' }) as FileStatusResult
@@ -48,19 +53,24 @@ describe('useGitDecorations', () => {
   let current: ReturnType<typeof useGitDecorations>
 
   function Probe({
+    active,
     includeIgnored,
+    preloadInactive,
     resourceId = 7,
     root = 'D:\\workspace'
   }: {
+    active?: boolean
     includeIgnored?: boolean
+    preloadInactive?: boolean
     resourceId?: number
     root?: string | null
   }): null {
-    current = useGitDecorations(resourceId, root, { includeIgnored })
+    current = useGitDecorations(resourceId, root, { active, includeIgnored, preloadInactive })
     return null
   }
 
   beforeEach(() => {
+    gitStatusCoordinator.clear()
     vi.clearAllMocks()
     vi.useFakeTimers()
     h.listener = undefined
@@ -90,6 +100,63 @@ describe('useGitDecorations', () => {
     expect(current.decorations.has('D:\\workspace\\file.ts')).toBe(true)
   })
 
+  it('shares one status request across views and merges the ignored-file requirement', async () => {
+    h.status.mockResolvedValue([])
+
+    await act(async () => {
+      reactRoot.render(
+        createElement(
+          'div',
+          null,
+          createElement(Probe, { includeIgnored: false, resourceId: 7, key: 'changes' }),
+          createElement(Probe, { includeIgnored: true, resourceId: 8, key: 'workspace' })
+        )
+      )
+      await Promise.resolve()
+    })
+
+    expect(h.status).toHaveBeenCalledOnce()
+    expect(h.status).toHaveBeenCalledWith('D:\\workspace', true)
+  })
+
+  it('returns a snapshot for each equivalent spelling of a shared root', async () => {
+    const changed = status('D:\\workspace\\file.ts')
+    const fetchStatus = vi.fn(async () => [changed])
+    const coordinator = new GitStatusCoordinator(fetchStatus)
+    const deactivate = coordinator.activate('D:\\workspace', false)
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(coordinator.snapshot('d:/workspace/', false)).toMatchObject({
+      loading: false,
+      root: 'd:/workspace/',
+      statuses: [changed]
+    })
+    expect(fetchStatus).toHaveBeenCalledOnce()
+    deactivate()
+    coordinator.clear()
+  })
+
+  it('cancels a pending refresh when a stronger request runs immediately', async () => {
+    const fetchStatus = vi.fn(async () => [])
+    const coordinator = new GitStatusCoordinator(fetchStatus)
+    const deactivateChanges = coordinator.activate('D:\\workspace', false)
+    await Promise.resolve()
+    await Promise.resolve()
+    coordinator.refresh('D:\\workspace')
+
+    const deactivateExplorer = coordinator.activate('D:\\workspace', true)
+    await Promise.resolve()
+    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(400)
+
+    expect(fetchStatus).toHaveBeenCalledTimes(2)
+    expect(fetchStatus).toHaveBeenLastCalledWith('D:\\workspace', true)
+    deactivateExplorer()
+    deactivateChanges()
+    coordinator.clear()
+  })
+
   it('reports loading until the initial status resolves', async () => {
     const pending = deferred<FileStatusResult[]>()
     h.status.mockReturnValue(pending.promise)
@@ -117,6 +184,45 @@ describe('useGitDecorations', () => {
     expect(h.status).toHaveBeenCalledTimes(2)
   })
 
+  it('refreshes after a matching Git status invalidation', async () => {
+    h.status.mockResolvedValue([])
+    await act(async () => {
+      reactRoot.render(createElement(Probe, {}))
+      await Promise.resolve()
+    })
+
+    invalidateGitStatus('d:/workspace/')
+    await act(async () => vi.advanceTimersByTimeAsync(400))
+
+    expect(h.status).toHaveBeenCalledTimes(2)
+  })
+
+  it('ignores Git status invalidations for another root', async () => {
+    h.status.mockResolvedValue([])
+    await act(async () => {
+      reactRoot.render(createElement(Probe, {}))
+      await Promise.resolve()
+    })
+
+    invalidateGitStatus('D:/other')
+    await act(async () => vi.advanceTimersByTimeAsync(400))
+
+    expect(h.status).toHaveBeenCalledOnce()
+  })
+
+  it('refreshes when the window regains focus', async () => {
+    h.status.mockResolvedValue([])
+    await act(async () => {
+      reactRoot.render(createElement(Probe, {}))
+      await Promise.resolve()
+    })
+
+    window.dispatchEvent(new Event('focus'))
+    await act(async () => vi.advanceTimersByTimeAsync(400))
+
+    expect(h.status).toHaveBeenCalledTimes(2)
+  })
+
   it('cancels queued work when unmounted', async () => {
     const pending = deferred<FileStatusResult[]>()
     h.status.mockReturnValueOnce(pending.promise)
@@ -130,6 +236,56 @@ describe('useGitDecorations', () => {
     expect(h.status).toHaveBeenCalledOnce()
     expect(h.unsubscribe).toHaveBeenCalledOnce()
     reactRoot = createRoot(container)
+  })
+
+  it('does no Git work for an inactive view unless preloading is requested', async () => {
+    await act(async () => reactRoot.render(createElement(Probe, { active: false })))
+
+    expect(h.status).not.toHaveBeenCalled()
+    expect(h.listener).toBeUndefined()
+    expect(current.statuses).toEqual([])
+  })
+
+  it('preloads one inactive snapshot and keeps its lightweight watcher', async () => {
+    const changed = status('D:\\workspace\\file.ts')
+    h.status.mockResolvedValue([changed])
+    await act(async () => {
+      reactRoot.render(createElement(Probe, { active: false, preloadInactive: true }))
+      await Promise.resolve()
+    })
+
+    expect(h.status).toHaveBeenCalledOnce()
+    expect(h.listener).toBeTypeOf('function')
+    expect(current.statuses).toEqual([changed])
+
+    await act(async () =>
+      reactRoot.render(createElement(Probe, { active: false, preloadInactive: true }))
+    )
+    expect(h.status).toHaveBeenCalledOnce()
+  })
+
+  it('reuses the cached snapshot immediately and refreshes after observation resumes', async () => {
+    const changed = status('D:\\workspace\\file.ts')
+    h.status.mockResolvedValue([changed])
+    await act(async () => {
+      reactRoot.render(createElement(Probe, { active: true }))
+      await Promise.resolve()
+    })
+
+    await act(async () => reactRoot.render(createElement(Probe, { active: false })))
+    expect(h.unsubscribe).toHaveBeenCalledOnce()
+    expect(h.status).toHaveBeenCalledOnce()
+    expect(current.statuses).toEqual([changed])
+
+    await act(async () => {
+      reactRoot.render(createElement(Probe, { active: true }))
+      await Promise.resolve()
+    })
+    expect(current.statuses).toEqual([changed])
+    expect(h.status).toHaveBeenCalledOnce()
+
+    await act(async () => vi.advanceTimersByTimeAsync(400))
+    expect(h.status).toHaveBeenCalledTimes(2)
   })
 
   it('ignores a stale request after switching roots', async () => {

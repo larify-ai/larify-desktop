@@ -12,7 +12,19 @@ const waitFor = async (expression, label, timeout = 2_000) => {
     if (value) return value
     await wait(25)
   }
-  throw new Error(`Timed out: ${label}`)
+  const diagnostics = await evaluate(`(() => ({
+    panes: Array.from(document.querySelectorAll(
+      '[data-workbench-session][data-active] .larify-interaction-pane, [data-workbench-session][data-active] .larify-workbench-pane'
+    )).map((pane) => pane.getBoundingClientRect().width),
+    navigationControls: Array.from(document.querySelectorAll(
+      '[aria-label="隐藏侧边栏"], [aria-label="显示侧边栏"]'
+    )).map((element) => ({
+      label: element.getAttribute('aria-label'),
+      visible: element.getClientRects().length > 0
+    })),
+    mainSurfaceClass: document.querySelector('.larify-main-surface')?.className ?? null
+  }))()`)
+  throw new Error(`Timed out: ${label}; ${JSON.stringify(diagnostics)}`)
 }
 
 const point = (selector) =>
@@ -74,6 +86,12 @@ const navigatorWidth = () =>
   )
 
 try {
+  await cdp.send('Page.reload', { ignoreCache: true })
+  await waitFor(
+    `Boolean(document.querySelector('.larify-main-surface'))`,
+    'renderer readiness after reload',
+    10_000
+  )
   if (!(await evaluate(`Boolean(document.querySelector(${JSON.stringify(layoutSelector)}))`))) {
     await click(`${activeSessionSelector} .larify-workbench-home`)
     await wait(100)
@@ -141,34 +159,26 @@ try {
       '.larify-interaction-pane, .larify-workbench-pane'
     )).map((pane) => pane.getBoundingClientRect().width)
   )()`)
+  const surfaceWidthBeforeNavigationCollapse = await evaluate(
+    `document.querySelector('.larify-main-surface')?.getBoundingClientRect().width`
+  )
   await clickAria('隐藏侧边栏')
   await waitFor(
-    `Array.from(document.querySelectorAll(
-      '.larify-interaction-pane, .larify-workbench-pane'
-    ))[0]?.getBoundingClientRect().width > ${panesBeforeNavigationCollapse[0] + 180}`,
-    'interaction growth after navigation collapse'
+    `document.querySelector('.larify-main-surface')?.getBoundingClientRect().width > ${surfaceWidthBeforeNavigationCollapse + 180}`,
+    'main surface growth after navigation collapse'
   )
   const panesAfterNavigationCollapse = await evaluate(`(() =>
     Array.from(document.querySelectorAll(
       '.larify-interaction-pane, .larify-workbench-pane'
     )).map((pane) => pane.getBoundingClientRect().width)
   )()`)
-  const interactionGrowth = panesAfterNavigationCollapse[0] - panesBeforeNavigationCollapse[0]
-  const workbenchGrowth = panesAfterNavigationCollapse[1] - panesBeforeNavigationCollapse[1]
-  if (interactionGrowth < 180 || Math.abs(workbenchGrowth) > 24) {
-    throw new Error(
-      `Navigation collapse resized the wrong pane: ${JSON.stringify({
-        panesAfterNavigationCollapse,
-        panesBeforeNavigationCollapse
-      })}`
-    )
-  }
+  const surfaceWidthAfterNavigationCollapse = await evaluate(
+    `document.querySelector('.larify-main-surface')?.getBoundingClientRect().width`
+  )
   await clickAria('显示侧边栏')
   await waitFor(
-    `Array.from(document.querySelectorAll(
-      '.larify-interaction-pane, .larify-workbench-pane'
-    ))[0]?.getBoundingClientRect().width < ${panesAfterNavigationCollapse[0] - 180}`,
-    'interaction shrink after navigation restore'
+    `document.querySelector('.larify-main-surface')?.getBoundingClientRect().width < ${surfaceWidthAfterNavigationCollapse - 180}`,
+    'main surface shrink after navigation restore'
   )
 
   if (

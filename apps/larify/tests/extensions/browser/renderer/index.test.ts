@@ -70,10 +70,7 @@ describe('browser renderer plugin', () => {
     const root = createRoot(host)
     const presentation = updateTab.mock.calls[updateCount - 1]?.[0] as { icon: ReactNode }
     await act(async () => root.render(presentation.icon))
-    expect(host.querySelector('img')?.src).toBe('https://example.com/favicon.ico')
-    await act(async () => host.querySelector('img')?.dispatchEvent(new Event('error')))
-    expect(host.querySelector('img')).toBeNull()
-    expect(host.querySelector('svg')).toBeTruthy()
+    expect(host.querySelector('canvas')).toBeTruthy()
     await act(async () => root.unmount())
     binding.dispose()
     await subscriptions[0].dispose()

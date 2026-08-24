@@ -15,6 +15,7 @@ import {
 } from '@renderer/app/registry/file-previews'
 import { ChangesIcon } from './changes/changes-icon'
 import { loadChangesView, preloadChangesEditor } from './changes/changes-loaders'
+import { invalidateGitStatus } from './changes/git-status-invalidation'
 
 const WorkspaceView = lazy(() =>
   import('./workspace-view').then(({ WorkspaceView }) => ({ default: WorkspaceView }))
@@ -45,6 +46,13 @@ const plugin: RendererPlugin = {
     if (!renderers) throw new Error('Workbench renderer registry is unavailable.')
     const previews = registry.get<PreviewRegistry>(previewRegistryToken)
     if (!previews) throw new Error('Preview registry is unavailable.')
+
+    const bridge = typeof window === 'undefined' ? undefined : window.bridge
+    const unbindTerminal = bridge?.on('terminal:command-finished', (payload) => {
+      const cwd = (payload as { cwd?: unknown } | undefined)?.cwd
+      if (typeof cwd === 'string') invalidateGitStatus(cwd)
+    })
+    if (unbindTerminal) subscriptions.push({ dispose: () => void unbindTerminal() })
 
     const preload = (): void => {
       void preloadChangesEditor().catch(() => undefined)

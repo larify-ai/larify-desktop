@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef } from 'react'
 import { FitAddon } from '@xterm/addon-fit'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { Terminal as XTerm, type ITheme } from '@xterm/xterm'
@@ -62,6 +62,7 @@ const pasteClipboard = (terminal: XTerm): void => {
 }
 
 export function TerminalView({
+  active = true,
   resourceId: terminalId,
   sessionId
 }: WorkbenchRendererProps): React.JSX.Element {
@@ -136,6 +137,12 @@ export function TerminalView({
     return () => cancelAnimationFrame(frame)
   }, [resolvedTheme])
 
+  useLayoutEffect(() => {
+    const terminal = terminalRef.current
+    if (!terminal) return
+    if (!active) terminal.blur()
+  }, [active])
+
   useEffect(() => {
     let active = true
     const container = containerRef.current
@@ -143,7 +150,7 @@ export function TerminalView({
 
     const terminal = new XTerm({
       allowProposedApi: true,
-      cursorBlink: true,
+      cursorBlink: false,
       cursorStyle: 'bar',
       cursorWidth: 2,
       fontFamily: readCssVar('--font-mono'),
@@ -274,11 +281,12 @@ export function TerminalView({
       resizeTimerRef.current = null
       fitFrameRef.current = null
     }
-  }, [scheduleFit, sessionId, terminalId])
+  }, [fit, scheduleFit, sessionId, terminalId])
 
   return (
     <div
       ref={containerRef}
+      data-terminal-active={active}
       className="larify-terminal-surface h-full overflow-hidden bg-background"
     />
   )

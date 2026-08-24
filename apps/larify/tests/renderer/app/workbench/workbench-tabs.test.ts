@@ -230,6 +230,36 @@ describe('WorkbenchTabs', () => {
     vi.unstubAllGlobals()
   })
 
+  it('marks only titles whose text overflows their available width', async () => {
+    const callbacks: ResizeObserverCallback[] = []
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe = vi.fn()
+        disconnect = vi.fn()
+
+        constructor(callback: ResizeObserverCallback) {
+          callbacks.push(callback)
+        }
+      }
+    )
+    await renderTabs()
+    const title = container.querySelector<HTMLElement>(
+      '[data-tab-id="terminal:1"] .larify-workbench-tab-title'
+    )!
+    Object.defineProperties(title, {
+      clientWidth: { configurable: true, value: 80 },
+      scrollWidth: { configurable: true, value: 120 }
+    })
+
+    await act(async () => callbacks.forEach((callback) => callback([], {} as ResizeObserver)))
+    expect(title.hasAttribute('data-overflow')).toBe(true)
+
+    Object.defineProperty(title, 'scrollWidth', { configurable: true, value: 80 })
+    await act(async () => callbacks.forEach((callback) => callback([], {} as ResizeObserver)))
+    expect(title.hasAttribute('data-overflow')).toBe(false)
+  })
+
   it('converts the mouse wheel to horizontal scrolling when tabs overflow', async () => {
     await renderTabs()
     const scroller = container.querySelector<HTMLElement>('.larify-workbench-tab-scroll')!

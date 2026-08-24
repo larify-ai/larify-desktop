@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/explicit-function-return-type */
+import assert from 'node:assert/strict'
 import { connectLarifyCdp } from '../../../manual/cdp-client.mjs'
 
 const wait = (duration) => new Promise((resolve) => setTimeout(resolve, duration))
@@ -67,8 +68,8 @@ try {
   await wait(300)
   await openChanges()
   await waitFor(
-    `Boolean(document.querySelector(${JSON.stringify(`${view} .workspace-file-preview`)}))`,
-    'initial diff'
+    `(() => { const preview = document.querySelector(${JSON.stringify(`${view} .workspace-file-preview`)}); const rect = preview?.getBoundingClientRect(); return Boolean(preview && rect.width > 0 && rect.height > 0 && preview.querySelectorAll('.view-line').length > 0) })()`,
+    'initial diff content'
   )
   if (
     await evaluate(
@@ -112,13 +113,18 @@ try {
       leaves: leaves.length,
       mode: preview?.getAttribute('data-diff-mode'),
       navigatorOpen: root?.querySelector('.workspace-layout-navigator')?.hasAttribute('data-open'),
-      selected: tree?.querySelectorAll('.rc-tree-treenode[aria-selected="true"]').length ?? 0,
+      selected: tree?.querySelectorAll('.rc-tree-treenode-selected').length ?? 0,
+      tabTitle: document.querySelector(${JSON.stringify(`${session} .larify-workbench-tab-trigger[data-state="active"] .larify-workbench-tab-title`)})?.textContent?.trim() ?? null,
+      viewLines: preview?.querySelectorAll('.view-line').length ?? 0,
       visibleLightbulbs: [...(root?.querySelectorAll('.lightbulb-glyph') ?? [])].filter(
         (node) => getComputedStyle(node).display !== 'none'
       ).length
     }
   })()`)
   if (initial.leaves < 1) throw new Error(`No changed files: ${JSON.stringify(initial)}`)
+  assert.equal(initial.selected, 1, 'the initial changed file must be selected')
+  assert.notEqual(initial.tabTitle, '变更', 'the initial Changes tab must preload its file name')
+  assert.ok(initial.viewLines > 0, 'the initial changed file must render diff contents')
   if (initial.collapsedDirectories !== 0) {
     throw new Error(`Changes tree is not fully expanded: ${JSON.stringify(initial)}`)
   }
@@ -147,8 +153,8 @@ try {
   })()`)
   if (!selectedFile) throw new Error('Changed file could not be resolved')
   await waitFor(
-    `document.querySelector(${JSON.stringify(`${view} .workspace-file-preview`)})?.getAttribute('data-diff-mode') === 'unified'`,
-    'selected file diff'
+    `(() => { const preview = document.querySelector(${JSON.stringify(`${view} .workspace-file-preview`)}); return preview?.getAttribute('data-diff-mode') === 'unified' && preview.querySelectorAll('.view-line').length > 0 })()`,
+    'selected file diff content'
   )
   const selectedTitle = selectedFile.split(/[\\/]/).at(-1)
   await waitFor(
@@ -175,7 +181,7 @@ try {
     'split diff'
   )
   await waitFor(
-    `Array.from(document.querySelectorAll(${JSON.stringify(`${view} .monaco-diff-editor .editor.original, ${view} .monaco-diff-editor .editor.modified`)})).length === 2 && Array.from(document.querySelectorAll(${JSON.stringify(`${view} .monaco-diff-editor .editor.original, ${view} .monaco-diff-editor .editor.modified`)})).every((editor) => editor.getBoundingClientRect().width > 0)`,
+    `Array.from(document.querySelectorAll(${JSON.stringify(`${view} .monaco-diff-editor .editor.original, ${view} .monaco-diff-editor .editor.modified`)})).length === 2 && Array.from(document.querySelectorAll(${JSON.stringify(`${view} .monaco-diff-editor .editor.original, ${view} .monaco-diff-editor .editor.modified`)})).every((editor) => editor.getBoundingClientRect().width > 0) && document.querySelectorAll(${JSON.stringify(`${view} .monaco-diff-editor .view-line`)}).length > 0`,
     'split editor layout'
   )
   const splitEditorWidths = await evaluate(`(() => {

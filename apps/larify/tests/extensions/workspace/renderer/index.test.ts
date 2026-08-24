@@ -9,6 +9,12 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true
 const changesLoaders = vi.hoisted(() => ({
   preloadChangesEditor: vi.fn(() => Promise.resolve())
 }))
+const gitStatusInvalidation = vi.hoisted(() => ({ invalidateGitStatus: vi.fn() }))
+
+vi.mock(
+  '../../../../src/extensions/workspace/renderer/changes/git-status-invalidation',
+  () => gitStatusInvalidation
+)
 
 vi.mock('../../../../src/extensions/workspace/renderer/preview/markdown-preview', () => ({
   MarkdownPreview: () => createElement('div', { 'data-preview': 'markdown' })
@@ -43,6 +49,33 @@ import {
 import { RendererPluginHost } from '../../../../src/renderer/src/app/registry/renderer-plugins'
 
 describe('workspace renderer plugin', () => {
+  it('invalidates Git status when a terminal command finishes', () => {
+    let listener: ((payload: unknown) => void) | undefined
+    const unbind = vi.fn()
+    Object.defineProperty(window, 'bridge', {
+      configurable: true,
+      value: {
+        on: vi.fn((_channel: string, callback: (payload: unknown) => void) => {
+          listener = callback
+          return unbind
+        })
+      }
+    })
+    gitStatusInvalidation.invalidateGitStatus.mockClear()
+    try {
+      const { registry, subscriptions } = createServices()
+      plugin.activate({ registry, subscriptions })
+
+      listener?.({ cwd: 'D:\\workspace' })
+
+      expect(gitStatusInvalidation.invalidateGitStatus).toHaveBeenCalledWith('D:\\workspace')
+      subscriptions.forEach(({ dispose }) => dispose())
+      expect(unbind).toHaveBeenCalledOnce()
+    } finally {
+      Reflect.deleteProperty(window, 'bridge')
+    }
+  })
+
   it('does not schedule eager loading without the idle callback API', () => {
     vi.stubGlobal('requestIdleCallback', undefined)
     changesLoaders.preloadChangesEditor.mockClear()

@@ -42,6 +42,7 @@ class FakeTerminalService {
   unbindChange = vi.fn()
   unbindData = vi.fn()
   unbindExit = vi.fn()
+  unbindCommandFinished = vi.fn()
   private changeCallback?: (state: SessionTerminalsState) => void
   private dataCallback?: (
     sessionId: string,
@@ -51,6 +52,15 @@ class FakeTerminalService {
     end?: number
   ) => void
   private exitCallback?: (sessionId: string, terminalId: number, exitCode: number) => void
+  private commandFinishedCallback?: (
+    sessionId: string,
+    terminalId: number,
+    event: { exitCode?: number }
+  ) => void
+  terminalState = vi.fn((_sessionId: string, terminalId: number) => ({
+    id: terminalId,
+    cwd: 'D:\\workspace'
+  }))
 
   bindChange(callback: (state: SessionTerminalsState) => void): () => void {
     this.changeCallback = callback
@@ -77,6 +87,13 @@ class FakeTerminalService {
     return this.unbindExit
   }
 
+  bindCommandFinished(
+    callback: (sessionId: string, terminalId: number, event: { exitCode?: number }) => void
+  ): () => void {
+    this.commandFinishedCallback = callback
+    return this.unbindCommandFinished
+  }
+
   emitChange(state: SessionTerminalsState): void {
     this.changeCallback?.(state)
   }
@@ -93,6 +110,10 @@ class FakeTerminalService {
 
   emitExit(sessionId: string, terminalId: number, exitCode: number): void {
     this.exitCallback?.(sessionId, terminalId, exitCode)
+  }
+
+  emitCommandFinished(sessionId: string, terminalId: number, exitCode?: number): void {
+    this.commandFinishedCallback?.(sessionId, terminalId, { exitCode })
   }
 }
 
@@ -146,6 +167,21 @@ describe('registerTerminalIpc', () => {
       {
         channel: 'terminal:state',
         payload: { sessionId: 'session-1', terminals: [] }
+      }
+    ])
+  })
+
+  it('sends command completion with the terminal working directory', async () => {
+    const { registerTerminalIpc } = await importIpc()
+    const service = new FakeTerminalService()
+    registerTerminalIpc(service as never, electronMock.window as never)
+
+    service.emitCommandFinished('session-1', 7, 0)
+
+    expect(electronMock.sends).toEqual([
+      {
+        channel: 'terminal:command-finished',
+        payload: { sessionId: 'session-1', terminalId: 7, cwd: 'D:\\workspace', exitCode: 0 }
       }
     ])
   })
@@ -248,6 +284,7 @@ describe('registerTerminalIpc', () => {
     expect(service.unbindChange).toHaveBeenCalled()
     expect(service.unbindData).toHaveBeenCalled()
     expect(service.unbindExit).toHaveBeenCalled()
+    expect(service.unbindCommandFinished).toHaveBeenCalled()
     expect(electronMock.ipcMain.removeHandler).toHaveBeenCalledTimes(4)
     expect(electronMock.handlers.size).toBe(0)
   })

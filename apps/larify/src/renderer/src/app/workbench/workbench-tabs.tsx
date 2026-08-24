@@ -180,7 +180,21 @@ function SortableTab({
 }): React.JSX.Element {
   const { isDragging, listeners, setNodeRef, transform, transition } = useSortable({ id: tab.id })
   const triggerRef = useRef<HTMLButtonElement>(null)
+  const titleRef = useRef<HTMLSpanElement>(null)
   const [menuOpen, setMenuOpen] = useState(false)
+  const [titleOverflowing, setTitleOverflowing] = useState(false)
+
+  useEffect(() => {
+    const title = titleRef.current
+    if (!title) return
+
+    const update = (): void => setTitleOverflowing(title.scrollWidth > title.clientWidth + 1)
+    update()
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(update)
+    observer.observe(title)
+    return () => observer.disconnect()
+  }, [tab.title])
 
   return (
     <DropdownMenu.Root modal={false} open={menuOpen} onOpenChange={setMenuOpen}>
@@ -219,7 +233,13 @@ function SortableTab({
           <span aria-hidden className="larify-workbench-tab-icon">
             {tab.icon}
           </span>
-          <span className="larify-workbench-tab-title">{tab.title}</span>
+          <span
+            className="larify-workbench-tab-title"
+            data-overflow={titleOverflowing || undefined}
+            ref={titleRef}
+          >
+            {tab.title}
+          </span>
         </Tabs.Trigger>
         <button
           aria-label={`关闭 ${tab.title}`}

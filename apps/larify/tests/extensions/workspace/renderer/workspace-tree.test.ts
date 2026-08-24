@@ -19,6 +19,7 @@ const treeProps = vi.hoisted(() => ({
         expandedKeys: Key[]
         loadData(node: DataNode): Promise<void>
         onExpand(keys: Key[]): void
+        onSelect(keys: Key[], info: { node: DataNode }): void
         selectedKeys: Key[]
         scrollWidth?: number
         titleRender(node: DataNode): React.ReactElement
@@ -32,6 +33,7 @@ vi.mock('rc-tree', () => ({
     expandedKeys: Key[]
     loadData(node: DataNode): Promise<void>
     onExpand(keys: Key[]): void
+    onSelect(keys: Key[], info: { node: DataNode }): void
     selectedKeys: Key[]
     scrollWidth?: number
     titleRender(node: DataNode): React.ReactElement
@@ -55,6 +57,7 @@ const directory = (path: string, children: DataNode[]): DataNode => ({
 
 describe('WorkspaceTree', () => {
   let container: HTMLDivElement
+  let onOpen: ReturnType<typeof vi.fn>
   let onToggle: ReturnType<typeof vi.fn>
   let root: Root
 
@@ -75,6 +78,7 @@ describe('WorkspaceTree', () => {
     vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(300)
     container = document.createElement('div')
     document.body.appendChild(container)
+    onOpen = vi.fn()
     onToggle = vi.fn(async () => undefined)
     root = createRoot(container)
   })
@@ -182,6 +186,16 @@ describe('WorkspaceTree', () => {
     expect(requestFrame).toHaveBeenCalledTimes(1)
   })
 
+  it('keeps a leaf selected when the selected file is clicked again', () => {
+    const file = { isLeaf: true, key: '/workspace/file.ts', title: 'file.ts' }
+    render([directory('/workspace', [file])])
+
+    act(() => treeProps.current?.onSelect([], { node: file }))
+
+    expect(treeProps.current?.selectedKeys).toEqual(['/workspace/file.ts'])
+    expect(onOpen).toHaveBeenCalledWith('/workspace/file.ts')
+  })
+
   it('does not enable horizontal scrolling when the tree is narrower than its container', () => {
     render([directory('/workspace', [])])
 
@@ -244,7 +258,7 @@ describe('WorkspaceTree', () => {
           changesOnly,
           entries,
           gitDecorations: new Map(),
-          onOpen: vi.fn(),
+          onOpen,
           onToggle,
           revealDirectory,
           revealPath

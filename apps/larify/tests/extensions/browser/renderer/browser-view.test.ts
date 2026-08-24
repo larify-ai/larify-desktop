@@ -121,12 +121,14 @@ describe('BrowserView', () => {
     h.state = { id: 42, url: 'https://example.com' } as BrowserTabState
     await renderView()
     const viewport = container.querySelector('[data-testid="browser-viewport"]') as HTMLDivElement
-    viewport.getBoundingClientRect = vi.fn(() => DOMRect.fromRect({
-      x: 11,
-      y: 22,
-      width: 333,
-      height: 444
-    }))
+    viewport.getBoundingClientRect = vi.fn(() =>
+      DOMRect.fromRect({
+        x: 11,
+        y: 22,
+        width: 333,
+        height: 444
+      })
+    )
     window.dispatchEvent(new CustomEvent('larify:native-layout'))
 
     expect(webview().parentElement?.style.cssText).toContain('left: 11px')
@@ -173,7 +175,41 @@ describe('BrowserView', () => {
       )
     })
 
-    expect(document.body.querySelectorAll('[data-browser-webview-host="42"] webview')).toHaveLength(1)
+    expect(document.body.querySelectorAll('[data-browser-webview-host="42"] webview')).toHaveLength(
+      1
+    )
+  })
+
+  it('parks an inactive webview without shrinking its last visible backing size over time', async () => {
+    vi.useFakeTimers()
+    h.state = { id: 42, url: 'https://example.com' } as BrowserTabState
+    await renderView()
+    const viewport = container.querySelector('[data-testid="browser-viewport"]') as HTMLDivElement
+    viewport.getBoundingClientRect = vi.fn(() =>
+      DOMRect.fromRect({ x: 20, y: 30, width: 2560, height: 1400 })
+    )
+    window.dispatchEvent(new CustomEvent('larify:native-layout'))
+
+    await act(async () => {
+      root.render(
+        createElement(BrowserView, {
+          active: false,
+          resourceId: 42,
+          sessionId: 'session-a',
+          updateTab: vi.fn()
+        })
+      )
+    })
+
+    const style = webview().parentElement!.style
+    expect(style.left).toBe('-10000px')
+    expect(style.top).toBe('-10000px')
+    expect(style.width).toBe('2560px')
+    expect(style.height).toBe('1400px')
+    await act(async () => vi.advanceTimersByTimeAsync(30_000))
+    expect(style.width).toBe('2560px')
+    expect(style.height).toBe('1400px')
+    vi.useRealTimers()
   })
 
   it('isolates a leased webview from user layout changes and tab switches', async () => {

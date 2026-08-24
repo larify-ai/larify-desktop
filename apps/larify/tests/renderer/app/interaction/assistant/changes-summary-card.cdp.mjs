@@ -18,6 +18,16 @@ const waitFor = async (expression, label, timeout = 5_000) => {
 }
 
 try {
+  // Start from a committed renderer tree. During development, Vite HMR can leave
+  // virtualized message nodes backed by stale React fibers, which makes a CDP
+  // hover exercise the old tree instead of the code under test.
+  await cdp.send('Page.reload', { ignoreCache: true })
+  await waitFor(`document.readyState === 'complete'`, 'renderer reload')
+  await waitFor(
+    `document.querySelectorAll('button[data-session-id]').length > 0`,
+    'session list'
+  )
+
   const switched = await evaluate(`(() => {
     const button = [...document.querySelectorAll('button[data-session-id]')].find((candidate) =>
       candidate.textContent?.includes(${JSON.stringify(process.env.LARIFY_REVIEW_CARD_SESSION ?? '请使用工具分两步完成')})

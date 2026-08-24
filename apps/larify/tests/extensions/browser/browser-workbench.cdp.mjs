@@ -61,8 +61,8 @@ const connectPage = async (urlPart) => {
     const list = await fetch(`http://127.0.0.1:${port}/json/list`).then((response) =>
       response.json()
     )
-    target = list.find(({ type, url }) =>
-      (type === 'page' || type === 'webview') && url.includes(urlPart)
+    target = list.find(
+      ({ type, url }) => (type === 'page' || type === 'webview') && url.includes(urlPart)
     )
     if (target) break
     await wait(50)
@@ -235,17 +235,23 @@ try {
     `(async () => (await window.bridge.invoke('browser:getState', ${JSON.stringify(first.sessionId)}, ${first.id}))?.url === ${JSON.stringify(secondUrl)})()`,
     'second address navigation'
   )
-  await evaluate(`window.bridge.invoke('browser:back', ${JSON.stringify(first.sessionId)}, ${first.id})`)
+  await evaluate(
+    `window.bridge.invoke('browser:back', ${JSON.stringify(first.sessionId)}, ${first.id})`
+  )
   await waitFor(
     `(async () => (await window.bridge.invoke('browser:getState', ${JSON.stringify(first.sessionId)}, ${first.id}))?.url === ${JSON.stringify(url)})()`,
     'browser back'
   )
-  await evaluate(`window.bridge.invoke('browser:forward', ${JSON.stringify(first.sessionId)}, ${first.id})`)
+  await evaluate(
+    `window.bridge.invoke('browser:forward', ${JSON.stringify(first.sessionId)}, ${first.id})`
+  )
   await waitFor(
     `(async () => (await window.bridge.invoke('browser:getState', ${JSON.stringify(first.sessionId)}, ${first.id}))?.url === ${JSON.stringify(secondUrl)})()`,
     'browser forward'
   )
-  await evaluate(`window.bridge.invoke('browser:reload', ${JSON.stringify(first.sessionId)}, ${first.id})`)
+  await evaluate(
+    `window.bridge.invoke('browser:reload', ${JSON.stringify(first.sessionId)}, ${first.id})`
+  )
   await waitFor(
     `(async () => !(await window.bridge.invoke('browser:getState', ${JSON.stringify(first.sessionId)}, ${first.id}))?.loading)()`,
     'browser reload'
@@ -329,12 +335,16 @@ try {
     'linked page tab title'
   )
   page.socket.close()
-  await evaluate(`window.bridge.invoke('browser:back', ${JSON.stringify(first.sessionId)}, ${first.id})`)
+  await evaluate(
+    `window.bridge.invoke('browser:back', ${JSON.stringify(first.sessionId)}, ${first.id})`
+  )
   await waitFor(
     `(async () => (await window.bridge.invoke('browser:getState', ${JSON.stringify(first.sessionId)}, ${first.id}))?.title === 'Browser Interaction Test')()`,
     'back to interaction fixture'
   )
-  await evaluate(`window.bridge.invoke('browser:back', ${JSON.stringify(first.sessionId)}, ${first.id})`)
+  await evaluate(
+    `window.bridge.invoke('browser:back', ${JSON.stringify(first.sessionId)}, ${first.id})`
+  )
   await waitFor(
     `(async () => (await window.bridge.invoke('browser:getState', ${JSON.stringify(first.sessionId)}, ${first.id}))?.url === ${JSON.stringify(secondUrl)})()`,
     'back to remote page'
@@ -395,7 +405,11 @@ try {
     const next = host.getBoundingClientRect()
     return { before: { x, y, width, height }, after: { x: next.x, y: next.y, width: next.width, height: next.height } }
   })()`)
-  assert.deepEqual(stagedBounds.after, stagedBounds.before, 'user layout must not resize a leased webview')
+  assert.deepEqual(
+    stagedBounds.after,
+    stagedBounds.before,
+    'user layout must not resize a leased webview'
+  )
   const hiddenPage = await connectPage('history=second')
   await hiddenPage.send('Page.bringToFront')
   await hiddenPage.send('Emulation.setFocusEmulationEnabled', { enabled: true })
@@ -406,10 +420,12 @@ try {
     mobile: false
   })
   assert.equal(
-    (await hiddenPage.send('Runtime.evaluate', {
-      expression: 'innerWidth === 640 && innerHeight === 480',
-      returnByValue: true
-    })).result.value,
+    (
+      await hiddenPage.send('Runtime.evaluate', {
+        expression: 'innerWidth === 640 && innerHeight === 480',
+        returnByValue: true
+      })
+    ).result.value,
     true,
     'Agent CDP must still be able to resize the guest viewport'
   )
@@ -417,7 +433,10 @@ try {
     format: 'png',
     fromSurface: true
   })
-  assert.ok(hiddenCapture.data.length > 1_000, 'hidden webview screenshot should contain image data')
+  assert.ok(
+    hiddenCapture.data.length > 1_000,
+    'hidden webview screenshot should contain image data'
+  )
   await hiddenPage.send('Emulation.setFocusEmulationEnabled', { enabled: false })
   await hiddenPage.send('Emulation.clearDeviceMetricsOverride')
   hiddenPage.socket.close()

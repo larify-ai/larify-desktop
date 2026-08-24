@@ -12,7 +12,11 @@ import { useBrowser } from './use-browser'
 
 const parkedBounds = { left: -10_000, top: -10_000, width: 1280, height: 800 }
 
-export function BrowserView({ active, resourceId, sessionId }: WorkbenchRendererProps): React.JSX.Element {
+export function BrowserView({
+  active,
+  resourceId,
+  sessionId
+}: WorkbenchRendererProps): React.JSX.Element {
   const browser = useBrowser(sessionId, resourceId)
   const tab = browser.state
   const hasPage = Boolean(tab?.url && tab.url !== 'about:blank')
@@ -20,6 +24,7 @@ export function BrowserView({ active, resourceId, sessionId }: WorkbenchRenderer
   const webviewRef = useRef<Electron.WebviewTag>(null)
   const viewportRef = useRef<HTMLDivElement>(null)
   const hostRef = useRef<HTMLDivElement>(null)
+  const lastVisibleSizeRef = useRef({ height: parkedBounds.height, width: parkedBounds.width })
 
   useLayoutEffect(() => {
     const host = hostRef.current
@@ -30,7 +35,17 @@ export function BrowserView({ active, resourceId, sessionId }: WorkbenchRenderer
         host.style.zIndex = shown ? '' : '-1'
         return
       }
-      const bounds = shown ? viewport.getBoundingClientRect() : parkedBounds
+      const viewportBounds = shown ? viewport.getBoundingClientRect() : null
+      if (viewportBounds?.width && viewportBounds.height) {
+        lastVisibleSizeRef.current = {
+          height: viewportBounds.height,
+          width: viewportBounds.width
+        }
+      }
+      const bounds = viewportBounds ?? {
+        ...parkedBounds,
+        ...lastVisibleSizeRef.current
+      }
       host.style.zIndex = ''
       Object.assign(host.style, {
         left: `${bounds.left}px`,

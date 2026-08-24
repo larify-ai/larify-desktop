@@ -10,7 +10,8 @@ const wait = (duration) => new Promise((resolve) => setTimeout(resolve, duration
 const activeWorkspaceSelector =
   '[data-workbench-session][data-active] [data-workbench-view="workspace"][data-active]'
 const fixtureName = '__markdown-preview-cdp__'
-const fixtureRoot = join(homedir(), '.larify', 'workspace', fixtureName)
+const workspaceRoot = join(homedir(), '.larify', 'workspace')
+const fixtureRoot = join(workspaceRoot, fixtureName)
 
 await mkdir(fixtureRoot, { recursive: true })
 await Promise.all([
@@ -47,7 +48,16 @@ flowchart LR
 \`\`\`
 
 [Basic fixture](./01-basic.markdown)
+
+![Local fixture](./fixture.png)
 `
+  ),
+  writeFile(
+    join(fixtureRoot, 'fixture.png'),
+    Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+      'base64'
+    )
   ),
   writeFile(
     join(fixtureRoot, 'fixture.html'),
@@ -56,6 +66,20 @@ flowchart LR
 ])
 
 const app = await connectLarifyCdp()
+const runtimeErrors = []
+await app.send('Runtime.enable')
+const unsubscribeRuntime = app.onEvent((message) => {
+  if (message.method === 'Runtime.exceptionThrown') {
+    runtimeErrors.push(
+      message.params.exceptionDetails.exception?.description ?? message.params.exceptionDetails.text
+    )
+  }
+  if (message.method === 'Runtime.consoleAPICalled' && message.params.type === 'error') {
+    runtimeErrors.push(
+      message.params.args.map((argument) => argument.value ?? argument.description).join(' ')
+    )
+  }
+})
 const waitFor = async (expression, label, timeout = 8_000) => {
   const started = Date.now()
   while (Date.now() - started < timeout) {
@@ -81,35 +105,75 @@ const clickTreeItem = (name) =>
     item?.querySelector('.rc-tree-node-content-wrapper')?.click()
     return Boolean(item)
   })()`)
-let workspaceTabId
+let workspaceResourceId
 
 try {
   await app.send('Page.reload', { ignoreCache: true })
-  await wait(1500)
+  await waitFor(
+    `Boolean(window.bridge && (
+      document.querySelector('[data-workbench-session][data-active]') ||
+      document.querySelector('button[data-session-id][aria-current="page"]')
+    ))`,
+    'renderer readiness'
+  )
   await click('button[aria-label="显示工作台"]')
   await wait(300)
-  assert.equal(
-    await app.evaluate(`(() => {
-      const button = Array.from(document.querySelectorAll('button')).find(
-        (element) => element.textContent?.trim() === '文件'
-      )
-      button?.click()
-      return Boolean(button)
-    })()`),
-    true,
-    'workspace renderer should be available'
+  const sessionId = await app.evaluate(
+    `document.querySelector('[data-workbench-session][data-active]')?.getAttribute('data-workbench-session') ??
+     document.querySelector('button[data-session-id][aria-current="page"]')?.getAttribute('data-session-id')`
   )
-  workspaceTabId = await app.evaluate(
-    `document.querySelector('[role="tab"][data-state="active"]')?.closest('[data-tab-id]')?.getAttribute('data-tab-id')`
+  assert.ok(sessionId, 'active session should be available')
+  const resourceId = await app.evaluate(
+    `window.bridge.invoke('resource:create', 'workspace', ${JSON.stringify(sessionId)}, { root: ${JSON.stringify(workspaceRoot)} })`
   )
-  await wait(800)
-
+  assert.ok(resourceId, 'workspace renderer should be available')
+  workspaceResourceId = resourceId
+  await waitFor(
+    `Boolean(document.querySelector('[data-workbench-view="workspace"][data-resource-id="${resourceId}"]'))`,
+    'workspace mount'
+  )
+  await app.evaluate(`window.dispatchEvent(new CustomEvent('larify:workbench-select-resource', {
+    detail: {
+      rendererId: 'workspace',
+      resourceId: ${JSON.stringify(resourceId)},
+      sessionId: ${JSON.stringify(sessionId)}
+    }
+  }))`)
+  await waitFor(
+    `Boolean(document.querySelector('[data-workbench-view="workspace"][data-resource-id="${resourceId}"][data-active]'))`,
+    'workspace activation'
+  )
+  await waitFor(
+    `Array.from(document.querySelector(${JSON.stringify(activeWorkspaceSelector)})?.querySelectorAll('[role="treeitem"]') ?? []).some(
+      (element) => element.querySelector('.rc-tree-title')?.textContent?.trim() === ${JSON.stringify(fixtureName)}
+    )`,
+    'CDP fixture folder'
+  )
   assert.equal(await clickTreeItem(fixtureName), true, 'CDP fixture folder is missing')
   await wait(300)
   assert.equal(await clickTreeItem('02-rich-content.md'), true, 'rich Markdown fixture is missing')
   await waitFor(
+    `Boolean(
+      document.querySelector(${JSON.stringify(activeWorkspaceSelector)})?.querySelector('.workspace-markdown-preview') ||
+      document.querySelector('button[aria-label="阅读预览"]')
+    )`,
+    'Markdown source or preview'
+  )
+  await click('button[aria-label="阅读预览"]')
+  await waitFor(
+    `Boolean(document.querySelector(${JSON.stringify(activeWorkspaceSelector)})?.querySelector('.workspace-markdown-preview'))`,
+    'Markdown preview'
+  )
+  await waitFor(
     `Boolean(document.querySelector(${JSON.stringify(activeWorkspaceSelector)})?.querySelector('.ant-mermaid-graph svg, svg[id^="mermaid-"]'))`,
     'Mermaid preview'
+  )
+  await waitFor(
+    `(() => {
+      const image = document.querySelector(${JSON.stringify(activeWorkspaceSelector)})?.querySelector('.workspace-markdown-preview img[alt="Local fixture"]')
+      return image?.src.startsWith('blob:') && image.complete && image.naturalWidth > 0
+    })()`,
+    'local Markdown image'
   )
 
   const preview = await app.evaluate(`(() => {
@@ -129,6 +193,10 @@ try {
       codeBlocks: element?.querySelectorAll('pre').length ?? 0,
       math: element?.querySelectorAll('.katex').length ?? 0,
       mermaid: element?.querySelectorAll('.ant-mermaid-graph svg, svg[id^="mermaid-"]').length ?? 0,
+      localImage: (() => {
+        const image = element?.querySelector('img[alt="Local fixture"]')
+        return Boolean(image?.src.startsWith('blob:') && image.complete && image.naturalWidth > 0)
+      })(),
       hasErrorOverlay: Boolean(document.querySelector('vite-error-overlay'))
     }
   })()`)
@@ -140,6 +208,7 @@ try {
   assert.ok(preview.codeBlocks > 0)
   assert.ok(preview.math > 0)
   assert.ok(preview.mermaid > 0)
+  assert.equal(preview.localImage, true)
   assert.equal(preview.hasErrorOverlay, false)
 
   assert.equal(await click('button[aria-label="查看源码"]'), true)
@@ -220,15 +289,40 @@ try {
   )
 
   console.log('workspace Markdown preview CDP regression passed')
+} catch (error) {
+  console.error(
+    await app.evaluate(`(() => {
+      const workspace = document.querySelector(${JSON.stringify(activeWorkspaceSelector)})
+      return {
+        actions: Array.from(document.querySelectorAll('.larify-workbench-tab-actions button')).map(
+          (button) => button.getAttribute('aria-label')
+        ),
+        active: workspace?.getAttribute('data-active'),
+        error: document.querySelector('vite-error-overlay')?.shadowRoot?.textContent?.slice(0, 500),
+        runtimeErrors: ${JSON.stringify(runtimeErrors)},
+        selected: workspace?.querySelector('.rc-tree-treenode-selected')?.textContent?.trim(),
+        text: workspace?.innerText?.slice(0, 500),
+        tabs: Array.from(document.querySelectorAll('[role="tab"]')).map((tab) => ({
+          active: tab.getAttribute('aria-selected'),
+          title: tab.textContent?.trim()
+        })),
+        views: Array.from(document.querySelectorAll('[data-workbench-view]')).map((view) => ({
+          active: view.getAttribute('data-active'),
+          id: view.getAttribute('data-resource-id'),
+          type: view.getAttribute('data-workbench-view')
+        }))
+      }
+    })()`)
+  )
+  throw error
 } finally {
-  if (workspaceTabId) {
+  if (workspaceResourceId) {
     await app
-      .evaluate(
-        `document.querySelector(${JSON.stringify(`[data-tab-id="${workspaceTabId}"] .larify-workbench-tab-close`)})?.click()`
-      )
+      .evaluate(`window.bridge.invoke('resource:close', ${JSON.stringify(workspaceResourceId)})`)
       .catch(() => undefined)
     await wait(300)
   }
+  unsubscribeRuntime()
   app.close()
   await rm(fixtureRoot, { recursive: true, force: true })
 }

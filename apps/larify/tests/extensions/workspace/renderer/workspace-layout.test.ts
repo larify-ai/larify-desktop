@@ -122,6 +122,32 @@ describe('WorkspaceLayout', () => {
     expect(observerCount).toBe(1)
   })
 
+  it('observes only while the workspace is visible', () => {
+    let observeCount = 0
+    let disconnectCount = 0
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe(): void {
+          observeCount += 1
+        }
+        disconnect(): void {
+          disconnectCount += 1
+        }
+        unobserve(): void {}
+      }
+    )
+
+    render(true, createElement('div'))
+    expect(observeCount).toBe(1)
+
+    render(true, createElement('div'), false, false)
+    expect(disconnectCount).toBe(1)
+
+    render(true, createElement('div'), false, true)
+    expect(observeCount).toBe(2)
+  })
+
   it('reports navigator width only when the width changes', () => {
     const onNavigatorWidthChange = vi.fn()
     const navigatorNode = createElement('div')
@@ -245,12 +271,17 @@ describe('WorkspaceLayout', () => {
     expect(navigator()?.getAttribute('data-open')).toBe('true')
   })
 
-  function render(navigatorOpen: boolean, navigator?: ReactNode, animating = false): void {
+  function render(
+    navigatorOpen: boolean,
+    navigator?: ReactNode,
+    animating = false,
+    visible = true
+  ): void {
     act(() =>
       root.render(
         createElement(
           WorkspaceLayout,
-          { animating, navigator, navigatorOpen },
+          { animating, navigator, navigatorOpen, visible },
           createElement('div', { 'data-content': true })
         )
       )

@@ -210,7 +210,7 @@ async function terminalSnapshot(tab) {
 }
 
 const terminalText = (text) =>
-  `document.querySelector('.xterm-rows')?.textContent.includes(${JSON.stringify(text)})`
+  `document.querySelector('[data-terminal-active="true"] .xterm-rows')?.textContent.includes(${JSON.stringify(text)})`
 
 async function runAndWait(command, expected, message, timeout) {
   await typeInTerminal(command)

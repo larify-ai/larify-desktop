@@ -132,6 +132,7 @@ describe('MarkdownImage', () => {
 
   it('does not forward XMarkdown-only properties to the img element', async () => {
     await render({
+      children: 'ignored',
       domNode: { type: 'tag' },
       src: 'https://example.com/image.png',
       streamStatus: 'done'

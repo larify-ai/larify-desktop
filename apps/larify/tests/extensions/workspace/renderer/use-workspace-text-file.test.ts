@@ -37,8 +37,16 @@ function deferred<T>(): {
   return { promise, resolve }
 }
 
-function Probe({ path, resourceId = 7 }: { path: string; resourceId?: number }): React.JSX.Element {
-  const state = useWorkspaceTextFile(resourceId, path)
+function Probe({
+  active = true,
+  path,
+  resourceId = 7
+}: {
+  active?: boolean
+  path: string
+  resourceId?: number
+}): React.JSX.Element {
+  const state = useWorkspaceTextFile(resourceId, path, active)
   return createElement('div', { 'data-content': state.content, 'data-error': state.error })
 }
 
@@ -121,6 +129,39 @@ describe('useWorkspaceTextFile', () => {
     expect(h.unsubscribe).toHaveBeenCalledOnce()
 
     await act(async () => next.resolve('second'))
+    expect(container.firstElementChild?.getAttribute('data-content')).toBe('second')
+  })
+
+  it('does not read an initially inactive file until activation', async () => {
+    h.readFile.mockResolvedValueOnce('ready')
+    await act(async () => root.render(createElement(Probe, { active: false, path: 'README.md' })))
+    expect(h.readFile).not.toHaveBeenCalled()
+
+    await act(async () => {
+      root.render(createElement(Probe, { path: 'README.md' }))
+      await Promise.resolve()
+    })
+    expect(h.readFile).toHaveBeenCalledOnce()
+    expect(container.firstElementChild?.getAttribute('data-content')).toBe('ready')
+  })
+
+  it('reloads once after a loaded file changes while inactive', async () => {
+    h.readFile.mockResolvedValueOnce('first').mockResolvedValueOnce('second')
+    await act(async () => {
+      root.render(createElement(Probe, { path: 'README.md' }))
+      await Promise.resolve()
+    })
+    await act(async () => root.render(createElement(Probe, { active: false, path: 'README.md' })))
+
+    h.listener?.('', 'README.md')
+    await act(async () => vi.advanceTimersByTimeAsync(100))
+    expect(h.readFile).toHaveBeenCalledOnce()
+
+    await act(async () => {
+      root.render(createElement(Probe, { path: 'README.md' }))
+      await Promise.resolve()
+    })
+    expect(h.readFile).toHaveBeenCalledTimes(2)
     expect(container.firstElementChild?.getAttribute('data-content')).toBe('second')
   })
 })

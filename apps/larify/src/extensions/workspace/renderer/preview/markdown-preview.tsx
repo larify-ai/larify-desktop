@@ -20,13 +20,14 @@ const markdownConfig: XMarkdownProps['config'] = {
 }
 
 export function MarkdownPreview({
+  active,
   file,
   resourceId,
   target
 }: PreviewRendererProps): React.JSX.Element {
   const { resolvedTheme } = useTheme()
   const previewRef = useRef<HTMLDivElement>(null)
-  const { content, error } = useWorkspaceTextFile(resourceId, file.path)
+  const { content, error } = useWorkspaceTextFile(resourceId, file.path, active)
   const markdown = content === undefined ? undefined : stripYamlFrontmatter(content)
   const components = useMemo(
     () => ({

@@ -38,8 +38,8 @@ describe('useWorkspaceExplorer', () => {
   let root: Root
   let explorer: ReturnType<typeof useWorkspaceExplorer>
 
-  function Harness(): null {
-    explorer = useWorkspaceExplorer(workspace.resourceId)
+  function Harness({ active = true }: { active?: boolean }): null {
+    explorer = useWorkspaceExplorer(workspace.resourceId, active)
     return null
   }
 
@@ -82,6 +82,76 @@ describe('useWorkspaceExplorer', () => {
     expect(workspace.readDirectory).toHaveBeenCalledTimes(2)
     expect(workspace.readDirectory).toHaveBeenNthCalledWith(1, undefined)
     expect(workspace.readDirectory).toHaveBeenNthCalledWith(2, 'D:\\workspace\\src')
+  })
+
+  it('preserves loaded directories while inactive without reloading', async () => {
+    expect(workspace.readDirectory).toHaveBeenCalledTimes(1)
+    expect(workspace.listener).toBeDefined()
+    const entries = explorer.entries
+
+    await act(async () => root.render(createElement(Harness, { active: false })))
+    expect(workspace.listener).toBeDefined()
+    expect(explorer.entries).toBe(entries)
+
+    await act(async () => root.render(createElement(Harness, { active: true })))
+    expect(workspace.listener).toBeDefined()
+    expect(workspace.readDirectory).toHaveBeenCalledTimes(1)
+    expect(explorer.entries).toBe(entries)
+  })
+
+  it('defers the initial directory read until an inactive workspace is activated', async () => {
+    act(() => root.unmount())
+    root = createRoot(container)
+    workspace.readDirectory.mockClear()
+
+    await act(async () => root.render(createElement(Harness, { active: false })))
+    expect(workspace.readDirectory).not.toHaveBeenCalled()
+    expect(explorer.entries).toEqual([])
+
+    await act(async () => root.render(createElement(Harness, { active: true })))
+    expect(workspace.readDirectory).toHaveBeenCalledOnce()
+    expect(workspace.readDirectory).toHaveBeenCalledWith(undefined)
+  })
+
+  it('refreshes changes received while inactive after activation', async () => {
+    await act(async () => root.render(createElement(Harness, { active: false })))
+    workspace.readDirectory.mockResolvedValueOnce([
+      { isLeaf: true, key: 'D:\\workspace\\new.ts', title: 'new.ts' }
+    ])
+    act(() => workspace.listener?.('D:\\workspace'))
+
+    expect(workspace.readDirectory).toHaveBeenCalledTimes(1)
+
+    await act(async () => root.render(createElement(Harness, { active: true })))
+
+    expect(workspace.readDirectory).toHaveBeenCalledTimes(2)
+    expect(explorer.entries).toEqual([
+      { isLeaf: true, key: 'D:\\workspace\\new.ts', title: 'new.ts' }
+    ])
+  })
+
+  it('deduplicates inactive changes and continues after a refresh fails', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    await act(async () => root.render(createElement(Harness, { active: false })))
+    act(() => {
+      workspace.listener?.('D:\\workspace\\src')
+      workspace.listener?.('D:\\workspace\\src')
+      workspace.listener?.('D:\\workspace\\other')
+    })
+    workspace.readDirectory
+      .mockRejectedValueOnce(new Error('unavailable'))
+      .mockResolvedValueOnce([
+        { isLeaf: true, key: 'D:\\workspace\\other\\new.ts', title: 'new.ts' }
+      ])
+
+    await act(async () => root.render(createElement(Harness, { active: true })))
+
+    expect(workspace.readDirectory.mock.calls.slice(1)).toEqual([
+      ['D:\\workspace\\src'],
+      ['D:\\workspace\\other']
+    ])
+    expect(consoleError).toHaveBeenCalledWith('[workspace:refresh]', expect.any(Error))
+    consoleError.mockRestore()
   })
 
   it('reveals a file requested before the workspace root finishes loading', async () => {

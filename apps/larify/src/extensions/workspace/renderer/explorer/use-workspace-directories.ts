@@ -3,7 +3,10 @@ import type { DataNode } from 'rc-tree/lib/interface'
 import { workspaceClient } from '../workspace-client'
 import { isDirectoryLoaded, mergeLoadedChildren, updateDirectory } from './workspace-tree-state'
 
-export function useWorkspaceDirectories(resourceId: number): {
+export function useWorkspaceDirectories(
+  resourceId: number,
+  active = true
+): {
   entries: DataNode[]
   isLoaded(directory: string): boolean
   load(directory: string, signal?: AbortSignal): Promise<DataNode[]>
@@ -14,13 +17,14 @@ export function useWorkspaceDirectories(resourceId: number): {
     resourceId: number
     root: string | null
   }>({ entries: [], resourceId, root: null })
-  const active = state.resourceId === resourceId
-  const entries = active ? state.entries : []
-  const root = active ? state.root : null
+  const currentResource = state.resourceId === resourceId
+  const entries = currentResource ? state.entries : []
+  const root = currentResource ? state.root : null
   const entriesRef = useRef(entries)
   const rootRef = useRef(root)
   const lifecycle = useRef(0)
   const requests = useRef(new Map<string, number>())
+  const dirtyDirectories = useRef(new Set<string>())
 
   const replaceEntries = useCallback(
     (next: DataNode[]): void => {
@@ -63,15 +67,44 @@ export function useWorkspaceDirectories(resourceId: number): {
   useEffect(() => {
     const current = ++lifecycle.current
     requests.current.clear()
+    dirtyDirectories.current.clear()
     entriesRef.current = []
     rootRef.current = null
+    return () => {
+      lifecycle.current = current + 1
+    }
+  }, [resourceId])
 
-    const initialLoad = load('').catch((error) => {
-      if (lifecycle.current === current) console.error('[workspace:list]', error)
+  useEffect(() => {
+    const current = ++lifecycle.current
+    requests.current.clear()
+    const pendingDirectories = active ? [...dirtyDirectories.current] : []
+    if (active) dirtyDirectories.current.clear()
+
+    const initialLoad =
+      !active || rootRef.current
+        ? Promise.resolve()
+        : load('').catch((error) => {
+            if (lifecycle.current === current) console.error('[workspace:list]', error)
+          })
+    const refreshPending = initialLoad.then(async () => {
+      for (const directory of pendingDirectories) {
+        if (lifecycle.current !== current) return
+        try {
+          await load(directory)
+        } catch (error) {
+          dirtyDirectories.current.add(directory)
+          if (lifecycle.current === current) console.error('[workspace:refresh]', error)
+        }
+      }
     })
 
     const unsubscribe = workspaceClient.onDidChange(resourceId, (directory) => {
-      void initialLoad
+      if (!active) {
+        dirtyDirectories.current.add(directory)
+        return
+      }
+      void refreshPending
         .then(() => {
           if (lifecycle.current !== current) return
           return load(directory)
@@ -84,7 +117,7 @@ export function useWorkspaceDirectories(resourceId: number): {
       lifecycle.current = current + 1
       unsubscribe()
     }
-  }, [load, resourceId])
+  }, [active, load, resourceId])
 
   const isLoaded = useCallback(
     (directory: string): boolean =>

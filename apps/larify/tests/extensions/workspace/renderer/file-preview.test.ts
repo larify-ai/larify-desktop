@@ -19,9 +19,15 @@ const workspace = vi.hoisted(() => ({
 
 const monaco = vi.hoisted(() => ({
   language: vi.fn(() => 'plaintext'),
+  layout: vi.fn(),
+  renders: 0,
   props: undefined as
     | {
         language: string
+        onMount(instance: {
+          getLayoutInfo(): { height: number; width: number }
+          layout(): void
+        }): void
         options: Record<string, unknown>
         path: string
         theme: string
@@ -51,6 +57,7 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
 vi.mock('@monaco-editor/react', () => ({
   default: (props: NonNullable<typeof monaco.props>) => {
+    monaco.renders += 1
     monaco.props = props
     return createElement('pre', { 'data-model-path': props.path }, props.value)
   }
@@ -108,6 +115,8 @@ describe('FilePreview', () => {
     )
     workspace.listener = undefined
     workspace.readFile.mockReset()
+    monaco.layout.mockReset()
+    monaco.renders = 0
     monaco.props = undefined
     theme.resolved = 'dark'
     container = document.createElement('div')
@@ -122,6 +131,7 @@ describe('FilePreview', () => {
     act(() => root.unmount())
     vi.useRealTimers()
     vi.clearAllMocks()
+    vi.unstubAllGlobals()
   })
 
   it('reloads only when the open file changes', async () => {
@@ -160,6 +170,107 @@ describe('FilePreview', () => {
     expect(container.querySelector('pre')?.dataset.modelPath).toBe(
       'file://D:/workspace/src/file.ts'
     )
+  })
+
+  it('lays out a newly mounted Monaco editor on its first frame', async () => {
+    workspace.readFile.mockResolvedValue('content')
+    await renderPreview('D:\\workspace\\src\\file.ts')
+
+    mountMonaco()
+    expect(monaco.layout).not.toHaveBeenCalled()
+    await act(async () => vi.advanceTimersToNextFrame())
+
+    expect(monaco.layout).toHaveBeenCalledOnce()
+  })
+
+  it('does not read or mount Monaco in an initially inactive preview', async () => {
+    workspace.readFile.mockResolvedValue('content')
+    await renderPreview('D:\\workspace\\src\\file.ts', false)
+
+    expect(workspace.readFile).not.toHaveBeenCalled()
+    expect(monaco.props).toBeUndefined()
+    expect(monaco.layout).not.toHaveBeenCalled()
+  })
+
+  it('keeps loaded content inactive and refreshes it once after activation', async () => {
+    workspace.readFile.mockResolvedValue('first')
+    await renderPreview('D:\\workspace\\src\\file.ts')
+    expect(container.textContent).toBe('first')
+    expect(monaco.renders).toBe(1)
+
+    await renderPreview('D:\\workspace\\src\\file.ts', false)
+    expect(workspace.listener).toBeDefined()
+    expect(workspace.readFile).toHaveBeenCalledOnce()
+    expect(container.textContent).toBe('first')
+    expect(monaco.renders).toBe(1)
+
+    await renderPreview('D:\\workspace\\src\\file.ts')
+    expect(workspace.readFile).toHaveBeenCalledOnce()
+    expect(container.textContent).toBe('first')
+    expect(monaco.renders).toBe(1)
+  })
+
+  it('refreshes a file changed while its preview is inactive', async () => {
+    workspace.readFile.mockResolvedValueOnce('first').mockResolvedValueOnce('second')
+    await renderPreview('D:\\workspace\\src\\file.ts')
+    await renderPreview('D:\\workspace\\src\\file.ts', false)
+
+    act(() => workspace.listener?.('', 'D:\\workspace\\src\\file.ts'))
+    await act(async () => vi.advanceTimersByTime(100))
+    expect(workspace.readFile).toHaveBeenCalledOnce()
+
+    await renderPreview('D:\\workspace\\src\\file.ts')
+    expect(workspace.readFile).toHaveBeenCalledTimes(2)
+    expect(container.textContent).toBe('second')
+  })
+
+  it('observes layout only while Monaco is active and lays out again after activation', async () => {
+    let notifyResize = (): void => undefined
+    const disconnect = vi.fn()
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(callback: ResizeObserverCallback) {
+          notifyResize = () => callback([], this as unknown as ResizeObserver)
+        }
+        observe(): void {
+          return undefined
+        }
+        disconnect(): void {
+          disconnect()
+        }
+        unobserve(): void {
+          return undefined
+        }
+      }
+    )
+    workspace.readFile.mockResolvedValue('content')
+    await renderPreview('D:\\workspace\\src\\file.ts')
+    mountMonaco()
+    await act(async () => vi.advanceTimersToNextFrame())
+
+    act(() => {
+      notifyResize()
+      notifyResize()
+    })
+    await act(async () => vi.advanceTimersToNextFrame())
+    expect(monaco.layout).toHaveBeenCalledTimes(2)
+
+    await renderPreview('D:\\workspace\\src\\file.ts', false)
+    expect(disconnect).toHaveBeenCalledOnce()
+
+    await renderPreview('D:\\workspace\\src\\file.ts')
+    await act(async () => vi.advanceTimersToNextFrame())
+    expect(monaco.layout).toHaveBeenCalledTimes(3)
+  })
+
+  it('skips layout when an inactive Monaco editor retained the current size', async () => {
+    workspace.readFile.mockResolvedValue('content')
+    await renderPreview('D:\\workspace\\src\\file.ts')
+    mountMonaco({ height: 600, width: 800 })
+    await act(async () => vi.advanceTimersToNextFrame())
+
+    expect(monaco.layout).not.toHaveBeenCalled()
   })
 
   it('configures a themed read-only source preview without editor gutters', async () => {
@@ -402,14 +513,14 @@ describe('FilePreview', () => {
     registry.register(previewRegistryToken, previews)
   }
 
-  async function renderPreview(path: string): Promise<void> {
+  async function renderPreview(path: string, active = true): Promise<void> {
     await act(async () => {
       root.render(
         createElement(
           RendererRegistryProvider,
           { registry },
           createElement(FilePreview, {
-            active: true,
+            active,
             animating: false,
             path,
             resourceId: 7
@@ -417,5 +528,22 @@ describe('FilePreview', () => {
         )
       )
     })
+  }
+
+  function mountMonaco(layout = { height: 0, width: 0 }): {
+    getLayoutInfo(): { height: number; width: number }
+    layout: typeof monaco.layout
+  } {
+    const surface = container.querySelector<HTMLElement>('.workspace-file-preview')!
+    Object.defineProperties(surface, {
+      clientHeight: { configurable: true, value: 600 },
+      clientWidth: { configurable: true, value: 800 }
+    })
+    const instance = {
+      getLayoutInfo: () => layout,
+      layout: monaco.layout
+    }
+    monaco.props?.onMount(instance)
+    return instance
   }
 })

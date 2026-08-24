@@ -46,9 +46,8 @@
 .larify-workbench-tab-list {
   align-items: center;
   display: flex;
-  gap: 2px;
-  min-width: max-content;
-  width: max-content;
+  gap: 3px;
+  width: 100%;
 }
 
 .larify-workbench-tab-actions {
@@ -64,12 +63,13 @@
   border-radius: 8px;
   color: var(--muted-foreground);
   display: flex;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   height: 32px;
-  max-width: 220px;
-  min-width: 96px;
-  padding: 0 4px 0 10px;
+  max-width: 180px;
+  min-width: 76px;
+  padding: 0 10px;
   position: relative;
+  width: fit-content;
 }
 
 .larify-workbench-tab-menu-anchor {
@@ -103,32 +103,42 @@
   color: inherit;
   display: flex;
   flex: 1 1 auto;
-  gap: 7px;
+  gap: 4px;
   min-width: 0;
   outline: none;
   padding: 0;
 }
 
-.larify-workbench-tab-icon,
-.larify-workbench-tab-icon > svg {
+.larify-workbench-tab-icon {
+  color: var(--foreground);
+  display: grid;
+  flex: 0 0 20px;
+  height: 20px;
+  place-items: center;
+  transition: opacity 120ms ease;
+  width: 20px;
+}
+
+.larify-workbench-tab-icon > svg,
+.larify-workbench-tab-icon > img {
   color: var(--foreground);
   display: block;
-  flex: 0 0 16px;
-  height: 16px;
-  width: 16px;
+  flex: 0 0 18px;
+  height: 18px;
+  width: 18px;
 }
 
-.larify-workbench-tab-icon > .larify-workbench-icon-changes,
-.larify-workbench-tab-icon > .larify-workbench-icon-terminal {
-  transform: scale(1.3333);
-}
-
-.larify-workbench-tab-icon > .larify-workbench-icon-file {
-  transform: scale(1.25);
+.larify-workbench-tab-icon > canvas {
+  display: block;
+  flex: 0 0 20px;
+  height: 20px;
+  width: 20px;
 }
 
 .larify-workbench-tab-icon > .larify-workbench-icon-browser {
-  transform: scale(1.2);
+  flex-basis: 17px;
+  height: 17px;
+  width: 17px;
 }
 
 [data-testid='workbench-empty'] [aria-hidden] > svg {
@@ -137,11 +147,24 @@
   width: 24px;
 }
 
+[data-testid='workbench-empty'] [aria-hidden] > .larify-workbench-icon-browser {
+  flex-basis: 22px;
+  height: 22px;
+  width: 22px;
+}
+
 .larify-workbench-tab-title {
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
+  text-align: start;
+  text-overflow: clip;
+  transform: translateY(-1px);
   white-space: nowrap;
+}
+
+.larify-workbench-tab-title[data-overflow] {
+  mask-image: linear-gradient(to right, black 0, black calc(100% - 14px), transparent 100%);
 }
 
 .larify-workbench-tab-close,
@@ -160,18 +183,26 @@
 }
 
 .larify-workbench-tab-close {
-  flex-basis: 24px;
   height: 24px;
-  margin-left: 4px;
+  inset-inline-start: 8px;
   opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  top: 4px;
+  transition: opacity 120ms ease;
   width: 24px;
+  z-index: 1;
 }
 
-.larify-workbench-tab:has(.larify-workbench-tab-trigger[data-state='active'])
-  .larify-workbench-tab-close,
+.larify-workbench-tab:hover .larify-workbench-tab-icon,
+.larify-workbench-tab:has(.larify-workbench-tab-close:focus-visible) .larify-workbench-tab-icon {
+  opacity: 0;
+}
+
 .larify-workbench-tab:hover .larify-workbench-tab-close,
 .larify-workbench-tab-close:focus-visible {
   opacity: 1;
+  pointer-events: auto;
 }
 
 .larify-workbench-tab-close:hover,
@@ -190,8 +221,8 @@
 }
 
 .larify-workbench-home > svg {
-  height: 22px;
-  width: 22px;
+  height: 18px;
+  width: 18px;
 }
 
 .larify-workbench-home {

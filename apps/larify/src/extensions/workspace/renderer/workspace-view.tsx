@@ -65,9 +65,11 @@ export function WorkspaceView({
   const [previewPath, setPreviewPath] = useState<string | null>(null)
   const [previewDescriptor, setPreviewDescriptor] = useState<FileDescriptor | undefined>()
   const [target, setTarget] = useState<{ hash: string } | undefined>()
-  const { entries, loadDirectory, revealDirectory, revealFile, root } =
-    useWorkspaceExplorer(resourceId)
-  const { decorations: gitDecorations } = useGitDecorations(resourceId, root)
+  const { entries, loadDirectory, revealDirectory, revealFile, root } = useWorkspaceExplorer(
+    resourceId,
+    active
+  )
+  const { decorations: gitDecorations } = useGitDecorations(resourceId, root, { active })
 
   const showFile = useCallback((path: string, hash?: string, descriptor?: FileDescriptor): void => {
     setMarkdownMode('preview')
@@ -377,13 +379,13 @@ function WorkspaceTabActions({
           aria-label={markdownMode === 'preview' ? '查看源码' : '阅读预览'}
           title={markdownMode === 'preview' ? '查看源码' : '阅读预览'}
           variant="ghost"
-          size="icon-sm"
+          size="icon"
           onClick={() => onMarkdownModeChange(markdownMode === 'preview' ? 'source' : 'preview')}
         >
           {markdownMode === 'preview' ? (
-            <Code2Icon aria-hidden className="size-4" />
+            <Code2Icon aria-hidden className="size-[18px]" />
           ) : (
-            <EyeIcon aria-hidden className="size-4" />
+            <EyeIcon aria-hidden className="size-[18px]" />
           )}
         </Button>
       ) : html ? (
@@ -391,10 +393,10 @@ function WorkspaceTabActions({
           aria-label="在内置浏览器中打开"
           title="在内置浏览器中打开"
           variant="ghost"
-          size="icon-sm"
+          size="icon"
           onClick={onOpenInBrowser}
         >
-          <ExternalLinkIcon aria-hidden className="size-4" />
+          <ExternalLinkIcon aria-hidden className="size-[18px]" />
         </Button>
       ) : null}
       <Button
@@ -402,10 +404,10 @@ function WorkspaceTabActions({
         aria-label={navigatorOpen ? '隐藏目录树' : '显示目录树'}
         title={navigatorOpen ? '隐藏目录树' : '显示目录树'}
         variant={navigatorOpen ? 'secondary' : 'ghost'}
-        size="icon-sm"
+        size="icon"
         onClick={onToggleNavigator}
       >
-        <FilesIcon className="size-4" />
+        <FilesIcon className="size-[17px]" />
       </Button>
     </>
   )

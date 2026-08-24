@@ -3,14 +3,17 @@ import type { DataNode } from 'rc-tree/lib/interface'
 import { workspaceClient } from '../workspace-client'
 import { useWorkspaceDirectories } from './use-workspace-directories'
 
-export function useWorkspaceExplorer(resourceId: number): {
+export function useWorkspaceExplorer(
+  resourceId: number,
+  active = true
+): {
   entries: DataNode[]
   loadDirectory(directory: DataNode): Promise<void>
   revealDirectory(directory: string): Promise<string | undefined>
   revealFile(file: string): Promise<string | undefined>
   root: string | null
 } {
-  const { entries, isLoaded, load, root } = useWorkspaceDirectories(resourceId)
+  const { entries, isLoaded, load, root } = useWorkspaceDirectories(resourceId, active)
   const revealController = useRef<AbortController>(null)
 
   useEffect(() => () => revealController.current?.abort(), [resourceId])

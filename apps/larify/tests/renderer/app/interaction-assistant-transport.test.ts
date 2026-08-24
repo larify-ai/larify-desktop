@@ -1,16 +1,40 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { UIMessageChunk } from 'ai'
 import { defaultModelConfig } from '../../../src/main/core/model/config'
+
+const h = vi.hoisted(() => ({ invalidateGitStatus: vi.fn() }))
+
+vi.mock('../../../src/extensions/workspace/renderer/changes/git-status-invalidation', () => h)
+
 import { createIpcTransport } from '../../../src/renderer/src/app/interaction/assistant/transport'
 
 type Listener = (value?: unknown) => void
 
 afterEach(() => {
+  vi.clearAllMocks()
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
 })
 
 describe('interaction assistant transport', () => {
+  it('invalidates Git status for streamed change cards and when the run finishes', async () => {
+    const bridge = createBridge(async (channel) => {
+      if (channel !== 'agent:send') return
+      bridge.emit('agent:chunk:session-1', {
+        type: 'data-git-snapshot',
+        data: { files: [], root: 'C:/workspace' }
+      })
+      bridge.emit('agent:end:session-1')
+    })
+    vi.stubGlobal('window', { bridge })
+
+    await readAll(await send())
+
+    expect(h.invalidateGitStatus).toHaveBeenCalledTimes(2)
+    expect(h.invalidateGitStatus).toHaveBeenNthCalledWith(1, 'C:/workspace')
+    expect(h.invalidateGitStatus).toHaveBeenNthCalledWith(2, 'C:/workspace')
+  })
+
   it('forwards the request and streamed chunks, then releases listeners', async () => {
     const bridge = createBridge(async (channel, request) => {
       if (channel !== 'agent:send') return
@@ -239,6 +263,9 @@ describe('interaction assistant transport', () => {
     const abort = new AbortController()
     vi.stubGlobal('window', { bridge })
     const stream = await send(abort.signal)
+    await vi.waitFor(() =>
+      expect(bridge.invoke).toHaveBeenCalledWith('agent:send', expect.anything())
+    )
     bridge.emit('agent:chunk:session-1', { type: 'start' })
     abort.abort()
     expect(bridge.invoke).toHaveBeenCalledWith('agent:cancel', 'session-1')
@@ -255,6 +282,9 @@ describe('interaction assistant transport', () => {
     const abort = new AbortController()
     vi.stubGlobal('window', { bridge })
     const reader = (await send(abort.signal)).getReader()
+    await vi.waitFor(() =>
+      expect(bridge.invoke).toHaveBeenCalledWith('agent:send', expect.anything())
+    )
 
     abort.abort()
 
@@ -283,10 +313,32 @@ describe('interaction assistant transport', () => {
     const bridge = createBridge()
     vi.stubGlobal('window', { bridge })
     const reader = (await send()).getReader()
+    await vi.waitFor(() =>
+      expect(bridge.invoke).toHaveBeenCalledWith('agent:send', expect.anything())
+    )
 
     await reader.cancel()
 
     expect(bridge.invoke).toHaveBeenCalledWith('agent:cancel', 'session-1')
+    expect(h.invalidateGitStatus).toHaveBeenCalledOnce()
+    expect(h.invalidateGitStatus).toHaveBeenCalledWith('C:/workspace')
+    expect(bridge.listenerCount()).toBe(0)
+  })
+
+  it('invalidates Git status when consumer cancellation fails', async () => {
+    const error = new Error('cancel failed')
+    const bridge = createBridge(async (channel) => {
+      if (channel === 'agent:cancel') throw error
+    })
+    vi.stubGlobal('window', { bridge })
+    const reader = (await send()).getReader()
+    await vi.waitFor(() =>
+      expect(bridge.invoke).toHaveBeenCalledWith('agent:send', expect.anything())
+    )
+
+    await expect(reader.cancel()).rejects.toBe(error)
+
+    expect(h.invalidateGitStatus).toHaveBeenCalledOnce()
     expect(bridge.listenerCount()).toBe(0)
   })
 
@@ -303,7 +355,8 @@ describe('interaction assistant transport', () => {
     await Promise.resolve()
     await Promise.resolve()
 
-    expect(bridge.invoke).toHaveBeenCalledWith('agent:cancel', 'session-1')
+    expect(bridge.invoke).not.toHaveBeenCalledWith('agent:cancel', 'session-1')
+    expect(h.invalidateGitStatus).not.toHaveBeenCalled()
     expect(bridge.invoke.mock.calls.map(([channel]) => channel)).not.toContain('agent:send')
     expect(bridge.listenerCount()).toBe(0)
   })

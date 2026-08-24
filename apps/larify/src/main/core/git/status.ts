@@ -10,6 +10,7 @@ export async function status(
   includeIgnored = true
 ): Promise<FileStatusResult[]> {
   const git = await runtime.open(workspaceRoot)
+  git.env('GIT_OPTIONAL_LOCKS', '0')
   const repositoryRoot = await resolveRepositoryRoot(workspaceRoot, git)
   const [{ files }, ignoredOutput] = await Promise.all([
     git.status(),

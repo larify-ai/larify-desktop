@@ -13,16 +13,6 @@ if ($ExecutionContext.SessionState.LanguageMode -ne "FullLanguage") {
 	return;
 }
 
-function global:builtin-node {
-	$previous = $env:ELECTRON_RUN_AS_NODE
-	try {
-		$env:ELECTRON_RUN_AS_NODE = "1"
-		& $env:LARIFY_ELECTRON_PATH @args | Out-Default
-	} finally {
-		$env:ELECTRON_RUN_AS_NODE = $previous
-	}
-}
-
 $Global:__VSCodeState = @{
 	OriginalPrompt = $function:Prompt
 	LastHistoryId = -1

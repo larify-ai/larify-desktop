@@ -94,14 +94,15 @@ try {
   )
 
   const mounted = await app.evaluate(`(async () => {
-    const [react, reactDom, reactDomClient, { MessageLink }, { createMessageLinkHandler }] =
+    const [react, reactDom, reactDomClient, { MessageMarkdown }, messageLinks] =
       await Promise.all([
         import('/@id/react'),
         import('/@id/react-dom'),
         import('/@id/react-dom/client'),
-        import('/src/components/ai-elements/message-link.tsx'),
+        import('/src/app/interaction/assistant/message-parts/message-markdown.tsx'),
         import('/src/app/interaction/assistant/message-links.ts')
       ])
+    const { createMessageLinkHandler, MessageLinkContextProvider } = messageLinks
     const createElement = react.createElement ?? react.default?.createElement
     const flushSync = reactDom.flushSync ?? reactDom.default?.flushSync
     const createRoot = reactDomClient.createRoot ?? reactDomClient.default?.createRoot
@@ -114,12 +115,17 @@ try {
     if (!sessionId) throw new Error('active session is unavailable')
     const handler = createMessageLinkHandler('', sessionId)
     const root = createRoot(host)
-    flushSync(() => root.render(createElement('div', null,
-      createElement(MessageLink, { href: ${JSON.stringify(fixtureRoot)}, onOpenLink: handler }, 'fixture-directory'),
-      createElement(MessageLink, { href: ${JSON.stringify(fixtureFile)}, onOpenLink: handler }, 'workspace-link.ts'),
-      createElement(MessageLink, { href: ${JSON.stringify(reusedUrl)}, onOpenLink: handler }, 'reused-browser-url'),
-      createElement(MessageLink, { href: ${JSON.stringify(differentUrl)}, onOpenLink: handler }, 'different-browser-url')
-    )))
+    const markdown = [
+      '[fixture-directory](' + ${JSON.stringify(fixtureRoot)} + ')',
+      '[workspace-link.ts](' + ${JSON.stringify(fixtureFile)} + ')',
+      '[reused-browser-url](' + ${JSON.stringify(reusedUrl)} + ')',
+      '[different-browser-url](' + ${JSON.stringify(differentUrl)} + ')'
+    ].join('\\n\\n')
+    flushSync(() => root.render(
+      createElement(MessageLinkContextProvider, { value: handler },
+        createElement(MessageMarkdown, { isAnimating: false }, markdown)
+      )
+    ))
     window.__messageLinkCdpCleanup = () => {
       handler.dispose()
       root.unmount()
@@ -128,7 +134,7 @@ try {
     }
     return host.querySelectorAll('.larify-message-link').length
   })()`)
-  assert.equal(mounted, 4, 'the real MessageLink components should mount')
+  assert.equal(mounted, 4, 'the real Markdown renderer should create four message links')
 
   const browserCount = () =>
     app.evaluate(`window.bridge.invoke('resource:list', {

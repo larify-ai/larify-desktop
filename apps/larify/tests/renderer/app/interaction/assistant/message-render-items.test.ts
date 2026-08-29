@@ -45,6 +45,41 @@ describe('assistant message render items', () => {
     )
   })
 
+  it('freezes a streaming summary after its first complete sentence', () => {
+    const first = buildAssistantRenderItems(
+      message({ type: 'reasoning', text: '**先检查。**', state: 'streaming' }),
+      true
+    )
+    const later = buildAssistantRenderItems(
+      message({
+        type: 'reasoning',
+        text: '**先检查。** 后续生成了大量不应改变摘要的内容。',
+        state: 'streaming'
+      }),
+      true
+    )
+
+    expect(first[0].children?.[0].summary).toBe('先检查。')
+    expect(later[0].children?.[0].summary).toBe('先检查。')
+  })
+
+  it.each([
+    ['版本 v1.2', '版本 v1.2 仍在生成'],
+    ['访问 example.com', '访问 example.com 继续检查']
+  ])('does not freeze an unfinished summary containing punctuation', (firstText, laterText) => {
+    const first = buildAssistantRenderItems(
+      message({ type: 'reasoning', text: firstText, state: 'streaming' }),
+      true
+    )
+    const later = buildAssistantRenderItems(
+      message({ type: 'reasoning', text: laterText, state: 'streaming' }),
+      true
+    )
+
+    expect(first[0].children?.[0].summary).toBe(firstText)
+    expect(later[0].children?.[0].summary).toBe(laterText)
+  })
+
   it('ignores non-assistant messages and assistant file parts', () => {
     const userMessage = { ...message({ type: 'text', text: 'hello' }), role: 'user' } as UIMessage
     const assistantFile = message({
@@ -135,7 +170,7 @@ describe('assistant message render items', () => {
       { kind: 'tool-group', partIndexes: [3], summary: 'Run tests' }
     ])
     expect(items[1]).toEqual(
-      expect.objectContaining({ kind: 'final-text', partIndexes: [4], summary: 'done' })
+      expect.objectContaining({ kind: 'final-text', partIndexes: [4], summary: '' })
     )
   })
 
@@ -298,6 +333,25 @@ describe('assistant message render items', () => {
     )
   })
 
+  it('folds a pending ask-user into a collapsed tool group once superseded by a later user message', () => {
+    const waiting = buildAssistantRenderItems(
+      message(
+        { type: 'reasoning', text: 'I need clarification' },
+        tool('ask', 'Choose one', 'input-available', 'agent_ask_user')
+      ),
+      false,
+      true
+    )
+
+    expect(waiting.some((item) => item.kind === 'pending-ask-user')).toBe(false)
+    expect(waiting[0]).toEqual(
+      expect.objectContaining({ kind: 'activity-group', defaultOpen: false })
+    )
+    expect(waiting[0].children?.map((item) => item.kind)).toEqual(['reasoning', 'tool-group'])
+    expect(waiting[0].children?.at(-1)?.defaultOpen).toBe(false)
+    expect(waiting[0].children?.at(-1)?.partIndexes).toEqual([1])
+  })
+
   it('shows waiting instead of completed while ask user needs an answer', () => {
     const waiting = {
       ...message(
@@ -382,10 +436,7 @@ describe('assistant message render items', () => {
     )
     expect(items.map((item) => item.kind)).toEqual(['activity-group'])
     expect(items[0]).toEqual(expect.objectContaining({ defaultOpen: true }))
-    expect(items[0].children?.map((item) => item.kind)).toEqual([
-      'reasoning',
-      'intermediate-text'
-    ])
+    expect(items[0].children?.map((item) => item.kind)).toEqual(['reasoning', 'intermediate-text'])
     expect(items[0].children?.at(-1)?.defaultOpen).toBe(false)
     expect(items.slice(1).flatMap((item) => item.partIndexes)).toEqual([])
   })
@@ -400,9 +451,9 @@ describe('assistant message render items', () => {
     expect(buildAssistantRenderItems(response, true).map((item) => item.kind)).toEqual([
       'activity-group'
     ])
-    expect(
-      buildAssistantRenderItems(response, true)[0].children?.map((item) => item.kind)
-    ).toEqual(['reasoning', 'intermediate-text', 'intermediate-text'])
+    expect(buildAssistantRenderItems(response, true)[0].children?.map((item) => item.kind)).toEqual(
+      ['reasoning', 'intermediate-text', 'intermediate-text']
+    )
     expect(buildAssistantRenderItems(response, false).map((item) => item.kind)).toEqual([
       'activity-group',
       'final-text'
@@ -419,9 +470,7 @@ describe('assistant message render items', () => {
     )
 
     const final = buildAssistantRenderItems(response, false).at(-1)
-    expect(final).toEqual(
-      expect.objectContaining({ kind: 'final-text', partIndexes: [1, 2, 3] })
-    )
+    expect(final).toEqual(expect.objectContaining({ kind: 'final-text', partIndexes: [1, 2, 3] }))
     expect(
       final?.partIndexes
         .map((index) => response.parts[index])
@@ -502,10 +551,7 @@ describe('assistant message render items', () => {
     )
 
     expect(items.map((item) => item.kind)).toEqual(['activity-group'])
-    expect(items[0].children?.map((item) => item.kind)).toEqual([
-      'intermediate-text',
-      'tool-group'
-    ])
+    expect(items[0].children?.map((item) => item.kind)).toEqual(['intermediate-text', 'tool-group'])
   })
 
   it('keeps text in processing when a hidden tool starts in the same step', () => {
@@ -662,7 +708,7 @@ describe('assistant message render items', () => {
     expect(items[0].summary).toBe('已完成 · 处理了 5分钟 28秒')
   })
 
-  it('counts only fully elapsed seconds in a completed duration', () => {
+  it('rounds a sub-second completed duration up to one second', () => {
     const items = buildAssistantRenderItems(
       {
         ...message({ type: 'text', text: 'answer' }),
@@ -671,7 +717,7 @@ describe('assistant message render items', () => {
       false
     )
 
-    expect(items[0].summary).toBe('已完成 · 处理了 0秒')
+    expect(items[0].summary).toBe('已完成 · 处理了 1秒')
   })
 
   it('does not claim completion for legacy messages without timing metadata', () => {
@@ -768,5 +814,45 @@ describe('assistant message render items', () => {
 
     expect(items.map((item) => item.kind)).toEqual(['activity-group'])
     expect(items[0].summary).toBe('已中断')
+  })
+
+  it('prefers the accumulated totalProcessingMs over the last run interval', () => {
+    // startedAt/completedAt 只描述最后一次 run，totalProcessingMs 才是跨 run 累计值。
+    const accumulated = {
+      ...message({ type: 'text', text: 'answer' }),
+      metadata: { startedAt: 1_000, completedAt: 5_000, totalProcessingMs: 8_000 }
+    } as UIMessage
+
+    const items = buildAssistantRenderItems(accumulated, false)
+
+    expect(items[0].summary).toBe('已完成 · 处理了 8秒')
+  })
+
+  it('keeps the waiting status while using an accumulated duration', () => {
+    const waiting = {
+      ...message(
+        { type: 'reasoning', text: 'I need clarification' },
+        tool('ask', 'Choose one', 'input-available', 'agent_ask_user')
+      ),
+      metadata: { startedAt: 1_000, completedAt: 34_000, totalProcessingMs: 33_000 }
+    } as UIMessage
+
+    const items = buildAssistantRenderItems(waiting, false)
+
+    expect(items[0]).toEqual(
+      expect.objectContaining({ kind: 'activity-group', summary: '等待回答 · 处理了 33秒' })
+    )
+  })
+
+  it('keeps the interrupted status while using an accumulated duration', () => {
+    const aborted = {
+      ...message({ type: 'text', text: 'partial' }),
+      metadata: { startedAt: 1_000, completedAt: 9_000, outcome: 'aborted', totalProcessingMs: 8_000 }
+    } as UIMessage
+
+    const items = buildAssistantRenderItems(aborted, false)
+
+    expect(items.map((item) => item.kind)).toEqual(['activity-group'])
+    expect(items[0].summary).toBe('已中断 · 处理了 8秒')
   })
 })

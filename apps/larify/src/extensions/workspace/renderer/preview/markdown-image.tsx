@@ -1,21 +1,23 @@
-import { useEffect, useState } from 'react'
-import type { ComponentProps } from '@ant-design/x-markdown'
+import { type ComponentProps, useEffect, useState } from 'react'
+import type { ExtraProps } from 'streamdown'
 import { workspaceClient } from '../workspace-client'
 import { decodeUrlComponent, resolveWorkspacePath } from './markdown-navigation'
 
-export function MarkdownImage({
-  children: _children,
+function nodeSource(node: unknown): string | undefined {
+  if (!node || typeof node !== 'object' || !('properties' in node)) return undefined
+  const properties = node.properties
+  if (!properties || typeof properties !== 'object' || !('src' in properties)) return undefined
+  return typeof properties.src === 'string' ? properties.src : undefined
+}
+
+export function WorkspaceMarkdownImage({
   currentFile,
-  domNode: _domNode,
   resourceId,
   src,
-  streamStatus: _streamStatus,
+  node,
   ...props
-}: ComponentProps & { currentFile: string; resourceId: number }): React.JSX.Element {
-  void _domNode
-  void _children
-  void _streamStatus
-  const source = typeof src === 'string' ? src : ''
+}: ComponentProps<'img'> & ExtraProps & { currentFile: string; resourceId: number }): React.JSX.Element {
+  const source = src || nodeSource(node) || ''
   const remote = /^(?:data:|blob:|https?:|\/\/)/i.test(source)
   const remoteSource = source.startsWith('//') ? `https:${source}` : source
   const path =

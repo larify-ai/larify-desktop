@@ -3,9 +3,31 @@
   <head>
     <meta charset="UTF-8" />
     <title>Larify</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        background: #fafafa;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        html,
+        body {
+          background: #1e1e1f;
+        }
+      }
+    </style>
+    <script>
+      (() => {
+        const theme = localStorage.getItem('theme')
+        const dark = theme === 'dark' ||
+          (theme !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+        if (dark) document.documentElement.classList.add('dark')
+      })()
+    </script>
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' data: blob:"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'sha256-4hDycLI4V2bTvy+j2wwuy8JLNiAUAdaoo2GW3twdoQs='; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' data: blob:"
     />
   </head>
 

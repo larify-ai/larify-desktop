@@ -8,6 +8,7 @@ import { Layout } from '../../../src/renderer/src/app/layout/layout'
 import { registerBuiltinRenderers } from '../../../src/renderer/src/app/registry/register-builtins'
 import { RendererRegistryProvider } from '../../../src/renderer/src/app/registry/renderer-registry-provider'
 import { TooltipProvider } from '../../../src/renderer/src/components/ui/tooltip'
+import { AuthContext } from '../../../src/renderer/src/app/auth/auth-context'
 import {
   expandedContentMinSize,
   layoutSpec,
@@ -36,15 +37,24 @@ const navigationRegion = readFileSync(
   resolve('src/renderer/src/app/navigation/navigation.tsx'),
   'utf8'
 )
+const contextMenu = readFileSync(resolve('src/renderer/src/components/ui/context-menu.tsx'), 'utf8')
 const registry = new Registry()
 registerBuiltinRenderers(registry)
 
 function renderLayout(): string {
+  // AuthGate 依赖客户端 useEffect + window.bridge，在 renderToStaticMarkup（SSR）下
+  // 会永卡 restoring 而不渲染 Layout。这里改用 AuthContext.Provider 提供最小 auth 值，
+  // 让 Layout 内的 AccountMenu 能消费 useAuth。
+  const authValue = { email: null, logout: async () => { } }
   return renderToStaticMarkup(
     createElement(
       RendererRegistryProvider,
       { registry },
-      createElement(TooltipProvider, null, createElement(Layout))
+      createElement(
+        TooltipProvider,
+        null,
+        createElement(AuthContext.Provider, { value: authValue }, createElement(Layout))
+      )
     )
   )
 }
@@ -58,7 +68,7 @@ describe('workbench layout specification', () => {
   })
 
   it('uses the specified navigation width range', () => {
-    expect(layoutSpec.navigation).toEqual({ defaultSize: 240, minSize: 180, maxSize: 520 })
+    expect(layoutSpec.navigation).toEqual({ defaultSize: 240, minSize: 240, maxSize: 520 })
     expect(mainLayoutDefaultSizes(1200)).toEqual([240, 960])
     expect(mainLayoutDefaultSizes(800)).toEqual([240, 560])
     expect(mainLayoutDefaultSizes(500)).toEqual([240, 260])
@@ -92,9 +102,9 @@ describe('workbench layout specification', () => {
     const minimumThreePaneWidth =
       layoutSpec.navigation.minSize + layoutSpec.interaction.minSize + layoutSpec.workbench.minSize
 
-    expect(minimumThreePaneWidth).toBe(796)
-    expect(minimumThreePaneWidth).toBeLessThanOrEqual(800)
-    expect(window).toContain('minWidth: 800')
+    expect(minimumThreePaneWidth).toBe(856)
+    expect(minimumThreePaneWidth).toBeLessThanOrEqual(856)
+    expect(window).toContain('minWidth: 856')
   })
 
   it('uses the specified top bar height and main content radius', () => {
@@ -135,7 +145,7 @@ describe('workbench layout specification', () => {
     expect(navigation).not.toContain('ChevronDownIcon')
     expect(navigation).not.toContain('ChevronRightIcon')
     expect(navigation).toContain('grid-cols-[20px_minmax(0,1fr)]')
-    expect(navigation).toContain('className="h-14 shrink-0"')
+    expect(navigation).toContain('<AccountMenu />')
     expect(navigation).toContain('rounded-lg')
     expect(navigation).toContain('mx-1')
     expect(navigation).toContain('w-[calc(100%-0.5rem)]')
@@ -148,6 +158,9 @@ describe('workbench layout specification', () => {
     expect(navigation).not.toContain('space-y-2')
     expect(navigation).not.toContain('navigationItem} h-7')
     expect(navigation).not.toContain('border-t border-border-strong')
+    expect(contextMenu).toContain('min-w-32')
+    expect(contextMenu).toContain('rounded-md border bg-popover')
+    expect(contextMenu).toContain('gap-2 rounded-sm px-2')
   })
 
   it('keeps the title bar empty and separates it from both content columns', () => {

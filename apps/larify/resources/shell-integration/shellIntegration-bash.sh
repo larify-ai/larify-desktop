@@ -62,10 +62,6 @@ if [ -z "$VSCODE_SHELL_INTEGRATION" ]; then
 	builtin return
 fi
 
-builtin-node() {
-	ELECTRON_RUN_AS_NODE=1 "$LARIFY_ELECTRON_PATH" "$@"
-}
-
 # Prevent AI-executed commands from polluting shell history
 if [ "${VSCODE_PREVENT_SHELL_HISTORY:-}" = "1" ]; then
 	export HISTCONTROL="ignorespace"

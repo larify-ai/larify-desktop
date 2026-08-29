@@ -16,6 +16,13 @@ export interface SessionQueries {
     limit?: number
   ) => ReturnType<SessionStore['loadVisibleMessages']>
   'session:msg-count': (event: unknown, id: string) => ReturnType<SessionStore['countMessages']>
+  'session:navigation': (
+    event: unknown,
+    id: string,
+    beforeIndex?: number,
+    limit?: number
+  ) => ReturnType<SessionStore['loadNavigationIndex']>
+  'session:rename': (event: unknown, id: string, title: string) => void
 }
 
 export function createSessionQueries(store: SessionStore): SessionQueries {
@@ -31,6 +38,11 @@ export function createSessionQueries(store: SessionStore): SessionQueries {
       })),
     'session:msgs': (_event: unknown, id: string, offset?: number, limit?: number) =>
       store.loadVisibleMessages(id, offset, limit),
-    'session:msg-count': (_event: unknown, id: string) => store.countMessages(id)
+    'session:msg-count': (_event: unknown, id: string) => store.countMessages(id),
+    'session:navigation': (_event: unknown, id: string, beforeIndex?: number, limit?: number) =>
+      beforeIndex === undefined && limit === undefined
+        ? store.loadNavigationIndex(id)
+        : store.loadNavigationIndex(id, beforeIndex, limit),
+    'session:rename': (_event: unknown, id: string, title: string) => store.renameSession(id, title)
   }
 }

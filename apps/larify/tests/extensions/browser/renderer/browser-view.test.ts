@@ -197,7 +197,7 @@ describe('BrowserView', () => {
     )
   })
 
-  it('parks an inactive webview at the default rendering size', async () => {
+  it('parks an inactive webview at its last visible rendering size', async () => {
     vi.useFakeTimers()
     h.state = { id: 42, url: 'https://example.com' } as BrowserTabState
     await renderView()
@@ -221,11 +221,11 @@ describe('BrowserView', () => {
     const style = webview().parentElement!.style
     expect(style.left).toBe('-10000px')
     expect(style.top).toBe('-10000px')
-    expect(style.width).toBe('1280px')
-    expect(style.height).toBe('800px')
+    expect(style.width).toBe('2560px')
+    expect(style.height).toBe('1400px')
     await act(async () => vi.advanceTimersByTimeAsync(30_000))
-    expect(style.width).toBe('1280px')
-    expect(style.height).toBe('800px')
+    expect(style.width).toBe('2560px')
+    expect(style.height).toBe('1400px')
     vi.useRealTimers()
   })
 

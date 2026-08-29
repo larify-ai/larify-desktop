@@ -145,11 +145,11 @@ describe('WorkspaceView', () => {
     })
   }
 
-  const openFile = async (path: string): Promise<void> => {
+  const openFile = async (path: string, hash?: string): Promise<void> => {
     await act(async () => {
       window.dispatchEvent(
-        new CustomEvent('larify:workspace-markdown-open-file', {
-          detail: { path, resourceId: 42 }
+        new CustomEvent('larify:workspace-navigation', {
+          detail: { kind: 'file' as const, path, hash, resourceId: 42 }
         })
       )
       await Promise.resolve()
@@ -414,8 +414,8 @@ describe('WorkspaceView', () => {
     await render()
     await act(async () => {
       window.dispatchEvent(
-        new CustomEvent('larify:workspace-markdown-open-file', {
-          detail: { path: 'ignored.md', resourceId: 99 }
+        new CustomEvent('larify:workspace-navigation', {
+          detail: { kind: 'file', path: 'ignored.md', resourceId: 99 }
         })
       )
       await Promise.resolve()
@@ -424,8 +424,8 @@ describe('WorkspaceView', () => {
 
     await act(async () => {
       window.dispatchEvent(
-        new CustomEvent('larify:workspace-markdown-open-file', {
-          detail: { hash: 'install', path: 'guide.md', resourceId: 42 }
+        new CustomEvent('larify:workspace-navigation', {
+          detail: { kind: 'file', hash: 'install', path: 'guide.md', resourceId: 42 }
         })
       )
       await Promise.resolve()
@@ -465,13 +465,13 @@ describe('WorkspaceView', () => {
 
     act(() => {
       window.dispatchEvent(
-        new CustomEvent('larify:workspace-markdown-open-file', {
-          detail: { path: 'first.md', resourceId: 42 }
+        new CustomEvent('larify:workspace-navigation', {
+          detail: { kind: 'file', path: 'first.md', resourceId: 42 }
         })
       )
       window.dispatchEvent(
-        new CustomEvent('larify:workspace-markdown-open-file', {
-          detail: { path: 'second.md', resourceId: 42 }
+        new CustomEvent('larify:workspace-navigation', {
+          detail: { kind: 'file', path: 'second.md', resourceId: 42 }
         })
       )
     })
@@ -507,8 +507,8 @@ describe('WorkspaceView', () => {
 
     act(() => {
       window.dispatchEvent(
-        new CustomEvent('larify:workspace-markdown-open-file', {
-          detail: { path: 'old.md', resourceId: 42 }
+        new CustomEvent('larify:workspace-navigation', {
+          detail: { kind: 'file', path: 'old.md', resourceId: 42 }
         })
       )
     })
@@ -544,8 +544,8 @@ describe('WorkspaceView', () => {
     const navigate = async (): Promise<void> => {
       await act(async () => {
         window.dispatchEvent(
-          new CustomEvent('larify:workspace-markdown-open-file', {
-            detail: { hash: 'install', path: 'README.md', resourceId: 42 }
+          new CustomEvent('larify:workspace-navigation', {
+            detail: { kind: 'file', hash: 'install', path: 'README.md', resourceId: 42 }
           })
         )
         await Promise.resolve()
@@ -562,74 +562,4 @@ describe('WorkspaceView', () => {
     expect(h.filePreviewProps?.target).not.toBe(firstTarget)
   })
 
-  it('selects only the latest browser when creations finish out of order', async () => {
-    const first = deferred<number>()
-    const second = deferred<number>()
-    const selected = vi.fn()
-    h.invoke.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
-    window.addEventListener('larify:workbench-select-resource', selected)
-    await render()
-
-    act(() => {
-      window.dispatchEvent(
-        new CustomEvent('larify:workspace-markdown-open-external', {
-          detail: { resourceId: 42, url: 'https://first.example' }
-        })
-      )
-      window.dispatchEvent(
-        new CustomEvent('larify:workspace-markdown-open-external', {
-          detail: { resourceId: 42, url: 'https://second.example' }
-        })
-      )
-    })
-    await act(async () => second.resolve(2))
-    await act(async () => first.resolve(1))
-
-    expect(selected).toHaveBeenCalledOnce()
-    expect((selected.mock.calls[0][0] as CustomEvent).detail.resourceId).toBe(2)
-    expect(h.invoke).toHaveBeenCalledWith('resource:close', 1)
-    window.removeEventListener('larify:workbench-select-resource', selected)
-  })
-
-  it('closes a pending browser when a file is selected next', async () => {
-    const browser = deferred<number>()
-    const selected = vi.fn()
-    h.invoke.mockReturnValueOnce(browser.promise)
-    window.addEventListener('larify:workbench-select-resource', selected)
-    await render()
-
-    act(() => {
-      window.dispatchEvent(
-        new CustomEvent('larify:workspace-markdown-open-external', {
-          detail: { resourceId: 42, url: 'https://example.com' }
-        })
-      )
-    })
-    await openFile('README.md')
-    await act(async () => browser.resolve(3))
-
-    expect(selected).not.toHaveBeenCalled()
-    expect(h.invoke).toHaveBeenCalledWith('resource:close', 3)
-    expect(h.filePreviewProps?.path).toBe('D:\\workspace\\README.md')
-    window.removeEventListener('larify:workbench-select-resource', selected)
-  })
-
-  it('closes a pending browser after the workspace unmounts', async () => {
-    const browser = deferred<number>()
-    h.invoke.mockReturnValueOnce(browser.promise)
-    await render()
-
-    act(() => {
-      window.dispatchEvent(
-        new CustomEvent('larify:workspace-markdown-open-external', {
-          detail: { resourceId: 42, url: 'https://example.com' }
-        })
-      )
-    })
-    await act(async () => root.unmount())
-    await act(async () => browser.resolve(4))
-
-    expect(h.invoke).toHaveBeenCalledWith('resource:close', 4)
-    root = createRoot(container)
-  })
 })

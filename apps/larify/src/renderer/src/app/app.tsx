@@ -4,6 +4,7 @@ import { Layout } from './layout/layout'
 import { TooltipProvider } from '../components/ui/tooltip'
 import { registerBuiltinRenderers } from './registry/register-builtins'
 import { RendererRegistryProvider } from './registry/renderer-registry-provider'
+import { AuthGate } from './auth/auth-gate'
 
 const registry = new Registry()
 registerBuiltinRenderers(registry)
@@ -13,7 +14,9 @@ export function App(): React.JSX.Element {
     <RendererRegistryProvider registry={registry}>
       <ThemeProvider>
         <TooltipProvider>
-          <Layout />
+          <AuthGate>
+            <Layout />
+          </AuthGate>
         </TooltipProvider>
       </ThemeProvider>
     </RendererRegistryProvider>

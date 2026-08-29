@@ -1,20 +1,23 @@
 import { join } from 'node:path'
-import { BrowserWindow, nativeTheme, screen } from 'electron'
+import { BrowserWindow, nativeTheme, screen, shell } from 'electron'
 import { is } from '@electron-toolkit/utils'
 import { BROWSER_PARTITION } from '../../extensions/browser/shared/types'
 import { resourcePath } from '../utils/app-paths'
+import { loadTheme } from '../theme/store'
 
 export const titleBarHeight = 46
 
 export function createWindow(): BrowserWindow {
+  const savedTheme = loadTheme()
+  if (savedTheme) nativeTheme.themeSource = savedTheme
   const { workArea } = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
   const backgroundColor = nativeTheme.shouldUseDarkColors ? '#1e1e1f' : '#fafafa'
-  const width = Math.max(800, Math.min(1280, Math.round(workArea.width * 0.85)))
+  const width = Math.max(856, Math.min(1280, Math.round(workArea.width * 0.85)))
   const height = Math.max(600, Math.min(820, Math.round(workArea.height * 0.8)))
   const window = new BrowserWindow({
     width,
     height,
-    minWidth: 800,
+    minWidth: 856,
     minHeight: 600,
     x: Math.round(workArea.x + (workArea.width - width) / 2),
     y: Math.round(workArea.y + (workArea.height - height) / 2),
@@ -52,14 +55,19 @@ export function createWindow(): BrowserWindow {
     webPreferences.webSecurity = true
     webPreferences.allowRunningInsecureContent = false
   })
-  window.on('ready-to-show', () => {
-    window.maximize()
-    window.show()
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith('https://larify.ai/')) {
+      void shell.openExternal(url)
+    }
+    return { action: 'deny' }
   })
   const loading =
     is.dev && process.env['ELECTRON_RENDERER_URL']
       ? window.loadURL(process.env['ELECTRON_RENDERER_URL'])
       : window.loadFile(join(__dirname, '../renderer/index.html'))
+  window.on('ready-to-show', () => {
+    window.show()
+  })
   void loading.catch((error) => console.error('Failed to load renderer:', error))
   return window
 }

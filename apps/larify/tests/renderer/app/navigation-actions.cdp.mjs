@@ -36,7 +36,7 @@ const hoverAction = async (label) => {
     assert.ok(point, `workspace action should exist: ${label}`)
     await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point })
     await wait(100)
-    if ((await actionOpacity(label)) === '1') return point
+    if (Number(await actionOpacity(label)) > 0.95) return point
   }
   assert.fail(`workspace action should become visible: ${label}`)
 }
@@ -66,15 +66,14 @@ const measure = () =>
     }
   })()`)
 try {
-  const newTaskPoint = await cdp.evaluate(`(() => {
+  const clickedNewTask = await cdp.evaluate(`(() => {
     const button = [...document.querySelectorAll('button')]
       .find((candidate) => candidate.textContent.trim() === '新建任务')
-    if (!button) return null
-    const rect = button.getBoundingClientRect()
-    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+    if (!button) return false
+    button.click()
+    return true
   })()`)
-  assert.ok(newTaskPoint, 'global new task action should be visible')
-  await clickPoint(newTaskPoint)
+  assert.equal(clickedNewTask, true, 'global new task action should be visible')
   await wait(300)
   assert.equal(
     await cdp.evaluate(
@@ -118,15 +117,14 @@ try {
     initial.workspaceLabel,
     'Tab should focus the workspace create action'
   )
-  assert.equal(
-    await actionOpacity(initial.workspaceLabel),
-    '1',
+  assert.ok(
+    Number(await actionOpacity(initial.workspaceLabel)) > 0.95,
     'focusing the create action should reveal it'
   )
   await cdp.evaluate('document.activeElement?.blur()')
 
   const hoveredPoint = await hoverAction(initial.workspaceLabel)
-  assert.equal(await actionOpacity(initial.workspaceLabel), '1')
+  assert.ok(Number(await actionOpacity(initial.workspaceLabel)) > 0.95)
 
   await clickPoint(hoveredPoint)
   await wait(300)

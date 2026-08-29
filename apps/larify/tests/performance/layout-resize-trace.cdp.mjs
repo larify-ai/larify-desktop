@@ -6,12 +6,15 @@ const output = process.env.LARIFY_TRACE_OUTPUT
 if (!output) throw new Error('LARIFY_TRACE_OUTPUT is required')
 const diagnosticStyle = process.env.LARIFY_TRACE_STYLE
 const action = process.env.LARIFY_TRACE_ACTION ?? 'resize'
-const frameSampleLimit =
+const defaultFrameSampleLimit =
   action === 'stress-suite'
     ? 2_400
     : action === 'scroll-long' || action === 'scroll-programmatic'
       ? 900
       : 600
+const frameSampleLimit = Number(
+  process.env.LARIFY_TRACE_FRAME_SAMPLE_LIMIT ?? defaultFrameSampleLimit
+)
 const threadTitle = process.env.LARIFY_TRACE_THREAD
 const stressSessionId = process.env.LARIFY_TRACE_STRESS_SESSION_ID
 const workbenchTab = process.env.LARIFY_TRACE_WORKBENCH_TAB
@@ -22,6 +25,13 @@ const includeFeatureTabs = process.env.LARIFY_TRACE_WORKBENCH_FEATURE_TABS === '
 const cleanupStressOnly = process.env.LARIFY_TRACE_CLEANUP_STRESS_ONLY === '1'
 const syntheticMessageCount = Number(process.env.LARIFY_TRACE_SYNTHETIC_MESSAGE_COUNT ?? 0)
 const resizeSteps = Number(process.env.LARIFY_TRACE_RESIZE_STEPS ?? 180)
+const programmaticScrollMaxFrames = Number(
+  process.env.LARIFY_TRACE_PROGRAMMATIC_MAX_FRAMES ?? 600
+)
+const programmaticTopSettleFrames = Number(
+  process.env.LARIFY_TRACE_PROGRAMMATIC_TOP_SETTLE_FRAMES ?? 60
+)
+const evaluationTimeout = Number(process.env.LARIFY_TRACE_EVALUATION_TIMEOUT ?? 60_000)
 const resizeTarget = process.env.LARIFY_TRACE_RESIZE_TARGET ?? 'workbench'
 const tracingEnabled = process.env.LARIFY_TRACE_DISABLED !== '1'
 const freezeBrowserSize = process.env.LARIFY_TRACE_FREEZE_BROWSER_SIZE === '1'
@@ -32,6 +42,7 @@ const browserBoundsMode = process.env.LARIFY_TRACE_BROWSER_BOUNDS_MODE ?? 'full'
 const reloadPage = process.env.LARIFY_TRACE_RELOAD === '1'
 const cpuProfileEnabled = process.env.LARIFY_TRACE_CPU_PROFILE === '1'
 const disablePerformanceMeasure = process.env.LARIFY_TRACE_DISABLE_PERFORMANCE_MEASURE === '1'
+const disableStreamdownAstCache = process.env.LARIFY_TRACE_DISABLE_STREAMDOWN_AST_CACHE === '1'
 const expandProcessed = process.env.LARIFY_TRACE_EXPAND_PROCESSED === '1'
 const hideNativeBrowser = process.env.LARIFY_TRACE_HIDE_NATIVE_BROWSER === '1'
 const browserTestUrl = process.env.LARIFY_TRACE_BROWSER_URL ?? 'https://www.xiaohongshu.com/explore'
@@ -99,7 +110,7 @@ async function evaluate(expression) {
       returnByValue: true,
       awaitPromise: true
     },
-    60_000
+    evaluationTimeout
   )
   if (result.exceptionDetails) {
     throw new Error(result.exceptionDetails.exception?.description ?? result.exceptionDetails.text)
@@ -430,7 +441,8 @@ if (workbenchTab || workbenchRenderer) {
           )
           const activeTarget = browserTargets.find(
             ({ id, type, url }) =>
-              type === 'page' && !baselineExternalTargetIds.has(id) &&
+              type === 'page' &&
+              !baselineExternalTargetIds.has(id) &&
               url.includes(`larify_perf_tab=${marker}`)
           )
           if (activeTarget) {
@@ -470,7 +482,8 @@ if (workbenchTab || workbenchRenderer) {
         )
         stressTargets = browserTargets.filter(
           ({ id, type, url }) =>
-            type === 'page' && !url.startsWith('http://localhost:') &&
+            type === 'page' &&
+            !url.startsWith('http://localhost:') &&
             !baselineExternalTargetIds.has(id)
         )
         if (stressTargets.length >= workbenchTabCount - 1) break
@@ -650,7 +663,9 @@ if (workbenchTab || workbenchRenderer) {
         )
         stressBrowserTargets = browserTargets.filter(
           ({ id, type, url }) =>
-            type === 'page' && Boolean(url) && !url.startsWith('http://localhost:') &&
+            type === 'page' &&
+            Boolean(url) &&
+            !url.startsWith('http://localhost:') &&
             !baselineExternalTargetIds.has(id)
         )
         if (stressBrowserTargets.length >= workbenchTabCount) break
@@ -1006,6 +1021,11 @@ try {
     window.__larifyFrameTimes = []
     window.__larifyScrollEvents = []
     window.__larifyMessageMutations = []
+    globalThis.__larifyStreamdownCacheHits = 0
+    globalThis.__larifyStreamdownCacheMisses = 0
+    globalThis.__larifyStreamdownAstCacheHits = 0
+    globalThis.__larifyStreamdownAstCacheMisses = 0
+    globalThis.__larifyDisableStreamdownAstCache = ${disableStreamdownAstCache}
     window.__larifyBrowserBoundsSamples = []
     window.__larifyCaptureBrowserBounds = true
     window.__larifyBrowserBoundsSampleListener ??= (event) => {
@@ -1078,6 +1098,13 @@ try {
       passive: true
     })
     const trackedHandle = scrolling ? null : window.__larifyTraceResizeHandle
+    const renderedMessageIndexes = new Set(
+      scrolling
+        ? Array.from(trackedScroller.querySelectorAll('[data-message-index]'), (element) =>
+            Number(element.getAttribute('data-message-index'))
+          ).filter(Number.isFinite)
+        : []
+    )
     window.__larifyMessageMutationObserver?.disconnect()
     if (scrolling) {
       window.__larifyMessageMutationObserver = new MutationObserver((records) => {
@@ -1095,6 +1122,12 @@ try {
           for (const node of record.removedNodes) collect(node, removed)
         }
         if (added.length > 0 || removed.length > 0) {
+          for (const element of removed) {
+            renderedMessageIndexes.delete(Number(element.getAttribute('data-message-index')))
+          }
+          for (const element of added) {
+            renderedMessageIndexes.add(Number(element.getAttribute('data-message-index')))
+          }
           window.__larifyMessageMutations.push({ at: performance.now(), added, removed })
         }
       })
@@ -1131,7 +1164,13 @@ try {
           ? { x: browserRect.x, width: browserRect.width }
           : null,
         visibleSkeletonCount: 0,
-        renderedRange: null
+        renderedMessageCount: renderedMessageIndexes.size,
+        renderedRange: renderedMessageIndexes.size > 0
+          ? {
+              startIndex: Math.min(...renderedMessageIndexes),
+              endIndex: Math.max(...renderedMessageIndexes)
+            }
+          : null
       })
       previous = now
       if (window.__larifyFrameTimes.length < ${frameSampleLimit}) requestAnimationFrame(sample)
@@ -1156,7 +1195,12 @@ try {
         action === 'scroll-loaded' ||
         action === 'scroll-loaded-fast' ||
         action === 'scroll-loaded-up'
-      const distance = action === 'scroll-loaded-fast' ? 2_400 : loadedScroll ? 1_200 : 30_000
+      const distance =
+        action === 'scroll-loaded-fast'
+          ? 2_400
+          : loadedScroll
+            ? 1_200
+            : Number(process.env.LARIFY_TRACE_SCROLL_DISTANCE ?? 30_000)
       const speed = action === 'scroll-loaded-fast' ? 6_000 : loadedScroll ? 1_500 : 4_000
       await send('Input.synthesizeScrollGesture', {
         x: position.x,
@@ -1164,7 +1208,7 @@ try {
         yDistance: distance,
         speed,
         gestureSourceType: 'mouse'
-      })
+      }, Math.ceil(Math.abs(distance) / speed * 1_000) + 30_000)
       if (
         action === 'scroll-bidirectional' ||
         action === 'scroll-loaded' ||
@@ -1176,7 +1220,7 @@ try {
           yDistance: -distance,
           speed,
           gestureSourceType: 'mouse'
-        })
+        }, Math.ceil(Math.abs(distance) / speed * 1_000) + 30_000)
       }
     } else if (action === 'scroll-programmatic') {
       await evaluate(`new Promise((resolve) => {
@@ -1185,12 +1229,36 @@ try {
         )[0]
         if (!scroller) throw new Error('message log not found')
         scroller.scrollTop = scroller.scrollHeight
+        scroller.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -1 }))
         let frames = 0
+        let direction = -1
+        let settledTopFrames = 0
+        let lastScrollHeight = scroller.scrollHeight
         const scroll = () => {
-          scroller.scrollTop -= 180
+          scroller.scrollTop += direction * 400
           frames += 1
-          if (scroller.scrollTop <= 0 || frames >= 600) resolve(frames)
-          else requestAnimationFrame(scroll)
+          if (direction < 0 && scroller.scrollTop <= 0) {
+            const firstRenderedIndex = Math.min(
+              ...Array.from(scroller.querySelectorAll('[data-item-index]'), (item) =>
+                Number(item.getAttribute('data-item-index'))
+              ).filter(Number.isFinite)
+            )
+            if (firstRenderedIndex > 0) {
+              settledTopFrames = 0
+              requestAnimationFrame(scroll)
+              return
+            }
+            if (scroller.scrollHeight !== lastScrollHeight) {
+              lastScrollHeight = scroller.scrollHeight
+              settledTopFrames = 0
+            } else {
+              settledTopFrames += 1
+            }
+            if (settledTopFrames >= ${programmaticTopSettleFrames}) direction = 1
+          }
+          if ((direction > 0 && scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight) || frames >= ${programmaticScrollMaxFrames}) {
+            resolve(frames)
+          } else requestAnimationFrame(scroll)
         }
         requestAnimationFrame(scroll)
       })`)
@@ -1373,7 +1441,10 @@ try {
         })
       })()`)
       await new Promise((resolve) => setTimeout(resolve, 100))
-      featureScrollableResults.push({ renderer: resource.rendererId, scrollables: featureScrollables })
+      featureScrollableResults.push({
+        renderer: resource.rendererId,
+        scrollables: featureScrollables
+      })
       inputCount += featureScrollables.length
     }
     await setPhase('browser-scrollables')
@@ -1613,6 +1684,13 @@ try {
         browserBoundsSamples,
         sessionMessageCalls,
         longAnimationFrames,
+        streamdownCache: await evaluate(`({
+          hits: globalThis.__larifyStreamdownCacheHits ?? 0,
+          misses: globalThis.__larifyStreamdownCacheMisses ?? 0,
+          astHits: globalThis.__larifyStreamdownAstCacheHits ?? 0,
+          astMisses: globalThis.__larifyStreamdownAstCacheMisses ?? 0,
+          astDisabled: globalThis.__larifyDisableStreamdownAstCache ?? false
+        })`).catch(() => null),
         stressCoverage: await evaluate(`window.__larifyStressCoverage ?? null`).catch(() => null),
         cpuProfile,
         cpuProfileStartedAt,

@@ -1,23 +1,49 @@
-import { useLayoutEffect, useMemo, useRef } from 'react'
-import { XMarkdown, type ComponentProps, type XMarkdownProps } from '@ant-design/x-markdown'
-import Latex from '@ant-design/x-markdown/plugins/Latex'
-import '@ant-design/x-markdown/themes/light.css'
-import '@ant-design/x-markdown/themes/dark.css'
-import { ConfigProvider, theme as antdTheme } from 'antd'
-import { gfmHeadingId } from 'marked-gfm-heading-id'
+import { type ComponentProps, type MouseEvent, useLayoutEffect, useMemo, useRef } from 'react'
+import {
+  MessageResponse,
+  type MessageResponseProps
+} from '@renderer/components/ai-elements/message'
+import { createMessageLink } from '@renderer/components/ai-elements/message-link'
+import { createMessageLinkHandler } from '@renderer/app/interaction/assistant/message-links'
 import type { PreviewRendererProps } from '@renderer/app/registry/file-previews'
-import { useTheme } from '@renderer/app/theme/use-theme'
+import { normalizeModelMarkdownLinks } from '@renderer/lib/model-markdown-links'
+import rehypeSlug from 'rehype-slug'
+import { defaultRehypePlugins, type ExtraProps } from 'streamdown'
 import { stripYamlFrontmatter } from './markdown-utils'
-import { MarkdownCode } from './markdown-code'
-import { MarkdownImage } from './markdown-image'
-import { handleMarkdownLinkClick, scrollToHash } from './markdown-navigation'
+import { WorkspaceMarkdownImage } from './markdown-image'
+import { resolveWorkspacePath, scrollToHash } from './markdown-navigation'
 import { useWorkspaceTextFile } from './use-workspace-text-file'
 
-const markdownConfig: XMarkdownProps['config'] = {
-  // x-markdown and marked-gfm-heading-id resolve different marked type versions.
-  ...(gfmHeadingId() as unknown as XMarkdownProps['config']),
-  extensions: Latex()
+// 阻断非 image 的 data URI（避免 XSS 载荷），其余 src/href 原样保留供后续处理。
+const transformWorkspaceUrl = (url: string, key: string): string | null => {
+  const normalized = url.toLowerCase()
+  return key === 'src' && normalized.startsWith('data:') && !normalized.startsWith('data:image/')
+    ? null
+    : url
 }
+
+// 默认 rehype-sanitize 会把盘符（D:/）/file: 协议的 href 剥离，导致 workspace 本地文件
+// 链接无法点击。仿 message-markdown.tsx：删除 protocols.href 放行任意协议目标（相对路径
+// 与 #anchor 不受影响），src 额外放行 data。javascript:/vbscript: 等危险属性不在此列，
+// sanitize 默认仍按属性级规则处理。
+function createWorkspaceLinkRehypePlugins(): MessageResponseProps['rehypePlugins'] {
+  const sanitize = defaultRehypePlugins.sanitize
+  if (!Array.isArray(sanitize)) return [defaultRehypePlugins.raw, sanitize]
+  const [plugin, options] = sanitize
+  const schema = options as { protocols?: Record<string, string[]> }
+  const protocols = { ...schema.protocols }
+  delete protocols.href
+  protocols.src = [...(protocols.src ?? []), 'data']
+  return [defaultRehypePlugins.raw, [plugin, { ...schema, protocols }]]
+}
+
+const workspaceLinkRehypePlugins = createWorkspaceLinkRehypePlugins()
+
+// Streamdown 不内置 heading id，用 rehype-slug 生成（GitHub 风格：'hello-world'、
+// 'hello-world-1'），支撑文档内 #anchor 点击滚动与初始定位。
+const previewRehypePlugins = [rehypeSlug, ...workspaceLinkRehypePlugins!] as MessageResponseProps['rehypePlugins']
+
+type ImageProps = ComponentProps<'img'> & ExtraProps
 
 export function MarkdownPreview({
   active,
@@ -25,19 +51,36 @@ export function MarkdownPreview({
   resourceId,
   target
 }: PreviewRendererProps): React.JSX.Element {
-  const { resolvedTheme } = useTheme()
   const previewRef = useRef<HTMLDivElement>(null)
   const { content, error } = useWorkspaceTextFile(resourceId, file.path, active)
-  const markdown = content === undefined ? undefined : stripYamlFrontmatter(content)
-  const components = useMemo(
-    () => ({
-      code: (props: ComponentProps) => <MarkdownCode {...props} dark={resolvedTheme === 'dark'} />,
-      img: (props: ComponentProps) => (
-        <MarkdownImage {...props} currentFile={file.path} resourceId={resourceId} />
-      )
-    }),
-    [file.path, resolvedTheme, resourceId]
+  const markdown = useMemo(
+    () =>
+      content === undefined ? undefined : normalizeModelMarkdownLinks(stripYamlFrontmatter(content)),
+    [content]
   )
+  const handler = useMemo(() => {
+    const cwd = resolveWorkspacePath(file.path, '.')
+    return createMessageLinkHandler(cwd, '')
+  }, [file.path])
+  const components = useMemo(() => {
+    const MessageLinkA = createMessageLink(handler)
+    return {
+      a: (props: ComponentProps<'a'> & ExtraProps): React.JSX.Element => {
+        const { href, node } = props
+        const hrefValue = href || nodeHref(node)
+        const handleClick = (event: MouseEvent<HTMLAnchorElement>): void => {
+          if (hrefValue?.startsWith('#') && previewRef.current) {
+            event.preventDefault()
+            scrollToHash(previewRef.current, hrefValue.slice(1))
+          }
+        }
+        return <MessageLinkA {...props} onClick={handleClick} />
+      },
+      img: (props: ImageProps): React.JSX.Element => (
+        <WorkspaceMarkdownImage {...props} currentFile={file.path} resourceId={resourceId} />
+      )
+    }
+  }, [file.path, handler, resourceId])
 
   useLayoutEffect(() => {
     if (target && previewRef.current) scrollToHash(previewRef.current, target.hash)
@@ -47,41 +90,24 @@ export function MarkdownPreview({
   if (markdown === undefined) return <div className="h-full" />
 
   return (
-    <div
-      className="workspace-markdown-preview h-full overflow-auto"
-      onClick={(event) => handleMarkdownLinkClick(event, file.path, resourceId)}
-      ref={previewRef}
-    >
-      <ConfigProvider
-        theme={{
-          algorithm:
-            resolvedTheme === 'dark' ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
-          token: markdownThemeTokens
-        }}
+    <div className="workspace-markdown-preview h-full overflow-auto" ref={previewRef}>
+      <MessageResponse
+        components={components}
+        mode="static"
+        rehypePlugins={previewRehypePlugins}
+        urlTransform={transformWorkspaceUrl}
       >
-        <XMarkdown
-          className={resolvedTheme === 'dark' ? 'x-markdown-dark' : 'x-markdown-light'}
-          components={components}
-          config={markdownConfig}
-          content={markdown}
-        />
-      </ConfigProvider>
+        {markdown}
+      </MessageResponse>
     </div>
   )
 }
 
-const markdownThemeTokens = {
-  colorBgContainer: 'var(--workbench-content)',
-  colorBorder: 'var(--border-strong)',
-  colorBorderSecondary: 'var(--border)',
-  colorFill: 'var(--muted)',
-  colorFillContent: 'var(--muted)',
-  colorPrimary: 'var(--primary)',
-  colorText: 'var(--foreground)',
-  colorTextHeading: 'var(--foreground)',
-  colorTextSecondary: 'var(--muted-foreground)',
-  fontFamily: 'var(--font-sans)',
-  fontFamilyCode: 'var(--font-mono)'
+function nodeHref(node: unknown): string | undefined {
+  if (!node || typeof node !== 'object' || !('properties' in node)) return undefined
+  const properties = node.properties
+  if (!properties || typeof properties !== 'object' || !('href' in properties)) return undefined
+  return typeof properties.href === 'string' ? properties.href : undefined
 }
 
 function MarkdownPreviewError({ message }: { message: string }): React.JSX.Element {

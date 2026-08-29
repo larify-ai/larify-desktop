@@ -120,7 +120,7 @@ try {
     completed: 3,
     active: 0,
     indented: false,
-    dividerCount: 0
+    dividerCount: 1
   })
 
   await evaluate(`(() => {
@@ -173,7 +173,14 @@ try {
   )
   assert.equal(persistedCount, 1)
   const changesCardCount = await waitFor(
-    `document.querySelectorAll('section[aria-label^="已编辑 "]').length || null`,
+    `(() => {
+      const scroller = document.querySelector('[role="log"]')
+      if (scroller) {
+        scroller.scrollTop = 0
+        scroller.dispatchEvent(new Event('scroll', { bubbles: true }))
+      }
+      return document.querySelectorAll('section[aria-label^="已编辑 "]').length || null
+    })()`,
     'single cumulative changes card'
   )
   assert.equal(changesCardCount, 1)

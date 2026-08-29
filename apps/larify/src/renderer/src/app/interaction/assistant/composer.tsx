@@ -131,7 +131,7 @@ export function AssistantComposer({
   }
 
   return (
-    <div className="-mt-4 mx-auto w-full max-w-4xl px-6 pb-4">
+    <div className="-mt-4 mx-auto w-full max-w-4xl px-6 pb-4" data-composer-layout-shell>
       <div
         ref={inputRef}
         className="relative z-10 w-full overflow-hidden rounded-2xl bg-card shadow-sm"

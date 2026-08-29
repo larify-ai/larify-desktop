@@ -4,6 +4,7 @@ import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AssistantSessionsContext } from '../../../src/renderer/src/app/interaction/assistant/sessions-context'
+import { AuthContext } from '../../../src/renderer/src/app/auth/auth-context'
 import { NavigationContent } from '../../../src/renderer/src/app/navigation/navigation-content'
 
 let container: HTMLDivElement
@@ -11,6 +12,7 @@ let root: Root
 
 beforeEach(() => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true
+  localStorage.clear()
   container = document.createElement('div')
   root = createRoot(container)
 })
@@ -48,7 +50,11 @@ function renderNavigation(create = vi.fn()): void {
       createElement(
         AssistantSessionsContext.Provider,
         { value: sessions },
-        createElement(NavigationContent)
+        createElement(
+          AuthContext.Provider,
+          { value: { email: 'test@larify.ai', logout: vi.fn() } },
+          createElement(NavigationContent)
+        )
       )
     )
   )
@@ -63,6 +69,7 @@ describe('navigation content', () => {
     const workspaceList = container.querySelector('nav[aria-labelledby="workspaces-heading"]')
     const workspaceHeading = container.querySelector('#workspaces-heading')
     expect(workspaceList).not.toBeNull()
+    expect(workspaceHeading?.tagName).toBe('H2')
     expect(workspaceList?.className).toContain('overflow-y-auto')
     expect(workspaceList?.contains(workspaceHeading)).toBe(false)
     expect(container.textContent).toContain('百宝箱')
@@ -76,5 +83,21 @@ describe('navigation content', () => {
     )
     act(() => newTask?.click())
     expect(create).toHaveBeenCalledWith()
+  })
+
+  it('creates a task in a directory selected from the add workspace action', async () => {
+    const create = vi.fn()
+    const invoke = vi.fn().mockResolvedValue(['D:\\Added workspace'])
+    Object.defineProperty(window, 'bridge', {
+      configurable: true,
+      value: { invoke }
+    })
+    renderNavigation(create)
+
+    const add = container.querySelector<HTMLButtonElement>('[aria-label="添加工作空间"]')
+    await act(async () => add?.click())
+
+    expect(invoke).toHaveBeenCalledWith('dialog:pick-directories')
+    expect(create).toHaveBeenCalledWith('D:\\Added workspace')
   })
 })

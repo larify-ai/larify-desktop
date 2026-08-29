@@ -11,6 +11,22 @@ export interface Session {
   updatedAt: number
 }
 
+export interface SessionNavigationItem {
+  id: string
+  index: number
+  promptPreview: string
+  responsePreview?: string
+}
+
+function previewText(message: UIMessage): string {
+  return message.parts
+    .filter((part) => part.type === 'text')
+    .map((part) => part.text)
+    .join('\n\n')
+    .trim()
+    .slice(0, 2_000)
+}
+
 export class SessionStore implements Disposable {
   private readonly database: DatabaseSync
 
@@ -80,6 +96,44 @@ export class SessionStore implements Disposable {
       )
       .get(id)
     return Number(row?.count ?? 0)
+  }
+
+  loadNavigationIndex(id: string, beforeIndex?: number, limit = 50): SessionNavigationItem[] {
+    const messageCount = this.countMessages(id)
+    const itemLimit = Number.isFinite(limit) ? Math.min(50, Math.max(0, Math.trunc(limit))) : 50
+    if (itemLimit === 0) return []
+    let cursor = Number.isFinite(beforeIndex)
+      ? Math.min(Math.max(0, Math.trunc(beforeIndex!)), messageCount)
+      : messageCount
+    const items: SessionNavigationItem[] = []
+    let responsePreview: string | undefined
+    while (cursor > 0 && items.length < itemLimit) {
+      const start = Math.max(0, cursor - 100)
+      const messages = this.loadVisibleMessages(id, start, cursor - start)
+      for (let localIndex = messages.length - 1; localIndex >= 0; localIndex -= 1) {
+        const message = messages[localIndex]
+        if (message.role === 'user') {
+          const metadata = message.metadata as Record<string, unknown> | undefined
+          if (metadata?.compaction === true) {
+            responsePreview = undefined
+            continue
+          }
+          items.push({
+            id: message.id,
+            index: start + localIndex,
+            promptPreview: previewText(message).replace(/\s+/g, ' ') || '用户消息',
+            responsePreview
+          })
+          responsePreview = undefined
+          if (items.length === itemLimit) break
+          continue
+        }
+        if (message.role !== 'assistant' || responsePreview) continue
+        responsePreview = previewText(message) || undefined
+      }
+      cursor = start
+    }
+    return items.reverse()
   }
 
   hasSession(id: string): boolean {

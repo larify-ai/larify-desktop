@@ -11,6 +11,7 @@ import { registerPlugin } from '../core/plugin'
 import { registerTheme } from '../theme'
 import { registerDialog } from '../dialog'
 import { registerUpdate } from '../update'
+import { registerAuth } from '../auth'
 import { openMainWindow, registerWindow } from '../window'
 import type { Application } from './application'
 
@@ -32,6 +33,7 @@ async function createApplication(electron: App): Promise<Application> {
   await registerPlugin(application)
   registerAgent(application)
   registerUpdate(application)
+  registerAuth(application)
   return application
 }
 

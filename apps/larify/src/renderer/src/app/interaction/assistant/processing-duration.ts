@@ -1,5 +1,5 @@
-export function formatProcessingDuration(startedAt: number, currentAt: number): string {
-  let remaining = Math.max(0, Math.floor((currentAt - startedAt) / 1_000))
+export function formatProcessingDurationMs(totalMs: number): string {
+  let remaining = Math.max(0, Math.ceil(totalMs / 1_000))
   const days = Math.floor(remaining / 86_400)
   remaining %= 86_400
   const hours = Math.floor(remaining / 3_600)
@@ -13,4 +13,8 @@ export function formatProcessingDuration(startedAt: number, currentAt: number): 
     `${seconds}秒`
   ].filter(Boolean)
   return `处理了 ${parts.join(' ')}`
+}
+
+export function formatProcessingDuration(startedAt: number, currentAt: number): string {
+  return formatProcessingDurationMs(currentAt - startedAt)
 }

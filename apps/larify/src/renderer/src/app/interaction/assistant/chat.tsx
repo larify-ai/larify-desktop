@@ -6,6 +6,7 @@ import { AssistantComposer } from './composer'
 import type { ConversationHeading } from './conversation-header'
 import { ToolOutputContext } from './tool-output'
 import { sessionAttentionState, useSessionAttentionReport } from './session-attention'
+import type { SessionNavigationItem } from './session-messages'
 
 function messageText(message: UIMessage): string {
   let text = ''
@@ -35,6 +36,8 @@ export function AssistantChat({
   cwd,
   recentStart,
   olderMessages,
+  navigationItems,
+  onLoadOlderNavigation,
   onLoadRange,
   onCwdChange,
   onHeadingChange
@@ -45,6 +48,8 @@ export function AssistantChat({
   cwd: string
   recentStart: number
   olderMessages: Map<number, UIMessage>
+  navigationItems: SessionNavigationItem[]
+  onLoadOlderNavigation: () => void
   onLoadRange: (firstPage: number, lastPage: number) => void
   onCwdChange: (cwd: string) => void
   onHeadingChange: (heading: ConversationHeading | null) => void
@@ -129,6 +134,8 @@ export function AssistantChat({
           followRequest={followRequest}
           recentStart={recentStart}
           olderMessages={olderMessages}
+          navigationItems={navigationItems}
+          onLoadOlderNavigation={onLoadOlderNavigation}
           onLoadRange={onLoadRange}
         />
       </ToolOutputContext.Provider>

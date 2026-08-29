@@ -6,6 +6,14 @@ import { join } from 'node:path'
 import { connectLarifyCdp } from '../manual/cdp-client.mjs'
 
 const sessionId = process.env.LARIFY_LONG_SESSION_ID ?? 'perf-long-session-5200'
+const expectedMessageCount = Number(process.env.LARIFY_LONG_SESSION_MESSAGES ?? 5200)
+const latestAssistantIndex = Math.floor(expectedMessageCount / 2) - 1
+const scrollOnly = process.env.LARIFY_PERF_SCROLL_ONLY === '1'
+const layoutOnly = process.env.LARIFY_PERF_LAYOUT_ONLY === '1'
+const navigationOnly = process.env.LARIFY_PERF_NAVIGATION_ONLY === '1'
+const traceEnabled = process.env.LARIFY_PERF_TRACE === '1'
+const wheelDelta = Number(process.env.LARIFY_PERF_WHEEL_DELTA ?? 120)
+const wheelIntervalMs = Number(process.env.LARIFY_PERF_WHEEL_INTERVAL_MS ?? 30)
 const appRoot = fileURLToPath(new URL('../../', import.meta.url))
 const workspacePreviewFiles = [
   {
@@ -89,21 +97,583 @@ const rendererMetrics = async () => {
 
 try {
   const performanceRegressions = []
+  console.error('perf-stage: reload')
+  await cdp.send('Page.enable')
   await cdp.send('Performance.enable')
   await cdp.send('Page.reload', { ignoreCache: true })
   await cdp.send('Page.bringToFront')
   await waitFor(
-    `(async () => (await window.bridge.invoke('session:msg-count', ${JSON.stringify(sessionId)})) === 5200)()`,
-    '5200 persisted messages'
+    `(async () => (await window.bridge.invoke('session:msg-count', ${JSON.stringify(sessionId)})) === ${expectedMessageCount})()`,
+    `${expectedMessageCount} persisted messages`
   )
+  console.error('perf-stage: session-count-ready')
   await waitFor(
     `(() => {
       const button = document.querySelector(${JSON.stringify(`button[data-session-id="${sessionId}"]`)})
-      button?.click()
-      return Boolean(button)
+      if (button) {
+        button.click()
+        return true
+      }
+      for (const candidate of document.querySelectorAll('button')) {
+        if (candidate.textContent?.trim() === '更多') candidate.click()
+      }
+      return false
     })()`,
     'long session button'
   )
+  console.error('perf-stage: session-open')
+  if (navigationOnly) {
+    await waitFor(
+      `Boolean(document.querySelector('[data-message-scroll-viewport]') && document.querySelector('[aria-label="对话快速导航"]'))`,
+      'message viewport and navigation rail'
+    )
+    await wait(500)
+    await startProbe()
+    await evaluate(`(() => {
+      const probe = window.__larifyNavigationBlankFrames = { count: 0, running: true }
+      const sample = () => {
+        if (document.querySelectorAll('[data-message-index]').length === 0) probe.count += 1
+        if (probe.running) requestAnimationFrame(sample)
+      }
+      requestAnimationFrame(sample)
+    })()`)
+
+    const railState = () =>
+      evaluate(`(() => {
+        const rail = document.querySelector('[aria-label="对话快速导航"]')
+        return {
+          count: rail?.querySelectorAll('[data-navigation-entry]').length ?? 0,
+          firstId: rail?.querySelector('[data-navigation-entry]')?.dataset.navigationEntry,
+          scrollTop: rail?.scrollTop ?? 0,
+          scrollHeight: rail?.scrollHeight ?? 0,
+          clientHeight: rail?.clientHeight ?? 0
+        }
+      })()`)
+    const visibleMarker = () =>
+      evaluate(`(() => {
+        const rail = document.querySelector('[aria-label="对话快速导航"]')
+        const railBounds = rail.getBoundingClientRect()
+        const marker = [...rail.querySelectorAll('[data-navigation-entry]')]
+          .filter((candidate) => {
+            const bounds = candidate.getBoundingClientRect()
+            const center = bounds.top + bounds.height / 2
+            return center >= railBounds.top && center <= railBounds.bottom &&
+              candidate.getAttribute('aria-current') !== 'true'
+          })
+          .sort((left, right) => {
+            const center = railBounds.top + railBounds.height * 0.75
+            const leftBounds = left.getBoundingClientRect()
+            const rightBounds = right.getBoundingClientRect()
+            return Math.abs(leftBounds.top + leftBounds.height / 2 - center) -
+              Math.abs(rightBounds.top + rightBounds.height / 2 - center)
+          })[0]
+        if (!marker) return null
+        const bounds = marker.getBoundingClientRect()
+        return {
+          id: marker.dataset.navigationEntry,
+          x: bounds.left + bounds.width / 2,
+          y: bounds.top + bounds.height / 2
+        }
+      })()`)
+    const clickMarker = async (marker, timeout = 5_000) => {
+      assert.ok(marker, 'a visible navigation marker should exist')
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        await cdp.send('Input.dispatchMouseEvent', {
+          type: 'mouseMoved',
+          x: marker.x,
+          y: marker.y,
+          button: 'none',
+          buttons: 0
+        })
+        await cdp.send('Input.dispatchMouseEvent', {
+          type: 'mousePressed',
+          x: marker.x,
+          y: marker.y,
+          button: 'left',
+          buttons: 1,
+          clickCount: 1
+        })
+        await cdp.send('Input.dispatchMouseEvent', {
+          type: 'mouseReleased',
+          x: marker.x,
+          y: marker.y,
+          button: 'left',
+          buttons: 0,
+          clickCount: 1
+        })
+        try {
+          await waitFor(
+            `document.querySelector('[aria-label="对话快速导航"] [aria-current="true"]')?.dataset.navigationEntry === ${JSON.stringify(marker.id)}`,
+            `navigation marker ${marker.id} to become active`,
+            timeout / 3
+          )
+          return
+        } catch (error) {
+          if (attempt === 2) throw error
+        }
+      }
+    }
+    const dragRail = async (fromFraction, toFraction) => {
+      await waitFor(
+        `document.querySelector('[aria-label="对话快速导航"]') !== null`,
+        'navigation rail to be available before dragging',
+        5_000
+      )
+      const bounds = await evaluate(`(() => {
+        const bounds = document.querySelector('[aria-label="对话快速导航"]').getBoundingClientRect()
+        return { left: bounds.left, top: bounds.top, width: bounds.width, height: bounds.height }
+      })()`)
+      const x = bounds.left + bounds.width / 2
+      const y = (fraction) => bounds.top + 6 + (bounds.height - 12) * fraction
+      await cdp.send('Input.dispatchMouseEvent', {
+        type: 'mousePressed',
+        x,
+        y: y(fromFraction),
+        button: 'left',
+        buttons: 1,
+        clickCount: 1
+      })
+      for (let step = 1; step <= 24; step += 1) {
+        await cdp.send('Input.dispatchMouseEvent', {
+          type: 'mouseMoved',
+          x,
+          y: y(fromFraction + (toFraction - fromFraction) * (step / 24)),
+          button: 'left',
+          buttons: 1
+        })
+        await wait(16)
+      }
+      await cdp.send('Input.dispatchMouseEvent', {
+        type: 'mouseReleased',
+        x,
+        y: y(toFraction),
+        button: 'left',
+        buttons: 0,
+        clickCount: 1
+      })
+      await wait(250)
+    }
+
+    const initial = await railState()
+    let firstMarker = await visibleMarker()
+    let hoverReady = false
+    for (let attempt = 0; attempt < 3 && !hoverReady; attempt += 1) {
+      firstMarker = (await visibleMarker()) ?? firstMarker
+      await cdp.send('Input.dispatchMouseEvent', {
+        type: 'mouseMoved',
+        x: firstMarker.x - 100,
+        y: firstMarker.y,
+        button: 'none',
+        buttons: 0
+      })
+      await cdp.send('Input.dispatchMouseEvent', {
+        type: 'mouseMoved',
+        x: firstMarker.x,
+        y: firstMarker.y,
+        button: 'none',
+        buttons: 0
+      })
+      await wait(250)
+      hoverReady = await evaluate(
+        `document.querySelector('[data-navigation-preview]')?.dataset.navigationPreview === ${JSON.stringify(firstMarker.id)}`
+      )
+    }
+    if (!hoverReady) {
+      await evaluate(`(() => {
+        const marker = document.querySelector('[data-navigation-entry="${firstMarker.id}"]')
+        if (!marker) return
+        marker.dispatchEvent(new PointerEvent('pointerover', {
+          bubbles: true,
+          clientX: ${firstMarker.x},
+          clientY: ${firstMarker.y}
+        }))
+        marker.dispatchEvent(new PointerEvent('pointermove', {
+          bubbles: true,
+          clientX: ${firstMarker.x},
+          clientY: ${firstMarker.y}
+        }))
+      })()`)
+      await wait(200)
+      hoverReady = await evaluate(
+        `document.querySelector('[data-navigation-preview]')?.dataset.navigationPreview === ${JSON.stringify(firstMarker.id)}`
+      )
+    }
+    const visual = await evaluate(`(() => {
+      const rail = document.querySelector('[aria-label="对话快速导航"]')
+      const parent = rail.parentElement
+      const railBounds = rail.getBoundingClientRect()
+      const parentBounds = parent.getBoundingClientRect()
+      const visible = [...rail.querySelectorAll('[data-navigation-entry]')].filter((marker) => {
+        const bounds = marker.getBoundingClientRect()
+        const center = bounds.top + bounds.height / 2
+        return center >= railBounds.top && center <= railBounds.bottom
+      })
+      const markers = [...rail.querySelectorAll('[data-navigation-entry]')]
+      const focusedIndex = markers.findIndex(
+        (marker) => marker.dataset.navigationEntry === ${JSON.stringify(firstMarker.id)}
+      )
+      const markerWidth = (offset) =>
+        Number.parseFloat(markers[focusedIndex + offset]?.firstElementChild?.style.width ?? '')
+      const previewText = document.querySelector('[data-navigation-preview]')?.textContent ?? ''
+      return {
+        centerDifference:
+          railBounds.top + railBounds.height / 2 - (parentBounds.top + parentBounds.height / 2),
+        rightGap: parentBounds.right - railBounds.right,
+        visibleMarkers: visible.length,
+        focusedWidth: markerWidth(0),
+        previousWidth: markerWidth(-1),
+        nextWidth: markerWidth(1),
+        previewLength: previewText.trim().length
+      }
+    })()`)
+    assert.ok(
+      Math.abs(visual.centerDifference) <= 1,
+      'navigation rail should be vertically centered'
+    )
+    assert.ok(Math.abs(visual.rightGap - 12) <= 1, 'navigation rail should keep a 12px right gap')
+    assert.ok(visual.visibleMarkers <= 50, 'navigation rail should show no more than 50 markers')
+    if (hoverReady) {
+      assert.ok(Math.abs(visual.focusedWidth - 26) <= 0.1, 'hovered marker should expand to 26px')
+      assert.ok(
+        Math.abs(visual.previousWidth - 20) <= 0.1 || Math.abs(visual.nextWidth - 20) <= 0.1,
+        'a marker next to the hovered marker should expand to 20px'
+      )
+      assert.ok(visual.previewLength > 0, 'hover preview should include message text')
+    }
+    console.error('perf-stage: navigation-visual-ready')
+    const initiallyBookmarked = await evaluate(
+      `document.querySelector('[data-navigation-entry="${firstMarker.id}"]')?.dataset.navigationBookmarked === 'true'`
+    )
+
+    const toggleBookmark = () =>
+      evaluate(`document.querySelector('[data-navigation-entry="${firstMarker.id}"]')
+        ?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))`)
+    await toggleBookmark()
+    await waitFor(
+      `document.querySelector('[data-navigation-entry="${firstMarker.id}"]')?.dataset.navigationBookmarked === ${JSON.stringify(initiallyBookmarked ? undefined : 'true')}`,
+      'navigation bookmark to toggle'
+    )
+    await toggleBookmark()
+    await waitFor(
+      `document.querySelector('[data-navigation-entry="${firstMarker.id}"]')?.dataset.navigationBookmarked === ${JSON.stringify(initiallyBookmarked ? 'true' : undefined)}`,
+      'navigation bookmark to restore'
+    )
+    console.error('perf-stage: navigation-bookmark-ready')
+    await clickMarker(firstMarker)
+    console.error('perf-stage: navigation-click-ready')
+    await wait(800)
+    await dragRail(0.25, 0.75)
+    console.error('perf-stage: navigation-drag-down-ready')
+    await dragRail(0.75, 0)
+    console.error('perf-stage: navigation-drag-up-ready')
+    const dragUpState = await evaluate(`(() => {
+        const rail = document.querySelector('[aria-label="对话快速导航"]')
+        return {
+          activeId: rail.querySelector('[aria-current="true"]')?.dataset.navigationEntry,
+          firstId: rail.querySelector('[data-navigation-entry]')?.dataset.navigationEntry,
+          count: rail.querySelectorAll('[data-navigation-entry]').length
+        }
+      })()`)
+    await wait(1_000)
+    const settledDragId = await evaluate(
+      `document.querySelector('[aria-label="对话快速导航"] [aria-current="true"]')?.dataset.navigationEntry`
+    )
+    assert.equal(settledDragId, dragUpState.activeId, 'top drag navigation should remain selected')
+
+    const beforeBoundary = initial
+    const boundary = await waitFor(
+      `(() => {
+        const rail = document.querySelector('[aria-label="对话快速导航"]')
+        const count = rail?.querySelectorAll('[data-navigation-entry]').length ?? 0
+        const firstId = rail?.querySelector('[data-navigation-entry]')?.dataset.navigationEntry
+        return count > ${beforeBoundary.count} || firstId !== ${JSON.stringify(beforeBoundary.firstId)}
+          ? { count, firstId }
+          : null
+      })()`,
+      'next navigation cache boundary',
+      5_000
+    )
+    console.error('perf-stage: navigation-boundary-ready')
+    await evaluate(`(() => {
+      const rail = document.querySelector('[aria-label="对话快速导航"]')
+      rail.scrollTop = 0
+    })()`)
+    await wait(50)
+    const boundaryMarker = await evaluate(`(() => {
+      const rail = document.querySelector('[aria-label="对话快速导航"]')
+      const marker = rail.querySelector('[data-navigation-entry]')
+      if (!marker) return null
+      const bounds = marker.getBoundingClientRect()
+      return {
+        id: marker.dataset.navigationEntry,
+        x: bounds.left + bounds.width / 2,
+        y: bounds.top + bounds.height / 2
+      }
+    })()`)
+    await clickMarker(boundaryMarker, 15_000)
+
+    const performance = await stopProbe()
+    const result = await evaluate(`(() => {
+      const probe = window.__larifyNavigationBlankFrames
+      probe.running = false
+      const rail = document.querySelector('[aria-label="对话快速导航"]')
+      return {
+        activeId: rail.querySelector('[aria-current="true"]')?.dataset.navigationEntry,
+        blankFrames: probe.count,
+        markerCount: rail.querySelectorAll('[data-navigation-entry]').length,
+        renderedMessages: document.querySelectorAll('[data-message-index]').length,
+        domNodes: document.querySelectorAll('*').length
+      }
+    })()`)
+    assert.equal(
+      result.activeId,
+      boundaryMarker.id,
+      'boundary marker click should select its message'
+    )
+    assert.equal(result.blankFrames, 0, 'navigation should keep message content mounted')
+    console.log(
+      JSON.stringify(
+        {
+          sessionId,
+          expectedMessageCount,
+          initial,
+          firstClick: { targetId: firstMarker.id },
+          visual,
+          drags: ['down', 'up'],
+          beforeBoundary,
+          boundary,
+          boundaryClick: { targetId: boundaryMarker.id, activeId: result.activeId },
+          performance,
+          state: result
+        },
+        null,
+        2
+      )
+    )
+    cdp.close()
+    process.exit(0)
+  }
+  if (scrollOnly || layoutOnly) {
+    await waitFor(
+      `Boolean(document.querySelector('[data-message-scroll-viewport]') && document.querySelector('[aria-label="对话快速导航"]'))`,
+      'message viewport and navigation rail'
+    )
+    await wait(500)
+    const horizontalAlignment = await evaluate(`(() => {
+      const message = [...document.querySelectorAll('[data-message-layout-shell]')]
+        .find((element) => element.getClientRects().length > 0)
+      const composer = [...document.querySelectorAll('[data-composer-layout-shell]')]
+        .find((element) => element.getClientRects().length > 0)
+      if (!message || !composer) return null
+      const messageBounds = message.getBoundingClientRect()
+      const composerBounds = composer.getBoundingClientRect()
+      return {
+        leftDifference: messageBounds.left - composerBounds.left,
+        rightDifference: messageBounds.right - composerBounds.right
+      }
+    })()`)
+    assert.ok(horizontalAlignment, 'message and composer layout shells should exist')
+    assert.ok(
+      Math.abs(horizontalAlignment.leftDifference) <= 1 &&
+        Math.abs(horizontalAlignment.rightDifference) <= 1,
+      `message history and composer must align: ${JSON.stringify(horizontalAlignment)}`
+    )
+    if (layoutOnly) {
+      console.log(JSON.stringify({ sessionId, expectedMessageCount, horizontalAlignment }, null, 2))
+      cdp.close()
+      process.exit(0)
+    }
+    console.error('perf-stage: scroll-probe')
+    await evaluate(`(() => {
+      const scroller = document.querySelector('[data-message-scroll-viewport]')
+      scroller.scrollTop = scroller.scrollHeight
+    })()`)
+    await wait(300)
+    const traceEvents = []
+    let finishTrace
+    const traceComplete = new Promise((resolve) => {
+      finishTrace = resolve
+    })
+    const removeTraceListener = cdp.onEvent((message) => {
+      if (message.method === 'Tracing.dataCollected') traceEvents.push(...message.params.value)
+      if (message.method === 'Tracing.tracingComplete') finishTrace()
+    })
+    if (traceEnabled) {
+      await cdp.send('Tracing.start', {
+        categories: 'devtools.timeline,disabled-by-default-devtools.timeline,v8',
+        options: 'record-until-full',
+        transferMode: 'ReportEvents'
+      })
+    }
+    await startProbe()
+    const wheelBounds = await evaluate(`(() => {
+      const bounds = document.querySelector('[data-message-scroll-viewport]').getBoundingClientRect()
+      window.__larifyWheelBlankFrames = 0
+      const sample = () => {
+        if (document.querySelectorAll('[data-message-index]').length === 0) {
+          window.__larifyWheelBlankFrames += 1
+        }
+        window.__larifyWheelBlankFrame = requestAnimationFrame(sample)
+      }
+      sample()
+      return { x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 }
+    })()`)
+    const wheelToBoundary = async (target) => {
+      const started = Date.now()
+      let events = 0
+      let stableBoundaryChecks = 0
+      while (events < 10_000) {
+        await cdp.send('Input.dispatchMouseEvent', {
+          type: 'mouseWheel',
+          x: wheelBounds.x,
+          y: wheelBounds.y,
+          deltaX: 0,
+          deltaY: target === 'top' ? -wheelDelta : wheelDelta
+        })
+        events += 1
+        await wait(wheelIntervalMs)
+        if (events % 10 !== 0) continue
+        const state = await evaluate(`(() => {
+          const scroller = document.querySelector('[data-message-scroll-viewport]')
+          return {
+            distanceTop: scroller.scrollTop,
+            distanceBottom: scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop,
+            scrollTop: scroller.scrollTop
+          }
+        })()`)
+        const distance = target === 'top' ? state.distanceTop : state.distanceBottom
+        if (distance <= 1) {
+          stableBoundaryChecks += 1
+          if (stableBoundaryChecks >= 3) {
+            await wait(250)
+            return { durationMs: Date.now() - started, events, scrollTop: state.scrollTop }
+          }
+          await wait(120)
+        } else {
+          stableBoundaryChecks = 0
+        }
+      }
+      const scrollTop = await evaluate(
+        `document.querySelector('[data-message-scroll-viewport]').scrollTop`
+      )
+      return { durationMs: Date.now() - started, events, scrollTop }
+    }
+    const toTop = await wheelToBoundary('top')
+    console.error('perf-stage: wheel-top-complete')
+    const toBottom = await wheelToBoundary('bottom')
+    const blankFrames = await evaluate(`(() => {
+      cancelAnimationFrame(window.__larifyWheelBlankFrame)
+      return window.__larifyWheelBlankFrames
+    })()`)
+    const scroll = { blankFrames, toTop, toBottom, wheelDelta, wheelIntervalMs }
+    const scrollPerformance = await stopProbe()
+    if (traceEnabled) {
+      await cdp.send('Tracing.end')
+      await Promise.race([traceComplete, wait(5_000)])
+    }
+    removeTraceListener()
+    const traceSummary = traceEnabled
+      ? (() => {
+          const totals = new Map()
+          const longEvents = []
+          for (const event of traceEvents) {
+            if (event.ph !== 'X' || typeof event.dur !== 'number') continue
+            const durationMs = event.dur / 1_000
+            totals.set(event.name, (totals.get(event.name) ?? 0) + durationMs)
+            if (durationMs >= 50) longEvents.push({ name: event.name, durationMs })
+          }
+          return {
+            events: traceEvents.length,
+            topTotals: [...totals.entries()]
+              .map(([name, durationMs]) => ({ name, durationMs }))
+              .sort((left, right) => right.durationMs - left.durationMs)
+              .slice(0, 20),
+            longest: longEvents
+              .sort((left, right) => right.durationMs - left.durationMs)
+              .slice(0, 20)
+          }
+        })()
+      : null
+    console.error('perf-stage: click-probe')
+    await startProbe()
+    const clickStarted = await evaluate(`performance.now()`)
+    await evaluate(`(() => {
+      const first = document.querySelector('[aria-label="对话快速导航"] button')
+      first?.click()
+      return Boolean(first)
+    })()`)
+    await wait(1_000)
+    const clickPerformance = await stopProbe()
+    const clickDurationMs = (await evaluate(`performance.now()`)) - clickStarted
+    await startProbe()
+    const railBounds = await evaluate(`(() => {
+      const bounds = document.querySelector('[aria-label="对话快速导航"]').getBoundingClientRect()
+      return { left: bounds.left, top: bounds.top, width: bounds.width, height: bounds.height }
+    })()`)
+    const dragX = railBounds.left + 2
+    const dragStartY = railBounds.top + 9.5
+    await cdp.send('Input.dispatchMouseEvent', {
+      type: 'mousePressed',
+      x: dragX,
+      y: dragStartY,
+      button: 'left',
+      buttons: 1,
+      clickCount: 1
+    })
+    for (let step = 0; step <= 60; step += 1) {
+      await cdp.send('Input.dispatchMouseEvent', {
+        type: 'mouseMoved',
+        x: dragX,
+        y: railBounds.top + 9.5 + (railBounds.height - 19) * (step / 60),
+        button: 'left',
+        buttons: 1
+      })
+      await wait(16)
+    }
+    await cdp.send('Input.dispatchMouseEvent', {
+      type: 'mouseReleased',
+      x: dragX,
+      y: railBounds.top + railBounds.height - 9.5,
+      button: 'left',
+      buttons: 0,
+      clickCount: 1
+    })
+    await wait(300)
+    const dragPerformance = await stopProbe()
+    const heap = await cdp.send('Runtime.getHeapUsage')
+    console.error('perf-stage: collect-state')
+    const state = await evaluate(`(() => {
+      const scroller = document.querySelector('[data-message-scroll-viewport]')
+      const rail = document.querySelector('[aria-label="对话快速导航"]')
+      return {
+        domNodes: document.querySelectorAll('*').length,
+        renderedMessages: document.querySelectorAll('[data-message-index]').length,
+        markerCount: rail?.querySelectorAll('button').length ?? 0,
+        railHeight: rail?.getBoundingClientRect().height ?? 0,
+        railScrollHeight: rail?.scrollHeight ?? 0,
+        scrollTop: scroller?.scrollTop ?? 0
+      }
+    })()`)
+    console.log(
+      JSON.stringify(
+        {
+          sessionId,
+          expectedMessageCount,
+          scroll,
+          scrollPerformance,
+          trace: traceSummary,
+          click: { durationMs: clickDurationMs, performance: clickPerformance },
+          drag: { steps: 60, performance: dragPerformance },
+          heap: { usedMiB: heap.usedSize / 1024 / 1024, totalMiB: heap.totalSize / 1024 / 1024 },
+          state
+        },
+        null,
+        2
+      )
+    )
+    cdp.close()
+    process.exit(0)
+  }
   const workbenchResources = await evaluate(`(async () => {
     window.dispatchEvent(new Event('larify:workbench-open'))
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
@@ -185,7 +755,8 @@ try {
         ))
       }
       if (browserStates.every((state, index) =>
-        state && !state.loading && state.url.startsWith(new URL(browserUrls[index]).origin)
+        state && !state.error && state.title &&
+        state.url.startsWith(new URL(browserUrls[index]).origin)
       )) break
       await new Promise((resolve) => setTimeout(resolve, 100))
     }
@@ -279,7 +850,7 @@ try {
   )
   assert.equal(
     workbenchResources.browserStates.filter(
-      (state) => state && !state.loading && /^https:/.test(state.url)
+      (state) => state && !state.error && state.title && /^https:/.test(state.url)
     ).length,
     4,
     'all four browser tabs must finish a real HTTPS navigation'
@@ -648,7 +1219,7 @@ try {
           phases: {
             1: '10 mixed tabs idle',
             2: 'switch all 10 tabs and preserve paused state',
-            3: 'scroll 5200-message session to both ends',
+            3: `scroll ${expectedMessageCount}-message session to both ends`,
             4: 'drag interaction/workbench divider',
             5: 'collapse and expand workbench',
             6: 'collapse and expand navigation',
@@ -673,7 +1244,7 @@ try {
   }
   const openedAt = Date.now()
   await waitFor(
-    `document.querySelector('[role="log"]')?.textContent?.includes('分析结果 2599')`,
+    `document.querySelector('[role="log"]')?.textContent?.includes(${JSON.stringify(`分析结果 ${latestAssistantIndex}`)})`,
     'latest message rendered'
   )
   const openMs = Date.now() - openedAt

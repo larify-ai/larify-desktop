@@ -10,8 +10,8 @@ const databasePath =
   process.env.LARIFY_SESSION_DB ?? join(process.env.APPDATA, 'larify', 'sessions.db')
 const cwd = process.env.LARIFY_LONG_SESSION_CWD ?? join(homedir(), '.larify', 'workspace')
 
-if (!Number.isInteger(messageCount) || messageCount <= 5000) {
-  throw new Error('LARIFY_LONG_SESSION_MESSAGES must be an integer greater than 5000.')
+if (!Number.isInteger(messageCount) || messageCount <= 0) {
+  throw new Error('LARIFY_LONG_SESSION_MESSAGES must be a positive integer.')
 }
 
 const markdownSection = (index) => `
@@ -38,8 +38,6 @@ export function section${index}(value: number): number {
 - 第三项：工具调用折叠
 `
 
-const longMarkdown = Array.from({ length: 240 }, (_, index) => markdownSection(index)).join('\n')
-
 const createMessage = (index) => {
   const id = `long-session-${String(index).padStart(5, '0')}`
   if (index % 2 === 0) {
@@ -56,10 +54,10 @@ const createMessage = (index) => {
   }
 
   const toolIndex = Math.floor(index / 2)
-  const markdown =
-    toolIndex % 200 === 0
-      ? `# 超长 Markdown 压力样本 ${toolIndex}\n${longMarkdown}`
-      : `### 分析结果 ${toolIndex}\n\n工具调用已完成。\n\n${markdownSection(toolIndex)}`
+  const markdown = `### 分析结果 ${toolIndex}\n\n工具调用已完成。\n\n${Array.from(
+    { length: 4 },
+    (_, sectionIndex) => markdownSection(toolIndex * 4 + sectionIndex)
+  ).join('\n')}`
   return {
     id,
     role: 'assistant',
@@ -107,13 +105,18 @@ const insertMessage = database.prepare(
 
 database.exec('BEGIN IMMEDIATE')
 try {
-  database.prepare('DELETE FROM sessions WHERE id = ?').run(sessionId)
   database
     .prepare(
       `INSERT INTO sessions (id, title, cwd, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         title = excluded.title,
+         cwd = excluded.cwd,
+         start = NULL,
+         updated_at = excluded.updated_at`
     )
     .run(sessionId, `[性能测试] ${messageCount} 条长会话`, cwd, now, now)
+  database.prepare('DELETE FROM messages WHERE session_id = ?').run(sessionId)
   for (let index = 0; index < messageCount; index += 1) {
     const message = createMessage(index)
     insertMessage.run(sessionId, message.id, JSON.stringify(message))

@@ -337,6 +337,31 @@ describe('AssistantSessionsProvider', () => {
     ])
   })
 
+  it('renames a persisted session through IPC and updates its live heading', async () => {
+    const id = sessions.activeId
+    await act(async () => {
+      sessions.setHeading(id, { cwd: 'D:\\Workspace', title: 'Original' })
+      sessions.setPersisted(id)
+    })
+
+    await act(async () => sessions.rename(id, '  Renamed  '))
+
+    expect(invoke).toHaveBeenCalledWith('session:rename', id, 'Renamed')
+    expect(sessions.activeSession.heading).toEqual({ cwd: 'D:\\Workspace', title: 'Renamed' })
+  })
+
+  it('keeps the current title when rename IPC fails', async () => {
+    const id = sessions.activeId
+    await act(async () => {
+      sessions.setHeading(id, { cwd: 'D:\\Workspace', title: 'Original' })
+    })
+    invoke.mockRejectedValueOnce(new Error('Unavailable'))
+
+    await expect(sessions.rename(id, 'Renamed')).rejects.toThrow('Unavailable')
+
+    expect(sessions.activeSession.heading?.title).toBe('Original')
+  })
+
   it('loads and merges the next workspace page', async () => {
     act(() => root.unmount())
     invoke.mockImplementation((channel: string, cwd?: string, offset = 0) => {

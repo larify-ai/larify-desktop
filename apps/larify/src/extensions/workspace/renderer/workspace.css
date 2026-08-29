@@ -1,3 +1,25 @@
+/* Hide the browser scrollbar chrome inside the diff/workbench content area
+   while keeping scroll functionality. Monaco still scrolls via its own
+   internal mechanism; only the wide native scrollbar is removed. */
+.workspace-file-preview,
+.workspace-file-preview * {
+  scrollbar-width: none;
+}
+
+.workspace-file-preview::-webkit-scrollbar,
+.workspace-file-preview *::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+/* Monaco paints the diff overview-ruler viewport with a wide grey track. Keep
+   the colored diff markers on it (click to jump) but drop the grey strip that
+   reads as an oversized draggable scrollbar. */
+.workspace-file-preview .diffViewport {
+  background: transparent !important;
+}
+
 .workspace-tree {
   --rc-virtual-list-scrollbar-bg: var(--larify-scrollbar-thumb);
   background: transparent;
@@ -18,15 +40,11 @@
   cursor: default !important;
 }
 
-.workspace-tree
-  .rc-tree-list:has(> .rc-tree-list-scrollbar-horizontal):has(> .rc-tree-list-scrollbar-vertical)
-  > .rc-tree-list-scrollbar-horizontal {
+.workspace-tree .rc-tree-list:has(> .rc-tree-list-scrollbar-horizontal):has(> .rc-tree-list-scrollbar-vertical)>.rc-tree-list-scrollbar-horizontal {
   right: var(--larify-scrollbar-size) !important;
 }
 
-.workspace-tree
-  .rc-tree-list:has(> .rc-tree-list-scrollbar-horizontal):has(> .rc-tree-list-scrollbar-vertical)
-  > .rc-tree-list-scrollbar-vertical {
+.workspace-tree .rc-tree-list:has(> .rc-tree-list-scrollbar-horizontal):has(> .rc-tree-list-scrollbar-vertical)>.rc-tree-list-scrollbar-vertical {
   bottom: var(--larify-scrollbar-size) !important;
 }
 
@@ -95,7 +113,11 @@
 
 /* Monaco keeps the original editor mounted at zero width in compact inline
    mode. Its overflowing gutter must not become a second line-number column. */
-.workspace-file-preview[data-diff-mode='unified'] .monaco-diff-editor > .editor.original {
+.workspace-file-preview[data-diff-mode='unified'] .monaco-diff-editor>.editor.original {
+  visibility: hidden !important;
+}
+
+.workspace-file-preview[data-diff-mode='unified'] .original.diffOverviewRuler {
   visibility: hidden !important;
 }
 
@@ -132,35 +154,23 @@
   --workspace-monaco-gutter-width: 41px;
 }
 
-.workspace-file-preview[data-diff-mode='split']
-  .monaco-diff-editor.side-by-side
-  .editor.original
-  .glyph-margin {
+.workspace-file-preview[data-diff-mode='split'] .monaco-diff-editor.side-by-side .editor.original .glyph-margin {
   width: 0 !important;
 }
 
-.workspace-file-preview[data-diff-mode='split']
-  .monaco-diff-editor.side-by-side
-  .editor.original
-  :is(.margin, .margin-view-zones, .margin-view-overlays, .current-line-margin-both) {
+.workspace-file-preview[data-diff-mode='split'] .monaco-diff-editor.side-by-side .editor.original :is(.margin, .margin-view-zones, .margin-view-overlays, .current-line-margin-both) {
   width: var(--workspace-monaco-gutter-width) !important;
 }
 
-.workspace-file-preview[data-diff-mode='split']
-  .monaco-diff-editor.side-by-side
-  .editor.original
-  :is(.native-edit-context, .monaco-scrollable-element.editor-scrollable) {
+.workspace-file-preview[data-diff-mode='split'] .monaco-diff-editor.side-by-side .editor.original :is(.native-edit-context, .monaco-scrollable-element.editor-scrollable) {
   left: var(--workspace-monaco-gutter-width) !important;
 }
 
-.workspace-file-preview[data-diff-mode='split']
-  .monaco-diff-editor.side-by-side
-  .editor.original
-  .monaco-scrollable-element.editor-scrollable {
+.workspace-file-preview[data-diff-mode='split'] .monaco-diff-editor.side-by-side .editor.original .monaco-scrollable-element.editor-scrollable {
   width: calc(100% - var(--workspace-monaco-gutter-width)) !important;
 }
 
-.workspace-file-preview .monaco-diff-editor.side-by-side > .monaco-sash.vertical::before {
+.workspace-file-preview .monaco-diff-editor.side-by-side>.monaco-sash.vertical::before {
   left: calc(50% - 0.5px);
   width: 1px;
   background: var(--border-strong);
@@ -169,13 +179,9 @@
 /* Monaco models an empty document as one empty line. Hide the resulting
    phantom deletion/insertion so new and deleted files match the Git patch. */
 .workspace-file-preview[data-original-empty='true'] .monaco-diff-editor .line-delete,
-.workspace-file-preview[data-original-empty='true']
-  .monaco-diff-editor
-  .char-delete.diff-range-empty,
+.workspace-file-preview[data-original-empty='true'] .monaco-diff-editor .char-delete.diff-range-empty,
 .workspace-file-preview[data-modified-empty='true'] .monaco-diff-editor .line-insert,
-.workspace-file-preview[data-modified-empty='true']
-  .monaco-diff-editor
-  .char-insert.diff-range-empty {
+.workspace-file-preview[data-modified-empty='true'] .monaco-diff-editor .char-insert.diff-range-empty {
   background: transparent;
 }
 

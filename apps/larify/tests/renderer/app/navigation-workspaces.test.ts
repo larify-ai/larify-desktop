@@ -19,6 +19,7 @@ function source(values: Partial<AssistantSessions> = {}): AssistantSessions {
     select: vi.fn(),
     loadMore: vi.fn(),
     refresh: vi.fn(),
+    rename: vi.fn(),
     setPersisted: vi.fn(),
     setHeading: vi.fn(),
     attentionState: vi.fn(() => 'idle'),
@@ -27,6 +28,23 @@ function source(values: Partial<AssistantSessions> = {}): AssistantSessions {
 }
 
 describe('createWorkspaces', () => {
+  it('shows a newly selected workspace before its first session is persisted', () => {
+    const workspaces = createWorkspaces(
+      source({
+        activeSession: {
+          id: 'draft',
+          cwd: 'D:\\New workspace',
+          heading: null,
+          persisted: false,
+          messages: [],
+          messageCount: 0
+        }
+      })
+    )
+
+    expect(workspaces.map(({ id }) => id)).toEqual(['D:\\New workspace'])
+  })
+
   it('keeps the default workspace last without using a synthetic id', () => {
     const workspaces = createWorkspaces(
       source({
@@ -38,6 +56,7 @@ describe('createWorkspaces', () => {
     )
 
     expect(workspaces.map(({ id }) => id)).toEqual(['D:\\Workspace', ''])
+    expect(workspaces.find(({ id }) => id === '')?.onRemove).toBeUndefined()
   })
 
   it('uses the stored session instead of a live session', () => {
@@ -194,5 +213,33 @@ describe('createWorkspaces', () => {
     )
 
     expect(workspaces[0].onCreate).toBeUndefined()
+  })
+
+  it('filters hidden workspaces and delegates rename and removal', async () => {
+    const rename = vi.fn().mockResolvedValue(undefined)
+    const onRemove = vi.fn()
+    const workspaces = createWorkspaces(
+      source({
+        rename,
+        directory: [
+          {
+            cwd: 'D:\\Visible',
+            sessions: [{ id: 'session', title: 'Original', cwd: 'D:\\Visible' }],
+            hasMore: false
+          },
+          { cwd: 'D:\\Hidden', sessions: [], hasMore: false },
+          { cwd: '', sessions: [], hasMore: false }
+        ]
+      }),
+      { hidden: new Set(['D:\\Hidden']), onRemove }
+    )
+
+    expect(workspaces.map(({ id }) => id)).toEqual(['D:\\Visible', ''])
+    await workspaces[0].sessions[0].onRename('Renamed')
+    workspaces[0].onRemove?.()
+
+    expect(rename).toHaveBeenCalledWith('session', 'Renamed')
+    expect(onRemove).toHaveBeenCalledWith('D:\\Visible')
+    expect(workspaces[1].onRemove).toBeUndefined()
   })
 })

@@ -42,26 +42,23 @@ vi.mock('@ant-design/x-markdown', () => ({
     components: Record<string, ComponentType<Record<string, unknown>>>
   } & Record<string, unknown>) => {
     h.markdownProps = props
+    const A = components.a as ComponentType<Record<string, unknown>>
     return createElement(
       'div',
       null,
       createElement('h1', { id: 'heading' }, 'Heading'),
-      createElement('a', { href: 'docs/Guide%20One.md#Install' }, 'Guide'),
-      createElement('a', { href: 'bad%link.md' }, 'Malformed'),
-      createElement('a', { href: 'D:/workspace/absolute.md' }, 'Absolute'),
-      createElement('a', { href: '\\\\server\\share\\document.md' }, 'UNC'),
-      createElement('a', { href: 'https://example.com/docs' }, 'External'),
-      createElement('a', { href: '#heading' }, 'Anchor'),
-      createElement(components.img, { alt: 'local', src: './image.png' })
+      createElement(A, { href: 'docs/Guide%20One.md#Install', key: 'guide' }, 'Guide'),
+      createElement(A, { href: 'bad%link.md', key: 'bad' }, 'Malformed'),
+      createElement(A, { href: 'D:/workspace/absolute.md', key: 'abs' }, 'Absolute'),
+      createElement(A, { href: '\\\\server\\share\\document.md', key: 'unc' }, 'UNC'),
+      createElement(A, { href: 'https://example.com/docs', key: 'ext' }, 'External'),
+      createElement(A, { href: '#heading', key: 'anchor' }, 'Anchor'),
+      createElement(components.img, { alt: 'local', src: './image.png', key: 'img' })
     )
   }
 }))
 
 import { MarkdownPreview } from '../../../../src/extensions/workspace/renderer/preview/markdown-preview'
-import {
-  workspaceMarkdownOpenExternalEvent,
-  workspaceMarkdownOpenFileEvent
-} from '../../../../src/extensions/workspace/renderer/preview/markdown-navigation'
 
 describe('MarkdownPreview integration', () => {
   let container: HTMLDivElement
@@ -76,6 +73,12 @@ describe('MarkdownPreview integration', () => {
       createObjectURL: vi.fn(() => 'blob:local-image'),
       revokeObjectURL: vi.fn()
     })
+    const invoke = vi.fn(async (name: string, ...args: unknown[]) => {
+      if (name === 'workspace:path-kind') return 'file'
+      if (name === 'browser:openUrl') return 99
+      return undefined
+    })
+    vi.stubGlobal('bridge', { invoke })
     container = document.createElement('div')
     document.body.append(container)
     root = createRoot(container)
@@ -98,6 +101,21 @@ describe('MarkdownPreview integration', () => {
       content: '# Visible'
     })
     expect(h.markdownProps?.config).toBeDefined()
+    // XMarkdown 默认 DOMPurify 净化会剥离盘符/file 协议 href，导致本地文件链接不可点。
+    // 组件必须通过 dompurifyConfig 放行这些协议，同时仍禁止 javascript:/vbscript: 等危险协议。
+    const dompurifyConfig = h.markdownProps?.dompurifyConfig as {
+      ALLOWED_URI_REGEXP: RegExp
+    }
+    expect(dompurifyConfig).toBeDefined()
+    const allow = dompurifyConfig.ALLOWED_URI_REGEXP
+    expect(allow.test('D:/workspace/absolute.md')).toBe(true)
+    expect(allow.test('D:/Workspace/a.txt')).toBe(true)
+    expect(allow.test('file:///D:/Workspace/b.txt')).toBe(true)
+    expect(allow.test('https://example.com/docs')).toBe(true)
+    expect(allow.test('docs/Guide%20One.md#Install')).toBe(true)
+    expect(allow.test('#heading')).toBe(true)
+    expect(allow.test('javascript:alert(1)')).toBe(false)
+    expect(allow.test('vbscript:msgbox(1)')).toBe(false)
     expect(h.themeProps).toMatchObject({
       algorithm: {},
       token: {
@@ -134,7 +152,7 @@ describe('MarkdownPreview integration', () => {
 
   it('routes local links and loads local images through the workspace', async () => {
     const opened = vi.fn()
-    window.addEventListener(workspaceMarkdownOpenFileEvent, opened)
+    window.addEventListener('larify:workbench-open', opened)
     await act(async () => {
       root.render(
         createElement(MarkdownPreview, {
@@ -146,15 +164,18 @@ describe('MarkdownPreview integration', () => {
       await Promise.resolve()
     })
 
-    container.querySelector<HTMLAnchorElement>('a')!.click()
-    expect((opened.mock.calls[0][0] as CustomEvent).detail).toEqual({
-      hash: 'Install',
-      path: 'D:\\workspace\\docs\\Guide One.md',
-      resourceId: 7
+    container.querySelector('button, a')!.click()
+    await act(async () => {
+      await Promise.resolve()
     })
+    expect(opened).toHaveBeenCalled()
+    const detail = (opened.mock.calls[0][0] as CustomEvent).detail
+    expect(detail.rendererId).toBe('workspace')
+    expect(detail.options.root).toBe('D:\\workspace')
+    expect(typeof detail.onOpen).toBe('function')
     expect(h.readAsset).toHaveBeenCalledWith(7, 'D:\\workspace\\image.png')
     expect(container.querySelector('img')?.getAttribute('src')).toBe('blob:local-image')
-    window.removeEventListener(workspaceMarkdownOpenFileEvent, opened)
+    window.removeEventListener('larify:workbench-open', opened)
   })
 
   it('does not crash on malformed percent escapes', async () => {
@@ -167,16 +188,18 @@ describe('MarkdownPreview integration', () => {
       )
       await Promise.resolve()
     })
-    expect(() => container.querySelectorAll<HTMLAnchorElement>('a')[1].click()).not.toThrow()
+    const allClickable = [
+      ...container.querySelectorAll<HTMLElement>('button.larify-message-link, a.larify-message-link')
+    ]
+    const badLink = allClickable.find((el) => el.textContent === 'Malformed')
+    expect(badLink).not.toBeUndefined()
+    expect(() => badLink!.click()).not.toThrow()
   })
 
   it('preserves absolute paths, opens web links, and scrolls to document anchors', async () => {
-    const openedFile = vi.fn()
-    const openedExternal = vi.fn()
+    const openedWorkbench = vi.fn()
     const scrollIntoView = vi.fn()
-    container.addEventListener(workspaceMarkdownOpenFileEvent, openedFile)
-    window.addEventListener(workspaceMarkdownOpenFileEvent, openedFile)
-    window.addEventListener(workspaceMarkdownOpenExternalEvent, openedExternal)
+    window.addEventListener('larify:workbench-open', openedWorkbench)
     await act(async () => {
       root.render(
         createElement(MarkdownPreview, {
@@ -187,28 +210,41 @@ describe('MarkdownPreview integration', () => {
       await Promise.resolve()
     })
     Object.assign(container.querySelector('h1')!, { scrollIntoView })
-    const links = [...container.querySelectorAll<HTMLAnchorElement>('a')]
+    const buttons = [...container.querySelectorAll<HTMLButtonElement>('button.larify-message-link')]
+    const links = [...container.querySelectorAll<HTMLAnchorElement>('a.larify-message-link')]
+    const clickables = [...buttons, ...links]
+    const findEl = (text: string): Element =>
+      clickables.find((el) => el.textContent === text) ?? links.find((el) => el.textContent === text)!
 
-    links.find((link) => link.textContent === 'Absolute')!.click()
-    expect((openedFile.mock.calls[0][0] as CustomEvent).detail.path).toBe(
-      'D:/workspace/absolute.md'
-    )
-
-    links.find((link) => link.textContent === 'UNC')!.click()
-    expect((openedFile.mock.calls[1][0] as CustomEvent).detail.path).toBe(
-      '\\\\server\\share\\document.md'
-    )
-
-    links.find((link) => link.textContent === 'External')!.click()
-    expect((openedExternal.mock.calls[0][0] as CustomEvent).detail).toEqual({
-      resourceId: 7,
-      url: 'https://example.com/docs'
+    await act(async () => {
+      ; (findEl('Absolute') as HTMLElement).click()
     })
+    expect(openedWorkbench).toHaveBeenCalledTimes(1)
+    expect((openedWorkbench.mock.calls[0][0] as CustomEvent).detail.options.root).toBe(
+      'D:\\workspace'
+    )
+    openedWorkbench.mockClear()
 
-    links.find((link) => link.textContent === 'Anchor')!.click()
+    await act(async () => {
+      ; (findEl('UNC') as HTMLElement).click()
+    })
+    expect(openedWorkbench).toHaveBeenCalledTimes(1)
+    expect((openedWorkbench.mock.calls[0][0] as CustomEvent).detail.options.root).toMatch(
+      /^\\\\server\\share\\?$/
+    )
+
+    const invoke = (window.bridge as { invoke: ReturnType<typeof vi.fn> }).invoke
+    await act(async () => {
+      ; (findEl('External') as HTMLElement).click()
+      await Promise.resolve()
+    })
+    expect(invoke).toHaveBeenCalledWith('browser:openUrl', '', 'https://example.com/docs')
+
+    await act(async () => {
+      ; (findEl('Anchor') as HTMLElement).click()
+    })
     expect(scrollIntoView).toHaveBeenCalledOnce()
-    window.removeEventListener(workspaceMarkdownOpenFileEvent, openedFile)
-    window.removeEventListener(workspaceMarkdownOpenExternalEvent, openedExternal)
+    window.removeEventListener('larify:workbench-open', openedWorkbench)
   })
 
   it('replays the same target hash when its navigation revision changes', async () => {

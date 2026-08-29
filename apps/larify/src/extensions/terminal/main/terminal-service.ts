@@ -208,8 +208,7 @@ export class TerminalService {
       shellArgs: [...(opts?.shellArgs ?? []), ...(integration.shellArgs ?? [])],
       shellEnv: {
         ...opts?.shellEnv,
-        ...integration.shellEnv,
-        LARIFY_ELECTRON_PATH: process.execPath
+        ...integration.shellEnv
       }
     }
     const existingManager = this.manager(sessionId)

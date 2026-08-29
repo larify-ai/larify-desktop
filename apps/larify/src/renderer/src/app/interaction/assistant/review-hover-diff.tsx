@@ -20,7 +20,7 @@ export function ReviewHoverDiff({ file }: { file: ChangedFileSummary }): React.J
       <div className="truncate border-b border-border bg-muted/50 px-3 py-2 font-mono text-muted-foreground">
         {file.path}
       </div>
-      <div className="max-h-72 overflow-auto">
+      <div className="max-h-72 overflow-auto overscroll-contain">
         {unavailable ? (
           <div className="px-3 py-5 text-center text-muted-foreground">{unavailable}</div>
         ) : (

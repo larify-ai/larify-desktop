@@ -1,47 +1,55 @@
-import { ChevronDownIcon, ChevronUpIcon } from 'lucide-react'
-import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
-import { MessageContent } from '@renderer/components/ai-elements/message'
+import { CheckIcon, CopyIcon } from 'lucide-react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import {
+  MessageAction,
+  MessageActions,
+  MessageContent
+} from '@renderer/components/ai-elements/message'
 
-export function UserMessageContent({ children }: { children: ReactNode }): React.JSX.Element {
-  const contentRef = useRef<HTMLDivElement>(null)
-  const [expanded, setExpanded] = useState(false)
-  const [overflowing, setOverflowing] = useState(false)
+export function UserMessageContent({
+  children,
+  text
+}: {
+  children: ReactNode
+  text: string
+}): React.JSX.Element {
+  const [copied, setCopied] = useState(false)
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  useLayoutEffect(() => {
-    const content = contentRef.current
-    if (!content || expanded) return
+  useEffect(
+    () => () => {
+      if (copiedTimer.current !== null) clearTimeout(copiedTimer.current)
+    },
+    []
+  )
 
-    const measure = (): void => setOverflowing(content.scrollHeight > content.clientHeight + 1)
-    measure()
-
-    const observer = new ResizeObserver(measure)
-    observer.observe(content)
-    return () => observer.disconnect()
-  }, [children, expanded])
+  const copyText = async (): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(text)
+    } catch {
+      return
+    }
+    setCopied(true)
+    if (copiedTimer.current !== null) clearTimeout(copiedTimer.current)
+    copiedTimer.current = setTimeout(() => setCopied(false), 1_500)
+  }
 
   return (
-    <div className="ml-auto w-fit max-w-full">
-      <MessageContent className="select-text break-words [overflow-wrap:anywhere]">
-        <div ref={contentRef} className={expanded ? undefined : 'max-h-[3.75rem] overflow-hidden'}>
+    <div className="group/bubble ml-auto w-fit max-w-full">
+      <MessageContent className="select-text break-words [overflow-wrap:anywhere] [&_.larify-message-markdown]:space-y-0">
+        <div className="relative max-h-[3.75rem] overflow-hidden">
           {children}
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-x-0 top-[2.5rem] h-5 bg-gradient-to-b from-transparent to-secondary"
+          />
         </div>
       </MessageContent>
-      {overflowing ? (
-        <button
-          type="button"
-          aria-label={expanded ? '收起消息' : '展开消息'}
-          aria-expanded={expanded}
-          className="mt-1 ml-auto flex w-fit items-center gap-0.5 text-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-          onClick={() => setExpanded((value) => !value)}
-        >
-          {expanded ? '收起' : '展开'}
-          {expanded ? (
-            <ChevronUpIcon className="size-3.5" />
-          ) : (
-            <ChevronDownIcon className="size-3.5" />
-          )}
-        </button>
-      ) : null}
+      <MessageActions className="invisible mt-1 justify-end opacity-0 transition-opacity group-focus-within:visible group-focus-within:opacity-100 group-hover/bubble:visible group-hover/bubble:opacity-100">
+        <MessageAction title="复制" label="复制" onClick={() => void copyText()}>
+          {copied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
+        </MessageAction>
+      </MessageActions>
     </div>
   )
 }

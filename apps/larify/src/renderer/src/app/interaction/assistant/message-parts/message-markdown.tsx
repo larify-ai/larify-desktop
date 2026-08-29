@@ -30,10 +30,12 @@ const workspaceLinkRehypePlugins = createWorkspaceLinkRehypePlugins()
 
 export function MessageMarkdown({
   children,
-  isAnimating
+  isAnimating,
+  className
 }: {
   children: string
   isAnimating: boolean
+  className?: string
 }): React.JSX.Element {
   const messageLinkHandler = useMessageLinkHandler()
   const components = useMemo(
@@ -43,6 +45,7 @@ export function MessageMarkdown({
   const markdown = useMemo(() => normalizeModelMarkdownLinks(children), [children])
   return (
     <MessageResponse
+      className={className}
       components={components}
       isAnimating={isAnimating}
       mode={isAnimating ? 'streaming' : 'static'}

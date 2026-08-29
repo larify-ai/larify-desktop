@@ -24,6 +24,7 @@ export function BrowserView({
   const webviewRef = useRef<Electron.WebviewTag>(null)
   const viewportRef = useRef<HTMLDivElement>(null)
   const hostRef = useRef<HTMLDivElement>(null)
+  const lastVisibleSizeRef = useRef({ width: parkedBounds.width, height: parkedBounds.height })
 
   useLayoutEffect(() => {
     const host = hostRef.current
@@ -35,7 +36,16 @@ export function BrowserView({
         return
       }
       const viewportBounds = shown ? viewport.getBoundingClientRect() : null
-      const bounds = viewportBounds?.width && viewportBounds.height ? viewportBounds : parkedBounds
+      if (viewportBounds?.width && viewportBounds.height) {
+        lastVisibleSizeRef.current = {
+          width: viewportBounds.width,
+          height: viewportBounds.height
+        }
+      }
+      const bounds =
+        viewportBounds?.width && viewportBounds.height
+          ? viewportBounds
+          : { ...parkedBounds, ...lastVisibleSizeRef.current }
       host.style.zIndex = ''
       Object.assign(host.style, {
         left: `${bounds.left}px`,

@@ -29,6 +29,7 @@ describe('session IPC', () => {
   it('registers and removes every handler', async () => {
     const sessions = {
       loadVisibleMessages: vi.fn(),
+      loadNavigationIndex: vi.fn(),
       countMessages: vi.fn(),
       saveSession: vi.fn(),
       listSessions: vi.fn(),
@@ -40,7 +41,9 @@ describe('session IPC', () => {
       'session:cwds',
       'session:list',
       'session:msg-count',
-      'session:msgs'
+      'session:msgs',
+      'session:navigation',
+      'session:rename'
     ])
 
     await disposable.dispose()
@@ -52,7 +55,9 @@ describe('session IPC', () => {
       listCwds: vi.fn(() => ['/cwd']),
       listSessions: vi.fn(() => [{ id: 'session' }]),
       loadVisibleMessages: vi.fn(() => [{ id: 'message' }]),
-      countMessages: vi.fn(() => 42)
+      loadNavigationIndex: vi.fn(() => [{ id: 'navigation' }]),
+      countMessages: vi.fn(() => 42),
+      renameSession: vi.fn()
     }
     const queries = createSessionQueries(store as never)
 
@@ -60,9 +65,13 @@ describe('session IPC', () => {
     expect(queries['session:list']({}, '/cwd', 10, 20)).toEqual([{ id: 'session' }])
     expect(queries['session:msgs']({}, 'session', 30, 40)).toEqual([{ id: 'message' }])
     expect(queries['session:msg-count']({}, 'session')).toBe(42)
+    expect(queries['session:navigation']({}, 'session')).toEqual([{ id: 'navigation' }])
+    queries['session:rename']({}, 'session', 'New title')
     expect(store.listSessions).toHaveBeenCalledWith('/cwd', 10, 20)
     expect(store.loadVisibleMessages).toHaveBeenCalledWith('session', 30, 40)
     expect(store.countMessages).toHaveBeenCalledWith('session')
+    expect(store.loadNavigationIndex).toHaveBeenCalledWith('session')
+    expect(store.renameSession).toHaveBeenCalledWith('session', 'New title')
   })
 
   it('represents the default workspace with an empty cwd', () => {

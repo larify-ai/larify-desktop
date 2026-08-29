@@ -7,8 +7,10 @@ const electron = vi.hoisted(() => ({
   loadFile: vi.fn(() => Promise.resolve()),
   webContentsIsDestroyed: vi.fn(() => false),
   webContentsOn: vi.fn(),
+  setWindowOpenHandler: vi.fn(),
   webContentsSend: vi.fn(),
-  windowOn: vi.fn()
+  windowOn: vi.fn(),
+  openExternal: vi.fn(() => Promise.resolve())
 }))
 
 vi.mock('electron', () => ({
@@ -18,6 +20,7 @@ vi.mock('electron', () => ({
       webContents: {
         isDestroyed: electron.webContentsIsDestroyed,
         on: electron.webContentsOn,
+        setWindowOpenHandler: electron.setWindowOpenHandler,
         send: electron.webContentsSend
       },
       on: electron.windowOn,
@@ -28,6 +31,7 @@ vi.mock('electron', () => ({
     }
   }),
   nativeTheme: { shouldUseDarkColors: true },
+  shell: { openExternal: electron.openExternal },
   screen: {
     getCursorScreenPoint: vi.fn(() => ({ x: 0, y: 0 })),
     getDisplayNearestPoint: vi.fn(() => ({
@@ -47,12 +51,14 @@ beforeEach(() => {
   electron.maximize.mockClear()
   electron.show.mockClear()
   electron.webContentsOn.mockClear()
+  electron.setWindowOpenHandler.mockClear()
   electron.webContentsSend.mockClear()
   electron.windowOn.mockClear()
+  electron.openExternal.mockClear()
 })
 
 describe('createWindow', () => {
-  it('maximizes the window before showing it', () => {
+  it('shows the centered window without maximizing it', () => {
     createWindow()
     const readyToShow = electron.windowOn.mock.calls.find(
       ([event]) => event === 'ready-to-show'
@@ -61,11 +67,22 @@ describe('createWindow', () => {
     expect(readyToShow).toBeTypeOf('function')
     readyToShow()
 
-    expect(electron.maximize).toHaveBeenCalledOnce()
+    expect(electron.maximize).not.toHaveBeenCalled()
     expect(electron.show).toHaveBeenCalledOnce()
-    expect(electron.maximize.mock.invocationCallOrder[0]).toBeLessThan(
-      electron.show.mock.invocationCallOrder[0]
+    expect(electron.options).toMatchObject({ width: 1280, height: 820, x: 320, y: 130 })
+  })
+
+  it('opens only Larify authentication pages in the system browser', () => {
+    createWindow()
+    const handler = electron.setWindowOpenHandler.mock.calls[0]?.[0]
+
+    expect(handler({ url: 'https://larify.ai/login?client=desktop' })).toEqual({ action: 'deny' })
+    expect(electron.openExternal).toHaveBeenCalledWith(
+      'https://larify.ai/login?client=desktop'
     )
+
+    expect(handler({ url: 'https://example.com' })).toEqual({ action: 'deny' })
+    expect(electron.openExternal).toHaveBeenCalledOnce()
   })
 
   it('enables webviews without disabling the renderer sandbox', () => {

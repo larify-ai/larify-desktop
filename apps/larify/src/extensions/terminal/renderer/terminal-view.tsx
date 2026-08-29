@@ -179,6 +179,17 @@ export function TerminalView({
       terminal.write(data)
       lastSeqRef.current = event.end
     }
+    const sendResizeToPty = (cols: number, rows: number): void => {
+      if (exitedRef.current) return
+      if (resizeTimerRef.current) clearTimeout(resizeTimerRef.current)
+      resizeTimerRef.current = setTimeout(() => {
+        resizeTimerRef.current = null
+        if (exitedRef.current) return
+        void window.bridge
+          .invoke('terminal:resize', sessionId, terminalId, cols, rows)
+          .catch(() => undefined)
+      }, RESIZE_DEBOUNCE_MS)
+    }
     const finishRestore = (): void => {
       if (!active) return
       restoringRef.current = false
@@ -189,6 +200,11 @@ export function TerminalView({
         pendingExitRef.current = null
       }
       if (activeRef.current) scheduleFit()
+      const cols = terminal.cols
+      const rows = terminal.rows
+      if (Number.isFinite(cols) && Number.isFinite(rows) && cols > 0 && rows > 0) {
+        sendResizeToPty(cols, rows)
+      }
     }
 
     const offData = window.bridge.on('terminal:data', (payload) => {
@@ -213,14 +229,7 @@ export function TerminalView({
     })
     const resize = terminal.onResize(({ cols, rows }) => {
       if (restoringRef.current || suppressResizeRef.current || exitedRef.current) return
-      if (resizeTimerRef.current) clearTimeout(resizeTimerRef.current)
-      resizeTimerRef.current = setTimeout(() => {
-        resizeTimerRef.current = null
-        if (exitedRef.current) return
-        void window.bridge
-          .invoke('terminal:resize', sessionId, terminalId, cols, rows)
-          .catch(() => undefined)
-      }, RESIZE_DEBOUNCE_MS)
+      sendResizeToPty(cols, rows)
     })
 
     terminal.attachCustomKeyEventHandler((event) => {
@@ -292,7 +301,7 @@ export function TerminalView({
     <div
       ref={containerRef}
       data-terminal-active={active}
-      className="larify-terminal-surface h-full overflow-hidden bg-background"
+      className="larify-terminal-surface h-full overflow-x-auto overflow-y-hidden bg-background"
     />
   )
 }

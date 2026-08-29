@@ -64,6 +64,7 @@ import {
   WorkbenchRendererRegistry,
   workbenchRendererRegistryToken
 } from '../../../src/renderer/src/app/registry/workbench-renderers'
+import { AuthContext } from '../../../src/renderer/src/app/auth/auth-context'
 
 describe('layout panel behavior', () => {
   let container: HTMLDivElement
@@ -101,9 +102,13 @@ describe('layout panel behavior', () => {
     await act(async () =>
       root.render(
         createElement(
-          RendererRegistryProvider,
-          { registry },
-          createElement(TooltipProvider, null, createElement(Layout))
+          AuthContext.Provider,
+          { value: { email: 'test@larify.ai', logout: vi.fn() } },
+          createElement(
+            RendererRegistryProvider,
+            { registry },
+            createElement(TooltipProvider, null, createElement(Layout))
+          )
         )
       )
     )

@@ -19,12 +19,10 @@ import { createPathChangeTree } from './changes/git-change-tree'
 import { WorkspaceLayout, workspaceNavigatorDefaultWidth } from './layout/workspace-layout'
 import { EmptyFilePreview } from './preview/empty-file-preview'
 import {
-  workspaceMarkdownOpenExternalEvent,
-  workspaceMarkdownOpenFileEvent
-} from './preview/markdown-navigation'
-import {
   WORKSPACE_NAVIGATION_EVENT,
+  requestWorkspaceNavigation,
   takeWorkspaceNavigation,
+  workspaceRootForFile,
   type WorkspaceNavigationRequest
 } from './workspace-navigation'
 import { workspaceClient } from './workspace-client'
@@ -164,12 +162,26 @@ export function WorkspaceView({
       const request = ++navigationRequestRef.current
       void revealFile(path)
         .then((resolved) => {
-          if (!resolved || request !== navigationRequestRef.current) return
-          routeFile(resolved, hash, request, errorContext)
+          if (request !== navigationRequestRef.current) return
+          routeFile(resolved ?? path, hash, request, errorContext)
         })
-        .catch((error) => console.error(errorContext, error))
+        .catch((error) => {
+          console.error(errorContext, error)
+          if (request !== navigationRequestRef.current) return
+          const targetRoot = workspaceRootForFile(root ?? path, path)
+          window.dispatchEvent(
+            new CustomEvent('larify:workbench-open', {
+              detail: {
+                rendererId: 'workspace',
+                options: { root: targetRoot },
+                onOpen: (resourceId: number): void =>
+                  requestWorkspaceNavigation({ path, hash, resourceId })
+              }
+            })
+          )
+        })
     },
-    [revealFile, routeFile]
+    [revealFile, root, routeFile]
   )
 
   useEffect(
@@ -250,32 +262,6 @@ export function WorkspaceView({
     })
   }, [previewPath, updateTab])
 
-  useEffect(() => {
-    const openFile = (event: Event): void => {
-      const {
-        hash,
-        path,
-        resourceId: sourceResourceId
-      } = (event as CustomEvent<{ hash?: string; path: string; resourceId: number }>).detail
-      if (sourceResourceId !== resourceId) return
-      revealWorkspaceFile(path, hash, '[workspace:open-markdown-link]')
-    }
-    const openExternal = (event: Event): void => {
-      const { resourceId: sourceResourceId, url } = (
-        event as CustomEvent<{ resourceId: number; url: string }>
-      ).detail
-      if (sourceResourceId !== resourceId) return
-      openInBrowser(url, '[workspace:open-markdown-external]')
-    }
-
-    window.addEventListener(workspaceMarkdownOpenFileEvent, openFile)
-    window.addEventListener(workspaceMarkdownOpenExternalEvent, openExternal)
-    return () => {
-      window.removeEventListener(workspaceMarkdownOpenFileEvent, openFile)
-      window.removeEventListener(workspaceMarkdownOpenExternalEvent, openExternal)
-    }
-  }, [openInBrowser, resourceId, revealWorkspaceFile])
-
   // 消息正文中的文件链接：工作区资源打开后定位到目标文件。
   useEffect(() => {
     const navigate = (request: WorkspaceNavigationRequest): void => {
@@ -290,7 +276,9 @@ export function WorkspaceView({
     window.addEventListener(WORKSPACE_NAVIGATION_EVENT, onNavigate)
     const pending = takeWorkspaceNavigation(resourceId)
     if (pending) navigate(pending)
-    return () => window.removeEventListener(WORKSPACE_NAVIGATION_EVENT, onNavigate)
+    return () => {
+      window.removeEventListener(WORKSPACE_NAVIGATION_EVENT, onNavigate)
+    }
   }, [resourceId, revealWorkspaceDirectory, revealWorkspaceFile])
 
   useEffect(() => {

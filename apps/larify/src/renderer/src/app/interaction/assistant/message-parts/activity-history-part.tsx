@@ -9,7 +9,7 @@ import {
 import { cn } from '@renderer/lib/utils'
 import type { AssistantRenderItem } from '../message-render-items'
 import { LiveProcessingDuration } from '../live-processing-duration'
-import { formatProcessingDuration } from '../processing-duration'
+import { formatProcessingDuration, formatProcessingDurationMs } from '../processing-duration'
 import { ActivityGroupPart } from './activity-group-part'
 
 export interface ActivityHistorySection {
@@ -26,14 +26,16 @@ export interface ActivityHistorySection {
 
 export function ActivityHistoryPart({
   sections,
+  waiting = false,
   initialOpen,
   onOpenChange
 }: {
   sections: ActivityHistorySection[]
+  waiting?: boolean
   initialOpen?: boolean
   onOpenChange?: (open: boolean) => void
 }): React.JSX.Element {
-  const defaultOpen = sections.some(({ streaming }) => streaming)
+  const defaultOpen = sections.some(({ streaming }) => streaming) || waiting
   const aborted = sections.some(
     ({ message }) =>
       message.metadata &&
@@ -46,20 +48,31 @@ export function ActivityHistoryPart({
       : {}
   const startedAt = metadata(sections[0]?.message).startedAt
   const completedAt = metadata(sections.at(-1)?.message).completedAt
+  const totalProcessingMs = metadata(sections.at(-1)?.message).totalProcessingMs
+  const hasTotalProcessingMs =
+    typeof totalProcessingMs === 'number' && Number.isFinite(totalProcessingMs)
+  const baseProcessingMs = hasTotalProcessingMs ? totalProcessingMs : 0
   const hasDuration =
     typeof startedAt === 'number' &&
     Number.isFinite(startedAt) &&
     typeof completedAt === 'number' &&
     Number.isFinite(completedAt) &&
     completedAt >= startedAt
+  const durationPart = hasTotalProcessingMs
+    ? formatProcessingDurationMs(totalProcessingMs)
+    : hasDuration
+      ? formatProcessingDuration(startedAt, completedAt)
+      : null
   const summary = defaultOpen ? (
-    typeof startedAt === 'number' && Number.isFinite(startedAt) ? (
-      <LiveProcessingDuration startedAt={startedAt} />
+    waiting ? (
+      durationPart ? `等待回答 · ${durationPart}` : '等待回答'
+    ) : typeof startedAt === 'number' && Number.isFinite(startedAt) ? (
+      <LiveProcessingDuration startedAt={startedAt} baseMs={baseProcessingMs} />
     ) : (
       '处理过程'
     )
-  ) : hasDuration ? (
-    `${aborted ? '已中断' : '已完成'} · ${formatProcessingDuration(startedAt, completedAt)}`
+  ) : durationPart ? (
+    `${aborted ? '已中断' : '已完成'} · ${durationPart}`
   ) : aborted ? (
     '已中断'
   ) : (
@@ -83,7 +96,7 @@ export function ActivityHistoryPart({
       }}
       className="not-prose min-w-0"
     >
-      <CollapsibleTrigger className="group/summary flex w-full min-w-0 cursor-pointer items-center gap-x-2 text-sm text-muted-foreground">
+      <CollapsibleTrigger className="group/summary flex w-full min-w-0 cursor-pointer flex-wrap items-center gap-x-2 gap-y-3 text-sm text-muted-foreground">
         <span className="min-w-0 truncate">{summary}</span>
         <ChevronRightIcon
           className={cn(
@@ -91,6 +104,7 @@ export function ActivityHistoryPart({
             open ? 'rotate-90 opacity-100' : 'opacity-0 group-hover/summary:opacity-100'
           )}
         />
+        <span className="order-last h-px w-full basis-full bg-border" />
       </CollapsibleTrigger>
       {open ? (
         <CollapsibleContent className="mt-3 flex flex-col gap-3">

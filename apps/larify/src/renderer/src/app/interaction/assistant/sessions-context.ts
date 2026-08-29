@@ -22,6 +22,7 @@ export interface AssistantSessions {
   select(id: string): Promise<void>
   loadMore(cwd: string): Promise<void>
   refresh(): Promise<void>
+  rename(id: string, title: string): Promise<void>
   setCwd(id: string, cwd: string): void
   setPersisted(id: string): void
   setHeading(id: string, heading: ConversationHeading | null): void

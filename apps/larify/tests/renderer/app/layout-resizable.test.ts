@@ -167,7 +167,7 @@ describe('layout with the real resizable component', () => {
       '[data-region="workbench"]'
     )?.parentElement
 
-    expect(navigation?.style.minWidth).toBe('180px')
+    expect(navigation?.style.minWidth).toBe('240px')
     expect(workbench?.style.minWidth).toBe('280px')
   })
 

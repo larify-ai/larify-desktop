@@ -314,7 +314,6 @@ describe('TerminalService', () => {
           expect.stringContaining('resources\\shell-integration\\shellIntegration.ps1')
         ]),
         shellEnv: expect.objectContaining({
-          LARIFY_ELECTRON_PATH: process.execPath,
           VSCODE_STABLE: '1'
         })
       })
@@ -411,7 +410,7 @@ describe('TerminalService', () => {
       cwd: existingCwd,
       title: 'Custom',
       shellArgs: [],
-      shellEnv: { LARIFY_ELECTRON_PATH: process.execPath }
+      shellEnv: {}
     })
   })
 
@@ -504,7 +503,6 @@ describe('TerminalService', () => {
           expect.stringContaining(join(tmpdir(), 'larify', 'shell-integration', 'bash'))
         ],
         shellEnv: expect.objectContaining({
-          LARIFY_ELECTRON_PATH: process.execPath,
           VSCODE_INJECTION: '1',
           VSCODE_NONCE: expect.any(String)
         })
@@ -646,7 +644,6 @@ describe('TerminalService', () => {
         shell: '/bin/zsh',
         shellArgs: ['-i'],
         shellEnv: expect.objectContaining({
-          LARIFY_ELECTRON_PATH: process.execPath,
           USER_ZDOTDIR: expect.any(String),
           VSCODE_INJECTION: '1',
           VSCODE_NONCE: expect.any(String),

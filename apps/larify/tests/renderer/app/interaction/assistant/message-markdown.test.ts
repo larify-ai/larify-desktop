@@ -27,13 +27,14 @@ describe('MessageMarkdown', () => {
           createElement(
             MessageLinkContextProvider,
             { value: onOpenLink },
-            createElement(MessageMarkdown, { isAnimating }, markdown)
+            createElement(MessageMarkdown, { isAnimating, className: 'message-preview' }, markdown)
           )
         )
       })
     }
 
     await render('[file](D:\\Workspace\\still-streaming', true)
+    expect(container.querySelector('.message-preview')).not.toBeNull()
     expect(container.querySelector('button')).toBeNull()
 
     const completed = '[file](D:\\Workspace\\project\\README.md)'

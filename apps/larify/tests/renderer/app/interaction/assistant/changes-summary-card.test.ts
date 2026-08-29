@@ -19,7 +19,11 @@ vi.mock('../../../../../src/renderer/src/app/interaction/assistant/review-hover-
     createElement('div', { 'data-testid': 'hover-diff' }, file.path)
 }))
 
-import { ChangesSummaryCard } from '../../../../../src/renderer/src/app/interaction/assistant/changes-summary-card'
+import {
+  ChangesSummaryCard,
+  HIDE_DELAY,
+  HOVER_DELAY
+} from '../../../../../src/renderer/src/app/interaction/assistant/changes-summary-card'
 
 const files = [
   {
@@ -185,6 +189,7 @@ describe('ChangesSummaryCard', () => {
   })
 
   it('shows a diff preview while hovering a file row', async () => {
+    vi.useFakeTimers()
     await render()
 
     const row = Array.from(container.querySelectorAll('button')).find((button) =>
@@ -192,9 +197,11 @@ describe('ChangesSummaryCard', () => {
     )!
     act(() => {
       row.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
+      vi.advanceTimersByTime(HOVER_DELAY)
     })
 
     expect(container.querySelector('[data-testid="hover-diff"]')?.textContent).toBe('a.ts')
+    vi.useRealTimers()
   })
 
   it('shows a diff preview while focusing a file row', async () => {
@@ -209,6 +216,7 @@ describe('ChangesSummaryCard', () => {
   })
 
   it('places the preview below the card when the viewport clips the space above it', async () => {
+    vi.useFakeTimers()
     await render()
     const card = container.querySelector<HTMLElement>('.relative.mt-3')!
     container.setAttribute('data-message-scroll-viewport', '')
@@ -272,7 +280,7 @@ describe('ChangesSummaryCard', () => {
     expect(hoverDiff()).toBe('a.ts')
     act(() => {
       outside.focus()
-      vi.advanceTimersByTime(500)
+      vi.advanceTimersByTime(HIDE_DELAY)
     })
 
     expect(hoverDiff()).toBeUndefined()
@@ -280,6 +288,7 @@ describe('ChangesSummaryCard', () => {
   })
 
   it('keeps the preview open while the card or conversation scrolls', async () => {
+    vi.useFakeTimers()
     await render()
     const row = hoverRow('a.ts')
     const list = row.parentElement!
@@ -296,6 +305,7 @@ describe('ChangesSummaryCard', () => {
   })
 
   it('repositions an open preview when the conversation scrolls', async () => {
+    vi.useFakeTimers()
     await render()
     container.setAttribute('data-message-scroll-viewport', '')
     const card = container.querySelector<HTMLElement>('.relative.mt-3')!
@@ -318,11 +328,9 @@ describe('ChangesSummaryCard', () => {
   })
 
   it('drops the preview when the active file disappears', async () => {
+    vi.useFakeTimers()
     await render()
-    const row = Array.from(container.querySelectorAll('button')).find((button) =>
-      button.textContent.includes('a.ts')
-    )!
-    act(() => row.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })))
+    const row = hoverRow('a.ts')
 
     await act(async () => {
       root.render(
@@ -339,11 +347,9 @@ describe('ChangesSummaryCard', () => {
   })
 
   it('keeps the preview when streaming updates the hovered file', async () => {
+    vi.useFakeTimers()
     await render()
-    const row = Array.from(container.querySelectorAll('button')).find((button) =>
-      button.textContent.includes('a.ts')
-    )!
-    act(() => row.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })))
+    hoverRow('a.ts')
     expect(hoverDiff()).toBe('a.ts')
 
     await act(async () => {
@@ -361,6 +367,7 @@ describe('ChangesSummaryCard', () => {
   })
 
   it('keeps the preview when streaming recreates unchanged change data', async () => {
+    vi.useFakeTimers()
     await render()
     hoverRow('a.ts')
     expect(hoverDiff()).toBe('a.ts')
@@ -382,10 +389,11 @@ describe('ChangesSummaryCard', () => {
   const hoverDiff = (): string | undefined =>
     container.querySelector('[data-testid="hover-diff"]')?.textContent
 
-  const hoverRow = (path: string): HTMLElement => {
+  const hoverRow = (path: string, advance = HOVER_DELAY): HTMLElement => {
     const row = rowFor(path)
     act(() => {
       row.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
+      if (advance) vi.advanceTimersByTime(advance)
     })
     return row
   }
@@ -430,7 +438,7 @@ describe('ChangesSummaryCard', () => {
     act(() => {
       rootDiv.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, movementY: -5 }))
     })
-    hoverRow('b.ts')
+    hoverRow('b.ts', 0)
     expect(hoverDiff()).toBe('c.ts')
 
     act(() => vi.advanceTimersByTime(150))
@@ -439,6 +447,7 @@ describe('ChangesSummaryCard', () => {
   })
 
   it('switches the diff when hovering another file after moving down', async () => {
+    vi.useFakeTimers()
     await act(async () => {
       root.render(
         createElement(ChangesSummaryCard, {
@@ -480,7 +489,7 @@ describe('ChangesSummaryCard', () => {
     act(() => {
       rootDiv.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, movementY: -5 }))
     })
-    hoverRow('b.ts')
+    hoverRow('b.ts', 0)
     act(() => {
       container
         .querySelector<HTMLElement>('[data-testid="hover-diff"]')!

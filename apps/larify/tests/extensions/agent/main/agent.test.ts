@@ -163,7 +163,8 @@ describe('runAgentSession', () => {
     expect(steps[1].metadata).toEqual({ startedAt: expect.any(Number) })
     expect(session.at(-1)?.metadata).toEqual({
       startedAt: expect.any(Number),
-      completedAt: expect.any(Number)
+      completedAt: expect.any(Number),
+      totalProcessingMs: expect.any(Number)
     })
   })
 
@@ -288,7 +289,8 @@ describe('runAgentSession', () => {
     expect(session.at(-1)?.metadata).toEqual({
       startedAt: expect.any(Number),
       completedAt: expect.any(Number),
-      outcome: 'error'
+      outcome: 'error',
+      totalProcessingMs: expect.any(Number)
     })
   })
 
@@ -314,13 +316,92 @@ describe('runAgentSession', () => {
     )
 
     const metadata = session.at(-1)?.metadata as
-      { startedAt?: number; completedAt?: number; outcome?: string } | undefined
+      | { startedAt?: number; completedAt?: number; outcome?: string; totalProcessingMs?: number }
+      | undefined
     expect(metadata).toEqual({
       startedAt: expect.any(Number),
       completedAt: expect.any(Number),
-      outcome: 'error'
+      outcome: 'error',
+      totalProcessingMs: expect.any(Number)
     })
     expect(metadata!.completedAt!).toBeGreaterThanOrEqual(metadata!.startedAt!)
+  })
+
+  it('accumulates totalProcessingMs across a prior run', async () => {
+    // 模拟 ask_user 等待后新一轮 run：已有 assistant 消息携带此前累计值。
+    const original: UIMessage[] = [
+      { id: 'user-1', role: 'user', parts: [{ type: 'text', text: 'go' }] },
+      {
+        id: 'assistant-1',
+        role: 'assistant',
+        parts: [{ type: 'text', text: 'prior' }],
+        metadata: { startedAt: 1_000, completedAt: 3_000, totalProcessingMs: 2_000 }
+      }
+    ]
+    const result = await runAgentSession(original, {
+      tools: {},
+      activeTools: [],
+      toolsContext: {},
+      model: mockModel(['hello'])
+    })
+
+    const metadata = result.at(-1)?.metadata as Record<string, unknown>
+    expect(typeof metadata.startedAt).toBe('number')
+    expect(typeof metadata.completedAt).toBe('number')
+    expect(typeof metadata.totalProcessingMs).toBe('number')
+    const elapsed = (metadata.completedAt as number) - (metadata.startedAt as number)
+    expect(metadata.totalProcessingMs).toBe(2_000 + elapsed)
+  })
+
+  it('resets totalProcessingMs when a real user message starts a new turn', async () => {
+    const withRealTurn: UIMessage[] = [
+      { id: 'user-1', role: 'user', parts: [{ type: 'text', text: 'Q1' }] },
+      {
+        id: 'assistant-1',
+        role: 'assistant',
+        parts: [{ type: 'text', text: 'A1' }],
+        metadata: { startedAt: 1_000, completedAt: 3_000, totalProcessingMs: 2_000 }
+      },
+      { id: 'user-2', role: 'user', parts: [{ type: 'text', text: 'Q2' }] }
+    ]
+    const result = await runAgentSession(withRealTurn, {
+      tools: {},
+      activeTools: [],
+      toolsContext: {},
+      model: mockModel(['hello'])
+    })
+
+    const metadata = result.at(-1)?.metadata as Record<string, unknown>
+    const elapsed = (metadata.completedAt as number) - (metadata.startedAt as number)
+    expect(metadata.totalProcessingMs).toBe(elapsed)
+  })
+
+  it('keeps accumulating across a compaction user message (context reset handoff)', async () => {
+    const withCompaction: UIMessage[] = [
+      { id: 'user-1', role: 'user', parts: [{ type: 'text', text: 'Q1' }] },
+      {
+        id: 'assistant-1',
+        role: 'assistant',
+        parts: [{ type: 'text', text: 'partial' }],
+        metadata: { startedAt: 1_000, completedAt: 3_000, totalProcessingMs: 2_000 }
+      },
+      {
+        id: 'user-compaction',
+        role: 'user',
+        metadata: { compaction: true },
+        parts: [{ type: 'text', text: '# Handoff\nSummary' }]
+      }
+    ]
+    const result = await runAgentSession(withCompaction, {
+      tools: {},
+      activeTools: [],
+      toolsContext: {},
+      model: mockModel(['continuation'])
+    })
+
+    const metadata = result.at(-1)?.metadata as Record<string, unknown>
+    const elapsed = (metadata.completedAt as number) - (metadata.startedAt as number)
+    expect(metadata.totalProcessingMs).toBe(2_000 + elapsed)
   })
 
   it('records elapsed-time metadata when the run is aborted', async () => {
@@ -364,7 +445,8 @@ describe('runAgentSession', () => {
     expect(response?.metadata).toEqual({
       startedAt: expect.any(Number),
       completedAt: expect.any(Number),
-      outcome: 'aborted'
+      outcome: 'aborted',
+      totalProcessingMs: expect.any(Number)
     })
   })
 })

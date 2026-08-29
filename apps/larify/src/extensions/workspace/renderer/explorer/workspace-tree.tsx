@@ -236,7 +236,7 @@ function TreeTitle({
   const attachmentName = basename(path) || name
   return (
     <span
-      className="flex items-center gap-1"
+      className="flex h-4 items-center gap-1"
       draggable
       title={path}
       onDragStart={(event) => {
@@ -248,7 +248,9 @@ function TreeTitle({
       }}
     >
       <FileIcon expanded={open} kind={node.isLeaf ? 'file' : 'folder'} light={light} name={name} />
-      <span style={{ color: gitDecorations.get(path) }}>{name}</span>
+      <span className="leading-4" style={{ color: gitDecorations.get(path) }}>
+        {name}
+      </span>
     </span>
   )
 }

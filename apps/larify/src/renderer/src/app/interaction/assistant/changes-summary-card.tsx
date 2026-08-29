@@ -7,7 +7,8 @@ import {
 import type { ChangeSummary } from './change-summary'
 import { ReviewHoverDiff } from './review-hover-diff'
 
-const HIDE_DELAY = 500
+export const HIDE_DELAY = 300
+export const HOVER_DELAY = 200
 const UPWARD_SWITCH_DELAY = 150
 
 export function ChangesSummaryCard({
@@ -25,43 +26,40 @@ export function ChangesSummaryCard({
   const moveDir = useRef<'up' | 'down' | null>(null)
   const activeFile = files.find(({ path }) => path === activePath)
 
-  const clearHide = (): void => {
+  const clearTimers = (): void => {
     if (hideTimer.current) {
       clearTimeout(hideTimer.current)
       hideTimer.current = null
     }
-  }
-  const clearSwitch = (): void => {
     if (switchTimer.current) {
       clearTimeout(switchTimer.current)
       switchTimer.current = null
     }
   }
   const scheduleHide = (): void => {
-    clearHide()
-    clearSwitch()
+    clearTimers()
     hideTimer.current = setTimeout(() => {
       hideTimer.current = null
       setActivePath(null)
     }, HIDE_DELAY)
   }
-  const showFile = (path: string): void => {
-    clearHide()
-    clearSwitch()
-    if (activeFile && moveDir.current === 'up') {
-      switchTimer.current = setTimeout(() => {
-        switchTimer.current = null
-        setActivePath(path)
-      }, UPWARD_SWITCH_DELAY)
-    } else {
+  const showFile = (path: string, delay = HOVER_DELAY): void => {
+    clearTimers()
+    const applySwitch = (): void => {
+      switchTimer.current = null
       setActivePath(path)
+    }
+    const wait = activeFile && moveDir.current === 'up' ? UPWARD_SWITCH_DELAY : delay
+    if (wait > 0) {
+      switchTimer.current = setTimeout(applySwitch, wait)
+    } else {
+      applySwitch()
     }
   }
 
   useEffect(
     () => () => {
-      clearHide()
-      clearSwitch()
+      clearTimers()
     },
     []
   )
@@ -134,8 +132,7 @@ export function ChangesSummaryCard({
         <div
           ref={previewRef}
           onMouseEnter={() => {
-            clearHide()
-            clearSwitch()
+            clearTimers()
           }}
           onMouseLeave={scheduleHide}
           className={`pointer-events-auto absolute inset-x-0 z-50 ${
@@ -176,7 +173,7 @@ export function ChangesSummaryCard({
                   ? undefined
                   : () => {
                       moveDir.current = null
-                      showFile(file.path)
+                      showFile(file.path, 0)
                     }
               }
               onMouseEnter={file.binary ? undefined : () => showFile(file.path)}

@@ -1,5 +1,5 @@
 export const layoutSpec = {
-  navigation: { defaultSize: 240, minSize: 180, maxSize: 520 },
+  navigation: { defaultSize: 240, minSize: 240, maxSize: 520 },
   interaction: { minSize: 336 },
   workbench: { defaultSize: 700, minSize: 280 }
 } as const

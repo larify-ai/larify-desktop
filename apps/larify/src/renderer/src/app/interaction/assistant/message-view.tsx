@@ -64,6 +64,13 @@ export function MessageView({
           .map((part) => part.text)
           .join('')
       : undefined
+  const userText =
+    message.role === 'user'
+      ? selectedParts
+          .filter((part) => part?.type === 'text')
+          .map((part) => part.text)
+          .join('')
+      : ''
   const content =
     renderItem && isActivityRenderItem(renderItem)
       ? [
@@ -91,27 +98,27 @@ export function MessageView({
               onReplayComplete={onFinalReplayComplete}
             />
           ]
-      : selectedParts.map((part, selectedIndex) => {
-          if (!part) return null
-          const index = renderItem?.partIndexes[selectedIndex] ?? selectedIndex
-          if (isFileUIPart(part)) return null
-          if (isToolUIPart(part) && !isVisibleToolPart(part)) return null
-          const id = `${message.id}-${index}`
-          return (
-            <MessagePart
-              key={id}
-              part={part}
-              streaming={streaming && index === lastStreamingIndex}
-            />
-          )
-        })
+        : selectedParts.map((part, selectedIndex) => {
+            if (!part) return null
+            const index = renderItem?.partIndexes[selectedIndex] ?? selectedIndex
+            if (isFileUIPart(part)) return null
+            if (isToolUIPart(part) && !isVisibleToolPart(part)) return null
+            const id = `${message.id}-${index}`
+            return (
+              <MessagePart
+                key={id}
+                part={part}
+                streaming={streaming && index === lastStreamingIndex}
+              />
+            )
+          })
 
   return (
     <Message from={message.role}>
       {files.length ? <FileAttachments files={files} messageId={message.id} /> : null}
       {message.role === 'user' ? (
         hasContent ? (
-          <UserMessageContent>{content}</UserMessageContent>
+          <UserMessageContent text={userText}>{content}</UserMessageContent>
         ) : null
       ) : hasContent || changeSummary ? (
         <MessageContent

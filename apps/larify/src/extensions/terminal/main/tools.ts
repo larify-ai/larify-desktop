@@ -236,7 +236,7 @@ export function createTerminalToolkit(service: TerminalService): Record<string, 
         execute: async (_args, ctx) => service.state(ctx.sessionId).terminals
       }),
       create: defineTool({
-        description: 'Create a terminal',
+        description: 'Create a terminal only when none is available',
         metadata: { icon: 'terminal', eager: true },
         inputSchema: createSchema,
         execute: async (args, ctx) => {
@@ -267,7 +267,7 @@ export function createTerminalToolkit(service: TerminalService): Record<string, 
       }),
       write: defineTool({
         description:
-          "Write raw node-pty input to a terminal. Electron's Node is available as builtin-node, e.g. builtin-node script.js.",
+          "Write raw node-pty input to a terminal. Tip: This is a real TTY: interactive commands (e.g. `git diff`) won't emit a finish event and will block until idle/timeout — use non-interactive commands (e.g. `git --no-pager diff`) to improve efficiency.",
         metadata: { icon: 'terminal', eager: true },
         inputSchema: writeSchema,
         execute: async (args, ctx) => {

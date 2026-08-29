@@ -83,7 +83,7 @@ describe('activity group part', () => {
 
     const buttons = container.querySelectorAll('button')
     expect(buttons[0]?.getAttribute('aria-expanded')).toBe('true')
-    expect(container.textContent).toContain('处理了 0秒')
+    expect(container.textContent).toContain('处理了 1秒')
     expect(container.textContent).toContain('Read source')
     expect(container.querySelector('[data-shimmer-content]')).toBeNull()
   })
@@ -123,7 +123,7 @@ describe('activity group part', () => {
     expect(container.querySelector('[data-markdown]')).toBeNull()
   })
 
-  it('does not count a partial second as a completed second', async () => {
+  it('rounds a partial second up to one second while streaming', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(1_999)
     try {
@@ -143,7 +143,7 @@ describe('activity group part', () => {
         )
       )
 
-      expect(container.textContent).toBe('处理了 0秒')
+      expect(container.textContent).toBe('处理了 1秒')
     } finally {
       vi.useRealTimers()
     }

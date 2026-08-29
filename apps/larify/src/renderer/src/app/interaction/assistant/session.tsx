@@ -1,11 +1,16 @@
-import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Chat } from '@ai-sdk/react'
 import { lastAssistantMessageIsCompleteWithToolCalls, type UIMessage } from 'ai'
 import { createIpcTransport } from './transport'
 import { readModelConfig } from './model-config'
 import { AssistantChat } from './chat'
 import type { ConversationHeading } from './conversation-header'
-import { loadVisibleMessages, messagePageSize } from './session-messages'
+import {
+  loadSessionNavigation,
+  loadVisibleMessages,
+  messagePageSize,
+  type SessionNavigationItem
+} from './session-messages'
 import { createMessageLinkHandler, MessageLinkContextProvider } from './message-links'
 
 export function AssistantSession({
@@ -32,8 +37,9 @@ export function AssistantSession({
   const recentStart = Math.max(0, initialMessageCount - initialMessages.length)
   const cache = useRef(new Map<number, UIMessage>())
   const [olderMessages, setOlderMessages] = useState(() => new Map<number, UIMessage>())
+  const [navigationItems, setNavigationItems] = useState<SessionNavigationItem[]>([])
+  const navigationLoading = useRef(false)
   const loading = useRef(new Set<number>())
-  const range = useRef({ firstPage: 0, lastPage: -1 })
   const [{ chat, setTransportCwd }] = useState(() => {
     let transportCwd = initialCwd
     return {
@@ -66,6 +72,36 @@ export function AssistantSession({
     setTransportCwd(initialCwd)
   }, [initialCwd, setTransportCwd])
 
+  useEffect(() => {
+    let current = true
+    void loadSessionNavigation(id, initialMessageCount)
+      .then((items) => {
+        if (current) setNavigationItems(items)
+      })
+      .catch(() => undefined)
+    return () => {
+      current = false
+    }
+  }, [id, initialMessageCount])
+
+  const loadOlderNavigation = useCallback(() => {
+    const beforeIndex = navigationItems[0]?.index
+    if (!beforeIndex || navigationLoading.current) return
+    navigationLoading.current = true
+    void loadSessionNavigation(id, beforeIndex)
+      .then((items) => {
+        if (!items.length) return
+        setNavigationItems((current) => {
+          const ids = new Set(current.map((item) => item.id))
+          return [...items.filter((item) => !ids.has(item.id)), ...current]
+        })
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        navigationLoading.current = false
+      })
+  }, [id, navigationItems])
+
   // 消息正文中的文件/URL 链接处理器，随会话 cwd 与 id 变化而更新。
   const messageLinkHandler = useMemo(
     () => createMessageLinkHandler(initialCwd, id),
@@ -75,20 +111,6 @@ export function AssistantSession({
 
   const loadRange = useCallback(
     (firstPage: number, lastPage: number) => {
-      range.current = { firstPage, lastPage }
-
-      let pruned = false
-      for (const index of cache.current.keys()) {
-        const page = Math.floor(index / messagePageSize)
-        if (page < firstPage || page > lastPage) {
-          cache.current.delete(index)
-          pruned = true
-        }
-      }
-      if (pruned) {
-        startTransition(() => setOlderMessages(new Map(cache.current)))
-      }
-
       const missingPages: number[] = []
       for (let page = firstPage; page <= lastPage; page++) {
         const pageStart = page * messagePageSize
@@ -110,16 +132,11 @@ export function AssistantSession({
         const pageEnd = Math.min((lastMissingPage + 1) * messagePageSize, recentStart)
         void loadVisibleMessages(id, pageStart, pageEnd - pageStart)
           .then((messages) => {
-            const active = range.current
-            let changed = false
             messages.forEach((message, messageIndex) => {
               const absoluteIndex = pageStart + messageIndex
-              const page = Math.floor(absoluteIndex / messagePageSize)
-              if (page < active.firstPage || page > active.lastPage) return
               cache.current.set(absoluteIndex, message)
-              changed = true
             })
-            if (changed) startTransition(() => setOlderMessages(new Map(cache.current)))
+            setOlderMessages(new Map(cache.current))
           })
           .catch(() => {
             // Keep the page available for retry.
@@ -143,6 +160,8 @@ export function AssistantSession({
         cwd={initialCwd}
         recentStart={recentStart}
         olderMessages={olderMessages}
+        navigationItems={navigationItems}
+        onLoadOlderNavigation={loadOlderNavigation}
         onLoadRange={loadRange}
         onCwdChange={changeCwd}
         onHeadingChange={onHeadingChange}

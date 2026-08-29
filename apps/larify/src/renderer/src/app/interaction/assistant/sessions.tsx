@@ -177,6 +177,30 @@ export function AssistantSessionsProvider({
       )
     }))
   }, [])
+  const rename = useCallback(async (id: string, title: string) => {
+    const normalized = title.trim()
+    if (!normalized) return
+    await window.bridge.invoke('session:rename', id, normalized)
+    setDirectory((current) =>
+      current.map((group) => ({
+        ...group,
+        sessions: group.sessions.map((session) =>
+          session.id === id ? { ...session, title: normalized } : session
+        )
+      }))
+    )
+    setState((current) => ({
+      ...current,
+      sessions: current.sessions.map((session) =>
+        session.id === id
+          ? {
+              ...session,
+              heading: session.heading ? { ...session.heading, title: normalized } : null
+            }
+          : session
+      )
+    }))
+  }, [])
   const setCwd = useCallback((id: string, cwd: string) => {
     setState((current) => ({
       ...current,
@@ -226,6 +250,7 @@ export function AssistantSessionsProvider({
       select,
       loadMore,
       refresh,
+      rename,
       setCwd,
       setPersisted,
       setHeading,
@@ -237,6 +262,7 @@ export function AssistantSessionsProvider({
       directory,
       loadMore,
       refresh,
+      rename,
       select,
       setCwd,
       setHeading,

@@ -10,10 +10,6 @@ function replaceWindowsSeparators(
   return `${prefix}${destination.replaceAll('\\', '/')}${suffix}`
 }
 
-/**
- * Normalize Windows absolute paths in model-authored Markdown destinations before parsing.
- * Markdown treats the final `\.` in hidden-file paths as an escape and otherwise corrupts it.
- */
 export function normalizeModelMarkdownLinks(markdown: string): string {
   return markdown
     .replace(angleBracketedWindowsMarkdownLink, replaceWindowsSeparators)

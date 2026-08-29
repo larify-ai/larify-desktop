@@ -88,40 +88,6 @@ function commandCompletionCase(shell: string): void {
 }
 
 describe.skipIf(!process.env.LIVE_TERMINAL)('TerminalService live', () => {
-  it('runs builtin-node in a real default terminal', async () => {
-    const service = new TerminalService()
-    const terminalId = await service.createReady('builtin-node-live', { title: 'Live' })
-    const shell =
-      service.state('builtin-node-live').terminals.find((terminal) => terminal.id === terminalId)
-        ?.shell ?? ''
-    const output = new Promise<string>((resolve, reject) => {
-      const chunks: string[] = []
-      const timer = setTimeout(
-        () => reject(new Error('Timed out waiting for builtin-node')),
-        10_000
-      )
-      service.bindData((sessionId, eventTerminalId, data) => {
-        if (sessionId !== 'builtin-node-live' || eventTerminalId !== terminalId) return
-        chunks.push(data)
-        const text = chunks.join('')
-        if (!text.includes(marker)) return
-        clearTimeout(timer)
-        resolve(text)
-      })
-    })
-    const command =
-      process.platform === 'win32' || shell.toLowerCase().endsWith('powershell.exe')
-        ? `builtin-node -e "console.log('${marker}')"\r`
-        : `builtin-node -e 'console.log("${marker}")'\n`
-    service.write('builtin-node-live', terminalId, command)
-
-    try {
-      expect(await output).toContain(marker)
-    } finally {
-      await service.destroy()
-    }
-  }, 15_000)
-
   it('creates a real default terminal and forwards output', async () => {
     const service = new TerminalService()
     const output = new Promise<string>((resolve, reject) => {

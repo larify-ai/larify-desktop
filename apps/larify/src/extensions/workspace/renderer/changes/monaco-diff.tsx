@@ -19,20 +19,22 @@ const editorOptions = {
   ...workspaceMonacoGutterOptions,
   lightbulb: { enabled: editor.ShowLightbulbIconMode.Off },
   minimap: { enabled: false },
-  readOnly: true,
+  overviewRulerBorder: false,
   overviewRulerLanes: 0,
+  readOnly: true,
   scrollBeyondLastLine: false,
-  scrollbar: { horizontalScrollbarSize: 8, verticalScrollbarSize: 8 }
+  scrollbar: { horizontalScrollbarSize: 8, verticalScrollbarSize: 0 }
 } satisfies editor.IStandaloneEditorConstructionOptions
 
 const options = {
   ...editorOptions,
   diffAlgorithm: 'advanced',
+  hideUnchangedRegions: { enabled: false },
   enableSplitViewResizing: true,
   originalEditable: false,
   renderIndicators: false,
   renderMarginRevertIcon: false,
-  renderOverviewRuler: false,
+  renderOverviewRuler: true,
   useInlineViewWhenSpaceIsLimited: false
 } satisfies editor.IStandaloneDiffEditorConstructionOptions
 
@@ -200,7 +202,43 @@ export function MonacoContentDiff({
           renderedModified
         )}
         modifiedModelPath={modifiedModelPath}
-        onMount={mountEditor}
+        onMount={(instance) => {
+          mountEditor(instance)
+          let jumped = false
+          const jump = (): void => {
+            if (jumped) return
+            try {
+              const changes =
+                typeof instance.getLineChanges === 'function'
+                  ? instance.getLineChanges()
+                  : undefined
+              const first = changes?.[0]
+              if (!first) return
+              jumped = true
+              const modifiedStart = first.modifiedStartLineNumber
+              const originalStart = first.originalStartLineNumber
+              if (modifiedStart > 0) {
+                instance.getModifiedEditor().revealLineInCenter(modifiedStart)
+              }
+              if (originalStart > 0) {
+                const count = instance.getOriginalEditor().getModel()?.getLineCount() ?? 0
+                if (count > 0) {
+                  instance.getOriginalEditor().revealLineInCenter(originalStart)
+                }
+              }
+            } catch {
+              // Monaco methods can throw before the editor is fully initialised.
+            }
+          }
+          const diffUpdateDisposable = instance.onDidUpdateDiff?.(() => jump())
+          queueMicrotask(() => {
+            jump()
+            if (!jumped) setTimeout(jump, 0)
+          })
+          instance.onDidDispose?.(() => {
+            diffUpdateDisposable?.dispose?.()
+          })
+        }}
         options={diffOptions}
         original={renderedOriginal}
         originalLanguage={workspaceMonacoLanguage(originalPath, renderedOriginal)}

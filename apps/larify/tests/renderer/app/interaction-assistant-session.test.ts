@@ -33,6 +33,102 @@ describe('AssistantSession', () => {
     vi.clearAllMocks()
   })
 
+  it('keeps the current navigation visible while an updated index is loading', async () => {
+    let resolveUpdated!: (value: unknown[]) => void
+    const updated = new Promise<unknown[]>((resolve) => {
+      resolveUpdated = resolve
+    })
+    let navigationRequests = 0
+    const invoke = vi.fn((channel: string) => {
+      if (channel !== 'session:navigation') return Promise.resolve(undefined)
+      navigationRequests += 1
+      return navigationRequests === 1
+        ? Promise.resolve([{ id: 'old', index: 10, promptPreview: 'old' }])
+        : updated
+    })
+    Object.defineProperty(window, 'bridge', {
+      configurable: true,
+      value: { invoke, on: vi.fn(() => () => undefined) }
+    })
+    const root = createRoot(document.createElement('div'))
+    const props = {
+      id: 'session',
+      initialMessages: [message('latest')],
+      initialCwd: '',
+      onCwdChange: vi.fn(),
+      onHeadingChange: vi.fn(),
+      onSaved: vi.fn().mockResolvedValue(undefined)
+    }
+
+    await act(async () => {
+      root.render(createElement(AssistantSession, { ...props, initialMessageCount: 11 }))
+    })
+    expect(mocks.assistant.mock.calls.at(-1)![0]).toMatchObject({
+      navigationItems: [{ id: 'old', index: 10, promptPreview: 'old' }]
+    })
+
+    await act(async () => {
+      root.render(createElement(AssistantSession, { ...props, initialMessageCount: 12 }))
+    })
+    expect(mocks.assistant.mock.calls.at(-1)![0]).toMatchObject({
+      navigationItems: [{ id: 'old', index: 10, promptPreview: 'old' }]
+    })
+
+    await act(async () => {
+      resolveUpdated([{ id: 'new', index: 11, promptPreview: 'new' }])
+    })
+    expect(mocks.assistant.mock.calls.at(-1)![0]).toMatchObject({
+      navigationItems: [{ id: 'new', index: 11, promptPreview: 'new' }]
+    })
+
+    await act(async () => root.unmount())
+  })
+
+  it('prepends older navigation items without duplicating existing entries', async () => {
+    const invoke = vi.fn((channel: string, _id: unknown, beforeIndex?: number) => {
+      if (channel !== 'session:navigation') return Promise.resolve(undefined)
+      return Promise.resolve(
+        beforeIndex === 100
+          ? [
+              { id: 'older', index: 50, promptPreview: 'older' },
+              { id: 'recent', index: 100, promptPreview: 'recent' }
+            ]
+          : [{ id: 'recent', index: 100, promptPreview: 'recent' }]
+      )
+    })
+    Object.defineProperty(window, 'bridge', {
+      configurable: true,
+      value: { invoke, on: vi.fn(() => () => undefined) }
+    })
+    const root = createRoot(document.createElement('div'))
+
+    await act(async () => {
+      root.render(
+        createElement(AssistantSession, {
+          id: 'session',
+          initialMessages: [message('latest')],
+          initialMessageCount: 101,
+          initialCwd: '',
+          onCwdChange: vi.fn(),
+          onHeadingChange: vi.fn(),
+          onSaved: vi.fn().mockResolvedValue(undefined)
+        })
+      )
+    })
+    const current = mocks.assistant.mock.calls.at(-1)![0] as {
+      onLoadOlderNavigation: () => void
+    }
+    await act(async () => current.onLoadOlderNavigation())
+
+    expect(mocks.assistant.mock.calls.at(-1)![0]).toMatchObject({
+      navigationItems: [
+        { id: 'older', index: 50, promptPreview: 'older' },
+        { id: 'recent', index: 100, promptPreview: 'recent' }
+      ]
+    })
+    await act(async () => root.unmount())
+  })
+
   it('keeps the same chat when the workspace changes', async () => {
     const invoke = vi.fn().mockResolvedValue(undefined)
     const onSaved = vi.fn().mockResolvedValue(undefined)
@@ -275,10 +371,15 @@ describe('AssistantSession', () => {
   })
 
   it('releases every page in a failed batch so the visible range can retry', async () => {
-    const invoke = vi
-      .fn()
-      .mockRejectedValueOnce(new Error('temporary failure'))
-      .mockResolvedValueOnce([message('retried')])
+    let messageAttempts = 0
+    const invoke = vi.fn((channel: string, value?: unknown) => {
+      if (channel === 'attachment:load') return Promise.resolve(value)
+      if (channel !== 'session:msgs') return Promise.resolve([])
+      messageAttempts += 1
+      return messageAttempts === 1
+        ? Promise.reject(new Error('temporary failure'))
+        : Promise.resolve([message('retried')])
+    })
     Object.defineProperty(window, 'bridge', {
       configurable: true,
       value: { invoke, on: vi.fn(() => () => undefined) }
@@ -388,7 +489,7 @@ describe('AssistantSession', () => {
     await act(async () => root.unmount())
   })
 
-  it('keeps only the active page window and discards stale responses', async () => {
+  it('retains loaded pages when adjacent requests finish out of order', async () => {
     let resolveFirst!: (messages: UIMessage[]) => void
     let resolveSecond!: (messages: UIMessage[]) => void
     const first = new Promise<UIMessage[]>((resolve) => {
@@ -438,7 +539,56 @@ describe('AssistantSession', () => {
     const current = mocks.assistant.mock.calls.at(-1)![0] as {
       olderMessages: Map<number, UIMessage>
     }
-    expect(current.olderMessages.has(0)).toBe(false)
+    expect(current.olderMessages.get(0)?.id).toBe('stale')
+    expect(current.olderMessages.get(50)?.id).toBe('page-1')
+
+    await act(async () => root.unmount())
+  })
+
+  it('keeps previously loaded pages after the next page becomes ready', async () => {
+    let resolveSecond!: (messages: UIMessage[]) => void
+    const second = new Promise<UIMessage[]>((resolve) => {
+      resolveSecond = resolve
+    })
+    const invoke = vi.fn((channel: string, value: unknown, offset?: number) => {
+      if (channel === 'attachment:load') return Promise.resolve(value)
+      if (channel !== 'session:msgs') return Promise.resolve(undefined)
+      return offset === 0 ? Promise.resolve([message('page-0')]) : second
+    })
+    Object.defineProperty(window, 'bridge', {
+      configurable: true,
+      value: { invoke, on: vi.fn(() => () => undefined) }
+    })
+    const root = createRoot(document.createElement('div'))
+
+    await act(async () => {
+      root.render(
+        createElement(AssistantSession, {
+          id: 'session',
+          initialMessages: [message('latest')],
+          initialMessageCount: 101,
+          initialCwd: 'D:\\Workspace',
+          onHeadingChange: vi.fn(),
+          onSaved: vi.fn()
+        })
+      )
+    })
+    const session = mocks.assistant.mock.calls.at(-1)![0] as {
+      onLoadRange: (firstPage: number, lastPage: number) => void
+    }
+
+    await act(async () => session.onLoadRange(0, 0))
+    act(() => session.onLoadRange(1, 1))
+    let current = mocks.assistant.mock.calls.at(-1)![0] as {
+      olderMessages: Map<number, UIMessage>
+    }
+    expect(current.olderMessages.get(0)?.id).toBe('page-0')
+
+    await act(async () => resolveSecond([message('page-1')]))
+    current = mocks.assistant.mock.calls.at(-1)![0] as {
+      olderMessages: Map<number, UIMessage>
+    }
+    expect(current.olderMessages.get(0)?.id).toBe('page-0')
     expect(current.olderMessages.get(50)?.id).toBe('page-1')
 
     await act(async () => root.unmount())

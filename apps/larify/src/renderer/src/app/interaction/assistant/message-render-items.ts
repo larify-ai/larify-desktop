@@ -1,8 +1,6 @@
 import { getToolName, isFileUIPart, isToolUIPart, type UIMessage } from 'ai'
-import { fromMarkdown } from 'mdast-util-from-markdown'
-import type { Nodes } from 'mdast'
 import { isVisibleToolPart } from './message-parts/tool-visibility'
-import { formatProcessingDuration } from './processing-duration'
+import { formatProcessingDuration, formatProcessingDurationMs } from './processing-duration'
 
 export type AssistantRenderItemKind =
   | 'final-text'
@@ -27,6 +25,7 @@ interface LifecycleMetadata {
   startedAt?: unknown
   completedAt?: unknown
   outcome?: unknown
+  totalProcessingMs?: unknown
 }
 
 function lifecycleMetadata(message: UIMessage): LifecycleMetadata {
@@ -56,23 +55,24 @@ export function isActivityRenderItem(item: AssistantRenderItem): boolean {
 }
 
 const sentenceSegmenter = new Intl.Segmenter(undefined, { granularity: 'sentence' })
+const summaryPrefixLimit = 320
 
-function markdownPlainText(node: Nodes): string {
-  if ('value' in node) {
-    return node.type === 'html' ? '' : node.value
-  }
-  if (node.type === 'image') return node.alt ?? ''
-  if (node.type === 'break') return ' '
-  if (!('children' in node)) return ''
-
-  const separator = ['root', 'blockquote', 'list', 'listItem'].includes(node.type) ? ' ' : ''
-  return node.children.map(markdownPlainText).filter(Boolean).join(separator)
-}
-
+// summary 只是一行截断的纯文本预览（<span class="truncate">），不渲染成 markdown DOM，
+// 因此无需 fromMarkdown 建 AST。这里只做轻量字符串剥离常见 md 可视符号，让预览干净。
 function textSummary(text: string): string {
-  const normalized = markdownPlainText(fromMarkdown(text)).replace(/\s+/g, ' ').trim()
-  const first = sentenceSegmenter.segment(normalized)[Symbol.iterator]().next()
-  return first.done ? normalized : first.value.segment.trim()
+  const plain = text
+    .slice(0, summaryPrefixLimit)
+    .replace(/<!--[\s\S]*?-->/g, '') // HTML 注释
+    .replace(/^\s{0,3}#{1,6}\s+/gm, '') // ATX 标题
+    .replace(/```[\s\S]*?```/g, ' ') // 代码块（整块仅留一个空格）
+    .replace(/`([^`]+)`/g, '$1') // 行内代码
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1') // 链接 [text](url) -> text
+    .replace(/\*\*([^*]+)\*\*/g, '$1') // 粗体 **x**
+    .replace(/^[ \t]*(?:[-*+]|\d+[.)])\s+/gm, '') // 列表项 - / 1.
+    .replace(/\s+/g, ' ')
+    .trim()
+  const first = sentenceSegmenter.segment(plain)[Symbol.iterator]().next()
+  return first.done ? plain : first.value.segment.trim()
 }
 
 export function hasVisibleTextPart(part: UIMessage['parts'][number]): boolean {
@@ -90,20 +90,26 @@ function toolTitle(
   return getToolName(part)
 }
 
-function isPendingAskUser(part: UIMessage['parts'][number]): boolean {
+function isPendingAskUser(
+  part: UIMessage['parts'][number],
+  superseded = false
+): boolean {
   return (
-    isToolUIPart(part) && getToolName(part) === 'agent_ask_user' && part.state === 'input-available'
+    !superseded &&
+    isToolUIPart(part) &&
+    getToolName(part) === 'agent_ask_user' &&
+    part.state === 'input-available'
   )
 }
 
-function pendingAskUserIndex(message: UIMessage): number {
+function pendingAskUserIndex(message: UIMessage, superseded = false): number {
   const lastStepStartIndex = message.parts.findLastIndex((part) => part.type === 'step-start')
   const index = message.parts.findLastIndex(
     (part, partIndex) =>
       partIndex > lastStepStartIndex && isToolUIPart(part) && isVisibleToolPart(part)
   )
   if (index < 0) return -1
-  return isPendingAskUser(message.parts[index]) ? index : -1
+  return isPendingAskUser(message.parts[index], superseded) ? index : -1
 }
 
 function toolIcon(part: UIMessage['parts'][number]): string | undefined {
@@ -115,15 +121,19 @@ function toolIcon(part: UIMessage['parts'][number]): string | undefined {
 function completedSummary(metadata: LifecycleMetadata, waitingForAnswer: boolean): string {
   const interrupted = isInterrupted(metadata)
   const status = interrupted ? '已中断' : waitingForAnswer ? '等待回答' : '已完成'
-  if (!hasValidDuration(metadata)) {
-    return waitingForAnswer ? '等待回答' : interrupted ? '已中断' : '处理过程'
+  if (isFiniteNumber(metadata.totalProcessingMs)) {
+    return `${status} · ${formatProcessingDurationMs(metadata.totalProcessingMs)}`
   }
-  return `${status} · ${formatProcessingDuration(metadata.startedAt, metadata.completedAt)}`
+  if (hasValidDuration(metadata)) {
+    return `${status} · ${formatProcessingDuration(metadata.startedAt, metadata.completedAt)}`
+  }
+  return interrupted || waitingForAnswer ? status : '处理过程'
 }
 
 export function buildAssistantRenderItems(
   message: UIMessage,
-  streaming: boolean
+  streaming: boolean,
+  superseded = false
 ): AssistantRenderItem[] {
   if (message.role !== 'assistant') return []
 
@@ -150,13 +160,12 @@ export function buildAssistantRenderItems(
   const canRenderFinalText = !interrupted && !streaming
   const trailingTextParts = canRenderFinalText
     ? message.parts.flatMap((part, index) =>
-        part.type === 'text' && index > directTextStartIndex ? [{ index, text: part.text }] : []
-      )
+      part.type === 'text' && index > directTextStartIndex ? [{ index, text: part.text }] : []
+    )
     : []
   const firstVisibleFinalTextIndex = trailingTextParts.find(({ text }) => text.trim())?.index
-  const finalText = trailingTextParts.map(({ text }) => text).join('')
   const items: AssistantRenderItem[] = []
-  const pendingAskIndex = interrupted ? -1 : pendingAskUserIndex(message)
+  const pendingAskIndex = interrupted ? -1 : pendingAskUserIndex(message, superseded)
   const waitingForAnswer = pendingAskIndex >= 0
 
   for (let offset = 0; offset < visibleIndexes.length; offset += 1) {
@@ -169,7 +178,7 @@ export function buildAssistantRenderItems(
       items.push({
         kind: 'final-text',
         partIndexes: trailingTextParts.map(({ index }) => index),
-        summary: textSummary(finalText),
+        summary: '',
         defaultOpen: true
       })
       continue
@@ -193,7 +202,7 @@ export function buildAssistantRenderItems(
       continue
     }
     if (!isToolUIPart(part)) continue
-    if (partIndex === pendingAskIndex && isPendingAskUser(part)) {
+    if (partIndex === pendingAskIndex && isPendingAskUser(part, superseded)) {
       items.push({
         kind: 'pending-ask-user',
         partIndexes: [partIndex],
@@ -212,7 +221,7 @@ export function buildAssistantRenderItems(
       if (
         !nextPart ||
         !isToolUIPart(nextPart) ||
-        isPendingAskUser(nextPart) ||
+        isPendingAskUser(nextPart, superseded) ||
         toolIcon(nextPart) !== icon ||
         stepByPartIndex[nextIndex] !== stepByPartIndex[partIndex]
       ) {
@@ -232,26 +241,29 @@ export function buildAssistantRenderItems(
   }
   if (streaming) {
     const activityItems = items.filter(isActivityRenderItem)
-    const { startedAt } = metadata
+    const { startedAt, totalProcessingMs } = metadata
+    const processingSummary = isFiniteNumber(totalProcessingMs)
+      ? formatProcessingDurationMs(totalProcessingMs)
+      : '处理了 0秒'
     if (activityItems.length === 0) {
       return isFiniteNumber(startedAt)
         ? [
-            {
-              kind: 'status',
-              partIndexes: [],
-              summary: '处理了 0秒',
-              defaultOpen: false,
-              startedAt
-            },
-            ...items
-          ]
+          {
+            kind: 'status',
+            partIndexes: [],
+            summary: processingSummary,
+            defaultOpen: false,
+            startedAt
+          },
+          ...items
+        ]
         : items
     }
     return [
       {
         kind: 'activity-group' as const,
         partIndexes: activityItems.flatMap((activity) => activity.partIndexes),
-        summary: '处理了 0秒',
+        summary: processingSummary,
         defaultOpen: true,
         icon: activityItems.at(-1)?.icon,
         children: activityItems,
@@ -265,14 +277,14 @@ export function buildAssistantRenderItems(
   if (activityItems.length === 0) {
     return hasValidDuration(metadata) || interrupted
       ? [
-          {
-            kind: 'status',
-            partIndexes: [],
-            summary: completedSummary(metadata, waitingForAnswer),
-            defaultOpen: false
-          },
-          ...items
-        ]
+        {
+          kind: 'status',
+          partIndexes: [],
+          summary: completedSummary(metadata, waitingForAnswer),
+          defaultOpen: false
+        },
+        ...items
+      ]
       : items
   }
 

@@ -76,9 +76,18 @@ export function ActivityGroupPart({
     if (wasDefaultOpen.current !== item.defaultOpen) setOpen(item.defaultOpen)
     wasDefaultOpen.current = item.defaultOpen
   }, [item.defaultOpen])
+  const meta = message.metadata as Record<string, unknown> | undefined
+  const totalProcessingMs =
+    typeof meta?.totalProcessingMs === 'number' && Number.isFinite(meta.totalProcessingMs)
+      ? meta.totalProcessingMs
+      : 0
   const summary =
     !summaryIcon && streaming && item.startedAt !== undefined ? (
-      <LiveProcessingDuration key={item.startedAt} startedAt={item.startedAt} />
+      <LiveProcessingDuration
+        key={item.startedAt}
+        startedAt={item.startedAt}
+        baseMs={totalProcessingMs}
+      />
     ) : (
       item.summary
     )
@@ -89,33 +98,38 @@ export function ActivityGroupPart({
   })
   const fallbackStreamingIndex = streaming ? message.parts.findLastIndex(hasVisibleTextPart) : -1
   if (item.kind === 'status') {
-    return <div className="text-sm text-muted-foreground">{summary}</div>
+    return (
+      <div>
+        <div className="text-sm text-muted-foreground">{summary}</div>
+        {item.startedAt === undefined ? <div className="mt-2 h-px bg-border" /> : null}
+      </div>
+    )
   }
   if (!indexedParts.length) return null
   const content = item.children
     ? item.children.map((child) => (
-        <ActivityGroupPart
-          key={`${child.kind}-${child.partIndexes.join('-')}`}
-          item={child}
-          message={message}
-          streaming={streaming && isStreamingChild(child, message, fallbackStreamingIndex)}
-        />
-      ))
+      <ActivityGroupPart
+        key={`${child.kind}-${child.partIndexes.join('-')}`}
+        item={child}
+        message={message}
+        streaming={streaming && isStreamingChild(child, message, fallbackStreamingIndex)}
+      />
+    ))
     : indexedParts.map(({ index, part }, position) =>
-        part.type === 'reasoning' || (part.type === 'text' && item.kind === 'intermediate-text') ? (
-          <ReasoningBody key={index} data-reasoning-content className="text-foreground">
-            <MessageMarkdown isAnimating={streaming && position === indexedParts.length - 1}>
-              {part.text}
-            </MessageMarkdown>
-          </ReasoningBody>
-        ) : (
-          <MessagePart
-            key={index}
-            part={part}
-            streaming={streaming && position === indexedParts.length - 1}
-          />
-        )
+      part.type === 'reasoning' || (part.type === 'text' && item.kind === 'intermediate-text') ? (
+        <ReasoningBody key={index} data-reasoning-content className="text-foreground">
+          <MessageMarkdown isAnimating={streaming && position === indexedParts.length - 1}>
+            {part.text}
+          </MessageMarkdown>
+        </ReasoningBody>
+      ) : (
+        <MessagePart
+          key={index}
+          part={part}
+          streaming={streaming && position === indexedParts.length - 1}
+        />
       )
+    )
   if (contentOnly) return <div className="flex flex-col gap-3">{content}</div>
   return (
     <Collapsible

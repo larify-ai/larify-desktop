@@ -7,6 +7,32 @@ export interface MessagePage {
   messageCount: number
 }
 
+export interface SessionNavigationItem {
+  id: string
+  index: number
+  promptPreview: string
+  responsePreview?: string
+}
+
+export async function loadSessionNavigation(
+  id: string,
+  beforeIndex?: number,
+  limit = 50
+): Promise<SessionNavigationItem[]> {
+  const value = await window.bridge.invoke('session:navigation', id, beforeIndex, limit)
+  if (!Array.isArray(value)) return []
+  return value.filter((item): item is SessionNavigationItem =>
+    Boolean(
+      item &&
+      typeof item === 'object' &&
+      typeof item.id === 'string' &&
+      Number.isSafeInteger(item.index) &&
+      typeof item.promptPreview === 'string' &&
+      (item.responsePreview === undefined || typeof item.responsePreview === 'string')
+    )
+  )
+}
+
 export async function loadMessagePage(id: string): Promise<MessagePage> {
   const value = await window.bridge.invoke('session:msg-count', id)
   const messageCount = validMessageCount(value)

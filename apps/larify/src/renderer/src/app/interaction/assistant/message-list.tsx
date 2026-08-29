@@ -1,12 +1,13 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { getToolName, isToolUIPart, type UIMessage } from 'ai'
 import { ArrowDownIcon } from 'lucide-react'
-import { Virtuoso, type ListRange, type VirtuosoHandle } from 'react-virtuoso'
+import { Virtuoso, type ListRange, type StateSnapshot, type VirtuosoHandle } from 'react-virtuoso'
 import { Button } from '@renderer/components/ui/button'
 import { MessageView } from './message-view'
 import { summarizeMessageChanges, type ChangeSummary } from './change-summary'
 import { ChangesSummaryCard } from './changes-summary-card'
 import { messagePageSize } from './session-messages'
+import type { SessionNavigationItem } from './session-messages'
 import { useViewportBottomAnchor } from './use-viewport-bottom-anchor'
 import {
   buildAssistantRenderItems,
@@ -17,6 +18,10 @@ import {
   ActivityHistoryPart,
   type ActivityHistorySection
 } from './message-parts/activity-history-part'
+import {
+  ConversationNavigationRail,
+  type ConversationNavigationEntry
+} from './conversation-navigation-rail'
 
 const Message = memo(
   MessageView,
@@ -39,6 +44,7 @@ const renderChunk = 0
 const estimatedMessageHeight = 80
 const leaveBottomThreshold = 32
 const returnBottomThreshold = 16
+const navigationPreviewLimit = 2_000
 type ScrollMode = 'positioning' | 'following' | 'reading'
 
 interface MessageContentListItem {
@@ -63,6 +69,7 @@ interface MessageActivityHistoryListItem {
   key: string
   message: UIMessage
   sections: ActivityHistorySection[]
+  waiting?: boolean
   trailing?: MessageListItem[]
 }
 
@@ -71,10 +78,18 @@ interface MessageConsumedListItem {
   key: string
 }
 
+interface MessageGroupListItem {
+  kind: 'message-group'
+  key: string
+  message: UIMessage
+  items: Array<MessageContentListItem | MessageChangesListItem>
+}
+
 type MessageListItem =
   | MessageContentListItem
   | MessageChangesListItem
   | MessageActivityHistoryListItem
+  | MessageGroupListItem
   | MessageConsumedListItem
 
 function stageTitle(part: UIMessage['parts'][number] | undefined): string | undefined {
@@ -144,6 +159,29 @@ function isCompactionMessage(message: UIMessage | undefined): boolean {
   )
 }
 
+// 对每个 index 预计算"其后（不含自身）是否存在 user 消息"。
+// 反序遍历一次即可，O(n) 且不产生临时数组；
+// 逐条 slice(index + 1).some(...) 是 O(n^2)，5200 条消息实测 6.6ms→0.19ms。
+function laterUserMessageFlags(messages: UIMessage[]): boolean[] {
+  const flags = new Array<boolean>(messages.length)
+  let seen = false
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    flags[index] = seen
+    const message = messages[index]
+    if (message.role === 'user' && !isCompactionMessage(message)) seen = true
+  }
+  return flags
+}
+
+function messageTextPreview(message: UIMessage, separator: string): string {
+  return message.parts
+    .filter((part) => part.type === 'text')
+    .map((part) => part.text)
+    .join(separator)
+    .trim()
+    .slice(0, navigationPreviewLimit)
+}
+
 function filterRenderItem(
   item: AssistantRenderItem,
   allowedIndexes: Set<number>
@@ -160,7 +198,24 @@ function filterRenderItem(
   }
 }
 
-function itemsForMessage(message: UIMessage, streaming: boolean): MessageListItem[] {
+// 渲染卡顿主因之一：活跃消息 streaming 期间 messages 数组每次更新，若对全部历史消息
+// 重建 renderItems，会让 Message 的 renderItem 引用每次都变化 → Message memo 失效 →
+// 整个 recent 列表反复全量重渲染。这里按 message 引用 + (streaming, superseded) 缓存
+// 结果：历史消息引用稳定则直接命中缓存，renderItem 引用稳定，Message memo 得以生效。
+// WeakMap 键随 message GC 自动清理，无泄漏。缓存项只被调用方读取（map/filter/find），
+// 不原地修改，可安全共享。
+//
+// ⚠️ 只缓存非 streaming 的消息：AI SDK 对流式消息是**原地 mutation**
+// （process-ui-message-stream.ts 的 `textPart.text += chunk.delta`），message 与 part
+// 对象引用在整个流式过程中都不变。若按引用缓存流式消息，缓存将永不失效，
+// 摘要等内容会停在首次计算的结果上。已完成的消息不会再被 mutation，可安全缓存。
+const itemsForMessageCache = new WeakMap<UIMessage, Map<string, MessageListItem[]>>()
+
+function computeItemsForMessage(
+  message: UIMessage,
+  streaming: boolean,
+  superseded = false
+): MessageListItem[] {
   if (message.role !== 'assistant') {
     return [
       {
@@ -173,7 +228,7 @@ function itemsForMessage(message: UIMessage, streaming: boolean): MessageListIte
     ]
   }
   const changes = summarizeMessageChanges(message)
-  const contentItems: MessageContentListItem[] = buildAssistantRenderItems(message, streaming)
+  const contentItems: MessageContentListItem[] = buildAssistantRenderItems(message, streaming, superseded)
     .map((renderItem) => withoutInternalStageParts(renderItem, message))
     .filter((renderItem) => renderItem.partIndexes.length > 0 || renderItem.kind === 'status')
     .map((renderItem) => ({
@@ -196,10 +251,50 @@ function itemsForMessage(message: UIMessage, streaming: boolean): MessageListIte
     : contentItems
 }
 
+function itemsForMessage(
+  message: UIMessage,
+  streaming: boolean,
+  superseded = false
+): MessageListItem[] {
+  // 流式消息会被 chat 原地 mutation，对象引用不变，不能按引用缓存（见上方说明）。
+  // 它每次只有一条，重算成本已被 textSummary 的 part 级缓存压到亚毫秒级。
+  if (message.role !== 'assistant' || streaming) {
+    return computeItemsForMessage(message, streaming, superseded)
+  }
+  const key = `false|${Boolean(superseded)}`
+  const cache = itemsForMessageCache.get(message)
+  const cached = cache?.get(key)
+  if (cached) return cached
+  const items = computeItemsForMessage(message, streaming, superseded)
+  const map = cache ?? new Map<string, MessageListItem[]>()
+  map.set(key, items)
+  itemsForMessageCache.set(message, map)
+  return items
+}
+
+function historicalItem(message: UIMessage): MessageListItem {
+  if (message.role !== 'assistant') {
+    return {
+      key: message.id,
+      kind: 'content',
+      message,
+      firstFragment: true,
+      lastFragment: true
+    }
+  }
+  const items = itemsForMessage(message, false).filter(
+    (item): item is MessageContentListItem | MessageChangesListItem =>
+      item.kind === 'content' || item.kind === 'changes'
+  )
+  if (items.length === 1 && items[0]) return items[0]
+  return { kind: 'message-group', key: message.id, message, items }
+}
+
 interface ActivityHistoryRun {
   cursor: number
   sections: ActivityHistorySection[]
   trailing: MessageListItem[]
+  waiting: boolean
 }
 
 function activityHistoryRun(
@@ -218,6 +313,7 @@ function activityHistoryRun(
   let activeTitle: string | undefined
   let pendingStartTitle: string | undefined
   let seenBoundary = false
+  let waiting = false
   let cursor = start
 
   const append = (
@@ -256,6 +352,9 @@ function activityHistoryRun(
     if (message.role !== 'assistant') break
     if (cursor === start && !hasStageBoundary(message)) break
     const messageItems = itemsByMessage[cursor]
+    waiting ||= messageItems.some(
+      (item) => item.kind === 'content' && item.renderItem?.kind === 'pending-ask-user'
+    )
     const activityIndex = messageItems.findIndex(
       (item) =>
         item.kind === 'content' &&
@@ -317,7 +416,7 @@ function activityHistoryRun(
     }
     flushPending(activeTitle, true)
   }
-  return { cursor, sections, trailing }
+  return { cursor, sections, trailing, waiting }
 }
 
 function recentListItems(
@@ -325,8 +424,13 @@ function recentListItems(
   live: boolean,
   groupedMessageIds = new Set<string>()
 ): MessageListItem[] {
-  const itemsByMessage = messages.map((message) =>
-    itemsForMessage(message, live && message.id === messages.at(-1)?.id)
+  const laterUserFlags = laterUserMessageFlags(messages)
+  const itemsByMessage = messages.map((message, index) =>
+    itemsForMessage(
+      message,
+      live && message.id === messages.at(-1)?.id,
+      message.role === 'assistant' && laterUserFlags[index]
+    )
   )
   const result: MessageListItem[] = []
 
@@ -346,7 +450,7 @@ function recentListItems(
       result.push(...itemsByMessage[index])
       continue
     }
-    const { cursor, sections, trailing } = activityHistoryRun(messages, itemsByMessage, index, live)
+    const { cursor, sections, trailing, waiting } = activityHistoryRun(messages, itemsByMessage, index, live)
     if (sections.length === 0) {
       result.push(...itemsByMessage[index])
       continue
@@ -356,6 +460,7 @@ function recentListItems(
       key: `${sections[0].message.id}-activity-history`,
       message: sections[0].message,
       sections,
+      waiting,
       trailing
     })
     index = cursor - 1
@@ -385,8 +490,13 @@ function boundaryActivityHistory(
   }
   const boundary = older.length
   const combined = [...older.map(([, message]) => message), ...messages]
+  const laterUserFlags = laterUserMessageFlags(combined)
   const itemsByMessage = combined.map((message, index) =>
-    itemsForMessage(message, live && index === combined.length - 1)
+    itemsForMessage(
+      message,
+      live && index === combined.length - 1,
+      message.role === 'assistant' && laterUserFlags[index]
+    )
   )
   for (let start = 0; start < boundary; start += 1) {
     if (!hasStageBoundary(combined[start])) continue
@@ -402,6 +512,7 @@ function boundaryActivityHistory(
         key: `${run.sections[0].message.id}-activity-history`,
         message: run.sections[0].message,
         sections: run.sections,
+        waiting: run.waiting,
         trailing: run.trailing
       },
       recentMessageIds: new Set(
@@ -424,12 +535,15 @@ function HistoricalMessageSpacer({
 }): React.JSX.Element {
   return (
     <div
-      className="w-full"
+      className="mx-auto flex w-full max-w-4xl flex-col justify-center gap-3 px-6 py-3"
       style={{ height }}
       data-message-index={index}
       data-scroll-placeholder
       aria-hidden="true"
-    />
+    >
+      <div className="h-3 w-1/4 rounded bg-muted-foreground/15" />
+      <div className="h-3 w-3/4 rounded bg-muted-foreground/15" />
+    </div>
   )
 }
 
@@ -440,14 +554,38 @@ interface AssistantMessageListProps {
   followRequest?: number
   recentStart: number
   olderMessages: Map<number, UIMessage>
+  navigationItems?: SessionNavigationItem[]
+  onLoadOlderNavigation?: () => void
   onLoadRange: (firstPage: number, lastPage: number) => void
 }
 
+interface SavedMessageListState {
+  firstItemIndex: number
+  snapshot: StateSnapshot
+  totalCount: number
+}
+
+interface ActiveAssistantMessageListProps extends AssistantMessageListProps {
+  getSavedState: () => SavedMessageListState | undefined
+  onSaveState: (state: SavedMessageListState) => void
+}
+
 export function AssistantMessageList(props: AssistantMessageListProps): React.JSX.Element {
+  const savedState = useRef<SavedMessageListState | undefined>(undefined)
+  const getSavedState = useCallback(() => savedState.current, [])
+  const handleSaveState = useCallback((state: SavedMessageListState): void => {
+    savedState.current = state
+  }, [])
   if (props.active === false) {
     return <div className="relative min-h-0 min-w-0 flex-1" aria-hidden="true" />
   }
-  return <ActiveAssistantMessageList {...props} />
+  return (
+    <ActiveAssistantMessageList
+      {...props}
+      getSavedState={getSavedState}
+      onSaveState={handleSaveState}
+    />
+  )
 }
 
 function ActiveAssistantMessageList({
@@ -457,17 +595,23 @@ function ActiveAssistantMessageList({
   followRequest = 0,
   recentStart,
   olderMessages,
-  onLoadRange
-}: AssistantMessageListProps): React.JSX.Element {
+  navigationItems = [],
+  onLoadOlderNavigation,
+  onLoadRange,
+  getSavedState,
+  onSaveState
+}: ActiveAssistantMessageListProps): React.JSX.Element {
+  const [savedState] = useState(getSavedState)
   const list = useRef<VirtuosoHandle>(null)
   const scrollMode = useRef<ScrollMode>('positioning')
   const scrollElement = useRef<HTMLElement | null>(null)
   const lastScrollTop = useRef(0)
+  const viewportIndexFrame = useRef<number | null>(null)
   const resizingMessage = useRef(false)
   const resizeVersion = useRef(0)
   const scrollIntentTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const positioningStarted = useRef(false)
-  const previousLive = useRef(live)
+  const [previousLive, setPreviousLive] = useState(live)
   const openActivities = useRef(new Map<string, boolean>())
   const activityScrollTop = useRef<number | null>(null)
   const [position, setPosition] = useState({
@@ -476,6 +620,52 @@ function ActiveAssistantMessageList({
     escaped: false
   })
   const [replayFinalMessageId, setReplayFinalMessageId] = useState<string>()
+  const [visibleStartIndex, setVisibleStartIndex] = useState<number>()
+  const pendingNavigationIndex = useRef<number | undefined>(undefined)
+
+  const updateViewportIndex = useCallback(() => {
+    if (viewportIndexFrame.current !== null) return
+    viewportIndexFrame.current = requestAnimationFrame(() => {
+      viewportIndexFrame.current = null
+      const viewport = scrollElement.current
+      if (!viewport) return
+      const viewportBounds = viewport.getBoundingClientRect()
+      const viewportAnchor = viewportBounds.top + 1
+      const pendingIndex = pendingNavigationIndex.current
+      if (pendingIndex !== undefined) {
+        setVisibleStartIndex(pendingIndex)
+        return
+      }
+      let closestIndex: number | undefined
+      let closestDistance = Number.POSITIVE_INFINITY
+      for (const element of viewport.querySelectorAll<HTMLElement>('[data-message-index]')) {
+        const index = Number(element.dataset.messageIndex)
+        if (!Number.isSafeInteger(index)) continue
+        const bounds = element.getBoundingClientRect()
+        if (bounds.height <= 0) continue
+        const distance =
+          viewportAnchor < bounds.top
+            ? bounds.top - viewportAnchor
+            : viewportAnchor > bounds.bottom
+              ? viewportAnchor - bounds.bottom
+              : 0
+        if (distance < closestDistance) {
+          closestDistance = distance
+          closestIndex = index
+        }
+      }
+      if (closestIndex !== undefined) {
+        setVisibleStartIndex((current) => (current === closestIndex ? current : closestIndex))
+      }
+    })
+  }, [])
+
+  useEffect(
+    () => () => {
+      if (viewportIndexFrame.current !== null) cancelAnimationFrame(viewportIndexFrame.current)
+    },
+    []
+  )
   const {
     trackRenderedRange,
     scrollerRef,
@@ -491,8 +681,9 @@ function ActiveAssistantMessageList({
     [boundaryHistory, live, messages]
   )
 
-  useLayoutEffect(() => {
-    if (previousLive.current && !live) {
+  if (previousLive !== live) {
+    setPreviousLive(live)
+    if (previousLive && !live) {
       const assistant = messages.findLast(({ role }) => role === 'assistant')
       const hasFinalText = assistant
         ? buildAssistantRenderItems(assistant, false).some((item) => item.kind === 'final-text')
@@ -501,8 +692,7 @@ function ActiveAssistantMessageList({
     } else if (live) {
       setReplayFinalMessageId(undefined)
     }
-    previousLive.current = live
-  }, [live, messages])
+  }
 
   const handleFinalReplayComplete = useCallback(() => setReplayFinalMessageId(undefined), [])
 
@@ -607,7 +797,32 @@ function ActiveAssistantMessageList({
   )
 
   const totalCount = recentStart + recentItems.length
-  const positioningKey = active && totalCount > 0
+  let firstLoadedIndex = recentStart
+  for (const index of olderMessages.keys()) {
+    if (index < firstLoadedIndex) firstLoadedIndex = index
+  }
+  const loadedCount = recentStart - firstLoadedIndex + recentItems.length
+  const restorableState =
+    savedState?.firstItemIndex === firstLoadedIndex && savedState.totalCount === loadedCount
+      ? savedState
+      : undefined
+  const captureListState = useCallback((): void => {
+    const handle = list.current
+    if (!handle) return
+    handle.getState((snapshot) =>
+      onSaveState({ firstItemIndex: firstLoadedIndex, snapshot, totalCount: loadedCount })
+    )
+  }, [firstLoadedIndex, loadedCount, onSaveState])
+  const handleIsScrolling = useCallback(
+    (scrolling: boolean): void => {
+      if (!scrolling) captureListState()
+    },
+    [captureListState]
+  )
+
+  useLayoutEffect(() => () => captureListState(), [captureListState])
+
+  const positioningKey = active && loadedCount > 0
   const currentPosition =
     position.key === positioningKey
       ? position
@@ -661,32 +876,139 @@ function ActiveAssistantMessageList({
       scrollViewportToBottom()
     }
   }
-  const item = (index: number): MessageListItem | undefined => {
-    if (index < recentStart) {
-      const message = olderMessages.get(index)
-      if (boundaryHistory?.anchor === index) return boundaryHistory.item
-      if (boundaryHistory?.consumed.has(index)) {
-        return { kind: 'consumed', key: `${message?.id ?? index}-consumed` }
+  const item = useCallback(
+    (index: number): MessageListItem | undefined => {
+      if (index < recentStart) {
+        const message = olderMessages.get(index)
+        if (boundaryHistory?.anchor === index) return boundaryHistory.item
+        if (boundaryHistory?.consumed.has(index)) {
+          return { kind: 'consumed', key: `${message?.id ?? index}-consumed` }
+        }
+        return message ? historicalItem(message) : undefined
       }
-      return message
-        ? {
-            key: message.id,
-            kind: 'content',
-            message,
-            firstFragment: true,
-            lastFragment: true
-          }
-        : undefined
+      return recentItems[index - recentStart]
+    },
+    [boundaryHistory, olderMessages, recentItems, recentStart]
+  )
+  const navigationEntries = useMemo(() => {
+    const entries: ConversationNavigationEntry[] = navigationItems.map((entry) => ({
+      id: entry.id,
+      index: entry.index,
+      summary: entry.promptPreview,
+      response: entry.responsePreview
+    }))
+    const positions = new Map(entries.map((entry, index) => [entry.id, index]))
+    const loadedMessages: Array<{ index: number; message: UIMessage }> = []
+    for (const [index, message] of olderMessages) {
+      if (index < recentStart) loadedMessages.push({ index, message })
     }
-    return recentItems[index - recentStart]
-  }
+    let previousMessageId: string | undefined
+    for (let offset = 0; offset < recentItems.length; offset += 1) {
+      const recentItem = recentItems[offset]
+      const message = recentItem?.kind === 'consumed' ? undefined : recentItem?.message
+      if (!message || message.id === previousMessageId) continue
+      previousMessageId = message.id
+      loadedMessages.push({ index: recentStart + offset, message })
+    }
+    loadedMessages.sort((left, right) => left.index - right.index)
+    previousMessageId = undefined
+    for (const { index, message } of loadedMessages) {
+      if (message.id === previousMessageId) continue
+      previousMessageId = message.id
+      if (message.role === 'user') {
+        if (isCompactionMessage(message)) continue
+        const summary = messageTextPreview(message, ' ').replace(/\s+/g, ' ')
+        const position = positions.get(message.id)
+        if (position === undefined) {
+          positions.set(message.id, entries.length)
+          entries.push({ id: message.id, index, summary: summary || '用户消息' })
+        } else {
+          entries[position] = { ...entries[position], index, summary: summary || '用户消息' }
+        }
+      }
+    }
+    entries.sort((left, right) => left.index - right.index)
+    let entryIndex = -1
+    let compactionBoundary = false
+    for (const loaded of loadedMessages) {
+      while (entries[entryIndex + 1]?.index <= loaded.index) entryIndex += 1
+      if (isCompactionMessage(loaded.message)) {
+        compactionBoundary = true
+        continue
+      }
+      if (loaded.message.role === 'user') {
+        compactionBoundary = false
+        continue
+      }
+      const entry = entries[entryIndex]
+      if (!entry || compactionBoundary || loaded.message.role !== 'assistant') continue
+      const response = messageTextPreview(loaded.message, '\n\n')
+      if (response) entry.response = response
+    }
+    return entries
+  }, [navigationItems, olderMessages, recentItems, recentStart])
+  const navigateToMessage = useCallback(
+    (entry: ConversationNavigationEntry, behavior: 'auto' | 'smooth'): void => {
+      const { index } = entry
+      const nearby = Math.abs(index - (visibleStartIndex ?? totalCount - 1)) <= 8
+      pendingNavigationIndex.current = index
+      scrollMode.current = 'reading'
+      releaseAnchor()
+      setPosition((current) => ({ ...current, escaped: true }))
+      if (index < firstLoadedIndex) {
+        const page = Math.floor(index / messagePageSize)
+        onLoadRange(page, page)
+        return
+      }
+      setVisibleStartIndex(index)
+      if (behavior === 'smooth' && !nearby) {
+        list.current?.scrollToIndex({
+          index: index - firstLoadedIndex,
+          align: 'start',
+          behavior: 'auto'
+        })
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            list.current?.scrollToIndex({
+              index: index - firstLoadedIndex,
+              align: 'start',
+              behavior: 'smooth'
+            })
+          })
+        })
+        return
+      }
+      list.current?.scrollToIndex({
+        index: index - firstLoadedIndex,
+        align: 'start',
+        behavior
+      })
+    },
+    [firstLoadedIndex, onLoadRange, releaseAnchor, totalCount, visibleStartIndex]
+  )
+  useLayoutEffect(() => {
+    const index = pendingNavigationIndex.current
+    if (index === undefined || index < firstLoadedIndex) return
+    setVisibleStartIndex(index)
+    const frame = requestAnimationFrame(() => {
+      list.current?.scrollToIndex({
+        index: index - firstLoadedIndex,
+        align: 'start',
+        behavior: 'auto'
+      })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [firstLoadedIndex])
   const rangeChanged = ({ startIndex, endIndex }: ListRange): void => {
     trackRenderedRange({ startIndex, endIndex })
-    if (recentStart <= 0 || startIndex >= recentStart) return
-    const firstPage = Math.max(0, Math.floor(startIndex / messagePageSize) - pageBuffer)
+    if (navigationEntries.length >= 2) updateViewportIndex()
+    if (recentStart <= 0) return
+    const historyEnd = Math.min(endIndex, recentStart - 1)
+    const historyStart = Math.min(startIndex, historyEnd)
+    const firstPage = Math.max(0, Math.floor(historyStart / messagePageSize) - pageBuffer + 1)
     const lastPage = Math.min(
       Math.floor((recentStart - 1) / messagePageSize),
-      Math.floor(endIndex / messagePageSize) + pageBuffer
+      Math.floor(historyEnd / messagePageSize) + pageBuffer - 1
     )
     onLoadRange(firstPage, lastPage)
   }
@@ -694,6 +1016,14 @@ function ActiveAssistantMessageList({
   return (
     <div
       className="relative min-h-0 min-w-0 flex-1"
+      onPointerDownCapture={(event) => {
+        if (
+          event.target instanceof Element &&
+          !event.target.closest('[aria-label="对话快速导航"]')
+        ) {
+          pendingNavigationIndex.current = undefined
+        }
+      }}
       onWheelCapture={(event) => {
         if (
           event.target instanceof Element &&
@@ -701,6 +1031,7 @@ function ActiveAssistantMessageList({
         ) {
           return
         }
+        pendingNavigationIndex.current = undefined
         if (event.deltaY < 0 && (scrollElement.current?.scrollTop ?? 0) > 0) {
           if (scrollMode.current !== 'reading') {
             scrollMode.current = 'reading'
@@ -714,6 +1045,7 @@ function ActiveAssistantMessageList({
       onScrollCapture={(event) => {
         const element = scrollElement.current
         if (!element || event.target !== element) return
+        updateViewportIndex()
         const { scrollTop } = element
         const movedUp = scrollTop < lastScrollTop.current
         const distanceFromBottom = element.scrollHeight - element.clientHeight - scrollTop
@@ -729,7 +1061,7 @@ function ActiveAssistantMessageList({
               scrollElement.current === element &&
               element.scrollTop <= scrollTop &&
               element.scrollHeight - element.clientHeight - element.scrollTop >=
-                leaveBottomThreshold
+              leaveBottomThreshold
             if (!resizingMessage.current && scrollMode.current !== 'reading' && leftBottom) {
               scrollMode.current = 'reading'
               releaseAnchor()
@@ -749,13 +1081,15 @@ function ActiveAssistantMessageList({
         ref={list}
         scrollerRef={handleScrollerRef}
         role="log"
-        className="size-full [scrollbar-gutter:stable]"
-        totalCount={totalCount}
-        defaultItemHeight={estimatedMessageHeight}
-        initialItemCount={Math.min(12, totalCount)}
-        initialTopMostItemIndex={totalCount > 0 ? { index: 'LAST', align: 'end' } : 0}
+        className="larify-scrollbar-hidden size-full"
+        totalCount={loadedCount}
+        firstItemIndex={firstLoadedIndex}
+        initialItemCount={Math.min(12, loadedCount)}
+        initialTopMostItemIndex={loadedCount > 0 ? { index: 'LAST', align: 'end' } : 0}
+        restoreStateFrom={restorableState?.snapshot}
         increaseViewportBy={renderBuffer}
         overscan={renderChunk}
+        isScrolling={handleIsScrolling}
         followOutput={() => (scrollMode.current === 'following' ? 'auto' : false)}
         rangeChanged={rangeChanged}
         totalListHeightChanged={handleTotalListHeightChanged}
@@ -779,50 +1113,68 @@ function ActiveAssistantMessageList({
           return message ? (
             <div
               ref={index === totalCount - 1 ? followGrowingList : undefined}
-              className={`mx-auto w-[calc(100%-var(--larify-scrollbar-size))] max-w-4xl min-w-0 translate-x-[calc(var(--larify-scrollbar-size)/2)] px-6 ${listItem.kind === 'changes' ? '' : '[contain:layout_paint_style]'} ${joinsPrevious ? (listItem.kind === 'changes' ? 'pt-4' : followsActivityHistory ? 'pt-3' : 'pt-0') : 'pt-3'} ${joinsNext ? 'pb-0' : index === totalCount - 1 ? 'pb-30' : 'pb-3'}`}
+              className={`mx-auto w-full max-w-4xl min-w-0 px-6 ${listItem.kind === 'changes' ? '' : '[contain:layout_paint_style]'} ${joinsPrevious ? (listItem.kind === 'changes' ? 'pt-4' : followsActivityHistory ? 'pt-3' : 'pt-0') : 'pt-3'} ${joinsNext ? 'pb-0' : index === totalCount - 1 ? 'pb-30' : 'pb-3'}`}
               data-message-index={index}
+              data-message-layout-shell
             >
-              {listItem.kind === 'changes' ? (
+              {listItem.kind === 'message-group' ? (
+                listItem.items.map((groupItem, groupIndex) =>
+                  groupItem.kind === 'changes' ? (
+                    <div key={groupItem.key} className={groupIndex ? 'mt-3' : undefined}>
+                      <ChangesSummaryCard {...groupItem.changes} />
+                    </div>
+                  ) : (
+                    <div key={groupItem.key} className={groupIndex ? 'mt-3' : undefined}>
+                      <Message
+                        message={groupItem.message}
+                        streaming={false}
+                        renderItem={groupItem.renderItem}
+                        activityKey={groupItem.key}
+                        activityOpen={openActivities.current.get(groupItem.key)}
+                        onActivityOpenChange={handleActivityOpenChange}
+                        firstFragment={groupItem.firstFragment}
+                        lastFragment={groupItem.lastFragment}
+                        hideChanges
+                        replayFinal={false}
+                        onFinalReplayComplete={handleFinalReplayComplete}
+                      />
+                    </div>
+                  )
+                )
+              ) : listItem.kind === 'changes' ? (
                 <ChangesSummaryCard {...listItem.changes} />
               ) : listItem.kind === 'activity-history' ? (
-                listItem.trailing?.length ? (
-                  <>
-                    <ActivityHistoryPart
-                      sections={listItem.sections}
-                      initialOpen={openActivities.current.get(listItem.key)}
-                      onOpenChange={(open) => handleActivityOpenChange(listItem.key, open)}
-                    />
-                    {listItem.trailing.map((trailing) =>
-                      trailing.kind === 'changes' ? (
-                        <div key={trailing.key} className="mt-3">
-                          <ChangesSummaryCard {...trailing.changes} />
-                        </div>
-                      ) : trailing.kind === 'content' ? (
-                        <div key={trailing.key} className="mt-3">
-                          <Message
-                            message={trailing.message}
-                            streaming={trailing.streaming ?? false}
-                            renderItem={trailing.renderItem}
-                            activityKey={trailing.key}
-                            activityOpen={openActivities.current.get(trailing.key)}
-                            onActivityOpenChange={handleActivityOpenChange}
-                            firstFragment={trailing.firstFragment}
-                            lastFragment={trailing.lastFragment}
-                            hideChanges
-                            replayFinal={false}
-                            onFinalReplayComplete={handleFinalReplayComplete}
-                          />
-                        </div>
-                      ) : null
-                    )}
-                  </>
-                ) : (
+                <>
                   <ActivityHistoryPart
                     sections={listItem.sections}
+                    waiting={listItem.waiting}
                     initialOpen={openActivities.current.get(listItem.key)}
                     onOpenChange={(open) => handleActivityOpenChange(listItem.key, open)}
                   />
-                )
+                  {listItem.trailing?.map((trailing) =>
+                    trailing.kind === 'changes' ? (
+                      <div key={trailing.key} className="mt-3">
+                        <ChangesSummaryCard {...trailing.changes} />
+                      </div>
+                    ) : trailing.kind === 'content' ? (
+                      <div key={trailing.key} className="mt-3">
+                        <Message
+                          message={trailing.message}
+                          streaming={trailing.streaming ?? false}
+                          renderItem={trailing.renderItem}
+                          activityKey={trailing.key}
+                          activityOpen={openActivities.current.get(trailing.key)}
+                          onActivityOpenChange={handleActivityOpenChange}
+                          firstFragment={trailing.firstFragment}
+                          lastFragment={trailing.lastFragment}
+                          hideChanges
+                          replayFinal={false}
+                          onFinalReplayComplete={handleFinalReplayComplete}
+                        />
+                      </div>
+                    ) : null
+                  )}
+                </>
               ) : (
                 <Message
                   message={message}
@@ -845,6 +1197,12 @@ function ActiveAssistantMessageList({
             <HistoricalMessageSpacer height={estimatedMessageHeight} index={index} />
           )
         }}
+      />
+      <ConversationNavigationRail
+        entries={navigationEntries}
+        currentIndex={visibleStartIndex}
+        onNavigate={navigateToMessage}
+        onLoadOlder={onLoadOlderNavigation}
       />
       {active && currentPosition.complete && currentPosition.escaped && messages.length > 0 && (
         <Button

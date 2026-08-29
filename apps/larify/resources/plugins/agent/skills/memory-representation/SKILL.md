@@ -1,12 +1,12 @@
 ---
 name: memory-representation
-description: How memory is represented, e.g. semantic memory, procedural memory, etc.
+description: How knowledge is represented, e.g. semantic memory, procedural memory, episodic memory, etc.
 eager: true
 ---
 
 # Directory Structure
 
-Organize memory as a recursive hierarchy of domains:
+Organize knowledge in memory as a recursive hierarchy of domains:
 
 ```
 ~/.larify/memory/
@@ -53,8 +53,8 @@ description: <what it covers and when to use it>
 
 - **Accuracy**: whether subjects are recursively grounded in evidence, conflicting claims are made explicit, and temporal validity is maintained.
 - **Completeness**: whether subjects are recursively explored, verified, and critiqued across granularities until no meaningful expansion remains.
-- **Effectiveness**: whether context retrieval achieves sufficient precision and recall.
-- **Efficiency**: whether sufficient context is reached with low latency and token cost.
+- **Effectiveness**: whether knowledge retrieval achieves sufficient precision and recall.
+- **Efficiency**: whether sufficient knowledge is reached with low latency and token cost.
 
 # Version Control
 
@@ -65,6 +65,5 @@ description: <what it covers and when to use it>
 # Constraints
 
 - Represent everything learned in `<subject>.md`; only track task progress in `task.md`.
-- Use Chinese throughout, including directory names, file names, metadata, and content.
 - Keep `<subject>.md` self-contained.
 - Never cite `task.md` in `<subject>.md`.

@@ -109,6 +109,7 @@ describe('AssistantComposer', () => {
     expect(attachment?.getAttribute('aria-label')).toBe('添加附件')
     expect(button.classList.contains('disabled:opacity-50')).toBe(true)
     const composer = container.querySelector('.mx-auto')
+    expect(composer?.hasAttribute('data-composer-layout-shell')).toBe(true)
     expect(composer?.className).toContain('max-w-4xl')
     expect(composer?.className).toContain('-mt-4')
     expect(composer?.className).toContain('w-full')

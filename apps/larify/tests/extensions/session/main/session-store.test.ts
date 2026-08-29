@@ -24,6 +24,12 @@ const message = (id: string, text: string): UIMessage => ({
   parts: [{ type: 'text', text }]
 })
 
+const response = (id: string, text: string): UIMessage => ({
+  id,
+  role: 'assistant',
+  parts: [{ type: 'text', text }]
+})
+
 const compaction = (id: string, query: string, summary: string): UIMessage => ({
   id,
   role: 'user',
@@ -231,6 +237,53 @@ describe('SessionStore', () => {
     expect(store.loadVisibleMessages('large', 0, 2)).toEqual(messages.slice(0, 2))
     expect(store.loadVisibleMessages('large', 4998, 2)).toEqual(messages.slice(4998))
     expect(store.loadVisibleMessages('large', 5000, 2)).toEqual([])
+    const navigation = store.loadNavigationIndex('large')
+    expect(navigation).toHaveLength(50)
+    expect(navigation[0]).toMatchObject({ id: 'message-4950', index: 4950 })
+    expect(navigation.at(-1)).toMatchObject({ id: 'message-4999', index: 4999 })
+    store.dispose()
+  })
+
+  it('loads navigation items from newest to oldest pages', async () => {
+    const store = await createStore()
+    const messages = Array.from({ length: 60 }, (_, index) => [
+      message(`user-${index}`, `prompt ${index}`),
+      response(`assistant-${index}`, `response ${index}`)
+    ]).flat()
+    save(store, 'navigation', messages, '/cwd', 'navigation')
+
+    const latest = store.loadNavigationIndex('navigation')
+    expect(latest).toHaveLength(50)
+    expect(latest[0]).toMatchObject({ id: 'user-10', index: 20, responsePreview: 'response 10' })
+    expect(latest.at(-1)).toMatchObject({
+      id: 'user-59',
+      index: 118,
+      responsePreview: 'response 59'
+    })
+
+    const older = store.loadNavigationIndex('navigation', latest[0].index)
+    expect(older).toHaveLength(10)
+    expect(older[0]).toMatchObject({ id: 'user-0', index: 0, responsePreview: 'response 0' })
+    expect(older.at(-1)).toMatchObject({ id: 'user-9', index: 18, responsePreview: 'response 9' })
+    store.dispose()
+  })
+
+  it('keeps the final response across navigation scan boundaries', async () => {
+    const store = await createStore()
+    const messages: UIMessage[] = [message('user', 'prompt')]
+    for (let index = 0; index < 120; index += 1) {
+      messages.push(response(`assistant-${index}`, `response ${index}`))
+    }
+    save(store, 'navigation', messages, '/cwd', 'navigation')
+
+    expect(store.loadNavigationIndex('navigation', undefined, 1)).toEqual([
+      {
+        id: 'user',
+        index: 0,
+        promptPreview: 'prompt',
+        responsePreview: 'response 119'
+      }
+    ])
     store.dispose()
   })
 

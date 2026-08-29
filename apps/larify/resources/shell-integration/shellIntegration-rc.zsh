@@ -32,10 +32,6 @@ if [[ "$VSCODE_INJECTION" == "1" ]]; then
 	fi
 fi
 
-builtin-node() {
-	ELECTRON_RUN_AS_NODE=1 "$LARIFY_ELECTRON_PATH" "$@"
-}
-
 __vsc_use_aa=0
 __vsc_env_keys=()
 __vsc_env_values=()

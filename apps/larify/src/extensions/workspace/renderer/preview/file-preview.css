@@ -2,56 +2,19 @@
   display: none !important;
 }
 
-.workspace-markdown-preview > .x-markdown {
+.workspace-markdown-preview > .larify-message-markdown {
   box-sizing: border-box;
   width: min(100%, 61.25rem);
   min-height: 100%;
   margin-inline: auto;
   padding: 1.5rem 2rem 4rem;
-  font-family:
-    -apple-system, BlinkMacSystemFont, 'Segoe WPC', 'Segoe UI', system-ui, 'Ubuntu', 'Droid Sans',
-    sans-serif;
   overflow-wrap: break-word;
 }
 
-.workspace-markdown-preview .x-markdown {
-  --primary-color: var(--primary);
-  --primary-color-hover: var(--primary-hover);
-  --heading-color: var(--foreground);
-  --text-color: var(--foreground);
-  --border-color: var(--border-strong);
-  --line-color: var(--border);
-  --light-bg: var(--muted);
-  --dark-bg: var(--muted);
-  --table-head-bg: var(--muted);
-  --table-body-bg: transparent;
-  --cite-bg: var(--muted);
-  --cite-hover-bg: var(--accent);
-}
-
-.workspace-markdown-preview .x-markdown :is(img, video) {
+.workspace-markdown-preview .larify-message-markdown :is(img, video) {
   max-width: 100%;
 }
 
-.workspace-markdown-preview .x-markdown a {
+.workspace-markdown-preview .larify-message-markdown a {
   cursor: pointer;
-}
-
-.workspace-markdown-preview .ant-codeHighlighter-code {
-  background: var(--workbench-content) !important;
-  max-width: 100%;
-  overflow-x: auto !important;
-}
-
-.workspace-markdown-preview .ant-codeHighlighter-header {
-  background: var(--workbench-content) !important;
-}
-
-.workspace-markdown-preview .ant-codeHighlighter-code pre[class*='language-'] {
-  background: transparent !important;
-}
-
-.workspace-markdown-preview .ant-codeHighlighter-code :is(pre, code) {
-  white-space: pre-wrap !important;
-  overflow-wrap: anywhere;
 }

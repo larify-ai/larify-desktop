@@ -7,20 +7,38 @@ import type { UIMessage } from 'ai'
 
 vi.mock(
   '../../../../../src/renderer/src/app/interaction/assistant/message-parts/message-part',
-  () => ({
-    MessagePart: ({ part }: { part: { input?: { toolCallTitle?: string } } }) =>
-      createElement('div', { 'data-detail': true }, part.input?.toolCallTitle)
-  })
+  () => {
+    let partCount = 0
+    return {
+      __partCount: () => partCount,
+      MessagePart: ({ part }: { part: { input?: { toolCallTitle?: string } } }) => {
+        partCount += 1
+        return createElement('div', { 'data-detail': true }, part.input?.toolCallTitle)
+      }
+    }
+  }
 )
 vi.mock(
   '../../../../../src/renderer/src/app/interaction/assistant/message-parts/message-markdown',
-  () => ({
-    MessageMarkdown: ({ children, isAnimating }: { children: string; isAnimating?: boolean }) =>
-      createElement('div', { 'data-markdown': true, 'data-animating': isAnimating }, children)
-  })
+  () => {
+    let count = 0
+    return {
+      __count: () => count,
+      MessageMarkdown: ({ children, isAnimating }: { children: string; isAnimating?: boolean }) => {
+        count += 1
+        return createElement(
+          'div',
+          { 'data-markdown': true, 'data-animating': isAnimating },
+          children
+        )
+      }
+    }
+  }
 )
 
 import { ActivityGroupPart } from '../../../../../src/renderer/src/app/interaction/assistant/message-parts/activity-group-part'
+import { __count as markdownRenderCount } from '../../../../../src/renderer/src/app/interaction/assistant/message-parts/message-markdown'
+import { __partCount as messagePartRenderCount } from '../../../../../src/renderer/src/app/interaction/assistant/message-parts/message-part'
 import { MessageView } from '../../../../../src/renderer/src/app/interaction/assistant/message-view'
 import type { AssistantRenderItem } from '../../../../../src/renderer/src/app/interaction/assistant/message-render-items'
 
@@ -533,6 +551,115 @@ describe('activity group part', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('re-renders an expanded tool card when its output grows (stale guard)', async () => {
+    const toolMessage = (output: string): UIMessage =>
+      ({
+        id: 'assistant-tool-stale',
+        role: 'assistant',
+        parts: [
+          {
+            type: 'dynamic-tool',
+            toolName: 'read',
+            toolCallId: '1',
+            state: 'streaming',
+            input: { toolCallTitle: 'Read source' },
+            output
+          }
+        ]
+      }) as UIMessage
+    const item = (): AssistantRenderItem => ({
+      kind: 'tool-group',
+      partIndexes: [0],
+      summary: 'Read source',
+      defaultOpen: true
+    })
+    await act(async () =>
+      root.render(
+        createElement(ActivityGroupPart, {
+          item: item(),
+          message: toolMessage('a'),
+          streaming: true
+        })
+      )
+    )
+    const first = messagePartRenderCount()
+    expect(first).toBeGreaterThan(0)
+
+    // 同内容（新引用）→ memo 命中，不重渲
+    await act(async () =>
+      root.render(
+        createElement(ActivityGroupPart, {
+          item: item(),
+          message: toolMessage('a'),
+          streaming: true
+        })
+      )
+    )
+    expect(messagePartRenderCount()).toBe(first)
+
+    // 输出增长（state 相同）→ 必须重渲
+    await act(async () =>
+      root.render(
+        createElement(ActivityGroupPart, {
+          item: item(),
+          message: toolMessage('ab'),
+          streaming: true
+        })
+      )
+    )
+    expect(messagePartRenderCount()).toBe(first + 1)
+  })
+
+  it('returns the same rendered subtree when streamed part content is unchanged (memo)', async () => {
+    const reasoningMessage = (text: string): UIMessage =>
+      ({
+        id: 'assistant-memo',
+        role: 'assistant',
+        parts: [{ type: 'reasoning', text, state: 'streaming' }]
+      }) as UIMessage
+    const item = (): AssistantRenderItem => ({
+      kind: 'reasoning',
+      partIndexes: [0],
+      summary: 'Inspecting',
+      defaultOpen: true
+    })
+    await act(async () =>
+      root.render(
+        createElement(ActivityGroupPart, {
+          item: item(),
+          message: reasoningMessage('Inspecting'),
+          streaming: true
+        })
+      )
+    )
+    const first = markdownRenderCount()
+    expect(first).toBeGreaterThan(0)
+
+    // 模拟渲染端快照：message/item 均为新引用但内容相同 → memo 命中，不再渲染 markdown
+    await act(async () =>
+      root.render(
+        createElement(ActivityGroupPart, {
+          item: item(),
+          message: reasoningMessage('Inspecting'),
+          streaming: true
+        })
+      )
+    )
+    expect(markdownRenderCount()).toBe(first)
+
+    // 内容变化（文本增长）→ 必须重新渲染 markdown
+    await act(async () =>
+      root.render(
+        createElement(ActivityGroupPart, {
+          item: item(),
+          message: reasoningMessage('Inspecting more'),
+          streaming: true
+        })
+      )
+    )
+    expect(markdownRenderCount()).toBe(first + 1)
   })
 
   it('updates a reused activity timer before paint when a new run starts', async () => {

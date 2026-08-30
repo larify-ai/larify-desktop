@@ -3,7 +3,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   requestWorkspaceNavigation,
-  takeWorkspaceNavigation
+  takeWorkspaceNavigation,
+  workspaceRootForFile
 } from '../../../../src/extensions/workspace/renderer/workspace-navigation'
 
 describe('workspace navigation', () => {
@@ -49,5 +50,17 @@ describe('workspace navigation', () => {
     expect(event.detail).toEqual(request)
     expect(takeWorkspaceNavigation(9)).toEqual(request)
     expect(takeWorkspaceNavigation(9)).toBeNull()
+  })
+
+  it('computes the root inside the base for in-tree files', () => {
+    expect(workspaceRootForFile('D:\\Project', 'D:\\Project\\src\\a.md')).toBe('D:\\Project')
+  })
+
+  it('falls back to the target directory for out-of-tree files', () => {
+    expect(workspaceRootForFile('D:\\Project', 'D:\\Other\\notes\\a.md')).toBe('D:\\Other\\notes')
+  })
+
+  it('keeps the workspace root for default-space absolute files', () => {
+    expect(workspaceRootForFile('', 'C:\\Users\\me\\notes\\a.md')).toBe('C:\\Users\\me\\notes')
   })
 })

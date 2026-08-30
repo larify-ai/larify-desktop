@@ -12,9 +12,9 @@ vi.mock('../../../../src/extensions/workspace/renderer/workspace-client', () => 
   workspaceClient: { readAsset: h.readAsset }
 }))
 
-import { MarkdownImage } from '../../../../src/extensions/workspace/renderer/preview/markdown-image'
+import { WorkspaceMarkdownImage } from '../../../../src/extensions/workspace/renderer/preview/markdown-image'
 
-describe('MarkdownImage', () => {
+describe('WorkspaceMarkdownImage', () => {
   let container: HTMLDivElement
   let root: Root
   let rootMounted: boolean
@@ -130,22 +130,10 @@ describe('MarkdownImage', () => {
     expect(createObjectURL).not.toHaveBeenCalled()
   })
 
-  it('does not forward XMarkdown-only properties to the img element', async () => {
-    await render({
-      children: 'ignored',
-      domNode: { type: 'tag' },
-      src: 'https://example.com/image.png',
-      streamStatus: 'done'
-    })
-    const image = container.querySelector('img')!
-    expect(image.hasAttribute('domNode')).toBe(false)
-    expect(image.hasAttribute('streamStatus')).toBe(false)
-  })
-
   async function render(props: Record<string, unknown>): Promise<void> {
     await act(async () => {
       root.render(
-        createElement(MarkdownImage, {
+        createElement(WorkspaceMarkdownImage, {
           currentFile: 'D:\\workspace\\docs\\README.md',
           resourceId: 7,
           ...props

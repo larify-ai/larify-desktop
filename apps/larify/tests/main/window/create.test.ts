@@ -43,7 +43,7 @@ vi.mock('electron', () => ({
 vi.mock('@electron-toolkit/utils', () => ({ is: { dev: false } }))
 vi.mock('../../../src/main/utils/app-paths', () => ({ resourcePath: vi.fn() }))
 
-import { createWindow } from '../../../src/main/window/create'
+import { createWindow, isRendererNavigation } from '../../../src/main/window/create'
 
 beforeEach(() => {
   electron.options = undefined
@@ -92,6 +92,33 @@ describe('createWindow', () => {
       sandbox: true,
       webviewTag: true
     })
+  })
+
+  it('allows only the renderer origin during development navigation', () => {
+    const rendererUrl = new URL('http://localhost:5175/')
+    expect(isRendererNavigation('http://localhost:5175/index.html', rendererUrl, '')).toBe(true)
+    expect(isRendererNavigation('http://localhost:5175/', rendererUrl, '')).toBe(true)
+    expect(isRendererNavigation('http://localhost:5175.evil.com/', rendererUrl, '')).toBe(false)
+    expect(isRendererNavigation('https://example.com', rendererUrl, '')).toBe(false)
+    expect(isRendererNavigation('file:///D:/app/out/renderer/index.html', rendererUrl, '')).toBe(
+      false
+    )
+  })
+
+  it('allows only the renderer directory during production file navigation', () => {
+    const prefix = 'file:///D:/apps/larify/out/renderer'
+    expect(isRendererNavigation(`${prefix}/index.html`, undefined, prefix)).toBe(true)
+    expect(isRendererNavigation(`${prefix}/assets/index.js`, undefined, prefix)).toBe(true)
+    expect(isRendererNavigation(prefix, undefined, prefix)).toBe(true)
+    expect(isRendererNavigation(`${prefix}-evil/index.html`, undefined, prefix)).toBe(false)
+    expect(isRendererNavigation('https://example.com', undefined, prefix)).toBe(false)
+  })
+
+  it('rejects malformed navigation URLs without throwing', () => {
+    expect(isRendererNavigation(':::not a url', undefined, 'file:///out/renderer')).toBe(false)
+    expect(() =>
+      isRendererNavigation('not a url', new URL('http://localhost:5175/'), '')
+    ).not.toThrow()
   })
 
   it('only attaches sandboxed browser guests in the browser partition', () => {

@@ -116,7 +116,7 @@ describe('useWorkspaceTextFile', () => {
     expect(container.firstElementChild?.getAttribute('data-content')).toBe('current')
   })
 
-  it('hides stale content and unsubscribes when switching files', async () => {
+  it('keeps showing the previous content while the next file loads and unsubscribes', async () => {
     const next = deferred<string>()
     h.readFile.mockResolvedValueOnce('first').mockReturnValueOnce(next.promise)
     await act(async () => {
@@ -125,11 +125,72 @@ describe('useWorkspaceTextFile', () => {
     })
 
     await act(async () => root.render(createElement(Probe, { path: 'SECOND.md' })))
-    expect(container.firstElementChild?.hasAttribute('data-content')).toBe(false)
+    // 新内容到达前保留旧内容（避免空白帧闪烁）
+    expect(container.firstElementChild?.getAttribute('data-content')).toBe('first')
     expect(h.unsubscribe).toHaveBeenCalledOnce()
 
     await act(async () => next.resolve('second'))
     expect(container.firstElementChild?.getAttribute('data-content')).toBe('second')
+  })
+
+  it('serves a cached file when switching back without re-reading', async () => {
+    h.readFile.mockResolvedValueOnce('first').mockResolvedValueOnce('second')
+    await act(async () => {
+      root.render(createElement(Probe, { path: 'FIRST.md' }))
+      await Promise.resolve()
+    })
+    await act(async () => {
+      root.render(createElement(Probe, { path: 'SECOND.md' }))
+      await Promise.resolve()
+    })
+
+    const calls = h.readFile.mock.calls.length
+    await act(async () => root.render(createElement(Probe, { path: 'FIRST.md' })))
+    await act(async () => Promise.resolve())
+    expect(container.firstElementChild?.getAttribute('data-content')).toBe('first')
+    expect(h.readFile.mock.calls.length).toBe(calls)
+  })
+
+  it('does not stick to an error when returning to a cached file', async () => {
+    h.readFile.mockResolvedValueOnce('first').mockRejectedValueOnce(new Error('Read failed'))
+    await act(async () => {
+      root.render(createElement(Probe, { path: 'FIRST.md' }))
+      await Promise.resolve()
+    })
+    await act(async () => {
+      root.render(createElement(Probe, { path: 'BROKEN.md' }))
+      await Promise.resolve()
+    })
+    expect(container.firstElementChild?.getAttribute('data-error')).toBe('Read failed')
+
+    await act(async () => root.render(createElement(Probe, { path: 'FIRST.md' })))
+    await act(async () => Promise.resolve())
+    expect(container.firstElementChild?.getAttribute('data-content')).toBe('first')
+    expect(container.firstElementChild?.hasAttribute('data-error')).toBe(false)
+  })
+
+  it('retries a failed file when switching back to it', async () => {
+    h.readFile
+      .mockRejectedValueOnce(new Error('Read failed'))
+      .mockResolvedValueOnce('other')
+      .mockResolvedValueOnce('recovered')
+    await act(async () => {
+      root.render(createElement(Probe, { path: 'BROKEN.md' }))
+      await Promise.resolve()
+    })
+    expect(container.firstElementChild?.getAttribute('data-error')).toBe('Read failed')
+
+    await act(async () => {
+      root.render(createElement(Probe, { path: 'OTHER.md' }))
+      await Promise.resolve()
+    })
+    await act(async () => {
+      root.render(createElement(Probe, { path: 'BROKEN.md' }))
+      await Promise.resolve()
+    })
+    expect(h.readFile).toHaveBeenCalledTimes(3)
+    expect(container.firstElementChild?.getAttribute('data-content')).toBe('recovered')
+    expect(container.firstElementChild?.hasAttribute('data-error')).toBe(false)
   })
 
   it('does not read an initially inactive file until activation', async () => {

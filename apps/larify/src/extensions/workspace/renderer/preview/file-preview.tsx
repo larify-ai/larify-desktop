@@ -14,6 +14,7 @@ export function FilePreview({
   mode,
   path,
   resourceId,
+  sessionId,
   target
 }: {
   active: boolean
@@ -22,6 +23,7 @@ export function FilePreview({
   mode?: 'preview' | 'source'
   path: string
   resourceId: number
+  sessionId: string
   target?: { hash: string }
 }): React.JSX.Element {
   const services = useRendererRegistry()
@@ -66,6 +68,7 @@ export function FilePreview({
       file={file}
       mode={mode}
       resourceId={resourceId}
+      sessionId={sessionId}
       target={target}
     />
   )

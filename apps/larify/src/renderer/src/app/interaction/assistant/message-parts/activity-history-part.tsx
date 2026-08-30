@@ -46,6 +46,14 @@ export function ActivityHistoryPart({
     message?.metadata && typeof message.metadata === 'object'
       ? (message.metadata as Record<string, unknown>)
       : {}
+  const lastMetadata = metadata(sections.at(-1)?.message)
+  // error 时透出原因（截断到一行），便于用户/开发者定位"为什么提前结束"。
+  const interruptedSummary =
+    lastMetadata.outcome === 'error' &&
+    typeof lastMetadata.error === 'string' &&
+    lastMetadata.error.trim()
+      ? `已中断 · ${lastMetadata.error.trim().slice(0, 160)}`
+      : '已中断'
   const startedAt = metadata(sections[0]?.message).startedAt
   const completedAt = metadata(sections.at(-1)?.message).completedAt
   const totalProcessingMs = metadata(sections.at(-1)?.message).totalProcessingMs
@@ -72,9 +80,9 @@ export function ActivityHistoryPart({
       '处理过程'
     )
   ) : durationPart ? (
-    `${aborted ? '已中断' : '已完成'} · ${durationPart}`
+    `${aborted ? interruptedSummary : '已完成'} · ${durationPart}`
   ) : aborted ? (
-    '已中断'
+    interruptedSummary
   ) : (
     '已完成'
   )

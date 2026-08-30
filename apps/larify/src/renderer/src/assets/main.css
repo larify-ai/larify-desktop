@@ -406,7 +406,6 @@ html {
   position: relative;
   min-width: 0;
   max-width: 100%;
-  overflow: hidden;
   margin-block: 0.5rem;
 }
 
@@ -424,25 +423,16 @@ html {
   display: flex;
 }
 
-.larify-message-markdown [data-streamdown="code-block"] > div:has(> [data-streamdown="code-block-actions"]) {
-  position: sticky;
-  top: 0.5rem;
-  z-index: 10;
-  display: flex;
-  height: 2rem;
-  justify-content: flex-end;
-  margin-top: -2.5rem;
-  pointer-events: auto;
-}
+/* code 的 sticky 按钮行不再单独覆盖：streamdown 原生即
+   "sticky top-2 -mt-10 flex h-8 items-center justify-end"，
+   与 mermaid 块完全同源同构，可保证三者垂直对齐。 */
 
+/* 统一 code / mermaid / table 的复制、下载按钮组：
+   下载在左、复制在右；右对齐由各外层容器控制；垂直居中；间距一致。 */
 .larify-message-markdown [data-streamdown="code-block-actions"],
-.larify-message-markdown [data-streamdown="code-block-actions"] button {
-  pointer-events: auto;
-}
-
-.larify-message-markdown [data-streamdown="code-block-actions"] {
+.larify-message-markdown [data-streamdown="mermaid-block-actions"],
+.larify-message-markdown [data-streamdown="table-wrapper"] > div:has(button) {
   display: flex;
-  flex-direction: row-reverse;
   align-items: center;
   gap: 0.25rem;
   padding: 0;
@@ -451,25 +441,21 @@ html {
   box-shadow: none;
 }
 
-.larify-message-markdown [data-streamdown="code-block-actions"] button {
-  width: auto;
-  height: auto;
-  min-width: 0;
-  min-height: 0;
-  padding: 0.25rem;
-  border: 0;
-  background: transparent;
-  box-shadow: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+/* 顺序控制：code / mermaid 的 DOM 顺序已是 [下载, 复制]，复制在最右边；
+   table 的 DOM 顺序为 [复制, 下载]，用 row-reverse 使复制显示在最右边。
+   ⚠️ row-reverse 的主轴从右到左：视觉右对齐必须用 flex-start（flex-end 会贴到左边）。 */
+.larify-message-markdown [data-streamdown="code-block-actions"],
+.larify-message-markdown [data-streamdown="mermaid-block-actions"] {
+  flex-direction: row;
 }
 
-.larify-message-markdown [data-streamdown="code-block-actions"] button svg {
-  width: 0.875rem;
-  height: 0.875rem;
+.larify-message-markdown [data-streamdown="table-wrapper"] > div:has(button) {
+  flex-direction: row-reverse;
+  justify-content: flex-start;
 }
 
+/* code 按钮不再单独覆盖：streamdown 原生 code 按钮与 mermaid/table 按钮同款
+   （p-1 + size:14 图标），原生即保证三者尺寸/间距一致。 */
 .larify-message-markdown
   [data-streamdown="code-block"]:has([data-streamdown="code-block-header"] > span:empty)
   [data-streamdown="code-block-body"] {

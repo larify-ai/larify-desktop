@@ -133,7 +133,12 @@ export class AgentWorker {
       }
       if (!controller.signal.aborted) this.finish(() => this.sink.end())
     } catch (error) {
-      if (!controller.signal.aborted) this.finish(() => this.sink.error(error))
+      // abort 是用户主动停止（cancel()），预期路径，不按错误留痕。
+      // 主进程留痕：agent 运行级错误（非流内部，如工具执行/持久化失败）。
+      if (!controller.signal.aborted) {
+        console.error('[agent] run failed:', error)
+        this.finish(() => this.sink.error(error))
+      }
     } finally {
       review?.dispose()
       if (this.controller === controller) this.controller = undefined

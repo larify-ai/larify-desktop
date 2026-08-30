@@ -138,7 +138,7 @@ describe('WorkspaceTree', () => {
     expect(treeProps.current?.expandedKeys).toEqual([])
   })
 
-  it('reveals a path again after navigating away and back', () => {
+  it('reveals a path again after navigating away and back, keeping directories expanded', () => {
     const first = { isLeaf: true, key: '/workspace/a/file.ts', title: 'file.ts' }
     const second = { isLeaf: true, key: '/workspace/b/file.ts', title: 'file.ts' }
     const entries = [
@@ -153,7 +153,14 @@ describe('WorkspaceTree', () => {
     render(entries, String(second.key))
     render(entries, String(first.key))
 
-    expect(treeProps.current?.expandedKeys).toEqual(['/workspace', '/workspace/a'])
+    // reveal 展开过的目录持久化：a 与 b 都保持展开（不再反复伸缩），
+    // 当前导航目标（文件本身）被选中。
+    expect(treeProps.current?.expandedKeys).toEqual([
+      '/workspace',
+      '/workspace/b',
+      '/workspace/a'
+    ])
+    expect(treeProps.current?.selectedKeys).toEqual(['/workspace/a/file.ts'])
   })
 
   it.each(['/workspace/a/b', '/workspace/a/b/c'])(

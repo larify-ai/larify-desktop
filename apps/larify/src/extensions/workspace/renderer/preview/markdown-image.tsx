@@ -1,7 +1,7 @@
 import { type ComponentProps, useEffect, useState } from 'react'
 import type { ExtraProps } from 'streamdown'
 import { workspaceClient } from '../workspace-client'
-import { decodeUrlComponent, resolveWorkspacePath } from './markdown-navigation'
+import { decodeUrlComponent, resolveWorkspacePath } from '@renderer/lib/workspace-link'
 
 function nodeSource(node: unknown): string | undefined {
   if (!node || typeof node !== 'object' || !('properties' in node)) return undefined

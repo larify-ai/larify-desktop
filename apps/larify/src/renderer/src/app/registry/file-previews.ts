@@ -14,6 +14,8 @@ export interface PreviewRendererProps {
   file: PreviewFile
   mode?: 'preview' | 'source'
   resourceId: number
+  /** 所属会话 id，markdown 预览用其打开外部 URL（缺失会导致工作台丢弃选中事件而静默失效）。 */
+  sessionId: string
   target?: { hash: string }
 }
 

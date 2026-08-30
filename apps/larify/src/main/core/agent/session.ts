@@ -91,16 +91,27 @@ export async function runAgentSession(
           writer.write(value)
         }
       } catch (error) {
-        writer.write({ type: 'error', errorText: errorMessage(error) })
+        const reason = errorMessage(error)
+        // 主进程留痕：dev 时打在终端；同时把原因写进消息 metadata（渲染端可显示）。
+        // 用户主动停止（AbortError）属预期路径，降级为 warn 避免终端误报错误。
+        if ((error as { name?: string } | null)?.name === 'AbortError') {
+          console.warn('[agent] stream aborted:', reason)
+        } else {
+          console.error('[agent] stream failed:', error)
+        }
         const errorCompletedAt = Math.max(Date.now(), startedAt)
+        // 必须先写 message-metadata 再写 error：渲染端收到 error chunk 会抛错中断消费，
+        // 之后的 chunk（含 metadata）将不再被应用，导致 UI 内存中的消息丢失 outcome/error。
         writer.write({
           type: 'message-metadata',
           messageMetadata: {
             completedAt: errorCompletedAt,
             outcome: 'error',
+            error: reason,
             totalProcessingMs: previousTotalProcessingMs + (errorCompletedAt - startedAt)
           }
         })
+        writer.write({ type: 'error', errorText: reason })
       } finally {
         reader.releaseLock()
       }

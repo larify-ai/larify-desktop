@@ -26,6 +26,7 @@ interface LifecycleMetadata {
   completedAt?: unknown
   outcome?: unknown
   totalProcessingMs?: unknown
+  error?: unknown
 }
 
 function lifecycleMetadata(message: UIMessage): LifecycleMetadata {
@@ -121,13 +122,18 @@ function toolIcon(part: UIMessage['parts'][number]): string | undefined {
 function completedSummary(metadata: LifecycleMetadata, waitingForAnswer: boolean): string {
   const interrupted = isInterrupted(metadata)
   const status = interrupted ? '已中断' : waitingForAnswer ? '等待回答' : '已完成'
+  // error 时透出原因（截断到一行），便于用户/开发者定位"为什么提前结束"。
+  const errorReason =
+    metadata.outcome === 'error' && typeof metadata.error === 'string' && metadata.error.trim()
+      ? ` · ${metadata.error.trim().slice(0, 160)}`
+      : ''
   if (isFiniteNumber(metadata.totalProcessingMs)) {
-    return `${status} · ${formatProcessingDurationMs(metadata.totalProcessingMs)}`
+    return `${status}${errorReason} · ${formatProcessingDurationMs(metadata.totalProcessingMs)}`
   }
   if (hasValidDuration(metadata)) {
-    return `${status} · ${formatProcessingDuration(metadata.startedAt, metadata.completedAt)}`
+    return `${status}${errorReason} · ${formatProcessingDuration(metadata.startedAt, metadata.completedAt)}`
   }
-  return interrupted || waitingForAnswer ? status : '处理过程'
+  return interrupted || waitingForAnswer ? `${status}${errorReason}` : '处理过程'
 }
 
 export function buildAssistantRenderItems(

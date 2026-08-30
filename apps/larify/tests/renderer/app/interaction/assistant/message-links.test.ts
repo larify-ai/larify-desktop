@@ -206,6 +206,17 @@ describe('createMessageLinkHandler', () => {
     consoleError.mockRestore()
   })
 
+  it('does not open a relative file link in the default space (no base)', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const handler = createMessageLinkHandler('', sessionId)
+
+    handler({ kind: 'file', target: 'src/main.ts' })
+
+    expect(window.bridge.invoke).not.toHaveBeenCalled()
+    expect(dispatchSpy).not.toHaveBeenCalled()
+    consoleError.mockRestore()
+  })
+
   it('does not select a pending browser resource after the handler is disposed', async () => {
     const browser = deferred<number>()
     vi.mocked(window.bridge.invoke).mockReturnValueOnce(browser.promise)

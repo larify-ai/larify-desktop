@@ -54,10 +54,16 @@ export function AssistantChat({
   onCwdChange: (cwd: string) => void
   onHeadingChange: (heading: ConversationHeading | null) => void
 }): React.JSX.Element {
-  const { addToolOutput, messages, sendMessage, setMessages, status, stop } = useChat({
-    chat,
-    throttle: 50
-  })
+  const { addToolOutput, clearError, error, messages, sendMessage, setMessages, status, stop } =
+    useChat({
+      chat,
+      // 50ms → 100ms：@ai-sdk/react 每次 throttle tick 都会浅拷贝活跃消息全部 parts
+      // （snapshot 快照），巨型流式消息（数百 parts）每 tick 的拷贝量就是 GC/长任务
+      // 的来源（实测：0.57s 一个 50-150ms 长任务 = major GC，99.8% Profiler 样本）。
+      // 100ms 合并后分配频率减半，GC 长任务约减半；chunk 仍 20ms 到达，仅 UI 更新
+      // 20fps→10fps，流式观感几乎无差。
+      throttle: 100
+    })
   const running = status === 'submitted' || status === 'streaming'
   const attentionState = sessionAttentionState(status, messages)
   const reportAttentionState = useSessionAttentionReport()
@@ -126,6 +132,17 @@ export function AssistantChat({
 
   return (
     <div className="flex h-full min-w-0 flex-col">
+      {error ? (
+        <div
+          data-agent-error
+          className="mx-auto w-full max-w-4xl px-6 pt-3"
+          role="alert"
+        >
+          <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            Agent 运行出错：{error.message}
+          </div>
+        </div>
+      ) : null}
       <ToolOutputContext.Provider value={submitToolOutput}>
         <AssistantMessageList
           active={active}
@@ -147,6 +164,7 @@ export function AssistantChat({
         onCwdChange={onCwdChange}
         onSubmit={({ text, files }) => {
           runStartedAt.current = Date.now()
+          if (error) clearError()
           void sendMessage({ text, files })
         }}
         onStop={() => void stopAndMarkAborted()}

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import { BrainIcon, ChevronRightIcon } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import {
@@ -19,6 +19,7 @@ import { ToolIcon } from '@renderer/components/ai-elements/tool'
 import { ReasoningBody } from '@renderer/components/ai-elements/reasoning'
 import { cn } from '@renderer/lib/utils'
 import { ActivityShimmer } from './activity-shimmer'
+import { activityGroupPropsEqual, type ActivityGroupPartProps } from './activity-group-memo'
 
 const icons: Partial<Record<AssistantRenderItemKind, LucideIcon>> = {
   reasoning: BrainIcon,
@@ -49,7 +50,7 @@ function isStreamingChild(
   })
 }
 
-export function ActivityGroupPart({
+export const ActivityGroupPart = memo(function ActivityGroupPart({
   item,
   message,
   streaming,
@@ -59,17 +60,7 @@ export function ActivityGroupPart({
   onOpenChange,
   additionalContent,
   contentOnly = false
-}: {
-  item: AssistantRenderItem
-  message: UIMessage
-  streaming: boolean
-  summaryIcon?: React.ReactNode
-  summaryClassName?: string
-  initialOpen?: boolean
-  onOpenChange?: (open: boolean) => void
-  additionalContent?: React.ReactNode
-  contentOnly?: boolean
-}): React.JSX.Element | null {
+}: ActivityGroupPartProps): React.JSX.Element | null {
   const [open, setOpen] = useState(initialOpen ?? item.defaultOpen)
   const wasDefaultOpen = useRef(item.defaultOpen)
   useEffect(() => {
@@ -108,28 +99,28 @@ export function ActivityGroupPart({
   if (!indexedParts.length) return null
   const content = item.children
     ? item.children.map((child) => (
-      <ActivityGroupPart
-        key={`${child.kind}-${child.partIndexes.join('-')}`}
-        item={child}
-        message={message}
-        streaming={streaming && isStreamingChild(child, message, fallbackStreamingIndex)}
-      />
-    ))
-    : indexedParts.map(({ index, part }, position) =>
-      part.type === 'reasoning' || (part.type === 'text' && item.kind === 'intermediate-text') ? (
-        <ReasoningBody key={index} data-reasoning-content className="text-foreground">
-          <MessageMarkdown isAnimating={streaming && position === indexedParts.length - 1}>
-            {part.text}
-          </MessageMarkdown>
-        </ReasoningBody>
-      ) : (
-        <MessagePart
-          key={index}
-          part={part}
-          streaming={streaming && position === indexedParts.length - 1}
+        <ActivityGroupPart
+          key={`${child.kind}-${child.partIndexes.join('-')}`}
+          item={child}
+          message={message}
+          streaming={streaming && isStreamingChild(child, message, fallbackStreamingIndex)}
         />
+      ))
+    : indexedParts.map(({ index, part }, position) =>
+        part.type === 'reasoning' || (part.type === 'text' && item.kind === 'intermediate-text') ? (
+          <ReasoningBody key={index} data-reasoning-content className="text-foreground">
+            <MessageMarkdown isAnimating={streaming && position === indexedParts.length - 1}>
+              {part.text}
+            </MessageMarkdown>
+          </ReasoningBody>
+        ) : (
+          <MessagePart
+            key={index}
+            part={part}
+            streaming={streaming && position === indexedParts.length - 1}
+          />
+        )
       )
-    )
   if (contentOnly) return <div className="flex flex-col gap-3">{content}</div>
   return (
     <Collapsible
@@ -184,4 +175,4 @@ export function ActivityGroupPart({
       ) : null}
     </Collapsible>
   )
-}
+}, activityGroupPropsEqual)

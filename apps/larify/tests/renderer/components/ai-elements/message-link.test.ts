@@ -238,8 +238,20 @@ describe('MessageLink', () => {
     expect(anchor.getAttribute('href')).toBe('#section')
     expect(container.querySelector('svg')).toBeNull()
 
-    await act(async () => anchor.click())
+    const event = new MouseEvent('click', { bubbles: true, cancelable: true })
+    await act(async () => anchor.dispatchEvent(event))
     expect(onClick).toHaveBeenCalledOnce()
+  })
+
+  it('prevents the default hash navigation for an anchor without an onClick handler', async () => {
+    await act(async () => {
+      root.render(createElement(MessageLink, { href: '#missing' }, '章节'))
+    })
+
+    const anchor = container.querySelector('a')!
+    const event = new MouseEvent('click', { bubbles: true, cancelable: true })
+    await act(async () => anchor.dispatchEvent(event))
+    expect(event.defaultPrevented).toBe(true)
   })
 })
 

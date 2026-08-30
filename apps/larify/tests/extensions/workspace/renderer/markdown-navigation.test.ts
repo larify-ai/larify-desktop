@@ -3,9 +3,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   decodeUrlComponent,
-  resolveWorkspacePath,
-  scrollToHash
-} from '../../../../src/extensions/workspace/renderer/preview/markdown-navigation'
+  resolveWorkspacePath
+} from '../../../../src/renderer/src/lib/workspace-link'
+import { scrollToHash } from '../../../../src/extensions/workspace/renderer/preview/markdown-navigation'
 
 describe('Markdown navigation', () => {
   it.each([

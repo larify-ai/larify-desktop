@@ -1,4 +1,5 @@
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { BrowserWindow, nativeTheme, screen, shell } from 'electron'
 import { is } from '@electron-toolkit/utils'
 import { BROWSER_PARTITION } from '../../extensions/browser/shared/types'
@@ -6,6 +7,26 @@ import { resourcePath } from '../utils/app-paths'
 import { loadTheme } from '../theme/store'
 
 export const titleBarHeight = 46
+
+/**
+ * 渲染层导航白名单判定（纯函数便于单测）：
+ * - dev：仅放行 dev server 同 origin（origin 精确匹配，防「localhost:5173.evil.com」前缀碰撞）。
+ * - 生产：仅放行 renderer 目录下的 file:// 导航（目录边界 '/'，防「…/renderer-evil」前缀碰撞）。
+ * - 非法 URL 解析不成 → 一律拦截。
+ */
+export function isRendererNavigation(
+  url: string,
+  rendererUrl: URL | undefined,
+  rendererFilePrefix: string
+): boolean {
+  try {
+    return rendererUrl
+      ? new URL(url).origin === rendererUrl.origin
+      : url === rendererFilePrefix || url.startsWith(`${rendererFilePrefix}/`)
+  } catch {
+    return false
+  }
+}
 
 export function createWindow(): BrowserWindow {
   const savedTheme = loadTheme()
@@ -60,6 +81,21 @@ export function createWindow(): BrowserWindow {
       void shell.openExternal(url)
     }
     return { action: 'deny' }
+  })
+  // 渲染层任何未被 preventDefault 的 <a> 默认导航（如 markdown 链接漏拦截）
+  // 都会让主窗口整页导航离开应用 → 白屏。此处兜底：只允许应用自身地址，
+  // 其余一律阻止（markdown 链接统一走内部 handler，不依赖浏览器导航）。
+  // 注意用 origin/目录前缀精确匹配，避免「http://localhost:5173.evil.com」
+  // 这类域名前缀碰撞绕过；生产仅放行 renderer 目录下的 file:// 导航。
+  const rendererUrl =
+    is.dev && process.env['ELECTRON_RENDERER_URL']
+      ? new URL(process.env['ELECTRON_RENDERER_URL'])
+      : undefined
+  const rendererFilePrefix = pathToFileURL(join(__dirname, '../renderer')).href
+  window.webContents.on('will-navigate', (event, url) => {
+    if (!isRendererNavigation(url, rendererUrl, rendererFilePrefix)) {
+      event.preventDefault()
+    }
   })
   const loading =
     is.dev && process.env['ELECTRON_RENDERER_URL']

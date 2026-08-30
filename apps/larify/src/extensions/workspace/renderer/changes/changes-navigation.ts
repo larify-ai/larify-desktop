@@ -1,5 +1,4 @@
-import posixPath from 'path-unified/posix'
-import win32Path from 'path-unified/win32'
+import { pathFor } from '@renderer/lib/workspace-link'
 
 export interface ChangesNavigationRequest {
   path: string
@@ -10,22 +9,11 @@ export const CHANGES_NAVIGATION_EVENT = 'larify:changes-navigation'
 
 const pending = new Map<number, ChangesNavigationRequest>()
 
-interface PathApi {
-  resolve(...paths: string[]): string
-  relative(from: string, to: string): string
-  isAbsolute(path: string): boolean
-  dirname(path: string): string
-  sep: string
-}
-
-const pathForRoot = (root: string): PathApi =>
-  /^(?:[a-z]:[\\/]|\\\\)/i.test(root) ? win32Path : posixPath
-
 export const resolveChangesPath = (root: string, file: string): string =>
-  pathForRoot(root).resolve(root, file)
+  pathFor(root).resolve(root, file)
 
 export function sameChangesPath(root: string, left: string, right: string): boolean {
-  const path = pathForRoot(root)
+  const path = pathFor(root)
   return path.relative(path.resolve(root, left), path.resolve(root, right)) === ''
 }
 
@@ -33,7 +21,7 @@ export function changesRootForFile(root: string, file: string): string {
   // Default-space sessions have no cwd. In that case the target itself must
   // select the path implementation, otherwise a Windows absolute path is
   // interpreted as a POSIX relative path.
-  const path = pathForRoot(root || file)
+  const path = pathFor(root || file)
   const target = path.resolve(root, file)
   const relative = path.relative(root, target)
   const inside =

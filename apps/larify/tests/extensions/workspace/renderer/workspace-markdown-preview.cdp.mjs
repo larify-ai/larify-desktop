@@ -40,7 +40,7 @@ tags: [test]
 const ready = true
 \`\`\`
 
-Inline math: $E = mc^2$
+Inline math: $$E = mc^2$$
 
 \`\`\`mermaid
 flowchart LR
@@ -234,9 +234,10 @@ try {
   assert.equal(
     await app.evaluate(`(() => {
       const workspace = document.querySelector(${JSON.stringify(activeWorkspaceSelector)})
-      const link = Array.from(workspace?.querySelectorAll('.workspace-markdown-preview a') ?? []).find(
-        (element) => element.textContent === 'Basic fixture'
-      )
+      // 本地文件链接由 MessageLink 渲染为 button（file kind），非 <a>。
+      const link = Array.from(
+        workspace?.querySelectorAll('.workspace-markdown-preview .larify-message-link') ?? []
+      ).find((element) => element.textContent === 'Basic fixture')
       link?.click()
       return Boolean(link)
     })()`),

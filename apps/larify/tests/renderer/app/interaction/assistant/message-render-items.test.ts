@@ -795,6 +795,50 @@ describe('assistant message render items', () => {
     expect(items[0].summary).toBe('已中断 · 处理了 8秒')
   })
 
+  it('surfaces the error reason from metadata on the interrupted row', () => {
+    const failed = {
+      ...timedMessage({ type: 'reasoning', text: 'think' }, { type: 'text', text: 'partial' }),
+      metadata: {
+        startedAt: 1_000,
+        completedAt: 9_000,
+        outcome: 'error',
+        error: 'APICallError: upstream timeout'
+      }
+    } as UIMessage
+
+    const items = buildAssistantRenderItems(failed, false)
+
+    expect(items[0].summary).toBe('已中断 · APICallError: upstream timeout · 处理了 8秒')
+  })
+
+  it('truncates a long error reason and skips whitespace-only reasons', () => {
+    const longError = {
+      ...timedMessage({ type: 'text', text: 'partial' }),
+      metadata: {
+        startedAt: 1_000,
+        completedAt: 9_000,
+        outcome: 'error',
+        error: 'x'.repeat(500)
+      }
+    } as UIMessage
+    const whitespaceError = {
+      ...timedMessage({ type: 'text', text: 'partial' }),
+      metadata: {
+        startedAt: 1_000,
+        completedAt: 9_000,
+        outcome: 'error',
+        error: '   \n  '
+      }
+    } as UIMessage
+
+    expect(buildAssistantRenderItems(longError, false)[0].summary).toBe(
+      `已中断 · ${'x'.repeat(160)} · 处理了 8秒`
+    )
+    expect(buildAssistantRenderItems(whitespaceError, false)[0].summary).toBe(
+      '已中断 · 处理了 8秒'
+    )
+  })
+
   it('shows a legacy stream error as interrupted without timing metadata', () => {
     const failed = {
       ...message({ type: 'reasoning', text: 'think' }, { type: 'text', text: 'partial' }),

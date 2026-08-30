@@ -17,7 +17,9 @@ export type MessageLinkProps = ComponentProps<'a'> & {
   streamStatus?: unknown
 }
 
-function nodeHref(node: unknown): string | undefined {
+/** 从 hast 节点（Streamdown components.a 的 node prop）提取 href，供 href 缺失时兜底。 */
+// eslint-disable-next-line react-refresh/only-export-components
+export function nodeHref(node: unknown): string | undefined {
   if (!node || typeof node !== 'object' || !('properties' in node)) return undefined
   const properties = node.properties
   if (!properties || typeof properties !== 'object' || !('href' in properties)) return undefined
@@ -35,6 +37,7 @@ export function MessageLink({
   streamStatus: _streamStatus,
   ...rest
 }: MessageLinkProps): React.JSX.Element {
+  // Streamdown 额外传入的属性，接收后丢弃以免透传到 DOM。
   const target = href ?? nodeHref(node)
   const link = target ? parseWorkspaceLink(target) : null
   const linkClassName = cn(
@@ -68,7 +71,12 @@ export function MessageLink({
       onOpenLink?.({ kind: 'url', target: link.url })
       return
     }
-    if (link?.kind === 'anchor') onClick?.(event)
+    if (link?.kind === 'anchor') {
+      // 锚点滚动交由外部（onClick）处理；默认导航会改写 window.location.hash，
+      // 在消息正文等无标题 id 的上下文会污染全局 hash 而无任何滚动效果。
+      event.preventDefault()
+      onClick?.(event)
+    }
   }
 
   return (
@@ -86,8 +94,8 @@ export function MessageLink({
 // eslint-disable-next-line react-refresh/only-export-components
 export function createMessageLink(
   onOpenLink: MessageLinkHandler
-): (props: ComponentProps<'a'>) => React.JSX.Element {
-  function BoundMessageLink(props: ComponentProps<'a'>): React.JSX.Element {
+): (props: MessageLinkProps) => React.JSX.Element {
+  function BoundMessageLink(props: MessageLinkProps): React.JSX.Element {
     return <MessageLink {...props} onOpenLink={onOpenLink} />
   }
   return BoundMessageLink

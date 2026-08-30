@@ -37,6 +37,7 @@ export function ChangesView({
   active = false,
   cwd,
   resourceId,
+  sessionId,
   updateTab
 }: WorkbenchRendererProps): React.JSX.Element {
   const [mode, setMode] = useState<'unified' | 'split'>('unified')
@@ -221,6 +222,7 @@ export function ChangesView({
             mode={mode}
             resourceId={resourceId}
             root={root ?? cwd}
+            sessionId={sessionId}
             status={current}
           />
         </Suspense>

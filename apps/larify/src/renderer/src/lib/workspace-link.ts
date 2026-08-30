@@ -6,7 +6,11 @@ export type WorkspaceLink =
   | { kind: 'url'; url: string }
   | { kind: 'file'; target: string; hash?: string }
 
-type PathApi = Pick<typeof posixPath, 'dirname' | 'isAbsolute' | 'normalize' | 'resolve'>
+/** 渲染层路径实现所需的最小接口，posix/win32 均满足（sep 统一为 string 避免字面量差异）。 */
+export type PathApi = Pick<
+  typeof posixPath,
+  'dirname' | 'isAbsolute' | 'normalize' | 'resolve' | 'relative'
+> & { sep: string }
 type FileLink = Extract<WorkspaceLink, { kind: 'file' }>
 
 const schemePattern = /^([a-z][\w+.-]*):/i
@@ -59,7 +63,8 @@ export function parseWorkspaceLink(href: string): WorkspaceLink | null {
   }
 }
 
-function pathFor(value: string): PathApi {
+/** 按路径特征选择平台实现（盘符/UNC → win32，否则 posix）。渲染层唯一判别入口。 */
+export function pathFor(value: string): PathApi {
   return windowsRootPattern.test(value) ? win32Path : posixPath
 }
 
@@ -76,9 +81,16 @@ export function resolveWorkspaceLink(base: string, href: string): { path: string
 
   const target = schemeOf(link.target) === 'file' ? fileUrlToPath(link.target) : link.target
   const targetPath = pathFor(target)
-  const path = targetPath.isAbsolute(target) ? targetPath : pathFor(base)
+  if (targetPath.isAbsolute(target)) {
+    return { path: targetPath.normalize(target), ...(link.hash ? { hash: link.hash } : {}) }
+  }
+  // 相对目标必须有一个确定的 base（会话 cwd）；base 为空（默认空间）时
+  // 没有可解析基准，直接拒绝，避免 path.resolve('', ...) 意外解析到进程
+  // 工作目录并打开错误文件。
+  if (!base) throw new Error(`Relative link target without a base: ${href}`)
+  const basePath = pathFor(base)
   return {
-    path: path.isAbsolute(target) ? path.normalize(target) : path.resolve(base, target),
+    path: basePath.resolve(base, target),
     ...(link.hash ? { hash: link.hash } : {})
   }
 }

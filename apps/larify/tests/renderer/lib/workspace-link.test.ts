@@ -72,4 +72,16 @@ describe('workspace link', () => {
       path: '/tmp/notes.md'
     })
   })
+
+  it('rejects a relative target without a base instead of resolving against the process cwd', () => {
+    expect(() => resolveWorkspaceLink('', 'src/main.ts')).toThrow(
+      'Relative link target without a base'
+    )
+  })
+
+  it('still resolves absolute targets without a base', () => {
+    expect(resolveWorkspaceLink('', 'C:\\etc\\notes.md')).toEqual({
+      path: 'C:\\etc\\notes.md'
+    })
+  })
 })

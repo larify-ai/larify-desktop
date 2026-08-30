@@ -351,9 +351,9 @@ export function WorkspaceView({
               animating={workbenchAnimating}
               descriptor={previewDescriptor}
               enabled={workbenchVisible || workbenchAnimating}
-              key={`${resourceId}:${previewPath}`}
               mode={isMarkdownPath(previewPath) ? markdownMode : undefined}
               resourceId={resourceId}
+              sessionId={sessionId}
               target={target}
               path={previewPath}
             />

@@ -12,6 +12,7 @@ import { registerTheme } from '../theme'
 import { registerDialog } from '../dialog'
 import { registerUpdate } from '../update'
 import { registerAuth } from '../auth'
+import { configureSystemProxy } from '../proxy'
 import { openMainWindow, registerWindow } from '../window'
 import type { Application } from './application'
 
@@ -34,6 +35,9 @@ async function createApplication(electron: App): Promise<Application> {
   registerAgent(application)
   registerUpdate(application)
   registerAuth(application)
+  // 跟随系统代理（浏览器插件分区与默认会话），避免用户配置代理时应用裸连导致超时。
+  // 内部已捕获失败，await 确保任何 webview/网络请求前代理已生效。
+  await configureSystemProxy()
   return application
 }
 

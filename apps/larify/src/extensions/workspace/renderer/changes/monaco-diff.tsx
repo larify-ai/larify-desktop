@@ -55,6 +55,8 @@ interface MonacoDiffProps {
   mode: 'unified' | 'split'
   resourceId: number
   root: string
+  /** 透传给二进制文件预览（FilePreview），与 workspace 视图一致。 */
+  sessionId: string
   status: FileStatusResult
 }
 
@@ -255,6 +257,7 @@ export function MonacoDiff({
   mode,
   resourceId,
   root,
+  sessionId,
   status
 }: MonacoDiffProps): React.JSX.Element {
   const requestKey = `${resourceId}:${root}:${status.from ?? ''}:${status.path}:${status.index}${status.working_dir}`
@@ -334,6 +337,7 @@ export function MonacoDiff({
         animating={animating}
         path={status.path}
         resourceId={resourceId}
+        sessionId={sessionId}
       />
     )
   }

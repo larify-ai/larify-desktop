@@ -72,7 +72,14 @@ export function createMessageLinkHandler(
       openUrlInBrowser(sessionId, link.target, isCurrent)
       return
     }
-    const { path, hash } = resolveWorkspaceLink(cwd, link.target)
+    let resolved: { path: string; hash?: string }
+    try {
+      resolved = resolveWorkspaceLink(cwd, link.target)
+    } catch (error) {
+      if (isCurrent()) console.error('[message-link:resolve]', error)
+      return
+    }
+    const { path, hash } = resolved
     void window.bridge
       .invoke('workspace:path-kind', path)
       .then((kind) => {

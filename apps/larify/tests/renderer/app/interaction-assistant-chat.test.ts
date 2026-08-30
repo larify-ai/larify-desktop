@@ -101,7 +101,7 @@ describe('AssistantChat', () => {
       )
     )
 
-    expect(mocks.useChat).toHaveBeenCalledWith({ chat, throttle: 50 })
+    expect(mocks.useChat).toHaveBeenCalledWith({ chat, throttle: 100 })
     expect(mocks.list).toHaveBeenCalledWith(
       expect.objectContaining({
         live: true,
@@ -360,6 +360,39 @@ describe('AssistantChat', () => {
       output: ['Second']
     })
     expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ followRequest: 2 }))
+  })
+
+  it('surfaces a chat error banner and clears it on submit', async () => {
+    const clearError = vi.fn()
+    mocks.useChat.mockReturnValue({
+      addToolOutput: mocks.addToolOutput,
+      clearError,
+      error: new Error('upstream timeout'),
+      messages: [],
+      sendMessage: mocks.sendMessage,
+      setMessages: mocks.setMessages,
+      status: 'ready',
+      stop: mocks.stop
+    })
+    await act(async () =>
+      root?.render(
+        createElement(AssistantChat, {
+          chat: { id: 'session' } as never,
+          cwd: '',
+          onCwdChange: vi.fn(),
+          onHeadingChange: vi.fn()
+        })
+      )
+    )
+
+    const banner = container.querySelector('[data-agent-error]')
+    expect(banner).not.toBeNull()
+    expect(banner?.textContent).toContain('upstream timeout')
+
+    const composer = mocks.composer.mock.calls[0][0]
+    composer.onSubmit({ text: 'hello', files: [] })
+    expect(clearError).toHaveBeenCalledOnce()
+    expect(mocks.sendMessage).toHaveBeenCalledWith({ text: 'hello', files: [] })
   })
 
   it('does not create a heading for an empty session', async () => {

@@ -606,7 +606,6 @@ function ActiveAssistantMessageList({
   const scrollMode = useRef<ScrollMode>('positioning')
   const scrollElement = useRef<HTMLElement | null>(null)
   const lastScrollTop = useRef(0)
-  const viewportIndexFrame = useRef<number | null>(null)
   const resizingMessage = useRef(false)
   const resizeVersion = useRef(0)
   const scrollIntentTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -623,49 +622,17 @@ function ActiveAssistantMessageList({
   const [visibleStartIndex, setVisibleStartIndex] = useState<number>()
   const pendingNavigationIndex = useRef<number | undefined>(undefined)
 
-  const updateViewportIndex = useCallback(() => {
-    if (viewportIndexFrame.current !== null) return
-    viewportIndexFrame.current = requestAnimationFrame(() => {
-      viewportIndexFrame.current = null
-      const viewport = scrollElement.current
-      if (!viewport) return
-      const viewportBounds = viewport.getBoundingClientRect()
-      const viewportAnchor = viewportBounds.top + 1
-      const pendingIndex = pendingNavigationIndex.current
-      if (pendingIndex !== undefined) {
-        setVisibleStartIndex(pendingIndex)
-        return
-      }
-      let closestIndex: number | undefined
-      let closestDistance = Number.POSITIVE_INFINITY
-      for (const element of viewport.querySelectorAll<HTMLElement>('[data-message-index]')) {
-        const index = Number(element.dataset.messageIndex)
-        if (!Number.isSafeInteger(index)) continue
-        const bounds = element.getBoundingClientRect()
-        if (bounds.height <= 0) continue
-        const distance =
-          viewportAnchor < bounds.top
-            ? bounds.top - viewportAnchor
-            : viewportAnchor > bounds.bottom
-              ? viewportAnchor - bounds.bottom
-              : 0
-        if (distance < closestDistance) {
-          closestDistance = distance
-          closestIndex = index
-        }
-      }
-      if (closestIndex !== undefined) {
-        setVisibleStartIndex((current) => (current === closestIndex ? current : closestIndex))
-      }
-    })
+  // 可见起点：直接由 Virtuoso 的渲染 range 推导（rangeChanged 内设置），
+  // 高频滚动/流式增长路径不再 querySelectorAll + getBoundingClientRect，
+  // 避免每 tick 强制同步布局（layout thrash）。
+  const syncViewportFromRange = useCallback((startIndex: number): void => {
+    const pendingIndex = pendingNavigationIndex.current
+    if (pendingIndex !== undefined) {
+      setVisibleStartIndex(pendingIndex)
+      return
+    }
+    setVisibleStartIndex((current) => (current === startIndex ? current : startIndex))
   }, [])
-
-  useEffect(
-    () => () => {
-      if (viewportIndexFrame.current !== null) cancelAnimationFrame(viewportIndexFrame.current)
-    },
-    []
-  )
   const {
     trackRenderedRange,
     scrollerRef,
@@ -1001,7 +968,7 @@ function ActiveAssistantMessageList({
   }, [firstLoadedIndex])
   const rangeChanged = ({ startIndex, endIndex }: ListRange): void => {
     trackRenderedRange({ startIndex, endIndex })
-    if (navigationEntries.length >= 2) updateViewportIndex()
+    syncViewportFromRange(startIndex)
     if (recentStart <= 0) return
     const historyEnd = Math.min(endIndex, recentStart - 1)
     const historyStart = Math.min(startIndex, historyEnd)
@@ -1045,7 +1012,7 @@ function ActiveAssistantMessageList({
       onScrollCapture={(event) => {
         const element = scrollElement.current
         if (!element || event.target !== element) return
-        updateViewportIndex()
+        // 可见起点已由 rangeChanged 推导（零布局读），滚动路径不再读布局
         const { scrollTop } = element
         const movedUp = scrollTop < lastScrollTop.current
         const distanceFromBottom = element.scrollHeight - element.clientHeight - scrollTop

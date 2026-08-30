@@ -97,9 +97,14 @@ function WorkspaceTreeContent({
   const [revealState, setRevealState] = useState({ dismissed: false, path: revealPath })
   const [selectedKeys, setSelectedKeys] = useState<Key[]>([])
   const [size, setSize] = useState({ height: 0, width: 0 })
+  // 树内最近一次用户点击（leaf）的路径。用户在树中点击切换文件时，
+  // 目标已被选中且可见，无需再自动展开/滚动（否则每次切换都会触发
+  // 自动展开动画 + 滚动，表现为目录树闪烁）；仅外部导航（消息链接等）
+  // 才需要 reveal 自动定位。而用户点击的是目录（非 leaf）时不重置。
+  const [lastUserLeaf, setLastUserLeaf] = useState<string | null>(null)
 
   if (revealState.path !== revealPath) {
-    setRevealState({ dismissed: false, path: revealPath })
+    setRevealState({ dismissed: lastUserLeaf === revealPath, path: revealPath })
   }
 
   useLayoutEffect(() => {
@@ -171,6 +176,21 @@ function WorkspaceTreeContent({
     return () => cancelAnimationFrame(frame)
   }, [revealActive, revealed])
 
+  // reveal 自动展开的祖先目录持久化进 expandedKeys：外部导航定位后目录保持展开，
+  // 不会在离开后折叠、再次导航又展开（反复伸缩动画 = 树闪烁）。
+  // 用户手动折叠（onExpand）会 dismiss reveal，此后不再自动加回。
+  // 渲染期间条件调整（与上方 revealState 同模式）：React 立即重渲，无级联副作用。
+  if (
+    revealActive &&
+    revealed?.parents.length &&
+    !revealed.parents.every((parent) => expandedKeys.includes(parent))
+  ) {
+    setExpandedKeys((keys) => {
+      const merged = [...new Set([...keys, ...revealed.parents])]
+      return merged.length === keys.length ? keys : merged
+    })
+  }
+
   const light = resolvedTheme !== 'dark'
   return (
     <div
@@ -211,7 +231,10 @@ function WorkspaceTreeContent({
             onSelect={(keys, { node }) => {
               setRevealState({ dismissed: true, path: revealPath })
               setSelectedKeys(node.isLeaf ? [node.key] : keys)
-              if (node.isLeaf) onOpen(String(node.key))
+              if (node.isLeaf) {
+                setLastUserLeaf(String(node.key))
+                onOpen(String(node.key))
+              }
             }}
           />
         )}

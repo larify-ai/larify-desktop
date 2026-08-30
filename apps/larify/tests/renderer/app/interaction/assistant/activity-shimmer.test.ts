@@ -7,9 +7,12 @@ const motionState = vi.hoisted(() => ({ reduced: false }))
 vi.mock('motion/react', () => ({
   useReducedMotion: () => motionState.reduced,
   motion: {
-    span: forwardRef<HTMLElement, Record<string, unknown>>(({ children, ...props }, ref) =>
-      createElement('span', { ...props, ref }, children)
-    )
+    span: forwardRef<HTMLElement, Record<string, unknown>>(function MotionSpan(
+      { children, ...props },
+      ref
+    ) {
+      return createElement('span', { ...props, ref }, children)
+    })
   }
 }))
 
@@ -46,6 +49,9 @@ describe('ActivityShimmer', () => {
     expect((container.firstElementChild as HTMLElement).style.backgroundClip).toBe('text')
     expect((container.firstElementChild as HTMLElement).style.backgroundImage).toContain(
       'linear-gradient'
+    )
+    expect((container.firstElementChild as HTMLElement).style.backgroundImage).toContain(
+      'color-mix'
     )
   })
 

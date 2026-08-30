@@ -6,7 +6,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger
 } from '@renderer/components/ui/collapsible'
-import type { UIMessage } from 'ai'
+import { isToolUIPart, type UIMessage } from 'ai'
 import {
   hasVisibleTextPart,
   type AssistantRenderItem,
@@ -44,10 +44,18 @@ function isStreamingChild(
 ): boolean {
   return item.partIndexes.some((index) => {
     const part = message.parts[index]
-    return (
-      (part?.type === 'text' || part?.type === 'reasoning') &&
-      (part.state === 'streaming' || (part.state === undefined && index === fallbackStreamingIndex))
-    )
+    if (!part) return false
+    if (part.type === 'text' || part.type === 'reasoning') {
+      return (
+        part.state === 'streaming' || (part.state === undefined && index === fallbackStreamingIndex)
+      )
+    }
+    // 工具在执行中（参数流式/运行中输出流式）也视为活跃，让处理列表条目标题扫光；
+    // output-available/error/denied 等完成后不再扫光。
+    if (isToolUIPart(part)) {
+      return part.state === 'input-streaming' || part.state === 'input-available'
+    }
+    return false
   })
 }
 

@@ -360,6 +360,50 @@ describe('activity group part', () => {
     expect(container.querySelector('[data-markdown]')?.getAttribute('data-animating')).toBe('true')
   })
 
+  const renderToolGroup = async (state: 'input-available' | 'output-available'): Promise<void> => {
+    const toolMessage = {
+      id: 'assistant-tool',
+      role: 'assistant',
+      parts: [
+        {
+          type: 'dynamic-tool',
+          toolName: 'execute',
+          toolCallId: '1',
+          state,
+          input: { toolCallTitle: '运行构建' },
+          output: state === 'output-available' ? 'done' : ''
+        }
+      ]
+    } as UIMessage
+    await act(async () =>
+      root.render(
+        createElement(ActivityGroupPart, {
+          item: {
+            kind: 'activity-group',
+            partIndexes: [0],
+            summary: '处理过程',
+            defaultOpen: true,
+            children: [
+              { kind: 'tool-group', partIndexes: [0], summary: '运行构建', defaultOpen: true }
+            ]
+          },
+          message: toolMessage,
+          streaming: true
+        })
+      )
+    )
+  }
+
+  it('shimmers an in-progress tool title inside an activity group', async () => {
+    await renderToolGroup('input-available')
+    expect(container.querySelector('[data-shimmer-content]')).not.toBeNull()
+  })
+
+  it('does not shimmer a completed tool title', async () => {
+    await renderToolGroup('output-available')
+    expect(container.querySelector('[data-shimmer-content]')).toBeNull()
+  })
+
   it('keeps original part indexes after missing parts are filtered', async () => {
     await act(async () =>
       root.render(

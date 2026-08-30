@@ -44,9 +44,10 @@ describe('MessageMarkdown', () => {
     await render(completed, false)
     const button = container.querySelector('button')!
     await act(async () => button.click())
+    // 盘符链接在 sanitize 层被改写为 file: URL（白名单放行），handler 收到的为标准形式
     expect(onOpenLink).toHaveBeenCalledExactlyOnceWith({
       kind: 'file',
-      target: 'D:/Workspace/project/README.md'
+      target: 'file:///D:/Workspace/project/README.md'
     })
 
     await act(async () => root.unmount())

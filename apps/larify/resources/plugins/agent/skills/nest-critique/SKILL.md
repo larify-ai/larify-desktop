@@ -20,5 +20,5 @@ Only for the scheduled task, create its subdirectory and `task.md` under the cur
 
 ## Review the Verdict
 
-- If a task is scheduled, call `agent_reset_context` with a handoff to continue the scheduled task from the Critique phase.
+- If a task is scheduled, call `agent_reset_context` with a handoff to continue the scheduled task from the Explore phase.
 - If no task is scheduled, proceed to the Reflect phase.

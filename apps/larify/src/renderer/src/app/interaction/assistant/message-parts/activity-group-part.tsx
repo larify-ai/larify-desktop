@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from 'react'
+import { memo } from 'react'
 import { BrainIcon, ChevronRightIcon } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import {
@@ -20,6 +20,7 @@ import { ReasoningBody } from '@renderer/components/ai-elements/reasoning'
 import { cn } from '@renderer/lib/utils'
 import { ActivityShimmer } from './activity-shimmer'
 import { activityGroupPropsEqual, type ActivityGroupPartProps } from './activity-group-memo'
+import { useStickyOpen } from './use-sticky-open'
 
 const icons: Partial<Record<AssistantRenderItemKind, LucideIcon>> = {
   reasoning: BrainIcon,
@@ -59,14 +60,10 @@ export const ActivityGroupPart = memo(function ActivityGroupPart({
   initialOpen,
   onOpenChange,
   additionalContent,
-  contentOnly = false
+  contentOnly = false,
+  active = true
 }: ActivityGroupPartProps): React.JSX.Element | null {
-  const [open, setOpen] = useState(initialOpen ?? item.defaultOpen)
-  const wasDefaultOpen = useRef(item.defaultOpen)
-  useEffect(() => {
-    if (wasDefaultOpen.current !== item.defaultOpen) setOpen(item.defaultOpen)
-    wasDefaultOpen.current = item.defaultOpen
-  }, [item.defaultOpen])
+  const [open, setOpenSticky] = useStickyOpen(initialOpen, item.defaultOpen)
   const meta = message.metadata as Record<string, unknown> | undefined
   const totalProcessingMs =
     typeof meta?.totalProcessingMs === 'number' && Number.isFinite(meta.totalProcessingMs)
@@ -78,6 +75,7 @@ export const ActivityGroupPart = memo(function ActivityGroupPart({
         key={item.startedAt}
         startedAt={item.startedAt}
         baseMs={totalProcessingMs}
+        active={active}
       />
     ) : (
       item.summary
@@ -108,7 +106,11 @@ export const ActivityGroupPart = memo(function ActivityGroupPart({
       ))
     : indexedParts.map(({ index, part }, position) =>
         part.type === 'reasoning' || (part.type === 'text' && item.kind === 'intermediate-text') ? (
-          <ReasoningBody key={index} data-reasoning-content className="text-foreground">
+          <ReasoningBody
+            key={index}
+            data-reasoning-content
+            className="max-h-[20rem] overflow-y-auto overscroll-contain text-foreground"
+          >
             <MessageMarkdown isAnimating={streaming && position === indexedParts.length - 1}>
               {part.text}
             </MessageMarkdown>
@@ -129,7 +131,7 @@ export const ActivityGroupPart = memo(function ActivityGroupPart({
       open={open}
       onOpenChange={(nextOpen) => {
         onOpenChange?.(nextOpen)
-        setOpen(nextOpen)
+        setOpenSticky(nextOpen)
       }}
       className="not-prose min-w-0"
     >

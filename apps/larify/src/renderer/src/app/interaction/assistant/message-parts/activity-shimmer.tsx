@@ -22,7 +22,7 @@ export function ActivityShimmer({
       animate={{ backgroundPosition: '250% 0, 0 0' }}
       style={{
         backgroundImage:
-          'linear-gradient(90deg, transparent 0%, light-dark(#000, #fff) 40%, light-dark(#000, #fff) 60%, transparent 100%), linear-gradient(var(--foreground), var(--foreground))',
+          'linear-gradient(90deg, transparent 0%, var(--background) 40%, var(--background) 60%, transparent 100%), linear-gradient(var(--foreground), var(--foreground))',
         backgroundRepeat: 'no-repeat',
         backgroundSize: '50% 200%, 100% 100%',
         backgroundClip: 'text',

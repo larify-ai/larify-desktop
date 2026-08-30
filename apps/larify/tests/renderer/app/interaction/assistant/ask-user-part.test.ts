@@ -136,7 +136,7 @@ describe('AskUserPart', () => {
     })
     expect(handler).toHaveBeenCalledExactlyOnceWith({
       kind: 'file',
-      target: 'D:/Workspace/readme.md'
+      target: 'file:///D:/Workspace/readme.md'
     })
   })
 

@@ -21,7 +21,7 @@ const editorOptions = {
   overviewRulerLanes: 0,
   readOnly: true,
   renderLineHighlight: 'none',
-  scrollbar: { horizontalScrollbarSize: 8, verticalScrollbarSize: 0 },
+  scrollbar: { horizontalScrollbarSize: 8, verticalScrollbarSize: 8 },
   scrollBeyondLastLine: false,
   selectionHighlight: false
 } satisfies editor.IStandaloneEditorConstructionOptions

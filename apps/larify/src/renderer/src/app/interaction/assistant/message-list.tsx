@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { getToolName, isToolUIPart, type UIMessage } from 'ai'
 import { ArrowDownIcon } from 'lucide-react'
-import { Virtuoso, type ListRange, type StateSnapshot, type VirtuosoHandle } from 'react-virtuoso'
+import { Virtuoso, type ListRange, type VirtuosoHandle } from 'react-virtuoso'
 import { Button } from '@renderer/components/ui/button'
 import { MessageView } from './message-view'
 import { summarizeMessageChanges, type ChangeSummary } from './change-summary'
@@ -36,7 +36,8 @@ const Message = memo(
     previous.lastFragment === next.lastFragment &&
     previous.hideChanges === next.hideChanges &&
     previous.replayFinal === next.replayFinal &&
-    previous.onFinalReplayComplete === next.onFinalReplayComplete
+    previous.onFinalReplayComplete === next.onFinalReplayComplete &&
+    previous.active === next.active
 )
 const pageBuffer = 2
 const renderBuffer = 400
@@ -559,33 +560,11 @@ interface AssistantMessageListProps {
   onLoadRange: (firstPage: number, lastPage: number) => void
 }
 
-interface SavedMessageListState {
-  firstItemIndex: number
-  snapshot: StateSnapshot
-  totalCount: number
-}
-
-interface ActiveAssistantMessageListProps extends AssistantMessageListProps {
-  getSavedState: () => SavedMessageListState | undefined
-  onSaveState: (state: SavedMessageListState) => void
-}
-
 export function AssistantMessageList(props: AssistantMessageListProps): React.JSX.Element {
-  const savedState = useRef<SavedMessageListState | undefined>(undefined)
-  const getSavedState = useCallback(() => savedState.current, [])
-  const handleSaveState = useCallback((state: SavedMessageListState): void => {
-    savedState.current = state
-  }, [])
-  if (props.active === false) {
-    return <div className="relative min-h-0 min-w-0 flex-1" aria-hidden="true" />
-  }
-  return (
-    <ActiveAssistantMessageList
-      {...props}
-      getSavedState={getSavedState}
-      onSaveState={handleSaveState}
-    />
-  )
+  // 列表始终保持挂载（会话切换时用 CSS 隐藏，不卸载 Virtuoso）：
+  // 卸载/重建会让切换瞬间出现"只有背景、然后才出现内容"的闪烁，
+  // 且会丢失滚动位置与展开状态。隐藏时仅暂停计时器等活跃 UI 开销。
+  return <ActiveAssistantMessageList {...props} />
 }
 
 function ActiveAssistantMessageList({
@@ -597,11 +576,8 @@ function ActiveAssistantMessageList({
   olderMessages,
   navigationItems = [],
   onLoadOlderNavigation,
-  onLoadRange,
-  getSavedState,
-  onSaveState
-}: ActiveAssistantMessageListProps): React.JSX.Element {
-  const [savedState] = useState(getSavedState)
+  onLoadRange
+}: AssistantMessageListProps): React.JSX.Element {
   const list = useRef<VirtuosoHandle>(null)
   const scrollMode = useRef<ScrollMode>('positioning')
   const scrollElement = useRef<HTMLElement | null>(null)
@@ -769,25 +745,6 @@ function ActiveAssistantMessageList({
     if (index < firstLoadedIndex) firstLoadedIndex = index
   }
   const loadedCount = recentStart - firstLoadedIndex + recentItems.length
-  const restorableState =
-    savedState?.firstItemIndex === firstLoadedIndex && savedState.totalCount === loadedCount
-      ? savedState
-      : undefined
-  const captureListState = useCallback((): void => {
-    const handle = list.current
-    if (!handle) return
-    handle.getState((snapshot) =>
-      onSaveState({ firstItemIndex: firstLoadedIndex, snapshot, totalCount: loadedCount })
-    )
-  }, [firstLoadedIndex, loadedCount, onSaveState])
-  const handleIsScrolling = useCallback(
-    (scrolling: boolean): void => {
-      if (!scrolling) captureListState()
-    },
-    [captureListState]
-  )
-
-  useLayoutEffect(() => () => captureListState(), [captureListState])
 
   const positioningKey = active && loadedCount > 0
   const currentPosition =
@@ -795,15 +752,14 @@ function ActiveAssistantMessageList({
       ? position
       : { key: positioningKey, complete: false, escaped: false }
 
+  // 只在第一次具备定位条件时滚到底部；会话保持挂载，active 切换不重建，
+  // 因此不会重复定位（避免切换时跳变/闪烁）。
   useLayoutEffect(() => {
     if (scrollIntentTimer.current !== null) {
       clearTimeout(scrollIntentTimer.current)
       scrollIntentTimer.current = null
     }
-    if (!positioningKey) {
-      positioningStarted.current = false
-      return
-    }
+    if (!positioningKey) return
     if (positioningStarted.current) return
     positioningStarted.current = true
     scrollMode.current = 'positioning'
@@ -812,7 +768,11 @@ function ActiveAssistantMessageList({
   }, [positioningKey, scrollViewportToBottom])
 
   const scrollToBottom = (): void => {
-    scrollMode.current = 'positioning'
+    // 使用 following（而非 positioning）：虚拟列表最后几项的高度在最后一帧才确定，
+    // positioning 期间 followOutput 返回 false，内容补齐后不会再校正滚动位置，
+    // 表现为"点了回到底部滑块却停在半路"。following 会持续跟随到 atBottom 确认，
+    // 直到用户主动上滚（wheel/scroll 会把模式切回 reading）。
+    scrollMode.current = 'following'
     setPosition((current) => ({ ...current, escaped: false }))
     list.current?.autoscrollToBottom()
     scrollViewportToBottom()
@@ -983,6 +943,8 @@ function ActiveAssistantMessageList({
   return (
     <div
       className="relative min-h-0 min-w-0 flex-1"
+      style={active ? undefined : { display: 'none' }}
+      aria-hidden={!active}
       onPointerDownCapture={(event) => {
         if (
           event.target instanceof Element &&
@@ -1051,12 +1013,11 @@ function ActiveAssistantMessageList({
         className="larify-scrollbar-hidden size-full"
         totalCount={loadedCount}
         firstItemIndex={firstLoadedIndex}
+        defaultItemHeight={estimatedMessageHeight}
         initialItemCount={Math.min(12, loadedCount)}
         initialTopMostItemIndex={loadedCount > 0 ? { index: 'LAST', align: 'end' } : 0}
-        restoreStateFrom={restorableState?.snapshot}
         increaseViewportBy={renderBuffer}
         overscan={renderChunk}
-        isScrolling={handleIsScrolling}
         followOutput={() => (scrollMode.current === 'following' ? 'auto' : false)}
         rangeChanged={rangeChanged}
         totalListHeightChanged={handleTotalListHeightChanged}
@@ -1104,6 +1065,7 @@ function ActiveAssistantMessageList({
                         hideChanges
                         replayFinal={false}
                         onFinalReplayComplete={handleFinalReplayComplete}
+                        active={active}
                       />
                     </div>
                   )
@@ -1116,6 +1078,7 @@ function ActiveAssistantMessageList({
                     sections={listItem.sections}
                     waiting={listItem.waiting}
                     initialOpen={openActivities.current.get(listItem.key)}
+                    active={active}
                     onOpenChange={(open) => handleActivityOpenChange(listItem.key, open)}
                   />
                   {listItem.trailing?.map((trailing) =>
@@ -1137,6 +1100,7 @@ function ActiveAssistantMessageList({
                           hideChanges
                           replayFinal={false}
                           onFinalReplayComplete={handleFinalReplayComplete}
+                          active={active}
                         />
                       </div>
                     ) : null
@@ -1157,6 +1121,7 @@ function ActiveAssistantMessageList({
                   hideChanges
                   replayFinal={replayFinalMessageId === message.id}
                   onFinalReplayComplete={handleFinalReplayComplete}
+                  active={active}
                 />
               )}
             </div>

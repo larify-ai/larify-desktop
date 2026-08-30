@@ -16,6 +16,12 @@ export interface AgentWorkerInput {
   runtime: AgentOptions
 }
 
+export interface SessionTrack {
+  cwd: string
+  review: AgentReview
+  tracker: FileChangeTracker
+}
+
 export interface AgentSink {
   chunk(chunk: UIMessageChunk): void
   title?(title: string): void
@@ -29,19 +35,39 @@ export class AgentWorker {
 
   constructor(
     private readonly sessions: SessionStore,
-    private readonly sink: AgentSink
+    private readonly sink: AgentSink,
+    private readonly track?: SessionTrack
   ) {}
 
   async run(input: AgentWorkerInput): Promise<void> {
     if (this.controller || this.closed) return
     const controller = new AbortController()
     this.controller = controller
-    let review: AgentReview | undefined
     try {
-      const activeReview = new AgentReview(input.cwd, (chunk) => {
+      // ask_user 回答/reset_context 都是同一任务的续写：追踪器由 Agent 按会话持有，
+      // 跨 worker 复用（track?.review/track?.tracker），不会因为新 worker 而丢文件。
+      const activeReview = this.track?.review ?? new AgentReview(input.cwd, (chunk) => {
         if (!controller.signal.aborted) this.sink.chunk(chunk)
       })
-      const fileChanges = new FileChangeTracker()
+      const fileChanges = this.track?.tracker ?? new FileChangeTracker()
+      // 每轮结束时把当前任务快照写回持久化：
+      // runStoredAgentSession 的 onMessage 只保存流内消息（不含 review part），
+      // 会覆盖掉上一轮已持久化的快照；这里把最新快照（同 id 原地替换）写回，
+      // 保证"ask_user 前改的文件"在重载/切换会话后仍然可见。
+      const saveReview = (response: UIMessage): void => {
+        const snapshot = activeReview.finish()
+        if (!snapshot) return
+        const chunk = reviewChunk(snapshot)
+        const existingIndex = response.parts.findIndex(
+          (part) => part.type === 'data-git-snapshot' && part.id === 'review'
+        )
+        if (existingIndex >= 0) {
+          response.parts[existingIndex] = chunk as (typeof response.parts)[number]
+        } else {
+          response.parts.push(chunk as (typeof response.parts)[number])
+        }
+        this.sessions.saveMessages(input.sessionId, [response])
+      }
       let handoff: string | undefined
       const toolsContext = Object.fromEntries(
         Object.entries(input.runtime.toolsContext).map(([name, context]) => [
@@ -63,7 +89,6 @@ export class AgentWorker {
           }
         }
       }
-      review = activeReview
       const reviewToolCalls = new Set<string>()
       const originalStopWhen = input.runtime.stopWhen
       const runOnce = (message: UIMessage): Promise<UIMessage | undefined> =>
@@ -112,6 +137,7 @@ export class AgentWorker {
           }
         })
       let response = await runOnce(input.message)
+      if (response) saveReview(response)
       while (handoff) {
         if (controller.signal.aborted) return
         const message: UIMessage = {
@@ -124,12 +150,7 @@ export class AgentWorker {
         clearReadState(input.sessionId)
         this.sessions.saveStart(input.sessionId, message)
         response = await runOnce(message)
-      }
-      if (controller.signal.aborted) return
-      const snapshot = activeReview.finish()
-      if (snapshot && response) {
-        response.parts.push(reviewChunk(snapshot) as (typeof response.parts)[number])
-        this.sessions.saveMessages(input.sessionId, [response])
+        if (response) saveReview(response)
       }
       if (!controller.signal.aborted) this.finish(() => this.sink.end())
     } catch (error) {
@@ -140,7 +161,6 @@ export class AgentWorker {
         this.finish(() => this.sink.error(error))
       }
     } finally {
-      review?.dispose()
       if (this.controller === controller) this.controller = undefined
     }
   }

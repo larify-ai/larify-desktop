@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { z } from 'zod'
 import { MockLanguageModelV4, convertArrayToReadableStream } from 'ai/test'
 import { isLoopFinished, type UIMessage } from 'ai'
-import type { LanguageModelV4FinishReason } from '@ai-sdk/provider'
+import { APICallError, type LanguageModelV4FinishReason } from '@ai-sdk/provider'
 import { runAgentSession } from '../../../../src/main/core/agent'
 
 const USAGE = {
@@ -297,11 +297,22 @@ describe('runAgentSession', () => {
   })
 
   it('records elapsed-time metadata when the stream fails before start', async () => {
+    // 客户端错误（400）不可重试，模拟快速失败；若用普通 Error 会触发
+    // ai-retry 的 3 次退避重试，把测试拖长到超时。
     const model = new MockLanguageModelV4({
       doStream: async () => ({
         stream: new ReadableStream({
           start(controller) {
-            controller.error(new Error('connection failed'))
+            controller.error(
+              new APICallError({
+                message: 'connection failed',
+                statusCode: 400,
+                url: 'https://api.example.com/stream',
+                requestBodyValues: {},
+                responseBody: '',
+                isRetryable: false
+              })
+            )
           }
         })
       })
@@ -318,7 +329,13 @@ describe('runAgentSession', () => {
     )
 
     const metadata = session.at(-1)?.metadata as
-      | { startedAt?: number; completedAt?: number; outcome?: string; error?: string; totalProcessingMs?: number }
+      | {
+          startedAt?: number
+          completedAt?: number
+          outcome?: string
+          error?: string
+          totalProcessingMs?: number
+        }
       | undefined
     expect(metadata).toEqual({
       startedAt: expect.any(Number),

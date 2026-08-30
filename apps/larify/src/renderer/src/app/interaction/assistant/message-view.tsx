@@ -25,7 +25,8 @@ export function MessageView({
   lastFragment = true,
   hideChanges = false,
   replayFinal = false,
-  onFinalReplayComplete
+  onFinalReplayComplete,
+  active = true
 }: {
   message: UIMessage
   streaming?: boolean
@@ -38,6 +39,7 @@ export function MessageView({
   hideChanges?: boolean
   replayFinal?: boolean
   onFinalReplayComplete?: () => void
+  active?: boolean
 }): React.JSX.Element | null {
   const files = firstFragment ? message.parts.filter(isFileUIPart) : []
   const changeSummary =
@@ -83,6 +85,7 @@ export function MessageView({
             message={message}
             streaming={streaming}
             initialOpen={activityOpen}
+            active={active}
             onOpenChange={(open) => {
               if (activityKey) onActivityOpenChange?.(activityKey, open)
             }}

@@ -93,12 +93,21 @@ describe('interaction assistant message list', () => {
     const props = captured.props as VirtuosoProps
     expect(props.totalCount).toBe(1)
     expect(props.firstItemIndex).toBe(4999)
-    expect(props.defaultItemHeight).toBeUndefined()
     expect(props.initialItemCount).toBe(1)
     expect(props.initialTopMostItemIndex).toEqual({ index: 'LAST', align: 'end' })
     expect(props.computeItemKey(4999)).toBe('latest-0')
     expect(props.className).toContain('larify-scrollbar-hidden')
     expect(props.scrollerRef).toEqual(expect.any(Function))
+  })
+
+  it('lays out the first frame with the estimated height instead of a blank viewport', async () => {
+    // 切换会话时用户看到"只有背景、然后才出现内容"：Virtuoso 在 initialItemFinalLocationReached
+    // 前隐藏列表，未提供 defaultItemHeight 时首次布局依赖测量 → 空白窗口更长。
+    // 提供估算高度后，初始范围可立即计算，隐藏窗口趋近于 0。
+    await render({ messages: [message('latest')], recentStart: 4999 })
+
+    const props = captured.props as VirtuosoProps
+    expect(props.defaultItemHeight).toBe(80)
   })
 
   it('does not render initial placeholders for an empty conversation', async () => {
@@ -438,47 +447,45 @@ describe('interaction assistant message list', () => {
     expect(captured.autoscrollToBottom).toHaveBeenCalledOnce()
   })
 
-  it('positions once each time a mounted conversation is reactivated', async () => {
+  it('positions once and never re-positions when reactivated', async () => {
+    // 列表保持挂载：切换会话时不卸装/重建，恢复时内容直接可见（无"先背景后内容"的闪烁）。
     const props = { messages: [message('latest')], recentStart: 0 }
     await render({ ...props, active: true })
     expect(captured.autoscrollToBottom).toHaveBeenCalledTimes(1)
 
     await render({ ...props, active: false })
-    await render({ ...props, active: true })
-    expect(captured.autoscrollToBottom).toHaveBeenCalledTimes(2)
-    expect(captured.mounts).toBe(2)
-  })
-
-  it('restores measured sizes and still returns to bottom when a conversation is reactivated', async () => {
-    const props = { messages: [message('latest')], recentStart: 0 }
-    await render({ ...props, active: true })
-    const scroller = createScroller(50)
-    act(() => (captured.props as VirtuosoProps).scrollerRef(scroller))
-    act(() => (captured.props as VirtuosoProps).isScrolling(false))
-
-    await render({ ...props, active: false })
     captured.autoscrollToBottom.mockClear()
     await render({ ...props, active: true })
-
-    expect((captured.props as VirtuosoProps).restoreStateFrom).toEqual(captured.snapshot)
-    expect(captured.autoscrollToBottom).toHaveBeenCalledOnce()
+    expect(captured.autoscrollToBottom).not.toHaveBeenCalled()
+    expect(captured.mounts).toBe(1)
   })
 
-  it('does not restore measured sizes into a different window with the same item count', async () => {
-    await render({ messages: [message('first')], recentStart: 0, active: true })
-    act(() => (captured.props as VirtuosoProps).isScrolling(false))
-    await render({ messages: [message('first')], recentStart: 0, active: false })
+  it('keeps the scroll position across conversation switches', async () => {
+    // 用户切走前正在阅读历史中部：列表保持挂载，切回后滚动位置必须原样保留
+    // （不能先跳底部、也不能因重建丢失位置）。
+    const props = { messages: [message('latest')], recentStart: 0 }
+    await render({ ...props, active: true })
+    const scroller = createScroller(100)
+    container.firstElementChild?.append(scroller)
+    act(() => (captured.props as VirtuosoProps).scrollerRef(scroller))
+    scroller.scrollTop = 77
+    act(() => scroller.dispatchEvent(new Event('scroll')))
+    await act(() => new Promise((resolve) => setTimeout(resolve, 2)))
 
-    await render({ messages: [message('second')], recentStart: 1, active: true })
+    await render({ ...props, active: false })
+    await render({ ...props, active: true })
 
-    expect((captured.props as VirtuosoProps).restoreStateFrom).toBeUndefined()
+    expect(captured.mounts).toBe(1)
+    expect(scroller.scrollTop).toBe(77)
+    expect(container.firstElementChild?.getAttribute('style')).not.toContain('display: none')
   })
 
-  it('does not mount a virtual list for an inactive conversation', async () => {
+  it('keeps the mounted conversation hidden without rebuilding when inactive', async () => {
     await render({ active: false, messages: [message('hidden')], recentStart: 0 })
 
-    expect(captured.mounts).toBe(0)
-    expect(container.querySelector('[role="log"]')).toBeNull()
+    expect(captured.mounts).toBe(1)
+    expect(container.firstElementChild?.getAttribute('style')).toContain('display: none')
+    expect(container.firstElementChild?.getAttribute('aria-hidden')).toBe('true')
   })
 
   it('scrolls to the bottom when initial messages finish restoring', async () => {
@@ -663,8 +670,10 @@ describe('interaction assistant message list', () => {
 
     await render({ ...props, active: false })
     await act(() => new Promise((resolve) => setTimeout(resolve, 2)))
+    captured.autoscrollToBottom.mockClear()
     await render({ ...props, active: true, messages: [message('streaming longer')] })
 
+    // 保持挂载：切回不重建；仍处于流式跟随（following）时消息增长继续跟底。
     expect(captured.autoscrollToBottom).toHaveBeenCalled()
   })
 
@@ -979,6 +988,29 @@ describe('interaction assistant message list', () => {
 
     await render({ ...props, messages: [message('streaming longer')] })
 
+    expect(captured.autoscrollToBottom).toHaveBeenCalled()
+  })
+
+  it('keeps growing content anchored to the bottom after the return button', async () => {
+    const props = { messages: [message('latest')], recentStart: 0 }
+    await render(props)
+    act(() => (captured.props as VirtuosoProps).atBottomStateChange(true))
+    const scroller = createScroller(100)
+    container.firstElementChild?.append(scroller)
+    act(() => (captured.props as VirtuosoProps).scrollerRef(scroller))
+    scroller.scrollTop = 60
+    act(() => scroller.dispatchEvent(new Event('scroll')))
+    await act(() => new Promise((resolve) => setTimeout(resolve, 2)))
+    captured.autoscrollToBottom.mockClear()
+
+    act(() => container.querySelector<HTMLButtonElement>('button[aria-label="返回底部"]')?.click())
+    expect(captured.autoscrollToBottom).toHaveBeenCalled()
+
+    // 虚拟列表最后一帧高度未定/后续消息追加时，必须继续跟随到底，
+    // 否则滑块会停在半路（用户报告的"点了回到底部却不到底"）。
+    expect((captured.props as VirtuosoProps).followOutput(true)).toBe('auto')
+
+    await render({ ...props, messages: [message('latest even longer')] })
     expect(captured.autoscrollToBottom).toHaveBeenCalled()
   })
 

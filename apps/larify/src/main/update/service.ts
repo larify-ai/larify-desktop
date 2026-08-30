@@ -21,7 +21,10 @@ function getAutoUpdater(): AppUpdater {
     const updater = electronUpdater.autoUpdater
     updater.setFeedURL({
       provider: 'generic',
-      url: UPDATE_FEED_URL
+      url: UPDATE_FEED_URL,
+      // cnb.cool 的 CDN（asset.cnb.cool）不支持 Range 请求（实测返回 200 全量而非 206），
+      // 差量更新必然失败并回退全量；直接禁用可跳过注定失败的差量尝试。
+      useMultipleRangeRequest: false
     })
     return updater
   })()

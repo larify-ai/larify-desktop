@@ -24,6 +24,7 @@ export interface ActivityGroupPartProps {
   onOpenChange?: (open: boolean) => void
   additionalContent?: React.ReactNode
   contentOnly?: boolean
+  active?: boolean
 }
 
 // 输出规模近似（只用长度，读取 O(1)，不做序列化）：
@@ -124,6 +125,7 @@ export function activityGroupPropsEqual(
   if (previous.initialOpen !== next.initialOpen) return false
   if (previous.additionalContent !== next.additionalContent) return false
   if (previous.contentOnly !== next.contentOnly) return false
+  if (previous.active !== next.active) return false
   if (totalProcessingMsOf(previous.message) !== totalProcessingMsOf(next.message)) return false
   if (!renderItemContentEquals(previous.item, next.item)) return false
   return partsContentEqual(previous.message, next.message, previous.item.partIndexes)

@@ -86,9 +86,10 @@ it('renders and opens a file link through the real markdown renderer', async () 
   await act(async () => {
     windowsBackslash?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
   })
+  // 盘符链接在 sanitize 层被改写为 file: URL
   expect(handler).toHaveBeenLastCalledWith({
     kind: 'file',
-    target: 'D:/Workspace/larify-website/.codex-stream-card-acceptance.txt'
+    target: 'file:///D:/Workspace/larify-website/.codex-stream-card-acceptance.txt'
   })
 
   await act(async () => root.unmount())

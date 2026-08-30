@@ -38,6 +38,7 @@ const markdown = [
   '[unc](\\\\server\\share\\document.md)',
   '[external](https://example.com/docs)',
   '[anchor](#heading)',
+  '[unsafe](<javascript:alert(1)>)',
   '',
   '![alt](./image.png)'
 ].join('\n')
@@ -60,11 +61,12 @@ describe('MarkdownPreview integration (Streamdown)', () => {
       if (channel === 'browser:openUrl') return 99
       return undefined
     })
-    vi.stubGlobal('URL', {
-      ...URL,
-      createObjectURL: vi.fn(() => 'blob:local-image'),
-      revokeObjectURL: vi.fn()
-    })
+    // 继承而非展开：展开会丢失 URL.canParse 等静态方法，file: URL 链接解析会失败
+    class TestURL extends URL {
+      static createObjectURL = vi.fn(() => 'blob:local-image')
+      static revokeObjectURL = vi.fn()
+    }
+    vi.stubGlobal('URL', TestURL)
     vi.stubGlobal('bridge', { invoke: h.invoke })
     container = document.createElement('div')
     document.body.append(container)
@@ -116,7 +118,35 @@ describe('MarkdownPreview integration (Streamdown)', () => {
     await render()
 
     await act(async () => clickable('external').click())
-    expect(h.invoke).toHaveBeenCalledWith('browser:openUrl', 'session-1', 'https://example.com/docs')
+    expect(h.invoke).toHaveBeenCalledWith(
+      'browser:openUrl',
+      'session-1',
+      'https://example.com/docs'
+    )
+  })
+
+  it('strips dangerous href schemes at the sanitize layer', async () => {
+    await render()
+    // javascript: 链接不保留 href、不派发任何打开动作（sanitize 协议白名单 + MessageLink 双重防线）
+    const unsafe = clickable('unsafe')
+    expect(unsafe.getAttribute('href')).toBeNull()
+    expect(unsafe.querySelector('a[href^="javascript"]')).toBeNull()
+    const opened = vi.fn()
+    window.addEventListener('larify:workbench-open', opened)
+    await act(async () => unsafe.click())
+    expect(opened).not.toHaveBeenCalled()
+    window.removeEventListener('larify:workbench-open', opened)
+  })
+
+  it('keeps drive links clickable through the rewritten file URL', async () => {
+    const opened = vi.fn()
+    window.addEventListener('larify:workbench-open', opened)
+    await render()
+
+    await act(async () => clickable('absolute').click())
+    const event = opened.mock.calls[0]?.[0] as CustomEvent | undefined
+    expect(event?.type).toBe('larify:workbench-open')
+    window.removeEventListener('larify:workbench-open', opened)
   })
 
   it('scrolls to document anchors without navigating', async () => {

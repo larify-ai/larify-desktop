@@ -175,6 +175,10 @@ const writeSchema = z.object({
     .boolean()
     .default(true)
     .describe('Append \\r to execute the input'),
+  interrupt: z
+    .boolean()
+    .default(true)
+    .describe('Send Ctrl+C before writing the input'),
   timeout: z
     .number()
     .min(1)
@@ -271,7 +275,7 @@ export function createTerminalToolkit(service: TerminalService): Record<string, 
         metadata: { icon: 'terminal', eager: true },
         inputSchema: writeSchema,
         execute: async (args, ctx) => {
-          const { id, input, submit, timeout, idle } = args
+          const { id, input, submit, interrupt, timeout, idle } = args
           return service.withWriterLock(ctx.sessionId, id, async () => {
             const state = service.terminalState(ctx.sessionId, id)
             if (!state) throw new Error(`Terminal "${id}" not found.`)
@@ -297,6 +301,11 @@ export function createTerminalToolkit(service: TerminalService): Record<string, 
             try {
               const log = await service.startRun(ctx.sessionId, id)
               if (!log) throw new Error(`Terminal "${id}" not found.`)
+              // interrupt: send a real Ctrl+C (ETX, 0x03) to stop the foreground
+              // process before writing the new input, preventing interleaved writes
+              // to an already-running command (agent flows default this on).
+              // node-pty forwards the byte to the ConPTY, which triggers the interrupt.
+              if (interrupt) service.write(ctx.sessionId, id, '\x03')
               if (data) service.write(ctx.sessionId, id, data)
               let outcome: CommandWaitOutcome = 'pending'
               if (commandWait) outcome = await commandWait

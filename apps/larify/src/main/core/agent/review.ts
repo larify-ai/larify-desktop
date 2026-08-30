@@ -69,7 +69,7 @@ export class FileChangeTracker {
   }
 }
 
-/** Tracks only successful file mutation tool results for one agent response. */
+/** Tracks successful file mutation tool results of one agent task (session-level). */
 export class AgentReview {
   private readonly files = new Map<string, GitSnapshotFile>()
   private active = true

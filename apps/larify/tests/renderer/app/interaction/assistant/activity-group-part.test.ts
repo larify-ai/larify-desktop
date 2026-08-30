@@ -407,6 +407,84 @@ describe('activity group part', () => {
     expect(container.querySelector('button')?.getAttribute('aria-expanded')).toBe('false')
   })
 
+  it('keeps a manually expanded group open when the run completes', async () => {
+    // 用户手动展开（defaultOpen=false 的完成态）→ 之后 defaultOpen 变化（新一轮
+    // 开始/结束）不能把用户的手势强制覆盖成收起。
+    await render(false)
+    await act(async () => container.querySelector<HTMLButtonElement>('button')?.click())
+    expect(container.querySelector('button')?.getAttribute('aria-expanded')).toBe('true')
+
+    const streaming = {
+      ...message,
+      parts: [
+        { type: 'reasoning', text: 'still working', state: 'streaming' },
+        message.parts[0]
+      ]
+    } as UIMessage
+    await act(async () =>
+      root.render(
+        createElement(ActivityGroupPart, {
+          item: {
+            kind: 'activity-group',
+            partIndexes: [0, 1],
+            summary: '处理过程',
+            defaultOpen: true,
+            children: [
+              { kind: 'tool-group', partIndexes: [0], summary: 'Read source', defaultOpen: false }
+            ]
+          },
+          message: streaming,
+          streaming: true
+        })
+      )
+    )
+    expect(container.querySelector('button')?.getAttribute('aria-expanded')).toBe('true')
+
+    await render(false)
+    expect(container.querySelector('button')?.getAttribute('aria-expanded')).toBe('true')
+    expect(container.querySelector('[data-detail]')).not.toBeNull()
+  })
+
+  it('limits only the text part with a scroll bar while tool cards keep their own', async () => {
+    // 工具卡（ToolContent）内部已有 max-h/overflow；外层折叠容器不能再限高，
+    // 否则会出现"两个滑动条"。只有 reasoning/中间文本需要限高滚动。
+    const reasoningMessage = {
+      id: 'assistant-long-reasoning',
+      role: 'assistant',
+      parts: [{ type: 'reasoning', text: 'long reasoning' }]
+    } as UIMessage
+    await act(async () =>
+      root.render(
+        createElement(ActivityGroupPart, {
+          item: {
+            kind: 'activity-group',
+            partIndexes: [0],
+            summary: '处理过程',
+            defaultOpen: false,
+            children: [
+              { kind: 'reasoning', partIndexes: [0], summary: 'long reasoning', defaultOpen: false }
+            ]
+          },
+          message: reasoningMessage,
+          streaming: false
+        })
+      )
+    )
+
+    await act(async () => container.querySelector<HTMLButtonElement>('button')?.click())
+    await act(async () => container.querySelectorAll<HTMLButtonElement>('button')[1]?.click())
+
+    const textPart = container.querySelector('[data-reasoning-content]')
+    expect(textPart).not.toBeNull()
+    expect(textPart?.className).toContain('max-h-[20rem]')
+    expect(textPart?.className).toContain('overflow-y-auto')
+    expect(textPart?.className).toContain('overscroll-contain')
+
+    const outerContent = container.querySelector('[data-slot="collapsible-content"]')
+    expect(outerContent?.className).not.toContain('overflow-y-auto')
+    expect(outerContent?.className).not.toContain('max-h-')
+  })
+
   it('restores an explicitly persisted open state on mount', async () => {
     await act(async () =>
       root.render(

@@ -39,7 +39,8 @@ describe('checkForUpdates', () => {
 
     expect(autoUpdater.setFeedURL).toHaveBeenCalledWith({
       provider: 'generic',
-      url: UPDATE_FEED_URL
+      url: UPDATE_FEED_URL,
+      useMultipleRangeRequest: false
     })
     expect(autoUpdater.checkForUpdates).toHaveBeenCalledOnce()
   })

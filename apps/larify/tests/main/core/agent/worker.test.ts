@@ -9,7 +9,8 @@ vi.mock('../../../../src/main/core/agent/persist', () => ({
   runStoredAgentSession: mocks.run
 }))
 
-import { AgentWorker } from '../../../../src/main/core/agent/worker'
+import { AgentWorker, type SessionTrack } from '../../../../src/main/core/agent/worker'
+import { AgentReview, FileChangeTracker } from '../../../../src/main/core/agent/review'
 
 const input = {
   sessionId: 'session',
@@ -27,9 +28,10 @@ const input = {
   } as never
 }
 
-function createWorker(): {
+function createWorker(track?: SessionTrack): {
   worker: AgentWorker
   sessions: {
+    loadMessages: ReturnType<typeof vi.fn<() => UIMessage[]>>
     saveMessages: ReturnType<typeof vi.fn>
     saveStart: ReturnType<typeof vi.fn>
   }
@@ -41,11 +43,20 @@ function createWorker(): {
   }
 } {
   const sink = { chunk: vi.fn(), title: vi.fn(), error: vi.fn(), end: vi.fn() }
-  const sessions = { saveMessages: vi.fn(), saveStart: vi.fn() }
+  const sessions = { loadMessages: vi.fn<() => UIMessage[]>(() => []), saveMessages: vi.fn(), saveStart: vi.fn() }
   return {
-    worker: new AgentWorker(sessions as never, sink),
+    worker: new AgentWorker(sessions as never, sink, track),
     sessions,
     sink
+  }
+}
+
+/** 构造一个会话级追踪器（模拟 Agent 中 ask_user 之前的既有状态）。 */
+function createTrack(root: string, sink: { chunk: ReturnType<typeof vi.fn> }): SessionTrack {
+  return {
+    cwd: root,
+    review: new AgentReview(root, (chunk) => sink.chunk(chunk)),
+    tracker: new FileChangeTracker()
   }
 }
 
@@ -298,6 +309,82 @@ describe('AgentWorker', () => {
 
     expect(sink.error).toHaveBeenCalledWith(error)
     expect(sink.end).not.toHaveBeenCalled()
+  })
+
+  it('keeps earlier files when the same task writes more files in a continuation', async () => {
+    // ask_user 前已修改 existing.ts（会话级 track 中有记录）；用户回答后同一任务
+    // （复用同一个 track）又改了 new.ts。期望：快照包含旧文件 + 新文件。
+    const followPath = resolve('/workspace/new.ts')
+    mocks.run.mockImplementation(async (_sessions, request) => {
+      const context = request.options.toolsContext.fs_write as {
+        trackFileChange: (mutation: { path: string; before: string | null; after: string }) => void
+      }
+      context.trackFileChange({ path: followPath, before: null, after: 'new\n' })
+      request.onChunk({
+        type: 'tool-input-start',
+        toolCallId: 'write',
+        toolName: 'fs_write'
+      } as UIMessageChunk)
+      request.onChunk({
+        type: 'tool-output-available',
+        toolCallId: 'write',
+        output: { kind: 'diff', path: followPath, patch: '+new' }
+      } as UIMessageChunk)
+      return { id: 'assistant', role: 'assistant', parts: [] } as UIMessage
+    })
+    const { sink } = createWorker()
+    const track = createTrack('/workspace', sink)
+    track.review.update({
+      path: resolve('/workspace/existing.ts'),
+      patch: '+old',
+      additions: 1,
+      deletions: 0,
+      binary: false
+    })
+    const { worker: continuationWorker } = createWorker(track)
+
+    await continuationWorker.run({
+      ...input,
+      runtime: {
+        toolsContext: { fs_write: { sessionId: 'session', cwd: '/workspace' } }
+      } as never
+    })
+
+    const snapshots = sink.chunk.mock.calls
+      .map(([chunk]) => chunk)
+      .filter((chunk) => chunk.type === 'data-git-snapshot')
+    const last = snapshots.at(-1)
+    expect(last).toBeDefined()
+    expect(last.data.files.map((file: { path: string }) => file.path).sort()).toEqual([
+      'existing.ts',
+      'new.ts'
+    ])
+  })
+
+  it('persists the task snapshot when a continuation makes no changes', async () => {
+    // 会话级 track 已含第一轮修改的文件；本轮（ask_user 回答后）没有任何文件变更。
+    // 期望：最终保存的消息仍带快照 part（同一任务，不能因为本轮无改动而丢失）。
+    mocks.run.mockImplementation(
+      async () => ({ id: 'assistant', role: 'assistant', parts: [] }) as UIMessage
+    )
+    const { sink } = createWorker()
+    const track = createTrack('/workspace', sink)
+    track.review.update({
+      path: resolve('/workspace/file.ts'),
+      patch: '+change',
+      additions: 1,
+      deletions: 0,
+      binary: false
+    })
+    const { worker: continuationWorker, sessions } = createWorker(track)
+
+    await continuationWorker.run(input)
+
+    const lastSaved = sessions.saveMessages.mock.calls.at(-1)?.[1]?.[0] as UIMessage | undefined
+    expect(lastSaved).toBeDefined()
+    expect(lastSaved?.parts).toContainEqual(
+      expect.objectContaining({ type: 'data-git-snapshot', id: 'review' })
+    )
   })
 
   it('streams and persists successful tool diffs', async () => {

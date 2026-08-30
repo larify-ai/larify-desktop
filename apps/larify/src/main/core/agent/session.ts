@@ -52,6 +52,20 @@ export async function runAgentSession(
   })()
   const agentStream = runAgent(await toModelMessages(messages, options.tools), options)
   let finalMessages = messages
+  const errorMetadata = (
+    reason: string
+  ): { type: 'message-metadata'; messageMetadata: Record<string, unknown> } => {
+    const errorCompletedAt = Math.max(Date.now(), startedAt)
+    return {
+      type: 'message-metadata',
+      messageMetadata: {
+        completedAt: errorCompletedAt,
+        outcome: 'error',
+        error: reason,
+        totalProcessingMs: previousTotalProcessingMs + (errorCompletedAt - startedAt)
+      }
+    }
+  }
   const stream = createUIMessageStream({
     originalMessages: messages,
     onError: errorMessage,
@@ -84,40 +98,34 @@ export async function runAgentSession(
         }
       })
       const reader = uiStream.getReader()
+      // 必须先写 message-metadata 再写 error：渲染端收到 error chunk 会抛错中断消费，
+      // 之后的 chunk（含 metadata）将不再被应用，导致 UI 内存中的消息丢失 outcome/error。
+      const writeError = (reason: string, raw?: unknown): void => {
+        writer.write(errorMetadata(reason))
+        writer.write({ type: 'error', errorText: reason })
+        // 主进程留痕：用户主动停止（AbortError）属预期路径，降级为 warn 避免终端误报错误。
+        if ((raw as { name?: string } | null)?.name === 'AbortError') {
+          console.warn('[agent] stream aborted:', reason)
+        } else {
+          console.error('[agent] stream failed:', reason)
+        }
+      }
       try {
         while (true) {
           const { done, value } = await reader.read()
           if (done) break
-          writer.write(value)
+          // AI SDK 把底层模型错误转成 error chunk 流出（不抛异常），
+          // 必须在这里补写错误 metadata；catch 仅兜底流本身真的抛错的场景。
+          if (value.type === 'error') writeError(value.errorText)
+          else writer.write(value)
         }
       } catch (error) {
-        const reason = errorMessage(error)
-        // 主进程留痕：dev 时打在终端；同时把原因写进消息 metadata（渲染端可显示）。
-        // 用户主动停止（AbortError）属预期路径，降级为 warn 避免终端误报错误。
-        if ((error as { name?: string } | null)?.name === 'AbortError') {
-          console.warn('[agent] stream aborted:', reason)
-        } else {
-          console.error('[agent] stream failed:', error)
-        }
-        const errorCompletedAt = Math.max(Date.now(), startedAt)
-        // 必须先写 message-metadata 再写 error：渲染端收到 error chunk 会抛错中断消费，
-        // 之后的 chunk（含 metadata）将不再被应用，导致 UI 内存中的消息丢失 outcome/error。
-        writer.write({
-          type: 'message-metadata',
-          messageMetadata: {
-            completedAt: errorCompletedAt,
-            outcome: 'error',
-            error: reason,
-            totalProcessingMs: previousTotalProcessingMs + (errorCompletedAt - startedAt)
-          }
-        })
-        writer.write({ type: 'error', errorText: reason })
+        writeError(errorMessage(error), error)
       } finally {
         reader.releaseLock()
       }
     },
-    onStepEnd: ({ responseMessage }) =>
-      onMessage?.(normalizeMessageMetadata(responseMessage)),
+    onStepEnd: ({ responseMessage }) => onMessage?.(normalizeMessageMetadata(responseMessage)),
     onEnd: (event) => {
       finalMessages = event.messages
     }

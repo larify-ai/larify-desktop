@@ -178,12 +178,54 @@ describe('write', () => {
     vi.mocked(service.startRun).mockResolvedValue({ runId: 'run-1', sessionId: 'session-1' })
     vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: 'done' })
 
+    await tool('write', service).execute({ id: 1, input: 'echo done', timeout: 1, idle: 0 }, ctx)
+
+    expect(service.write).toHaveBeenCalledWith('session-1', 1, 'echo done\r')
+  })
+
+  it('sends Ctrl+C before writing input when interrupt is true', async () => {
+    const service = createService()
+    vi.mocked(service.terminalState).mockReturnValue({
+      id: 1,
+      pid: 100,
+      title: 'powershell',
+      cwd: 'D:\\Workspace',
+      shell: 'powershell.exe',
+      exitCode: null
+    })
+    vi.mocked(service.startRun).mockResolvedValue({ runId: 'run-1', sessionId: 'session-1' })
+    vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: 'done' })
+
     await tool('write', service).execute(
-      { id: 1, input: 'echo done', timeout: 1, idle: 0 },
+      { id: 1, input: 'echo next', interrupt: true, timeout: 1, idle: 0 },
       ctx
     )
 
-    expect(service.write).toHaveBeenCalledWith('session-1', 1, 'echo done\r')
+    // 先发真实 Ctrl+C (ETX, \x03)，再写输入
+    const writes = vi.mocked(service.write).mock.calls.map((call) => call[2])
+    expect(writes).toEqual(['\x03', 'echo next\r'])
+  })
+
+  it('only sends Ctrl+C when interrupt is true and input is empty', async () => {
+    const service = createService()
+    vi.mocked(service.terminalState).mockReturnValue({
+      id: 1,
+      pid: 100,
+      title: 'powershell',
+      cwd: 'D:\\Workspace',
+      shell: 'powershell.exe',
+      exitCode: null
+    })
+    vi.mocked(service.startRun).mockResolvedValue({ runId: 'run-1', sessionId: 'session-1' })
+    vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: 'done' })
+
+    await tool('write', service).execute(
+      { id: 1, input: '', interrupt: true, submit: false, timeout: 1, idle: 0 },
+      ctx
+    )
+
+    const writes = vi.mocked(service.write).mock.calls.map((call) => call[2])
+    expect(writes).toEqual(['\x03'])
   })
 
   it('returns the full terminal snapshot with run metadata', async () => {
@@ -278,7 +320,8 @@ describe('write', () => {
 
     await expect(
       tool('write', service).execute(
-        { id: 1, input: 'echo done', submit: true, timeout: 1, idle: 0 },
+        // interrupt 默认 true，队列顺序测试只关心一次写入，显式关掉 Ctrl+C
+        { id: 1, input: 'echo done', submit: true, interrupt: false, timeout: 1, idle: 0 },
         ctx
       )
     ).resolves.toMatchObject({
@@ -414,7 +457,8 @@ describe('write', () => {
 
     await expect(
       tool('write', service).execute(
-        { id: 1, input: '', submit: false, timeout: 1, idle: 0 },
+        // 空输入 = 只等待查看，不发任何字节（含 Ctrl+C），显式关掉默认中断
+        { id: 1, input: '', submit: false, interrupt: false, timeout: 1, idle: 0 },
         ctx
       )
     ).resolves.toMatchObject({

@@ -2,8 +2,7 @@ import { z } from 'zod'
 import { defineTool } from '../../../main/core/plugin/protocol'
 
 export const resetContextTool = defineTool({
-  description:
-    'When the accumulated context becomes too large, first update the task and memory representations in Chinese following the `task-representation` and `memory-representation` skills to help prevent context loss, and then call the tool with a Markdown handoff linking to the relevant task and memory files to reset the model context.',
+  description: 'Reset the model context and continue from the handoff.',
   metadata: { eager: true, icon: 'list-restart' },
   inputSchema: z
     .object({

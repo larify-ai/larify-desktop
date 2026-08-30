@@ -1,4 +1,3 @@
-import { useEffect, useRef, useState } from 'react'
 import { CheckCircleIcon, ChevronRightIcon, LoaderCircleIcon } from 'lucide-react'
 import type { UIMessage } from 'ai'
 import {
@@ -11,6 +10,7 @@ import type { AssistantRenderItem } from '../message-render-items'
 import { LiveProcessingDuration } from '../live-processing-duration'
 import { formatProcessingDuration, formatProcessingDurationMs } from '../processing-duration'
 import { ActivityGroupPart } from './activity-group-part'
+import { useStickyOpen } from './use-sticky-open'
 
 export interface ActivityHistorySection {
   title: string
@@ -28,12 +28,14 @@ export function ActivityHistoryPart({
   sections,
   waiting = false,
   initialOpen,
-  onOpenChange
+  onOpenChange,
+  active = true
 }: {
   sections: ActivityHistorySection[]
   waiting?: boolean
   initialOpen?: boolean
   onOpenChange?: (open: boolean) => void
+  active?: boolean
 }): React.JSX.Element {
   const defaultOpen = sections.some(({ streaming }) => streaming) || waiting
   const aborted = sections.some(
@@ -75,7 +77,7 @@ export function ActivityHistoryPart({
     waiting ? (
       durationPart ? `等待回答 · ${durationPart}` : '等待回答'
     ) : typeof startedAt === 'number' && Number.isFinite(startedAt) ? (
-      <LiveProcessingDuration startedAt={startedAt} baseMs={baseProcessingMs} />
+      <LiveProcessingDuration startedAt={startedAt} baseMs={baseProcessingMs} active={active} />
     ) : (
       '处理过程'
     )
@@ -86,13 +88,7 @@ export function ActivityHistoryPart({
   ) : (
     '已完成'
   )
-  const [open, setOpen] = useState(initialOpen ?? defaultOpen)
-  const wasDefaultOpen = useRef(defaultOpen)
-
-  useEffect(() => {
-    if (wasDefaultOpen.current !== defaultOpen) setOpen(defaultOpen)
-    wasDefaultOpen.current = defaultOpen
-  }, [defaultOpen])
+  const [open, setOpenSticky] = useStickyOpen(initialOpen, defaultOpen)
 
   return (
     <Collapsible
@@ -100,7 +96,7 @@ export function ActivityHistoryPart({
       open={open}
       onOpenChange={(nextOpen) => {
         onOpenChange?.(nextOpen)
-        setOpen(nextOpen)
+        setOpenSticky(nextOpen)
       }}
       className="not-prose min-w-0"
     >
@@ -117,29 +113,31 @@ export function ActivityHistoryPart({
       {open ? (
         <CollapsibleContent className="mt-3 flex flex-col gap-3">
           {sections.map((section, index) => {
-            const active = section.streaming
+            const streaming = section.streaming
             return (
               <ActivityGroupPart
                 key={`${section.message.id}-${index}`}
                 item={{
                   ...section.item,
                   summary: section.title,
-                  defaultOpen: active
+                  defaultOpen: streaming
                 }}
                 message={section.message}
                 streaming={section.streaming}
+                active={active}
                 additionalContent={section.continuations?.map((continuation, continuationIndex) => (
                   <ActivityGroupPart
                     key={`${continuation.message.id}-${continuationIndex}`}
                     item={continuation.item}
                     message={continuation.message}
                     streaming={continuation.streaming}
+                    active={active}
                     contentOnly
                   />
                 ))}
-                summaryClassName={active ? 'text-foreground' : 'text-muted-foreground'}
+                summaryClassName={streaming ? 'text-foreground' : 'text-muted-foreground'}
                 summaryIcon={
-                  active ? (
+                  streaming ? (
                     <LoaderCircleIcon
                       data-stage-status="active"
                       className="size-4 shrink-0 animate-spin"

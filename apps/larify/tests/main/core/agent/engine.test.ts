@@ -59,6 +59,81 @@ describe('runAgent', () => {
     expect(prepareStep).toHaveBeenCalledOnce()
   })
 
+  it('retries a mid-stream network error before any content', async () => {
+    const networkError = Object.assign(new TypeError('terminated'), {
+      cause: Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' })
+    })
+    const doStream = vi
+      .fn()
+      .mockResolvedValueOnce({
+        stream: new ReadableStream({
+          start(controller) {
+            controller.enqueue({ type: 'stream-start', warnings: [] })
+            controller.enqueue({ type: 'text-start', id: 'text' })
+            controller.error(networkError)
+          }
+        })
+      })
+      .mockResolvedValueOnce({
+        stream: convertArrayToReadableStream([
+          { type: 'stream-start', warnings: [] },
+          { type: 'text-start', id: 'text' },
+          { type: 'text-delta', id: 'text', delta: 'hello' },
+          { type: 'text-end', id: 'text' },
+          { type: 'finish', finishReason: finishReason('stop'), usage }
+        ])
+      })
+    const languageModel = new MockLanguageModelV4({ doStream })
+    const stream = runAgent([{ role: 'user', content: 'hello' }], {
+      model: languageModel,
+      tools: {},
+      activeTools: [],
+      toolsContext: {},
+      imageCapable: false
+    })
+
+    const parts = []
+    for await (const part of stream) parts.push(part)
+
+    expect(parts.some(({ type }) => type === 'text-delta')).toBe(true)
+    expect(doStream).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not retry when the caller aborts', async () => {
+    const abortError = new DOMException('Aborted', 'AbortError')
+    const doStream = vi
+      .fn()
+      .mockResolvedValueOnce({
+        stream: new ReadableStream({
+          start(controller) {
+            controller.enqueue({ type: 'stream-start', warnings: [] })
+            controller.error(abortError)
+          }
+        })
+      })
+      .mockResolvedValueOnce({
+        stream: convertArrayToReadableStream([
+          { type: 'stream-start', warnings: [] },
+          { type: 'text-delta', id: 'text', delta: 'hello' },
+          { type: 'finish', finishReason: finishReason('stop'), usage }
+        ])
+      })
+    const languageModel = new MockLanguageModelV4({ doStream })
+    const stream = runAgent([{ role: 'user', content: 'hello' }], {
+      model: languageModel,
+      tools: {},
+      activeTools: [],
+      toolsContext: {},
+      imageCapable: false
+    })
+
+    const parts = []
+    for await (const part of stream) parts.push(part)
+
+    expect(parts.some(({ type }) => type === 'error')).toBe(true)
+    expect(doStream).toHaveBeenCalledTimes(1)
+  })
+
   it('sends only active tools to the model', async () => {
     const languageModel = model()
     const tool = { description: 'test', inputSchema: z.object({}) }

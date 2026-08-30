@@ -44,3 +44,7 @@ Append each event chronologically under `# Events`:
 
 <links to related files under `~/.larify/memory/`>
 ```
+
+# Recursion Principle
+
+Derive top-down, reduce bottom-up.

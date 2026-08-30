@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { defineTool } from '../../../main/core/plugin/protocol'
 
 export const resetContextTool = defineTool({
-  description: 'Reset the model context and continue from the handoff.',
+  description: 'Reset the model context',
   metadata: { eager: true, icon: 'list-restart' },
   inputSchema: z
     .object({
@@ -10,7 +10,7 @@ export const resetContextTool = defineTool({
         .string()
         .trim()
         .min(1)
-        .describe('Markdown handoff linking to the relevant task and memory files')
+        .describe('Markdown handoff document')
     })
     .strict(),
   execute: ({ handoff }, context) => {

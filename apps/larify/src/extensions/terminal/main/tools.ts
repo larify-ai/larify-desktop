@@ -178,7 +178,7 @@ const writeSchema = z.object({
   interrupt: z
     .boolean()
     .default(true)
-    .describe('Send Ctrl+C before writing the input'),
+    .describe('Send \\u0003 before writing the input'),
   timeout: z
     .number()
     .min(1)

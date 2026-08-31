@@ -9,15 +9,71 @@ const ISSUER = new URL(process.env.LARIFY_AUTH_ISSUER ?? 'https://larify.ai/api/
 const CLIENT_ID = process.env.LARIFY_AUTH_CLIENT_ID ?? 'larify-desktop'
 const SCOPES = 'openid email offline_access'
 
+let authService: AuthService | undefined
+
+export function getAuthService(): AuthService {
+  authService ??= new AuthService()
+  return authService
+}
+
 export class AuthService {
   private state: AuthState = { status: 'restoring' }
   private config?: oidc.Configuration
   private refreshToken?: string
+  private accessToken?: string
+  private accessTokenExpiresAt = 0
+  private refreshAttempt?: Promise<string | null>
   private listeners = new Set<(state: AuthState) => void>()
   private loginAttempt?: Promise<AuthState>
 
   getState(): AuthState {
     return this.state
+  }
+
+  /**
+   * Returns a valid OIDC access token, refreshing it when expired or absent.
+   * Used by the New API integration to authenticate against larify.ai.
+   */
+  async getAccessToken(): Promise<string | null> {
+    if (this.state.status !== 'authenticated') return null
+    if (this.accessToken && this.accessTokenExpiresAt > Date.now() + 60_000) {
+      return this.accessToken
+    }
+    if (!this.refreshToken) return null
+    // Single-flight: concurrent callers share one refresh so a rotated refresh
+    // token is never handed to the issuer twice (the loser would get rejected
+    // by the reuse policy and misreport a sign-out).
+    this.refreshAttempt ??= this.performRefresh()
+    try {
+      return await this.refreshAttempt
+    } finally {
+      this.refreshAttempt = undefined
+    }
+  }
+
+  private async performRefresh(): Promise<string | null> {
+    const refreshToken = this.refreshToken
+    if (!refreshToken) return null
+    try {
+      const tokens = await oidc.refreshTokenGrant(await this.getConfig(), refreshToken)
+      this.adoptTokens(tokens)
+      // Persist a rotated refresh token so the session survives an app restart.
+      if (tokens.refresh_token && this.state.status === 'authenticated') {
+        await this.persist(tokens.refresh_token, this.state.user)
+      }
+      return this.accessToken ?? null
+    } catch {
+      return null
+    }
+  }
+
+  private adoptTokens(tokens: Awaited<ReturnType<typeof oidc.refreshTokenGrant>>): void {
+    this.accessToken = tokens.access_token ?? undefined
+    this.accessTokenExpiresAt =
+      typeof tokens.expires_in === 'number'
+        ? Date.now() + tokens.expires_in * 1000
+        : 0
+    if (tokens.refresh_token) this.refreshToken = tokens.refresh_token
   }
 
   subscribe(listener: (state: AuthState) => void): () => void {
@@ -35,10 +91,12 @@ export class AuthService {
       const tokens = await oidc.refreshTokenGrant(await this.getConfig(), stored.refreshToken)
       const user = await this.loadUser(tokens.access_token, stored.user.id)
       await this.persist(tokens.refresh_token ?? stored.refreshToken, user)
+      this.adoptTokens(tokens)
       this.setState({ status: 'authenticated', user })
     } catch (error) {
       if (isInvalidGrant(error)) {
         this.refreshToken = undefined
+        this.accessToken = undefined
         try {
           await clearCredentials()
         } catch {
@@ -62,6 +120,7 @@ export class AuthService {
     const refreshToken = this.refreshToken
     await clearCredentials()
     this.refreshToken = undefined
+    this.accessToken = undefined
     this.setState({ status: 'unauthenticated' })
     if (refreshToken) {
       try {
@@ -103,6 +162,7 @@ export class AuthService {
       if (!subject) throw new Error('The login server did not return a user identity.')
       const user = await this.loadUser(tokens.access_token, subject)
       await this.persist(tokens.refresh_token, user)
+      this.adoptTokens(tokens)
       const authenticated: AuthState = { status: 'authenticated', user }
       this.setState(authenticated)
       return authenticated

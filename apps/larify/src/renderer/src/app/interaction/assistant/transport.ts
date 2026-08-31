@@ -1,4 +1,5 @@
 import type { ChatTransport, UIMessage, UIMessageChunk } from 'ai'
+import { USAGE_CHANGED_EVENT } from '@shared/events'
 import type { AgentModelConfig } from '../../../../../main/core/model/config'
 import { invalidateGitStatus } from '../../../../../extensions/workspace/renderer/changes/git-status-invalidation'
 
@@ -31,6 +32,9 @@ function openAgentStream(
         finished = true
         dispose()
         if (started) onGitChange()
+        // A session ended (completed, failed, or aborted): let the account
+        // menu refresh the usage balance instead of polling.
+        window.dispatchEvent(new CustomEvent(USAGE_CHANGED_EVENT))
         if (error === undefined) controller.close()
         else controller.error(error)
       }
@@ -80,6 +84,9 @@ function openAgentStream(
         await window.bridge.invoke('agent:cancel', sessionId)
       } finally {
         onGitChange()
+        // The stream was abandoned (e.g. the consumer unmounted) after the
+        // agent may have consumed usage; refresh the balance here too.
+        window.dispatchEvent(new CustomEvent(USAGE_CHANGED_EVENT))
       }
     }
   })

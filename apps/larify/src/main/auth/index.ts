@@ -2,12 +2,13 @@ import { ipcMain } from 'electron'
 import { defineService } from '@shared/infra/registry'
 
 import type { Application } from '../app/application'
-import { AuthService } from './service'
+import { getModelApiService } from '../model-api/service'
+import { getAuthService } from './service'
 
 const authToken = defineService()
 
 export function registerAuth(application: Application): void {
-  const auth = new AuthService()
+  const auth = getAuthService()
   const unsubscribe = auth.subscribe((state) => {
     const window = application.window.get()
     if (window.isDestroyed()) return
@@ -24,7 +25,15 @@ export function registerAuth(application: Application): void {
 
   ipcMain.handle('auth:state', () => auth.getState())
   ipcMain.handle('auth:login', () => auth.login())
-  ipcMain.handle('auth:logout', () => auth.logout())
+  ipcMain.handle('auth:logout', async () => {
+    try {
+      await auth.logout()
+    } finally {
+      // Drop the cached model-api credentials so a different account cannot
+      // reuse them, even when local logout partially fails.
+      await getModelApiService().clear()
+    }
+  })
   application.registry.register(authToken, {
     dispose: () => {
       unsubscribe()

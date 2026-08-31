@@ -38,6 +38,13 @@ export function AuthGate({ children }: AuthGateProps): React.JSX.Element {
     [logout, state]
   )
 
+  // After sign-in, mint/fetch the New API credentials so the model runtime can
+  // use them immediately. Failures surface later in the account menu.
+  useEffect(() => {
+    if (state.status !== 'authenticated') return
+    window.bridge.invoke('model-api:get-credentials').catch(() => undefined)
+  }, [state.status])
+
   if (state.status === 'restoring') {
     return (
       <main

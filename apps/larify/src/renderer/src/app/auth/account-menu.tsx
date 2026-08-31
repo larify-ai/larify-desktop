@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   CircleArrowUpIcon,
   CrownIcon,
@@ -8,6 +8,8 @@ import {
 } from 'lucide-react'
 import { useTheme } from 'next-themes'
 
+import type { ModelApiBalance } from '@shared/model-api'
+import { USAGE_CHANGED_EVENT } from '@shared/events'
 import { Button } from '@renderer/components/ui/button'
 import {
   Dialog,
@@ -33,6 +35,47 @@ export function AccountMenu(): React.JSX.Element {
   const [isLoggingOut, setIsLoggingOut] = useState(false)
   const [updateStatus, setUpdateStatus] = useState('')
   const [logoutError, setLogoutError] = useState('')
+  const [balance, setBalance] = useState<ModelApiBalance | null>(null)
+  const [balanceError, setBalanceError] = useState('')
+
+  const refreshBalance = useCallback(async (): Promise<void> => {
+    setBalanceError('')
+    try {
+      const result = (await window.bridge.invoke('model-api:get-balance')) as ModelApiBalance
+      setBalance(result)
+    } catch (error) {
+      setBalanceError(error instanceof Error ? error.message : '加载额度失败')
+    }
+  }, [])
+
+  // Fetch once on mount for an initial value, then refresh whenever an agent
+  // session ends (the transport dispatches USAGE_CHANGED_EVENT) or the window
+  // regains focus (covers purchases/plan changes made elsewhere). No polling:
+  // the balance only changes through model usage or external actions. The
+  // initial fetch is deferred to a timer so the effect never synchronously
+  // calls setState (avoids cascading renders per the react-hooks rules).
+  useEffect(() => {
+    const initial = setTimeout(() => void refreshBalance(), 0)
+    const refresh = (): void => {
+      void refreshBalance()
+    }
+    window.addEventListener(USAGE_CHANGED_EVENT, refresh)
+    window.addEventListener('focus', refresh)
+    return () => {
+      clearTimeout(initial)
+      window.removeEventListener(USAGE_CHANGED_EVENT, refresh)
+      window.removeEventListener('focus', refresh)
+    }
+  }, [refreshBalance])
+
+  const subscription = balance?.subscriptions?.[0]
+  const planTitle = subscription?.planTitle ?? '未开通'
+  const remaining = subscription && subscription.total > 0
+    ? Math.max(0, subscription.total - subscription.used)
+    : 0
+  const remainingRatio = subscription && subscription.total > 0
+    ? Math.min(1, remaining / subscription.total)
+    : 0
 
   const checkForUpdates = async (): Promise<void> => {
     setUpdateStatus('检查中…')
@@ -60,8 +103,6 @@ export function AccountMenu(): React.JSX.Element {
       await logout()
       setConfirming(false)
     } catch {
-      // Logout failed (e.g. an IPC error): stay signed in and surface the
-      // failure so the user can retry from the still-open confirm dialog.
       setLogoutError('退出登录失败，请重试。')
     } finally {
       setIsLoggingOut(false)
@@ -79,11 +120,16 @@ export function AccountMenu(): React.JSX.Element {
           >
             <span className="flex min-w-0 items-center gap-1.5 font-medium">
               <CrownIcon aria-hidden="true" className="size-4 shrink-0 stroke-[1.75]" />
-              <span className="truncate">体验版</span>
+              <span className="truncate">{planTitle}</span>
             </span>
-            <span className="whitespace-nowrap text-xs text-muted-foreground">剩余 100%</span>
+            <span className="whitespace-nowrap text-xs text-muted-foreground">
+              {subscription ? `剩余 ${Math.round(remainingRatio * 100)}%` : balanceError ? '—' : '···'}
+            </span>
             <span className="col-span-2 h-1 overflow-hidden rounded-full bg-muted">
-              <span className="block h-full w-full rounded-full bg-foreground" />
+              <span
+                className="block h-full rounded-full bg-foreground transition-all"
+                style={{ width: `${remainingRatio * 100}%` }}
+              />
             </span>
           </button>
         </DropdownMenuTrigger>
@@ -99,24 +145,7 @@ export function AccountMenu(): React.JSX.Element {
               {email ?? '登录邮箱'}
             </span>
           </div>
-          {/* <DropdownMenuSeparator className="my-2" />
-          <div className="grid min-h-10 grid-cols-[20px_auto_minmax(0,1fr)] items-center gap-2 rounded-lg px-2 text-sm">
-            <CrownIcon aria-hidden="true" className="size-5 stroke-[1.75] text-foreground" />
-            <span className="min-w-12 whitespace-nowrap">体验版</span>
-            <button
-              type="button"
-              className="justify-self-end rounded-md bg-foreground px-2 py-1 text-xs font-medium text-background hover:opacity-90"
-            >
-              升级
-            </button>
-          </div>
-          <div className="grid min-h-10 grid-cols-[20px_auto_minmax(0,1fr)] items-center gap-2 rounded-lg px-2 text-sm">
-            <GaugeIcon aria-hidden="true" className="size-5 stroke-[1.75] text-foreground" />
-            <span className="min-w-12 whitespace-nowrap">使用量</span>
-            <span className="col-start-3 w-full whitespace-nowrap text-right text-xs text-muted-foreground">
-              剩余 100%
-            </span>
-          </div> */}
+
           <DropdownMenuSeparator className="my-2" />
           <div className="grid min-h-10 grid-cols-[20px_auto_minmax(0,1fr)] items-center gap-2 rounded-lg px-2 text-sm">
             <PaletteIcon aria-hidden="true" className="size-5 stroke-[1.75] text-foreground" />

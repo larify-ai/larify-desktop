@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
     subscribe: vi.fn()
   },
   handle: vi.fn(),
+  modelApiClear: vi.fn(),
   removeHandler: vi.fn()
 }))
 
@@ -19,13 +20,11 @@ vi.mock('electron', () => ({
 }))
 
 vi.mock('../../../src/main/auth/service', () => ({
-  AuthService: class {
-    getState = mocks.auth.getState
-    login = mocks.auth.login
-    logout = mocks.auth.logout
-    restore = mocks.auth.restore
-    subscribe = mocks.auth.subscribe
-  }
+  getAuthService: () => mocks.auth
+}))
+
+vi.mock('../../../src/main/model-api/service', () => ({
+  getModelApiService: () => ({ clear: mocks.modelApiClear })
 }))
 
 import { registerAuth } from '../../../src/main/auth'
@@ -33,7 +32,7 @@ import { registerAuth } from '../../../src/main/auth'
 describe('authentication registration', () => {
   beforeEach(() => vi.clearAllMocks())
 
-  it('registers authentication IPC and restores the saved session', () => {
+  it('registers authentication IPC and restores the saved session', async () => {
     mocks.auth.subscribe.mockReturnValue(vi.fn())
     const state = { status: 'unauthenticated' }
     const login = Promise.resolve({ status: 'authenticated' })
@@ -59,10 +58,11 @@ describe('authentication registration', () => {
     const handlers = Object.fromEntries(mocks.handle.mock.calls)
     expect(handlers['auth:state']()).toBe(state)
     expect(handlers['auth:login']()).toBe(login)
-    expect(handlers['auth:logout']()).toBe(logout)
+    await handlers['auth:logout']()
+    expect(mocks.auth.logout).toHaveBeenCalledOnce()
+    expect(mocks.modelApiClear).toHaveBeenCalledOnce()
     expect(mocks.auth.getState).toHaveBeenCalledOnce()
     expect(mocks.auth.login).toHaveBeenCalledOnce()
-    expect(mocks.auth.logout).toHaveBeenCalledOnce()
   })
 
   it('broadcasts state, focuses after login, and removes all wiring on disposal', () => {

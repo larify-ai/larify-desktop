@@ -15,12 +15,19 @@ describe('AccountMenu', () => {
     expect(accountMenu).not.toContain('variant="destructive"')
     expect(accountMenu).toContain('aria-label="套餐与账户菜单"')
     expect(accountMenu).toContain("email ?? '登录邮箱'")
-    expect(accountMenu).toContain('>体验版</span>')
-    expect(accountMenu).toContain('>使用量</span>')
-    expect(accountMenu).toContain('剩余 100%')
+    // The trigger renders live data: plan title + remaining ratio + progress.
+    expect(accountMenu).toContain('{planTitle}')
+    expect(accountMenu).toContain('remainingRatio')
+    expect(accountMenu).toContain("invoke('model-api:get-balance')")
     expect(accountMenu).toContain('>主题</span>')
     expect(accountMenu).toContain("setTheme('light')")
     expect(accountMenu).toContain("setTheme('dark')")
     expect(accountMenu).toContain("window.bridge.invoke('update:check')")
+    // The dropdown was simplified back to the legacy structure: no subscription
+    // blocks, no manual credential/refresh buttons inside the menu.
+    expect(accountMenu).not.toContain('获取凭据')
+    expect(accountMenu).not.toContain('剩余额度')
+    expect(accountMenu).not.toContain('有效期至')
+    expect(accountMenu).not.toContain('RefreshCwIcon')
   })
 })

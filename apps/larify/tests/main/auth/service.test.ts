@@ -327,4 +327,148 @@ describe('AuthService', () => {
 
     expect(listener).not.toHaveBeenCalled()
   })
+
+  describe('getAccessToken', () => {
+    it('returns null when not authenticated', async () => {
+      mocks.loadCredentials.mockResolvedValue(null)
+
+      const service = new AuthService()
+      await service.restore()
+
+      expect(await service.getAccessToken()).toBeNull()
+      expect(mocks.refreshTokenGrant).not.toHaveBeenCalled()
+    })
+
+    it('returns the cached token without refreshing while still valid', async () => {
+      mocks.loadCredentials.mockResolvedValue({
+        refreshToken: 'rt-1',
+        user: { id: 'u1', email: 'a@b.c' }
+      })
+      mocks.refreshTokenGrant.mockResolvedValue({
+        access_token: 'at-1',
+        expires_in: 3600,
+        refresh_token: 'rt-2'
+      })
+      mocks.fetchUserInfo.mockResolvedValue({ sub: 'u1', email: 'a@b.c' })
+
+      const service = new AuthService()
+      await service.restore()
+
+      expect(await service.getAccessToken()).toBe('at-1')
+      expect(mocks.refreshTokenGrant).toHaveBeenCalledTimes(1) // restore only, no extra refresh
+    })
+
+    it('refreshes an expired token and persists the rotated refresh token', async () => {
+      mocks.loadCredentials.mockResolvedValue({
+        refreshToken: 'rt-1',
+        user: { id: 'u1', email: 'a@b.c' }
+      })
+      mocks.refreshTokenGrant
+        .mockResolvedValueOnce({ access_token: 'at-1', expires_in: 0, refresh_token: 'rt-1' })
+        .mockResolvedValueOnce({ access_token: 'at-2', expires_in: 3600, refresh_token: 'rt-2' })
+      mocks.fetchUserInfo.mockResolvedValue({ sub: 'u1', email: 'a@b.c' })
+
+      const service = new AuthService()
+      await service.restore()
+
+      expect(await service.getAccessToken()).toBe('at-2')
+      expect(mocks.refreshTokenGrant).toHaveBeenCalledTimes(2)
+      expect(mocks.saveCredentials).toHaveBeenLastCalledWith({
+        refreshToken: 'rt-2',
+        user: { id: 'u1', email: 'a@b.c' }
+      })
+    })
+
+    it('does not persist when the refresh response carries no new refresh token', async () => {
+      mocks.loadCredentials.mockResolvedValue({
+        refreshToken: 'rt',
+        user: { id: 'u1', email: 'a@b.c' }
+      })
+      mocks.refreshTokenGrant
+        .mockResolvedValueOnce({ access_token: 'at-1', expires_in: 0 })
+        .mockResolvedValueOnce({ access_token: 'at-2', expires_in: 3600 })
+      mocks.fetchUserInfo.mockResolvedValue({ sub: 'u1', email: 'a@b.c' })
+
+      const service = new AuthService()
+      await service.restore()
+
+      expect(await service.getAccessToken()).toBe('at-2')
+      // restore persists once; getAccessToken must not persist without a new refresh token
+      expect(mocks.saveCredentials).toHaveBeenCalledTimes(1)
+    })
+
+    it('returns null when the refresh fails', async () => {
+      mocks.loadCredentials.mockResolvedValue({
+        refreshToken: 'rt',
+        user: { id: 'u1', email: 'a@b.c' }
+      })
+      mocks.refreshTokenGrant
+        .mockResolvedValueOnce({ access_token: 'at-1', expires_in: 0, refresh_token: 'rt' })
+        .mockRejectedValueOnce(new Error('refresh failed'))
+      mocks.fetchUserInfo.mockResolvedValue({ sub: 'u1', email: 'a@b.c' })
+
+      const service = new AuthService()
+      await service.restore()
+
+      expect(await service.getAccessToken()).toBeNull()
+    })
+
+    it('shares one refresh across concurrent callers', async () => {
+      mocks.loadCredentials.mockResolvedValue({
+        refreshToken: 'rt',
+        user: { id: 'u1', email: 'a@b.c' }
+      })
+      mocks.refreshTokenGrant
+        .mockResolvedValueOnce({ access_token: 'at-1', expires_in: 0, refresh_token: 'rt' })
+        .mockResolvedValueOnce({ access_token: 'at-2', expires_in: 3600, refresh_token: 'rt-2' })
+      mocks.fetchUserInfo.mockResolvedValue({ sub: 'u1', email: 'a@b.c' })
+
+      const service = new AuthService()
+      await service.restore()
+
+      const [first, second] = await Promise.all([
+        service.getAccessToken(),
+        service.getAccessToken()
+      ])
+      expect(first).toBe('at-2')
+      expect(second).toBe('at-2')
+      // restore refreshed once; the two concurrent callers share a single refresh.
+      expect(mocks.refreshTokenGrant).toHaveBeenCalledTimes(2)
+    })
+
+    it('retries a failed refresh on the next call', async () => {
+      mocks.loadCredentials.mockResolvedValue({
+        refreshToken: 'rt',
+        user: { id: 'u1', email: 'a@b.c' }
+      })
+      mocks.refreshTokenGrant
+        .mockResolvedValueOnce({ access_token: 'at-1', expires_in: 0, refresh_token: 'rt' })
+        .mockRejectedValueOnce(new Error('offline'))
+        .mockResolvedValueOnce({ access_token: 'at-2', expires_in: 3600, refresh_token: 'rt-2' })
+      mocks.fetchUserInfo.mockResolvedValue({ sub: 'u1', email: 'a@b.c' })
+
+      const service = new AuthService()
+      await service.restore()
+
+      expect(await service.getAccessToken()).toBeNull()
+      expect(await service.getAccessToken()).toBe('at-2')
+      expect(mocks.refreshTokenGrant).toHaveBeenCalledTimes(3)
+    })
+
+    it('returns the token obtained at login without refreshing', async () => {
+      mocks.authorizationCodeGrant.mockResolvedValue({
+        access_token: 'at-login',
+        refresh_token: 'rt-login',
+        expires_in: 3600,
+        claims: () => ({ sub: 'u1' })
+      })
+      mocks.fetchUserInfo.mockResolvedValue({ sub: 'u1', email: 'a@b.c' })
+
+      const service = new AuthService()
+      await service.login()
+
+      expect(await service.getAccessToken()).toBe('at-login')
+      expect(mocks.refreshTokenGrant).not.toHaveBeenCalled()
+    })
+  })
 })

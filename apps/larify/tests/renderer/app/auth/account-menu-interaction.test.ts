@@ -3,6 +3,7 @@
 import { act, createElement, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { USAGE_CHANGED_EVENT } from '../../../../src/shared/events'
 
 // ---- hoisted mock state ----
 const hoisted = vi.hoisted(() => {
@@ -87,7 +88,11 @@ describe('AccountMenu interactions', () => {
     document.body.append(container)
     root = createRoot(container)
     window.bridge = {
-      invoke: vi.fn().mockResolvedValue({ status: 'current' })
+      invoke: vi.fn().mockImplementation((channel: string) =>
+        channel === 'model-api:get-balance'
+          ? Promise.resolve({ wallet: { quota: 0, usedQuota: 0 }, subscriptions: [] })
+          : Promise.resolve({ status: 'current' })
+      )
     } as unknown as typeof window.bridge
     await render()
   })
@@ -227,5 +232,40 @@ describe('AccountMenu interactions', () => {
     expect(container.textContent).toContain('检查中…')
 
     await act(async () => resolveCheck())
+  })
+
+  it('refreshes the balance when an agent session ends', async () => {
+    const invoke = vi.mocked(window.bridge.invoke)
+    invoke.mockClear()
+
+    window.dispatchEvent(new CustomEvent(USAGE_CHANGED_EVENT))
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(invoke).toHaveBeenCalledWith('model-api:get-balance')
+  })
+
+  it('refreshes the balance when the window regains focus', async () => {
+    const invoke = vi.mocked(window.bridge.invoke)
+    invoke.mockClear()
+
+    window.dispatchEvent(new Event('focus'))
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(invoke).toHaveBeenCalledWith('model-api:get-balance')
+  })
+
+  it('stops refreshing after unmount', async () => {
+    const invoke = vi.mocked(window.bridge.invoke)
+    act(() => root.unmount())
+    invoke.mockClear()
+
+    window.dispatchEvent(new CustomEvent(USAGE_CHANGED_EVENT))
+    window.dispatchEvent(new Event('focus'))
+
+    expect(invoke).not.toHaveBeenCalled()
   })
 })

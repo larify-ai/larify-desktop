@@ -26,7 +26,7 @@ describe('interaction assistant transport', () => {
       })
       bridge.emit('agent:end:session-1')
     })
-    vi.stubGlobal('window', { bridge })
+    vi.stubGlobal('window', { bridge, dispatchEvent: vi.fn() })
 
     await readAll(await send())
 
@@ -43,7 +43,7 @@ describe('interaction assistant transport', () => {
       bridge.emit(`agent:chunk:${sessionId}`, { type: 'text-delta', id: 'text', delta: 'hello' })
       bridge.emit(`agent:end:${sessionId}`)
     })
-    vi.stubGlobal('window', { bridge })
+    vi.stubGlobal('window', { bridge, dispatchEvent: vi.fn() })
 
     expect(await readAll(await send())).toEqual([
       { type: 'text-start', id: 'text' },
@@ -78,7 +78,7 @@ describe('interaction assistant transport', () => {
       if (channel === 'agent:send') bridge.emit('agent:end:session-1')
       return value
     })
-    vi.stubGlobal('window', { bridge })
+    vi.stubGlobal('window', { bridge, dispatchEvent: vi.fn() })
 
     await readAll(await send())
 
@@ -95,7 +95,7 @@ describe('interaction assistant transport', () => {
       bridge.emit('agent:end:session-1')
     })
     const onTitle = vi.fn()
-    vi.stubGlobal('window', { bridge })
+    vi.stubGlobal('window', { bridge, dispatchEvent: vi.fn() })
     const transport = createIpcTransport(
       () => 'C:/workspace',
       () => defaultModelConfig,
@@ -119,7 +119,7 @@ describe('interaction assistant transport', () => {
   it('notifies after the backend accepts and stores the message', async () => {
     const bridge = createBridge()
     const onSaved = vi.fn().mockResolvedValue(undefined)
-    vi.stubGlobal('window', { bridge })
+    vi.stubGlobal('window', { bridge, dispatchEvent: vi.fn() })
     const transport = createIpcTransport(
       () => 'C:/workspace',
       () => defaultModelConfig,
@@ -139,7 +139,7 @@ describe('interaction assistant transport', () => {
   it('does not delay the stream while the directory refresh completes', async () => {
     const bridge = createBridge()
     const refresh = Promise.withResolvers<void>()
-    vi.stubGlobal('window', { bridge })
+    vi.stubGlobal('window', { bridge, dispatchEvent: vi.fn() })
     const transport = createIpcTransport(
       () => 'C:/workspace',
       () => defaultModelConfig,
@@ -166,7 +166,7 @@ describe('interaction assistant transport', () => {
     const error = new Error('refresh failed')
     const bridge = createBridge()
     const onSaved = vi.fn().mockRejectedValue(error)
-    vi.stubGlobal('window', { bridge })
+    vi.stubGlobal('window', { bridge, dispatchEvent: vi.fn() })
     const transport = createIpcTransport(
       () => 'C:/workspace',
       () => defaultModelConfig,
@@ -191,7 +191,7 @@ describe('interaction assistant transport', () => {
     const onSaved = vi.fn(() => {
       throw new Error('refresh failed')
     })
-    vi.stubGlobal('window', { bridge })
+    vi.stubGlobal('window', { bridge, dispatchEvent: vi.fn() })
     const transport = createIpcTransport(
       () => 'C:/workspace',
       () => defaultModelConfig,
@@ -215,7 +215,7 @@ describe('interaction assistant transport', () => {
     const bridge = createBridge(async () => {
       throw error
     })
-    vi.stubGlobal('window', { bridge })
+    vi.stubGlobal('window', { bridge, dispatchEvent: vi.fn() })
 
     const reader = (await send()).getReader()
     await expect(reader.read()).rejects.toBe(error)
@@ -228,7 +228,7 @@ describe('interaction assistant transport', () => {
     bridge.invoke.mockImplementationOnce(() => {
       throw error
     })
-    vi.stubGlobal('window', { bridge })
+    vi.stubGlobal('window', { bridge, dispatchEvent: vi.fn() })
 
     await expect((await send()).getReader().read()).rejects.toBe(error)
     expect(bridge.listenerCount()).toBe(0)
@@ -237,7 +237,7 @@ describe('interaction assistant transport', () => {
   it('forwards a backend error and ignores later terminal events', async () => {
     const error = new Error('backend failed')
     const bridge = createBridge()
-    vi.stubGlobal('window', { bridge })
+    vi.stubGlobal('window', { bridge, dispatchEvent: vi.fn() })
     const reader = (await send()).getReader()
 
     bridge.emit('agent:error:session-1', error)
@@ -251,7 +251,7 @@ describe('interaction assistant transport', () => {
     const bridge = createBridge()
     const abort = new AbortController()
     abort.abort()
-    vi.stubGlobal('window', { bridge })
+    vi.stubGlobal('window', { bridge, dispatchEvent: vi.fn() })
 
     expect(await readAll(await send(abort.signal))).toEqual([])
     expect(bridge.invoke).not.toHaveBeenCalled()
@@ -261,7 +261,7 @@ describe('interaction assistant transport', () => {
   it('cancels a started response without inventing frontend lifecycle chunks', async () => {
     const bridge = createBridge()
     const abort = new AbortController()
-    vi.stubGlobal('window', { bridge })
+    vi.stubGlobal('window', { bridge, dispatchEvent: vi.fn() })
     const stream = await send(abort.signal)
     await vi.waitFor(() =>
       expect(bridge.invoke).toHaveBeenCalledWith('agent:send', expect.anything())
@@ -272,6 +272,22 @@ describe('interaction assistant transport', () => {
 
     expect(await readAll(stream)).toEqual([{ type: 'start' }])
     expect(bridge.listenerCount()).toBe(0)
+    expect(vi.mocked(window.dispatchEvent)).toHaveBeenCalled()
+  })
+
+  it('dispatches the usage-changed event when the stream is cancelled directly', async () => {
+    const bridge = createBridge()
+    vi.stubGlobal('window', { bridge, dispatchEvent: vi.fn() })
+    const stream = await send()
+    await vi.waitFor(() =>
+      expect(bridge.invoke).toHaveBeenCalledWith('agent:send', expect.anything())
+    )
+
+    await stream.cancel()
+
+    expect(bridge.invoke).toHaveBeenCalledWith('agent:cancel', 'session-1')
+    expect(vi.mocked(window.dispatchEvent)).toHaveBeenCalled()
+    expect(bridge.listenerCount()).toBe(0)
   })
 
   it('errors and cleans up when cancellation fails', async () => {
@@ -280,7 +296,7 @@ describe('interaction assistant transport', () => {
       if (channel === 'agent:cancel') throw error
     })
     const abort = new AbortController()
-    vi.stubGlobal('window', { bridge })
+    vi.stubGlobal('window', { bridge, dispatchEvent: vi.fn() })
     const reader = (await send(abort.signal)).getReader()
     await vi.waitFor(() =>
       expect(bridge.invoke).toHaveBeenCalledWith('agent:send', expect.anything())
@@ -298,7 +314,7 @@ describe('interaction assistant transport', () => {
       if (channel === 'attachment:save') return attachments.promise
     })
     const abort = new AbortController()
-    vi.stubGlobal('window', { bridge })
+    vi.stubGlobal('window', { bridge, dispatchEvent: vi.fn() })
     const stream = await send(abort.signal)
 
     abort.abort()
@@ -311,7 +327,7 @@ describe('interaction assistant transport', () => {
 
   it('cancels the backend and releases listeners when the consumer cancels the stream', async () => {
     const bridge = createBridge()
-    vi.stubGlobal('window', { bridge })
+    vi.stubGlobal('window', { bridge, dispatchEvent: vi.fn() })
     const reader = (await send()).getReader()
     await vi.waitFor(() =>
       expect(bridge.invoke).toHaveBeenCalledWith('agent:send', expect.anything())
@@ -330,7 +346,7 @@ describe('interaction assistant transport', () => {
     const bridge = createBridge(async (channel) => {
       if (channel === 'agent:cancel') throw error
     })
-    vi.stubGlobal('window', { bridge })
+    vi.stubGlobal('window', { bridge, dispatchEvent: vi.fn() })
     const reader = (await send()).getReader()
     await vi.waitFor(() =>
       expect(bridge.invoke).toHaveBeenCalledWith('agent:send', expect.anything())
@@ -347,7 +363,7 @@ describe('interaction assistant transport', () => {
     const bridge = createBridge(async (channel) => {
       if (channel === 'attachment:save') return attachments.promise
     })
-    vi.stubGlobal('window', { bridge })
+    vi.stubGlobal('window', { bridge, dispatchEvent: vi.fn() })
     const reader = (await send()).getReader()
 
     await reader.cancel()
@@ -363,7 +379,7 @@ describe('interaction assistant transport', () => {
 
   it('rejects an empty message list without registering listeners', async () => {
     const bridge = createBridge()
-    vi.stubGlobal('window', { bridge })
+    vi.stubGlobal('window', { bridge, dispatchEvent: vi.fn() })
     const transport = createIpcTransport(
       () => 'C:/workspace',
       () => defaultModelConfig
@@ -383,7 +399,7 @@ describe('interaction assistant transport', () => {
 
   it('does not register listeners when request configuration fails', async () => {
     const bridge = createBridge()
-    vi.stubGlobal('window', { bridge })
+    vi.stubGlobal('window', { bridge, dispatchEvent: vi.fn() })
     const transport = createIpcTransport(
       () => {
         throw new Error('cwd failed')

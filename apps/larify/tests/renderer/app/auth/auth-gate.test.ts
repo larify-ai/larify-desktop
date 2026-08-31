@@ -155,4 +155,22 @@ describe('AuthGate', () => {
 
     expect(unsubscribe).toHaveBeenCalledTimes(1)
   })
+
+  it('fetches New API credentials after sign-in so the model runtime is ready', async () => {
+    invoke.mockResolvedValueOnce({ status: 'restoring' })
+    await act(async () => root.render(createElement(AuthGate, null, createElement('div'))))
+    expect(invoke).not.toHaveBeenCalledWith('model-api:get-credentials')
+
+    await act(async () => {
+      stateListener({ status: 'authenticated', user: { id: '1', email: 'a@b.c' } })
+    })
+
+    expect(invoke).toHaveBeenCalledWith('model-api:get-credentials')
+  })
+
+  it('does not fetch credentials while unauthenticated', async () => {
+    invoke.mockResolvedValueOnce({ status: 'unauthenticated' })
+    await act(async () => root.render(createElement(AuthGate, null, createElement('div'))))
+    expect(invoke).not.toHaveBeenCalledWith('model-api:get-credentials')
+  })
 })

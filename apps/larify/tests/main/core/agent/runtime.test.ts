@@ -7,6 +7,14 @@ import { createAgentRuntime } from '../../../../src/main/core/agent/runtime'
 import { FilesystemSkillDiscovery, PluginHost, defineTool } from '../../../../src/main/core/plugin'
 import { Registry } from '../../../../src/shared/infra/registry'
 
+// createModelRuntime requires cached gateway credentials since the switch to
+// per-user sk- keys; provide a fake so runtime construction can proceed.
+vi.mock('../../../../src/main/model-api/service', () => ({
+  getModelApiService: () => ({
+    getCachedCredentialsSync: () => ({ baseUrl: 'https://api.larify.ai', apiKey: 'sk-test' })
+  })
+}))
+
 describe('createAgentRuntime', () => {
   it('loads the bundled agent skill into the runtime prompt', async () => {
     const host = new PluginHost(new Registry(), new FilesystemSkillDiscovery())

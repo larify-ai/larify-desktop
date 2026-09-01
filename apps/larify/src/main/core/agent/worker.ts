@@ -55,6 +55,11 @@ export class AgentWorker {
       // 会覆盖掉上一轮已持久化的快照；这里把最新快照（同 id 原地替换）写回，
       // 保证"ask_user 前改的文件"在重载/切换会话后仍然可见。
       const saveReview = (response: UIMessage): void => {
+        // Reconcile once more before persisting so a file deleted after the
+        // last tool output still surfaces as a deletion in the final card.
+        for (const tracked of fileChanges.syncResults()) {
+          activeReview.update(tracked)
+        }
         const snapshot = activeReview.finish()
         if (!snapshot) return
         const chunk = reviewChunk(snapshot)
@@ -120,13 +125,17 @@ export class AgentWorker {
               reviewToolCalls.delete(chunk.toolCallId)
             ) {
               const output = chunk.output
-              const tracked =
+              if (
                 output &&
                 typeof output === 'object' &&
                 typeof (output as { path?: unknown }).path === 'string'
-                  ? fileChanges.result((output as { path: string }).path)
-                  : undefined
-              if (tracked) activeReview.update(tracked)
+              ) {
+                // Sync every tracked file (including ones deleted outside the
+                // tracked tools, e.g. via the terminal) into the review card.
+                for (const tracked of fileChanges.syncResults()) {
+                  activeReview.update(tracked)
+                }
+              }
             } else if (
               chunk.type === 'tool-input-error' ||
               chunk.type === 'tool-output-error' ||

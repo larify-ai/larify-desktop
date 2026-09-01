@@ -1,11 +1,19 @@
 import type { UIMessage, UIMessageChunk } from 'ai'
-import { resolve } from 'node:path'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
+
+// Real workspace on disk: the change tracker reconciles tracked files against
+// the filesystem, so tool writes must actually land on disk in these tests.
+const workspace = mkdtempSync(join(tmpdir(), 'larify-agent-'))
+afterAll(() => rmSync(workspace, { recursive: true, force: true }))
 
 const mocks = vi.hoisted(() => ({
   run: vi.fn(),
   runtime: vi.fn(),
-  workspace: 'default-workspace'
+  workspace: 'default-workspace',
+  larifyRoot: '~/.larify/'
 }))
 
 vi.mock('../../../../src/main/core/agent/persist', () => ({
@@ -15,6 +23,7 @@ vi.mock('../../../../src/main/core/agent/runtime', () => ({
   createAgentRuntime: mocks.runtime
 }))
 vi.mock('../../../../src/main/utils/app-paths', () => ({
+  larifyPath: (...segments: string[]) => mocks.larifyRoot + segments.join('/'),
   larifyWorkspacePath: () => mocks.workspace
 }))
 
@@ -169,13 +178,17 @@ describe('Agent', () => {
   })
 
   it('keeps file tracking across an ask user continuation', async () => {
+    const existingPath = join(workspace, 'existing.ts')
+    const newPath = join(workspace, 'new.ts')
+    writeFileSync(existingPath, 'old\n')
+    writeFileSync(newPath, 'new\n')
     // 第一轮（用户提问）：修改 existing.ts。
     mocks.run.mockImplementationOnce(async (_sessions, request) => {
       const context = request.options.toolsContext.fs_write as {
         trackFileChange: (mutation: { path: string; before: string | null; after: string }) => void
       }
       context.trackFileChange({
-        path: resolve('/workspace/existing.ts'),
+        path: existingPath,
         before: null,
         after: 'old\n'
       })
@@ -187,7 +200,7 @@ describe('Agent', () => {
       request.onChunk({
         type: 'tool-output-available',
         toolCallId: 'write-1',
-        output: { kind: 'diff', path: resolve('/workspace/existing.ts'), patch: '+old' }
+        output: { kind: 'diff', path: join(workspace, 'existing.ts'), patch: '+old' }
       } as UIMessageChunk)
       return { id: 'assistant', role: 'assistant', parts: [] } as UIMessage
     })
@@ -197,7 +210,7 @@ describe('Agent', () => {
         trackFileChange: (mutation: { path: string; before: string | null; after: string }) => void
       }
       context.trackFileChange({
-        path: resolve('/workspace/new.ts'),
+        path: newPath,
         before: null,
         after: 'new\n'
       })
@@ -209,7 +222,7 @@ describe('Agent', () => {
       request.onChunk({
         type: 'tool-output-available',
         toolCallId: 'write-2',
-        output: { kind: 'diff', path: resolve('/workspace/new.ts'), patch: '+new' }
+        output: { kind: 'diff', path: join(workspace, 'new.ts'), patch: '+new' }
       } as UIMessageChunk)
       return { id: 'assistant', role: 'assistant', parts: [] } as UIMessage
     })
@@ -226,9 +239,9 @@ describe('Agent', () => {
     const second = { chunk: vi.fn(), error: vi.fn(), end: vi.fn() }
     const agent = new Agent(sessions as never, pluginHost as never)
 
-    agent.send({ ...input, cwd: resolve('/workspace') }, first)
+    agent.send({ ...input, cwd: workspace }, first)
     await vi.waitFor(() => expect(first.end).toHaveBeenCalledOnce())
-    agent.send({ ...input, cwd: resolve('/workspace'), message: continuation }, second)
+    agent.send({ ...input, cwd: workspace, message: continuation }, second)
     await vi.waitFor(() => expect(second.end).toHaveBeenCalledOnce())
 
     const snapshots = second.chunk.mock.calls
@@ -243,13 +256,17 @@ describe('Agent', () => {
   })
 
   it('resets file tracking when a new user request starts', async () => {
+    const existingPath = join(workspace, 'existing.ts')
+    const otherPath = join(workspace, 'other.ts')
+    writeFileSync(existingPath, 'old\n')
+    writeFileSync(otherPath, 'other\n')
     // 第一轮（user 请求）：修改 existing.ts。
     mocks.run.mockImplementationOnce(async (_sessions, request) => {
       const context = request.options.toolsContext.fs_write as {
         trackFileChange: (mutation: { path: string; before: string | null; after: string }) => void
       }
       context.trackFileChange({
-        path: resolve('/workspace/existing.ts'),
+        path: existingPath,
         before: null,
         after: 'old\n'
       })
@@ -261,7 +278,7 @@ describe('Agent', () => {
       request.onChunk({
         type: 'tool-output-available',
         toolCallId: 'write-1',
-        output: { kind: 'diff', path: resolve('/workspace/existing.ts'), patch: '+old' }
+        output: { kind: 'diff', path: join(workspace, 'existing.ts'), patch: '+old' }
       } as UIMessageChunk)
       return { id: 'assistant', role: 'assistant', parts: [] } as UIMessage
     })
@@ -271,7 +288,7 @@ describe('Agent', () => {
         trackFileChange: (mutation: { path: string; before: string | null; after: string }) => void
       }
       context.trackFileChange({
-        path: resolve('/workspace/other.ts'),
+        path: otherPath,
         before: null,
         after: 'other\n'
       })
@@ -283,7 +300,7 @@ describe('Agent', () => {
       request.onChunk({
         type: 'tool-output-available',
         toolCallId: 'write-2',
-        output: { kind: 'diff', path: resolve('/workspace/other.ts'), patch: '+other' }
+        output: { kind: 'diff', path: otherPath, patch: '+other' }
       } as UIMessageChunk)
       return { id: 'assistant-2', role: 'assistant', parts: [] } as UIMessage
     })
@@ -295,9 +312,9 @@ describe('Agent', () => {
     const second = { chunk: vi.fn(), error: vi.fn(), end: vi.fn() }
     const agent = new Agent(sessions as never, pluginHost as never)
 
-    agent.send({ ...input, cwd: resolve('/workspace') }, first)
+    agent.send({ ...input, cwd: workspace }, first)
     await vi.waitFor(() => expect(first.end).toHaveBeenCalledOnce())
-    agent.send({ ...input, cwd: resolve('/workspace') }, second)
+    agent.send({ ...input, cwd: workspace }, second)
     await vi.waitFor(() => expect(second.end).toHaveBeenCalledOnce())
 
     const snapshots = second.chunk.mock.calls
@@ -308,13 +325,15 @@ describe('Agent', () => {
   })
 
   it('keeps the persisted snapshot when a continuation changes no files', async () => {
+    const existingPath = join(workspace, 'existing.ts')
+    writeFileSync(existingPath, 'old\n')
     // 第一轮（user）：修改 existing.ts。
     mocks.run.mockImplementationOnce(async (_sessions, request) => {
       const context = request.options.toolsContext.fs_write as {
         trackFileChange: (mutation: { path: string; before: string | null; after: string }) => void
       }
       context.trackFileChange({
-        path: resolve('/workspace/existing.ts'),
+        path: existingPath,
         before: null,
         after: 'old\n'
       })
@@ -326,7 +345,7 @@ describe('Agent', () => {
       request.onChunk({
         type: 'tool-output-available',
         toolCallId: 'write-1',
-        output: { kind: 'diff', path: resolve('/workspace/existing.ts'), patch: '+old' }
+        output: { kind: 'diff', path: join(workspace, 'existing.ts'), patch: '+old' }
       } as UIMessageChunk)
       return { id: 'assistant', role: 'assistant', parts: [] } as UIMessage
     })
@@ -342,12 +361,12 @@ describe('Agent', () => {
     const second = { chunk: vi.fn(), error: vi.fn(), end: vi.fn() }
     const agent = new Agent(sessions as never, pluginHost as never)
 
-    agent.send({ ...input, cwd: resolve('/workspace') }, first)
+    agent.send({ ...input, cwd: workspace }, first)
     await vi.waitFor(() => expect(first.end).toHaveBeenCalledOnce())
     agent.send(
       {
         ...input,
-        cwd: resolve('/workspace'),
+        cwd: workspace,
         message: {
           id: 'assistant-continuation',
           role: 'assistant',

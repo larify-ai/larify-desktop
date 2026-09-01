@@ -1,6 +1,8 @@
 import type { UIMessage, UIMessageChunk } from 'ai'
-import { resolve } from 'node:path'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { clearReadState, markRead, readAtFor } from '../../../../src/extensions/fs/main/state'
 
 const mocks = vi.hoisted(() => ({ run: vi.fn() }))
@@ -12,9 +14,14 @@ vi.mock('../../../../src/main/core/agent/persist', () => ({
 import { AgentWorker, type SessionTrack } from '../../../../src/main/core/agent/worker'
 import { AgentReview, FileChangeTracker } from '../../../../src/main/core/agent/review'
 
+// Real workspace on disk: the change tracker reconciles tracked files against
+// the filesystem, so tool writes must actually land on disk in these tests.
+const workspace = mkdtempSync(join(tmpdir(), 'larify-worker-'))
+afterAll(() => rmSync(workspace, { recursive: true, force: true }))
+
 const input = {
   sessionId: 'session',
-  cwd: '/workspace',
+  cwd: workspace,
   message: {
     id: 'user',
     role: 'user',
@@ -22,8 +29,8 @@ const input = {
   } as UIMessage,
   runtime: {
     toolsContext: {
-      fs_edit: { sessionId: 'session', cwd: '/workspace' },
-      fs_write: { sessionId: 'session', cwd: '/workspace' }
+      fs_edit: { sessionId: 'session', cwd: workspace },
+      fs_write: { sessionId: 'session', cwd: workspace }
     }
   } as never
 }
@@ -64,10 +71,11 @@ beforeEach(() => vi.clearAllMocks())
 
 describe('AgentWorker', () => {
   it('streams one net patch for repeated edits to the same file', async () => {
-    const path = '/workspace/file.ts'
+    const path = join(workspace, 'file.ts')
+    writeFileSync(path, 'const value = 1\n')
     const runtime = {
       toolsContext: {
-        fs_edit: { sessionId: 'session', cwd: '/workspace' }
+        fs_edit: { sessionId: 'session', cwd: workspace }
       }
     } as never
     mocks.run.mockImplementation(async (_sessions, request) => {
@@ -123,6 +131,8 @@ describe('AgentWorker', () => {
   })
 
   it('updates a live review only after successful fs_write and fs_edit calls', async () => {
+    const path = join(workspace, 'file.ts')
+    writeFileSync(path, 'new\n')
     let emit!: (chunk: UIMessageChunk) => void
     let complete!: () => void
     let trackFileChange!: (mutation: { path: string; before: string | null; after: string }) => void
@@ -140,7 +150,7 @@ describe('AgentWorker', () => {
 
     emit({ type: 'tool-input-start', toolCallId: 'read', toolName: 'fs_read' } as UIMessageChunk)
     emit({ type: 'tool-output-available', toolCallId: 'read', output: 'text' } as UIMessageChunk)
-    trackFileChange({ path: '/workspace/file.ts', before: null, after: 'new\n' })
+    trackFileChange({ path, before: null, after: 'new\n' })
     emit({
       type: 'tool-input-available',
       toolCallId: 'write',
@@ -162,7 +172,7 @@ describe('AgentWorker', () => {
       toolCallId: 'write',
       output: {
         kind: 'diff',
-        path: '/workspace/file.ts',
+        path,
         patch: '--- a/file.ts\n+++ b/file.ts\n@@ -0,0 +1 @@\n+new'
       }
     } as UIMessageChunk)
@@ -170,7 +180,7 @@ describe('AgentWorker', () => {
       type: 'data-git-snapshot',
       id: 'review',
       data: {
-        root: resolve('/workspace'),
+        root: resolve(workspace),
         files: [
           {
             path: 'file.ts',
@@ -314,7 +324,8 @@ describe('AgentWorker', () => {
   it('keeps earlier files when the same task writes more files in a continuation', async () => {
     // ask_user 前已修改 existing.ts（会话级 track 中有记录）；用户回答后同一任务
     // （复用同一个 track）又改了 new.ts。期望：快照包含旧文件 + 新文件。
-    const followPath = resolve('/workspace/new.ts')
+    const followPath = join(workspace, 'new.ts')
+    writeFileSync(followPath, 'new\n')
     mocks.run.mockImplementation(async (_sessions, request) => {
       const context = request.options.toolsContext.fs_write as {
         trackFileChange: (mutation: { path: string; before: string | null; after: string }) => void
@@ -333,9 +344,9 @@ describe('AgentWorker', () => {
       return { id: 'assistant', role: 'assistant', parts: [] } as UIMessage
     })
     const { sink } = createWorker()
-    const track = createTrack('/workspace', sink)
+    const track = createTrack(workspace, sink)
     track.review.update({
-      path: resolve('/workspace/existing.ts'),
+      path: resolve(join(workspace, 'existing.ts')),
       patch: '+old',
       additions: 1,
       deletions: 0,
@@ -346,7 +357,7 @@ describe('AgentWorker', () => {
     await continuationWorker.run({
       ...input,
       runtime: {
-        toolsContext: { fs_write: { sessionId: 'session', cwd: '/workspace' } }
+        toolsContext: { fs_write: { sessionId: 'session', cwd: workspace } }
       } as never
     })
 
@@ -388,10 +399,12 @@ describe('AgentWorker', () => {
   })
 
   it('streams and persists successful tool diffs', async () => {
+    const path = join(workspace, 'file.ts')
+    writeFileSync(path, 'change\n')
     const response: UIMessage = { id: 'assistant', role: 'assistant', parts: [] }
     mocks.run.mockImplementation(async (_sessions, request) => {
       request.options.toolsContext.fs_write.trackFileChange({
-        path: '/workspace/file.ts',
+        path,
         before: null,
         after: 'change\n'
       })
@@ -405,7 +418,7 @@ describe('AgentWorker', () => {
         toolCallId: 'write',
         output: {
           kind: 'diff',
-          path: '/workspace/file.ts',
+          path,
           patch: '--- a/file.ts\n+++ b/file.ts\n@@ -0,0 +1 @@\n+change'
         }
       } as UIMessageChunk)
@@ -422,7 +435,7 @@ describe('AgentWorker', () => {
       type: 'data-git-snapshot',
       id: 'review',
       data: {
-        root: resolve('/workspace'),
+        root: resolve(workspace),
         files: [
           {
             additions: 1,
@@ -435,6 +448,54 @@ describe('AgentWorker', () => {
       }
     })
     expect(sessions.saveMessages).toHaveBeenCalledWith('session', [{ ...response, parts: [part] }])
+  })
+
+  it('reflects a file deleted after the last tool output in the final card', async () => {
+    const path = join(workspace, 'existing.ts')
+    writeFileSync(path, 'old\n')
+    mocks.run.mockImplementation(async (_sessions, request) => {
+      request.options.toolsContext.fs_write.trackFileChange({
+        path,
+        before: 'old\n',
+        after: 'new\n'
+      })
+      request.onChunk({
+        type: 'tool-input-start',
+        toolCallId: 'write',
+        toolName: 'fs_write'
+      } as UIMessageChunk)
+      request.onChunk({
+        type: 'tool-output-available',
+        toolCallId: 'write',
+        output: { kind: 'diff', path, patch: '-old\n+new' }
+      } as UIMessageChunk)
+      // Deleted outside the tracked tools after the final tool output.
+      rmSync(path)
+      return { id: 'assistant', role: 'assistant', parts: [] } as UIMessage
+    })
+    const { worker, sessions, sink } = createWorker()
+
+    await worker.run(input)
+
+    const snapshots = sink.chunk.mock.calls
+      .map(([chunk]) => chunk)
+      .filter((chunk) => chunk.type === 'data-git-snapshot')
+    const last = snapshots.at(-1)
+    expect(last).toMatchObject({
+      data: {
+        files: [
+          expect.objectContaining({
+            path: 'existing.ts',
+            additions: 0,
+            deletions: 1
+          })
+        ]
+      }
+    })
+    const lastSaved = sessions.saveMessages.mock.calls.at(-1)?.[1]?.[0] as UIMessage | undefined
+    expect(lastSaved?.parts).toContainEqual(
+      expect.objectContaining({ type: 'data-git-snapshot', id: 'review' })
+    )
   })
 
   it('ends and closes exactly once when cancelled', async () => {

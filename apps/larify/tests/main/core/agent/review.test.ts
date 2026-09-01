@@ -1,10 +1,18 @@
-import { resolve } from 'node:path'
-import { describe, expect, it, vi } from 'vitest'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
+import { afterAll, describe, expect, it, vi } from 'vitest'
 import {
   AgentReview,
   FileChangeTracker,
   reviewChunk
 } from '../../../../src/main/core/agent/review'
+import { larifyPath } from '../../../../src/main/utils/app-paths'
+
+const tempDirs: string[] = []
+afterAll(() => {
+  for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true })
+})
 
 describe('FileChangeTracker', () => {
   it('replaces repeated edits with one diff from the original to the latest content', () => {
@@ -81,6 +89,63 @@ describe('FileChangeTracker', () => {
     tracker.update({ path, before: '--- old\n', after: '+++ new\n' })
 
     expect(tracker.result(path)).toMatchObject({ additions: 1, deletions: 1 })
+  })
+
+  it('reports a tracked file deleted outside the tools as a whole-file deletion', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'larify-review-'))
+    tempDirs.push(dir)
+    const path = join(dir, 'file.ts')
+    writeFileSync(path, 'new\n')
+    const tracker = new FileChangeTracker()
+    tracker.update({ path, before: 'old\n', after: 'new\n' })
+
+    rmSync(path) // deleted via the terminal, outside the tracked tools
+
+    const [result] = tracker.syncResults()
+    expect(result).toBeDefined()
+    expect(result.path).toBe(path)
+    expect(result.additions).toBe(0)
+    expect(result.deletions).toBeGreaterThan(0)
+    expect(result.patch).toContain('-old')
+  })
+
+  it('emits a removal signal for a newly created file that never survived on disk', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'larify-review-'))
+    tempDirs.push(dir)
+    const tracker = new FileChangeTracker()
+    tracker.update({ path: join(dir, 'draft.md'), before: null, after: 'draft\n' })
+
+    // The file never made it to disk: reconcile reports a removal (patch: null)
+    // so the review card drops the stale "new file" entry.
+    const [result] = tracker.syncResults()
+    expect(result).toMatchObject({
+      path: join(dir, 'draft.md'),
+      patch: null,
+      additions: 0,
+      deletions: 0
+    })
+  })
+
+  it('ignores task and memory artifacts under ~/.larify', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'larify-review-'))
+    tempDirs.push(dir)
+    const appPath = join(dir, 'app.ts')
+    writeFileSync(appPath, 'code\n')
+    const tracker = new FileChangeTracker()
+    tracker.update({
+      path: join(larifyPath('tasks'), 'task-1', 'task.md'),
+      before: null,
+      after: '# Task\n'
+    })
+    tracker.update({
+      path: join(larifyPath('memory'), 'subject.md'),
+      before: null,
+      after: 'knowledge\n'
+    })
+    tracker.update({ path: appPath, before: null, after: 'code\n' })
+
+    const paths = tracker.syncResults().map((result) => result.path)
+    expect(paths).toEqual([appPath])
   })
 })
 
@@ -200,5 +265,23 @@ describe('AgentReview', () => {
 
     expect(review.finish()).toBeNull()
     expect(emit).not.toHaveBeenCalled()
+  })
+
+  it('drops a newly created file deleted after the last write from the final card', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'larify-review-'))
+    tempDirs.push(dir)
+    const path = join(dir, 'draft.ts')
+    writeFileSync(path, 'draft\n')
+    const tracker = new FileChangeTracker()
+    const review = new AgentReview(dir, vi.fn())
+
+    tracker.update({ path, before: null, after: 'draft\n' })
+    for (const tracked of tracker.syncResults()) review.update(tracked)
+    expect(review.finish()?.files).toHaveLength(1)
+
+    rmSync(path) // deleted outside the tools after the last write
+
+    for (const tracked of tracker.syncResults()) review.update(tracked)
+    expect(review.finish()).toBeNull()
   })
 })

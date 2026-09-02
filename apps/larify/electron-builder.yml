@@ -16,9 +16,12 @@ asarUnpack:
   - node_modules/node-pty/**
 win:
   executableName: larify
+  icon: build/icon.ico
 nsis:
   artifactName: ${name}-${version}-setup.${ext}
   include: build/installer.nsh
+  installerIcon: build/installerIcon.ico
+  uninstallerIcon: build/installerIcon.ico
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always

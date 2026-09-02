@@ -74,7 +74,7 @@ try {
   if (
     opened.firstRow !== '思考强度低中高' ||
     opened.effort.map(({ label }) => label).join(',') !== '低,中,高' ||
-    opened.models.length !== 2 ||
+    opened.models.length !== 3 ||
     opened.side !== 'top' ||
     opened.triggerBoxShadow !== 'none'
   ) {
@@ -104,10 +104,10 @@ try {
     'reasoning effort restoration'
   )
 
-  const initialModel = initial.modelText.includes('DeepSeek-V4-Pro')
-    ? 'DeepSeek-V4-Pro'
-    : 'DeepSeek-V4-Flash'
-  const nextModel = initialModel === 'DeepSeek-V4-Pro' ? 'DeepSeek-V4-Flash' : 'DeepSeek-V4-Pro'
+  // 从三个候选模型里，取一个不同于当前显示模型的"下一个"模型（用于往返切换验证）
+  const modelCandidates = ['DeepSeek-V4-Pro', 'DeepSeek-V4-Flash', 'DeepSeek-V4-Flash-Vision']
+  const initialModel = modelCandidates.find((m) => initial.modelText?.includes(m)) ?? 'DeepSeek-V4-Flash'
+  const nextModel = modelCandidates.find((m) => m !== initialModel) ?? 'DeepSeek-V4-Pro'
   await evaluate(`(() => {
     const content = document.querySelector(${JSON.stringify(menu)})
     Array.from(content?.querySelectorAll('[role="menuitem"]') ?? []).find(

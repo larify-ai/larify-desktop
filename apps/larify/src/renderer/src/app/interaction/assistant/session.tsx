@@ -1,8 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Chat } from '@ai-sdk/react'
 import { lastAssistantMessageIsCompleteWithToolCalls, type UIMessage } from 'ai'
+import type { AgentModelConfig } from '../../../../../main/core/model/config'
 import { createIpcTransport } from './transport'
-import { readModelConfig } from './model-config'
+import {
+  ModelConfigContext,
+  readSessionModelConfig,
+  writeModelConfig,
+  writeSessionModelConfig
+} from './model-config'
 import { AssistantChat } from './chat'
 import type { ConversationHeading } from './conversation-header'
 import {
@@ -34,6 +40,20 @@ export function AssistantSession({
   onHeadingChange: (heading: ConversationHeading | null) => void
   onSaved: () => Promise<void>
 }): React.JSX.Element {
+  // 会话级模型配置：state 驱动 ModelSelector 显示；ref 镜像最新选择，
+  // 供 transport 发送时读取（transport 闭包在 useState 初始化时创建，
+  // 无法捕获最新的 state，故用 ref 保证"所见即所发"）。
+  const modelConfigRef = useRef<AgentModelConfig>(readSessionModelConfig(id, localStorage))
+  const [modelConfig, setModelConfigState] = useState<AgentModelConfig>(modelConfigRef.current)
+  const updateModelConfig = useCallback((next: AgentModelConfig): void => {
+    modelConfigRef.current = next
+    setModelConfigState(next)
+    // 点选即固化：同时写入该会话 key（供回显）与全局默认值（供新建会话沿用）。
+    if (typeof localStorage !== 'undefined') {
+      writeSessionModelConfig(id, localStorage, next)
+      writeModelConfig(localStorage, next)
+    }
+  }, [id])
   const recentStart = Math.max(0, initialMessageCount - initialMessages.length)
   const cache = useRef(new Map<number, UIMessage>())
   const [olderMessages, setOlderMessages] = useState(() => new Map<number, UIMessage>())
@@ -49,7 +69,7 @@ export function AssistantSession({
         sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
         transport: createIpcTransport(
           () => transportCwd,
-          () => readModelConfig(localStorage),
+          () => modelConfigRef.current,
           onSaved,
           (title) => {
             onHeadingChange({ cwd: transportCwd, title })
@@ -153,19 +173,21 @@ export function AssistantSession({
 
   return (
     <MessageLinkContextProvider value={messageLinkHandler}>
-      <AssistantChat
-        active={active}
-        chat={chat}
-        title={title}
-        cwd={initialCwd}
-        recentStart={recentStart}
-        olderMessages={olderMessages}
-        navigationItems={navigationItems}
-        onLoadOlderNavigation={loadOlderNavigation}
-        onLoadRange={loadRange}
-        onCwdChange={changeCwd}
-        onHeadingChange={onHeadingChange}
-      />
+      <ModelConfigContext.Provider value={{ value: modelConfig, onChange: updateModelConfig }}>
+        <AssistantChat
+          active={active}
+          chat={chat}
+          title={title}
+          cwd={initialCwd}
+          recentStart={recentStart}
+          olderMessages={olderMessages}
+          navigationItems={navigationItems}
+          onLoadOlderNavigation={loadOlderNavigation}
+          onLoadRange={loadRange}
+          onCwdChange={changeCwd}
+          onHeadingChange={onHeadingChange}
+        />
+      </ModelConfigContext.Provider>
     </MessageLinkContextProvider>
   )
 }

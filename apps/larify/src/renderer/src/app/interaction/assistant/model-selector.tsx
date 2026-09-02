@@ -1,13 +1,11 @@
-import { useState } from 'react'
 import { CheckIcon, ChevronDownIcon } from 'lucide-react'
 import {
   modelIds,
   modelLabels,
   reasoningEfforts,
-  defaultModelConfig,
-  type AgentModelConfig,
   type ReasoningEffort
 } from '../../../../../main/core/model/config'
+import { useModelConfig } from './model-config'
 import { Button } from '@renderer/components/ui/button'
 import {
   DropdownMenu,
@@ -16,7 +14,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger
 } from '@renderer/components/ui/dropdown-menu'
-import { readModelConfig, writeModelConfig } from './model-config'
 
 const effortLabels: Record<ReasoningEffort, string> = {
   off: '低',
@@ -25,15 +22,7 @@ const effortLabels: Record<ReasoningEffort, string> = {
 }
 
 export function ModelSelector({ disabled = false }: { disabled?: boolean }): React.JSX.Element {
-  const [config, setConfig] = useState<AgentModelConfig>(() =>
-    typeof localStorage === 'undefined' ? defaultModelConfig : readModelConfig(localStorage)
-  )
-
-  const update = (next: AgentModelConfig): void => {
-    if (typeof localStorage !== 'undefined') writeModelConfig(localStorage, next)
-    setConfig(next)
-  }
-
+  const { value, onChange } = useModelConfig()
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -44,9 +33,9 @@ export function ModelSelector({ disabled = false }: { disabled?: boolean }): Rea
           size="sm"
           variant="ghost"
         >
-          <span className="truncate">{modelLabels[config.modelId]}</span>
+          <span className="truncate">{modelLabels[value.modelId]}</span>
           <span className="shrink-0 text-muted-foreground/70">
-            {effortLabels[config.reasoningEffort]}
+            {effortLabels[value.reasoningEffort]}
           </span>
           <ChevronDownIcon className="size-3.5 shrink-0" />
         </Button>
@@ -57,15 +46,15 @@ export function ModelSelector({ disabled = false }: { disabled?: boolean }): Rea
           <div className="flex rounded-full bg-muted p-0.5 text-xs">
             {reasoningEfforts.map((reasoningEffort) => (
               <button
-                aria-pressed={config.reasoningEffort === reasoningEffort}
+                aria-pressed={value.reasoningEffort === reasoningEffort}
                 className={`rounded-full px-2 py-0.5 transition-colors ${
-                  config.reasoningEffort === reasoningEffort
+                  value.reasoningEffort === reasoningEffort
                     ? 'bg-background text-foreground shadow-sm'
                     : 'text-muted-foreground hover:text-foreground'
                 }`}
                 disabled={disabled}
                 key={reasoningEffort}
-                onClick={() => update({ ...config, reasoningEffort })}
+                onClick={() => onChange({ ...value, reasoningEffort })}
                 type="button"
               >
                 {effortLabels[reasoningEffort]}
@@ -78,10 +67,10 @@ export function ModelSelector({ disabled = false }: { disabled?: boolean }): Rea
           <DropdownMenuItem
             disabled={disabled}
             key={modelId}
-            onSelect={() => update({ ...config, modelId })}
+            onSelect={() => onChange({ ...value, modelId })}
           >
             <span className="flex-1">{modelLabels[modelId]}</span>
-            {config.modelId === modelId && <CheckIcon className="size-4" />}
+            {value.modelId === modelId && <CheckIcon className="size-4" />}
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>

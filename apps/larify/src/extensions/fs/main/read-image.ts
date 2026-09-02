@@ -29,7 +29,7 @@ interface ReadImageOutput {
 
 export const readImageTool = defineTool({
   description: 'Read a local PNG, JPEG, WebP, or GIF image.',
-  metadata: { icon: 'read', eager: true },
+  metadata: { icon: 'image', eager: true },
   inputSchema,
   execute: async ({ file_path }, ctx): Promise<ReadImageOutput> => {
     const modelId = ctx.modelId

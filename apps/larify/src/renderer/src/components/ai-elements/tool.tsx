@@ -16,6 +16,7 @@ import {
   ClockIcon,
   FileTextIcon,
   GlobeIcon,
+  ImageIcon,
   MessageSquareTextIcon,
   type LucideIcon,
   SearchIcon,
@@ -69,6 +70,7 @@ const kindIcons: Record<string, LucideIcon> = {
   'message-square-text': MessageSquareTextIcon,
   read: FileTextIcon,
   edit: SquarePenIcon,
+  image: ImageIcon,
   other: WrenchIcon
 }
 

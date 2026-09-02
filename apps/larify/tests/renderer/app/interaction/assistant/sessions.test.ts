@@ -550,4 +550,143 @@ describe('AssistantSessionsProvider', () => {
 
     expect(sessions.directory.map(({ cwd }) => cwd)).toEqual(['newer', ''])
   })
+
+  it('starts without back/forward history', () => {
+    expect(sessions.canBack).toBe(false)
+    expect(sessions.canForward).toBe(false)
+  })
+
+  it('navigates back and forward across visited sessions', async () => {
+    const first = sessions.activeId
+    await act(async () => {
+      sessions.setPersisted(first)
+      sessions.create()
+    })
+    const second = sessions.activeId
+    expect(sessions.canBack).toBe(true)
+    expect(sessions.canForward).toBe(false)
+
+    await act(async () => sessions.back())
+    expect(sessions.activeId).toBe(first)
+    expect(sessions.canForward).toBe(true)
+
+    await act(async () => sessions.forward())
+    expect(sessions.activeId).toBe(second)
+    expect(sessions.canForward).toBe(false)
+  })
+
+  it('truncates forward history after a new visit', async () => {
+    const first = sessions.activeId
+    await act(async () => {
+      sessions.setPersisted(first)
+      sessions.create()
+    })
+    await act(async () => sessions.back())
+    expect(sessions.activeId).toBe(first)
+    expect(sessions.canForward).toBe(true)
+
+    // 新建会复用未持久化的 draft；无论落到哪个会话，都不应保留"前进"分支。
+    await act(async () => {
+      sessions.setPersisted(first)
+      sessions.create()
+    })
+    expect(sessions.canForward).toBe(false)
+  })
+
+  it('records history when selecting a session directly', async () => {
+    const first = sessions.activeId
+    await act(async () => {
+      sessions.setPersisted(first)
+      sessions.create()
+    })
+    const second = sessions.activeId
+    await act(async () => sessions.select(first))
+    // first 是历史最早访问，回到它后无可后退；可前进到 second。
+    expect(sessions.activeId).toBe(first)
+    expect(sessions.canBack).toBe(false)
+    expect(sessions.canForward).toBe(true)
+
+    await act(async () => sessions.forward())
+    expect(sessions.activeId).toBe(second)
+    expect(sessions.canBack).toBe(true)
+    expect(sessions.canForward).toBe(false)
+  })
+
+  it('cannot go back past the oldest visited session', async () => {
+    const first = sessions.activeId
+    await act(async () => {
+      sessions.setPersisted(first)
+      sessions.create()
+      sessions.setPersisted(sessions.activeId)
+      sessions.create()
+    })
+    // 反复 back 到最早会话后，canBack=false，且不再越界。
+    await act(async () => sessions.back())
+    await act(async () => sessions.back())
+    await act(async () => sessions.back())
+    expect(sessions.canBack).toBe(false)
+    expect(sessions.activeId).toBe(first)
+  })
+
+  it('cannot go forward past the newest visited session', async () => {
+    const first = sessions.activeId
+    await act(async () => {
+      sessions.setPersisted(first)
+      sessions.create()
+      sessions.setPersisted(sessions.activeId)
+      sessions.create()
+    })
+    const deepest = sessions.activeId
+    await act(async () => sessions.back())
+    await act(async () => sessions.back())
+    await act(async () => sessions.forward())
+    await act(async () => sessions.forward())
+    // 到达最深处后，canForward=false。
+    expect(sessions.canForward).toBe(false)
+    expect(sessions.canBack).toBe(true)
+  })
+
+  it('selecting the current session does not duplicate it in history', async () => {
+    const first = sessions.activeId
+    await act(async () => {
+      sessions.setPersisted(first)
+      sessions.create()
+    })
+    const current = sessions.activeId
+    // 反复 select 当前会话，不应改变历史位置或重复压栈。
+    for (let index = 0; index < 3; index += 1) {
+      await act(async () => sessions.select(current))
+    }
+    expect(sessions.activeId).toBe(current)
+    // 回到 first 仍只有一条路径（无重复）。
+    await act(async () => sessions.back())
+    expect(sessions.activeId).toBe(first)
+    await act(async () => sessions.forward())
+    expect(sessions.activeId).toBe(current)
+  })
+
+  it('keeps a clean history when Strict Mode replays create', async () => {
+    act(() => root.unmount())
+    root = createRoot(document.createElement('div'))
+    await act(async () => {
+      root.render(
+        createElement(
+          StrictMode,
+          null,
+          createElement(AssistantSessionsProvider, null, createElement(Probe))
+        )
+      )
+    })
+    const first = sessions.activeId
+    await act(async () => {
+      sessions.setPersisted(first)
+      sessions.create()
+    })
+    const second = sessions.activeId
+    await act(async () => sessions.back())
+    // StrictMode 下 create 被 replay 也不应产生脏历史（能回到 first）。
+    expect(sessions.activeId).toBe(first)
+    await act(async () => sessions.forward())
+    expect(sessions.activeId).toBe(second)
+  })
 })

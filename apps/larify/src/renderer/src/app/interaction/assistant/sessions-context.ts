@@ -20,6 +20,10 @@ export interface AssistantSessions {
   activeSession: AssistantSessionState
   create(cwd?: string): void
   select(id: string): Promise<void>
+  back(): void
+  forward(): void
+  canBack: boolean
+  canForward: boolean
   loadMore(cwd: string): Promise<void>
   refresh(): Promise<void>
   rename(id: string, title: string): Promise<void>

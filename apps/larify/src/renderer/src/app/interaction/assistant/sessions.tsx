@@ -39,6 +39,11 @@ const closeSessionResources = async (sessionId: string): Promise<void> => {
   )
 }
 
+interface NavigationHistory {
+  stack: string[]
+  index: number
+}
+
 export function AssistantSessionsProvider({
   children
 }: {
@@ -51,6 +56,26 @@ export function AssistantSessionsProvider({
   const loading = useRef(new Set<string>())
   const closingResources = useRef(new Set<string>())
   const selected = useRef(state.activeId)
+  // 会话访问历史栈：记录用户通过侧边栏点击/新建访问过的会话顺序，用于前进/后退。
+  const navRef = useRef<NavigationHistory | null>(null)
+  if (navRef.current === null) navRef.current = { stack: [state.activeId], index: 0 }
+  const [navTick, setNavTick] = useState(0)
+
+  const recordVisit = useCallback((id: string): void => {
+    const nav = navRef.current!
+    if (nav.stack[nav.index] === id) return
+    const incoming = nav.stack.indexOf(id)
+    if (incoming >= 0) {
+      // 目标会话已在历史中：把指针移回该位置（保留其后的前进分支），不新增重复条目。
+      nav.index = incoming
+    } else {
+      // 新会话：丢弃当前位置之后的历史，再压入。
+      nav.stack.length = nav.index + 1
+      nav.stack.push(id)
+      nav.index = nav.stack.length - 1
+    }
+    setNavTick((tick) => tick + 1)
+  }, [])
 
   const refresh = useCallback(async () => {
     const version = ++refreshVersion.current
@@ -62,32 +87,40 @@ export function AssistantSessionsProvider({
     void refresh().catch(() => undefined)
   }, [refresh])
 
-  const create = useCallback((cwd = '') => {
-    setState((current) => {
-      const draft = current.sessions.find(({ persisted }) => !persisted)
-      if (draft) {
-        selected.current = draft.id
-        queueMicrotask(() => {
-          if (closingResources.current.has(draft.id)) return
-          closingResources.current.add(draft.id)
-          void closeSessionResources(draft.id)
-            .catch(() => undefined)
-            .finally(() => closingResources.current.delete(draft.id))
-        })
-        return {
-          sessions: current.sessions.map((session) =>
-            session.id === draft.id ? { ...session, cwd } : session
-          ),
-          activeId: draft.id
-        }
-      }
-
+  const create = useCallback(
+    (cwd = '') => {
+      // 会话对象在 updater 外构造，保证 StrictMode double-invoke updater 时复用同一个
+      // 稳定 id，避免记录历史时入栈一个不在 state 里的孤儿 id（back 会卡住）。recordVisit
+      // 幂等（当前栈顶已是该 id 时直接返回），double-invoke 不会产生重复条目。
       const session = createSession(cwd)
-      selected.current = session.id
-      return { sessions: [...current.sessions, session], activeId: session.id }
-    })
-  }, [])
-  const select = useCallback(
+      setState((current) => {
+        const draft = current.sessions.find(({ persisted }) => !persisted)
+        if (draft) {
+          recordVisit(draft.id)
+          selected.current = draft.id
+          queueMicrotask(() => {
+            if (closingResources.current.has(draft.id)) return
+            closingResources.current.add(draft.id)
+            void closeSessionResources(draft.id)
+              .catch(() => undefined)
+              .finally(() => closingResources.current.delete(draft.id))
+          })
+          return {
+            sessions: current.sessions.map((item) =>
+              item.id === draft.id ? { ...item, cwd } : item
+            ),
+            activeId: draft.id
+          }
+        }
+
+        recordVisit(session.id)
+        selected.current = session.id
+        return { sessions: [...current.sessions, session], activeId: session.id }
+      })
+    },
+    [recordVisit]
+  )
+  const applySelect = useCallback(
     async (activeId: string) => {
       const clearUnread = (): void => {
         setAttention((current) => {
@@ -134,6 +167,30 @@ export function AssistantSessionsProvider({
     },
     [directory, state.activeId, state.sessions]
   )
+
+  const select = useCallback(
+    async (id: string) => {
+      recordVisit(id)
+      await applySelect(id)
+    },
+    [applySelect, recordVisit]
+  )
+  const back = useCallback(() => {
+    const nav = navRef.current!
+    if (nav.index <= 0) return
+    nav.index -= 1
+    setNavTick((tick) => tick + 1)
+    void applySelect(nav.stack[nav.index])
+  }, [applySelect])
+  const forward = useCallback(() => {
+    const nav = navRef.current!
+    if (nav.index >= nav.stack.length - 1) return
+    nav.index += 1
+    setNavTick((tick) => tick + 1)
+    void applySelect(nav.stack[nav.index])
+  }, [applySelect])
+  const canBack = (navRef.current?.index ?? 0) > 0
+  const canForward = (navRef.current?.index ?? 0) < (navRef.current?.stack.length ?? 1) - 1
   const loadMore = useCallback(
     async (cwd: string) => {
       const group = directory.find((item) => item.cwd === cwd)
@@ -248,6 +305,10 @@ export function AssistantSessionsProvider({
       activeSession,
       create,
       select,
+      back,
+      forward,
+      canBack,
+      canForward,
       loadMore,
       refresh,
       rename,
@@ -258,9 +319,14 @@ export function AssistantSessionsProvider({
     }),
     [
       activeSession,
+      back,
+      canBack,
+      canForward,
       create,
       directory,
+      forward,
       loadMore,
+      navTick,
       refresh,
       rename,
       select,

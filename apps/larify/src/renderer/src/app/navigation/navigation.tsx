@@ -3,6 +3,7 @@ import { PanelLeftCloseIcon } from 'lucide-react'
 import { PanelToggle } from '../layout/panel-toggle'
 import { Region } from '../layout/region'
 import { NavigationContent } from './navigation-content'
+import { NavigationHistory } from './navigation-history'
 
 export function Navigation({
   onCollapse,
@@ -14,12 +15,13 @@ export function Navigation({
   return (
     <Region label="Navigation" className="h-full bg-sidebar">
       <div
-        className="flex h-(--titlebar-h) shrink-0 items-center pr-3 [-webkit-app-region:drag]"
+        className="flex h-(--titlebar-h) shrink-0 items-center gap-2 pr-3 [-webkit-app-region:drag]"
         style={{ paddingLeft: 'calc(var(--titlebar-inset-left) - 7px)' }}
       >
         {showToggle && (
           <PanelToggle label="隐藏侧边栏" icon={PanelLeftCloseIcon} onClick={onCollapse} />
         )}
+        <NavigationHistory />
       </div>
       <NavigationContent />
     </Region>

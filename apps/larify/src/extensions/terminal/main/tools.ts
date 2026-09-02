@@ -240,7 +240,7 @@ export function createTerminalToolkit(service: TerminalService): Record<string, 
         execute: async (_args, ctx) => service.state(ctx.sessionId).terminals
       }),
       create: defineTool({
-        description: 'Create a terminal only when none is available',
+        description: 'Create a terminal only when none is reusable',
         metadata: { icon: 'terminal', eager: true },
         inputSchema: createSchema,
         execute: async (args, ctx) => {

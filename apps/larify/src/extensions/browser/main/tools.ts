@@ -204,7 +204,7 @@ async function writeDataUrl(
 export function createBrowserTools(service: BrowserService): Record<string, Tool> {
   return {
       create_tab: defineTool({
-        description: "Open a new browser tab only when none is available, optionally navigating to a URL or local file path.",
+        description: "Open a new browser tab only when none is reusable, optionally navigating to a URL or local file path.",
         metadata: { icon: "browser", eager: true },
         inputSchema: z.object({ url: z.string().optional().describe("URL or local file path") }).strict(),
         execute: async (args, ctx) => {

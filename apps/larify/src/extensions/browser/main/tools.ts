@@ -8,6 +8,7 @@ import { larifyTempPath } from "../../../main/utils/app-paths"
 import { prepareToolOutput } from "../../../main/utils/tool-output"
 import type { BrowserService } from "./browser-service"
 import type { BrowserTab } from "./tab"
+import { navigateAndWaitWithRetry } from "./transient-navigation"
 import { waitMs } from "./waits"
 import { pageContentOutput, webFetchTools } from "./web-fetch"
 import { webSearchTools } from "./web-search"
@@ -216,7 +217,11 @@ export function createBrowserTools(service: BrowserService): Record<string, Tool
                 ctx.sessionId,
                 id,
                 () => runUntilAbort(
-                  () => tab.navigateAndWait(resolveNavigationInput(ctx.cwd, url)),
+                  () => navigateAndWaitWithRetry(
+                    tab,
+                    resolveNavigationInput(ctx.cwd, url),
+                    ctx.signal,
+                  ),
                   ctx.signal,
                   "browser navigation",
                 ),
@@ -256,7 +261,11 @@ export function createBrowserTools(service: BrowserService): Record<string, Tool
           return withTab(service, ctx.sessionId, id, async (tab) => {
             await runUntilAbort(async () => {
               if (action === "goto")
-                await tab.navigateAndWait(resolveNavigationInput(ctx.cwd, url!))
+                await navigateAndWaitWithRetry(
+                  tab,
+                  resolveNavigationInput(ctx.cwd, url!),
+                  ctx.signal,
+                )
               else if (action === "back") await tab.goBackAndWait()
               else if (action === "forward") await tab.goForwardAndWait()
               else await tab.reloadAndWait()
@@ -527,7 +536,7 @@ function interactionTools(service: BrowserService): Record<string, Tool> {
               ctx.sessionId,
               newTabId,
               () => runUntilAbort(
-                () => created.navigateAndWait(href),
+                () => navigateAndWaitWithRetry(created, href, ctx.signal),
                 ctx.signal,
                 "browser navigation",
               ),

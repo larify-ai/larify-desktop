@@ -6,6 +6,7 @@ import { tmpdir } from "node:os"
 import { pathToFileURL } from "node:url"
 import { z } from "zod"
 import { createBrowserTools } from "../../../../src/extensions/browser/main/tools"
+import { TRANSIENT_NAVIGATION_ERROR } from "../../../../src/extensions/browser/main/transient-navigation"
 import type { BrowserService } from "../../../../src/extensions/browser/main/browser-service"
 
 const ctx = { context: { sessionId: "session-1", cwd: "D:\\Workspace" } }
@@ -311,6 +312,201 @@ describe("browser toolkit", () => {
     expect(tab.goBackAndWait).toHaveBeenCalledTimes(1)
     expect(tab.goForwardAndWait).toHaveBeenCalledTimes(1)
     expect(tab.reloadAndWait).toHaveBeenCalledTimes(1)
+  })
+
+  const transientNavigationMessages = [
+    "navigation failed (-15): ERR_SOCKET_NOT_CONNECTED: https://example.com",
+    "navigation failed (-21): ERR_NETWORK_CHANGED: https://example.com",
+    "navigation failed (-102): ERR_CONNECTION_RESET: https://example.com",
+    "navigation failed (-100): ERR_CONNECTION_CLOSED: https://example.com",
+    "navigation failed (-118): ERR_CONNECTION_TIMED_OUT: https://example.com",
+    "navigation failed (-7): ERR_TIMED_OUT: https://example.com",
+  ]
+  const nonTransientNavigationMessages = [
+    "navigation failed (-105): ERR_NAME_NOT_RESOLVED: https://example.com",
+    "navigation failed (-102): ERR_CONNECTION_REFUSED: https://example.com",
+    "navigation load event timed out after 60s",
+    "navigation was superseded: https://example.com",
+  ]
+
+  it.each(transientNavigationMessages)(
+    "treats transient navigation errors as retryable: %s",
+    (message) => {
+      expect(TRANSIENT_NAVIGATION_ERROR.test(message)).toBe(true)
+    },
+  )
+
+  it.each(nonTransientNavigationMessages)(
+    "does not treat non-transient navigation errors as retryable: %s",
+    (message) => {
+      expect(TRANSIENT_NAVIGATION_ERROR.test(message)).toBe(false)
+    },
+  )
+
+  it("retries a transient navigate failure once", async () => {
+    vi.useFakeTimers()
+    const tab = {
+      navigateAndWait: vi
+        .fn()
+        .mockRejectedValueOnce(
+          new Error(
+            "navigation failed (-102): ERR_CONNECTION_RESET: https://example.com",
+          ),
+        )
+        .mockResolvedValueOnce(undefined),
+      state: vi.fn(() => ({
+        id: 1,
+        url: "https://example.com",
+        title: "Example",
+        favIconUrl: "data:image/png;base64,abc",
+        loading: false,
+        canGoBack: false,
+        canGoForward: false,
+        error: null,
+      })),
+    }
+    const service = {
+      ...createService(),
+      tab: vi.fn(() => tab),
+    } as unknown as BrowserService
+
+    const pending = tool("navigate", service).execute({ id: 1, url: "https://example.com" }, ctx)
+    const assertion = expect(pending).resolves.toMatchObject({ id: 1, url: "https://example.com" })
+    await vi.advanceTimersByTimeAsync(0)
+    await vi.advanceTimersByTimeAsync(300)
+
+    await assertion
+    expect(tab.navigateAndWait).toHaveBeenCalledTimes(2)
+    vi.useRealTimers()
+  })
+
+  it("does not retry non-transient navigate failures", async () => {
+    const tab = {
+      navigateAndWait: vi.fn(async () => {
+        throw new Error("navigation failed (-105): ERR_NAME_NOT_RESOLVED: https://example.com")
+      }),
+    }
+    const service = {
+      ...createService(),
+      tab: vi.fn(() => tab),
+    } as unknown as BrowserService
+
+    await expect(
+      tool("navigate", service).execute({ id: 1, url: "https://example.com" }, ctx),
+    ).rejects.toThrow("ERR_NAME_NOT_RESOLVED")
+    expect(tab.navigateAndWait).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not retry navigation load timeouts", async () => {
+    const tab = {
+      navigateAndWait: vi.fn(async () => {
+        throw new Error("navigation load event timed out after 60s")
+      }),
+    }
+    const service = {
+      ...createService(),
+      tab: vi.fn(() => tab),
+    } as unknown as BrowserService
+
+    await expect(
+      tool("navigate", service).execute({ id: 1, url: "https://example.com" }, ctx),
+    ).rejects.toThrow("navigation load event timed out after 60s")
+    expect(tab.navigateAndWait).toHaveBeenCalledTimes(1)
+  })
+
+  it("exhausts transient retries and surfaces the last navigation error", async () => {
+    vi.useFakeTimers()
+    const tab = {
+      navigateAndWait: vi.fn(async () => {
+        throw new Error(
+          "navigation failed (-118): ERR_CONNECTION_TIMED_OUT: https://example.com",
+        )
+      }),
+    }
+    const service = {
+      ...createService(),
+      tab: vi.fn(() => tab),
+    } as unknown as BrowserService
+
+    const pending = tool("navigate", service).execute({ id: 1, url: "https://example.com" }, ctx)
+    const assertion = expect(pending).rejects.toThrow("ERR_CONNECTION_TIMED_OUT")
+    await vi.advanceTimersByTimeAsync(0)
+    await vi.advanceTimersByTimeAsync(300)
+
+    await assertion
+    expect(tab.navigateAndWait).toHaveBeenCalledTimes(2)
+    vi.useRealTimers()
+  })
+
+  it("retries a transient create_tab navigation failure once", async () => {
+    vi.useFakeTimers()
+    const tab = {
+      navigateAndWait: vi
+        .fn()
+        .mockRejectedValueOnce(
+          new Error(
+            "navigation failed (-102): ERR_CONNECTION_RESET: https://example.com",
+          ),
+        )
+        .mockResolvedValueOnce(undefined),
+      state: vi.fn(() => ({
+        id: 1,
+        url: "https://example.com",
+        title: "Example",
+        favIconUrl: "data:image/png;base64,abc",
+        loading: false,
+        canGoBack: false,
+        canGoForward: false,
+        error: null,
+      })),
+    }
+    const service = {
+      ...createService(),
+      createTab: vi.fn(() => 1),
+      close: vi.fn(async () => undefined),
+      tab: vi.fn(() => tab),
+    } as unknown as BrowserService
+
+    const pending = tool("create_tab", service).execute({ url: "https://example.com" }, ctx)
+    const assertion = expect(pending).resolves.toMatchObject({ id: 1, url: "https://example.com" })
+    await vi.advanceTimersByTimeAsync(0)
+    await vi.advanceTimersByTimeAsync(300)
+
+    await assertion
+    expect(tab.navigateAndWait).toHaveBeenCalledTimes(2)
+    expect(service.close).not.toHaveBeenCalled()
+    vi.useRealTimers()
+  })
+
+  it("retries a transient click newTab navigation failure once", async () => {
+    vi.useFakeTimers()
+    const source = { elementHref: vi.fn(async () => "https://example.com/next") }
+    const target = {
+      navigateAndWait: vi
+        .fn()
+        .mockRejectedValueOnce(
+          new Error(
+            "navigation failed (-21): ERR_NETWORK_CHANGED: https://example.com/next",
+          ),
+        )
+        .mockResolvedValueOnce(undefined),
+    }
+    const service = {
+      ...createService(),
+      createTab: vi.fn(() => 2),
+      close: vi.fn(async () => undefined),
+      tab: vi.fn((_sessionId: string, id: number) => (id === 1 ? source : target)),
+    } as unknown as BrowserService
+
+    const pending = tool("click", service).execute({ id: 1, selector: "a", newTab: true }, ctx)
+    const assertion = expect(pending).resolves.toMatchObject({ id: 2, newTab: true })
+    await vi.advanceTimersByTimeAsync(0)
+    await vi.advanceTimersByTimeAsync(300)
+
+    await assertion
+    expect(target.navigateAndWait).toHaveBeenCalledTimes(2)
+    expect(service.close).not.toHaveBeenCalled()
+    vi.useRealTimers()
   })
 
   it("stops waiting for navigation when the tool is aborted", async () => {

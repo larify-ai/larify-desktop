@@ -5,11 +5,9 @@ import { prepareToolOutput, type ToolPayload } from '../../../main/utils/tool-ou
 import { defineTool, type Tool, type ToolRunContext } from '../../../main/core/plugin/protocol'
 import type { BrowserService } from './browser-service'
 import type { BrowserTab } from './tab'
+import { TRANSIENT_NAVIGATION_ERROR } from './transient-navigation'
 import { normalizeUrl } from './url'
 import { waitForOperationOrAbort } from './waits'
-
-const TRANSIENT_NAVIGATION_ERROR =
-  /ERR_(?:SOCKET_NOT_CONNECTED|NETWORK_CHANGED|CONNECTION_RESET|CONNECTION_CLOSED|TIMED_OUT)/
 
 export const webFetchInputSchema = z
   .object({

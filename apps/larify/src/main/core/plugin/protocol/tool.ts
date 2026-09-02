@@ -1,5 +1,6 @@
 import type { Tool as AiTool, ToolExecutionOptions } from 'ai'
 import { z } from 'zod'
+import { convertJsonSchemaToZod } from 'zod-from-json-schema'
 import type { Metadata } from './metadata'
 
 export type Tool = AiTool
@@ -15,16 +16,23 @@ export type RequestContextReset = (handoff: string) => void
 
 export function wrapTool(tool: Tool): Tool {
   const execute = tool.execute
-  if (!(tool.inputSchema instanceof z.ZodObject)) {
-    throw new Error('Tool input schema must be a Zod object.')
+  let schema: z.ZodObject
+  if (tool.inputSchema instanceof z.ZodObject) {
+    schema = tool.inputSchema
+  } else {
+    const raw = (tool.inputSchema as { jsonSchema?: unknown } | null | undefined)?.jsonSchema
+    if (!raw || typeof raw !== 'object' || (raw as { type?: unknown }).type !== 'object') {
+      throw new Error('Tool input schema must be a Zod object or JSON object schema.')
+    }
+    schema = convertJsonSchemaToZod(raw as Parameters<typeof convertJsonSchemaToZod>[0]) as unknown as z.ZodObject
   }
-  if ('toolCallTitle' in tool.inputSchema.shape) {
+  if ('toolCallTitle' in schema.shape) {
     throw new Error('Tool input schema must not define the reserved "toolCallTitle" field.')
   }
 
   return {
     ...tool,
-    inputSchema: tool.inputSchema
+    inputSchema: schema
       .extend({
         toolCallTitle: z
           .string()

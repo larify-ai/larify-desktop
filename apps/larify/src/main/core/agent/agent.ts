@@ -3,6 +3,7 @@ import type { Disposable } from '@shared/infra/disposable'
 import { larifyWorkspacePath } from '../../utils/app-paths'
 import type { AgentModelConfig } from '../model/config'
 import type { PluginHost } from '../plugin/host'
+import { pluginDiscovery } from '../plugin/plugin-discovery'
 import type { SessionStore } from '../session'
 import { createAgentRuntime } from './runtime'
 import { AgentReview, FileChangeTracker } from './review'
@@ -33,11 +34,14 @@ export class Agent implements Disposable {
 
   send(input: AgentInput, sink: AgentSink): void {
     if (this.workers.has(input.sessionId)) throw new Error('Agent is already running.')
+    // 增量刷新磁盘插件（含新增/修改/删除的 MCP server）。fire-and-forget：
+    // 本次请求仍用当前工具集，下一次请求即生效。
+    void this.pluginHost.refreshPlugins(pluginDiscovery.discover())
     const request = { ...input, cwd: input.cwd || larifyWorkspacePath() }
     const runtime = createAgentRuntime(request, this.pluginHost)
     const track = this.acquireTrack(input.sessionId, request.cwd, input.message)
     this.activeSinks.set(input.sessionId, sink)
-    const worker = new AgentWorker(this.sessions, sink, track)
+    const worker = new AgentWorker(this.sessions, sink, this.pluginHost, track)
     this.workers.set(input.sessionId, worker)
     void worker.run({ ...request, runtime }).finally(() => {
       if (this.workers.get(input.sessionId) === worker) this.workers.delete(input.sessionId)

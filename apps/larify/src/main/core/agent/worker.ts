@@ -5,6 +5,8 @@ import type { SessionStore } from '../session'
 import type { AgentOptions } from './engine'
 import { runStoredAgentSession } from './persist'
 import { AgentReview, FileChangeTracker, reviewChunk } from './review'
+import type { PluginHost } from '../plugin/host'
+import { pluginDiscovery } from '../plugin/plugin-discovery'
 
 const reviewTools = new Set(['fs_edit', 'fs_write'])
 const resetContextTool = 'agent_reset_context'
@@ -36,6 +38,7 @@ export class AgentWorker {
   constructor(
     private readonly sessions: SessionStore,
     private readonly sink: AgentSink,
+    private readonly pluginHost: PluginHost,
     private readonly track?: SessionTrack
   ) {}
 
@@ -156,6 +159,10 @@ export class AgentWorker {
           parts: [...input.message.parts, { type: 'text', text: `# Handoff\n\n${handoff}` }]
         }
         handoff = undefined
+        // reset_context 走进程内 handoff，不经过 Agent.send()，故此处显式刷新
+        // 磁盘插件（增量 diff），让"重置上下文"后的续写立即可见新增/修改/删除的
+        // MCP server。await：reset 本就是重置语义，阻塞等刷新完再续写。
+        await this.pluginHost.refreshPlugins(pluginDiscovery.discover())
         clearReadState(input.sessionId)
         this.sessions.saveStart(input.sessionId, message)
         response = await runOnce(message)

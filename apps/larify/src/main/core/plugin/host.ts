@@ -3,6 +3,7 @@ import type { Registry } from '@shared/infra/registry'
 import type { Manifest, Plugin, PluginContext, Skill, Tool } from './protocol'
 import { wrapTool } from './protocol'
 import type { SkillDiscovery } from './skill-discovery'
+import type { DiscoveredPlugin } from './plugin-discovery'
 
 interface RegisteredPlugin {
   manifest: Manifest
@@ -17,11 +18,12 @@ function sortMap<T>(values: Iterable<readonly [string, T]>): Map<string, T> {
 
 export class PluginHost {
   private readonly plugins = new Map<string, RegisteredPlugin>()
+  private readonly pluginFingerprints = new Map<string, string>()
 
   constructor(
     private readonly registry: Registry,
     private readonly skillDiscovery?: SkillDiscovery
-  ) {}
+  ) { }
 
   has(id: string): boolean {
     return this.plugins.has(id)
@@ -82,6 +84,25 @@ export class PluginHost {
     await this.activate(plugin)
   }
 
+  async refreshPlugins(discovered: DiscoveredPlugin[]): Promise<void> {
+    const seen = new Set<string>()
+    for (const { plugin, fingerprint } of discovered) {
+      const id = plugin.manifest.id
+      seen.add(id)
+      if (!this.plugins.has(id)) {
+        await this.syncDiskPlugin(id, fingerprint, 'activate', () => this.activate(plugin))
+      } else if (this.pluginFingerprints.has(id) && this.pluginFingerprints.get(id) !== fingerprint) {
+        await this.syncDiskPlugin(id, fingerprint, 'reload', () => this.reload(plugin))
+      }
+    }
+    for (const id of [...this.pluginFingerprints.keys()]) {
+      if (!seen.has(id)) {
+        await this.deactivate(id)
+        this.pluginFingerprints.delete(id)
+      }
+    }
+  }
+
   async dispose(): Promise<void> {
     for (const id of [...this.plugins.keys()].reverse()) {
       await this.deactivate(id)
@@ -95,6 +116,20 @@ export class PluginHost {
       subscriptions: registered.subscriptions,
       registerTool: (name, tool) =>
         registered.tools.set(`${registered.manifest.id}_${name}`, wrapTool(tool))
+    }
+  }
+
+  private async syncDiskPlugin(
+    id: string,
+    fingerprint: string,
+    action: 'activate' | 'reload',
+    run: () => Promise<void>
+  ): Promise<void> {
+    try {
+      await run()
+      this.pluginFingerprints.set(id, fingerprint)
+    } catch (error) {
+      console.error(`[plugin] Failed to ${action} disk plugin "${id}":`, error)
     }
   }
 

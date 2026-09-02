@@ -72,8 +72,9 @@ describe('navigation content', () => {
     expect(workspaceHeading?.tagName).toBe('H2')
     expect(workspaceList?.className).toContain('overflow-y-auto')
     expect(workspaceList?.contains(workspaceHeading)).toBe(false)
-    expect(container.textContent).toContain('百宝箱')
-    expect(container.textContent).toContain('知识库')
+    // 暂时注释：百宝箱/知识库入口已隐藏，恢复入口时恢复以下断言
+    // expect(container.textContent).toContain('百宝箱')
+    // expect(container.textContent).toContain('知识库')
     expect(container.textContent).toContain('Workspace')
     expect(container.textContent).toContain('Stored session')
     expect(container.textContent).not.toContain('Current session')

@@ -1,5 +1,7 @@
 import { useState } from 'react'
-import { BookOpenIcon, LayoutGridIcon, MessageCirclePlusIcon, PlusIcon } from 'lucide-react'
+// 暂不显示百宝箱/知识库入口，恢复时取消注释并一并恢复下方 JSX 与测试断言
+// import { BookOpenIcon, LayoutGridIcon, MessageCirclePlusIcon, PlusIcon } from 'lucide-react'
+import { MessageCirclePlusIcon, PlusIcon } from 'lucide-react'
 import { useAssistantSessions } from '../interaction/assistant/sessions-context'
 import { NavigationAction } from './navigation-action'
 import { Workspace } from './workspace'
@@ -60,8 +62,10 @@ export function NavigationContent(): React.JSX.Element {
         <NavigationAction icon={MessageCirclePlusIcon} onClick={() => sessions.create()}>
           新建任务
         </NavigationAction>
+        {/* 暂时注释：百宝箱/知识库入口
         <NavigationAction icon={LayoutGridIcon}>百宝箱</NavigationAction>
         <NavigationAction icon={BookOpenIcon}>知识库</NavigationAction>
+        */}
       </nav>
 
       <h2

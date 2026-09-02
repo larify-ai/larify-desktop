@@ -396,7 +396,7 @@ describe('PluginHost', () => {
           context.registerTool('tool', { description: 'invalid' })
         }
       })
-    ).rejects.toThrow('Tool input schema must be a Zod object.')
+    ).rejects.toThrow('Tool input schema must be a Zod object or JSON object schema.')
 
     expect(host.has('invalid')).toBe(false)
   })
@@ -442,5 +442,139 @@ describe('PluginHost', () => {
 
     expect(calls).toEqual(['second', 'first'])
     expect(host.listPlugins()).toEqual([])
+  })
+})
+
+describe('PluginHost.refreshPlugins', () => {
+  const disk = (id: string, fingerprint: string, activate: Plugin['activate'] = () => undefined) => ({
+    fingerprint,
+    plugin: { manifest: { id }, activate } as Plugin
+  })
+
+  it('activates new disk plugins and tracks fingerprints', async () => {
+    const host = new PluginHost(new Registry())
+    const activate = vi.fn()
+
+    await host.refreshPlugins([disk('gh', 'a:1', activate)])
+
+    expect(host.has('gh')).toBe(true)
+    expect(activate).toHaveBeenCalledOnce()
+  })
+
+  it('reloads a disk plugin when its fingerprint changes', async () => {
+    const host = new PluginHost(new Registry())
+    const activate = vi.fn()
+    const dispose = vi.fn()
+    const pluginWithDispose: Plugin['activate'] = (ctx) => {
+      activate()
+      ctx.subscriptions.push({ dispose })
+    }
+
+    await host.refreshPlugins([disk('gh', 'a:1', pluginWithDispose)])
+    expect(activate).toHaveBeenCalledTimes(1)
+    expect(dispose).not.toHaveBeenCalled()
+
+    await host.refreshPlugins([disk('gh', 'b:2', pluginWithDispose)])
+
+    expect(activate).toHaveBeenCalledTimes(2)
+    expect(dispose).toHaveBeenCalledOnce()
+    expect(host.has('gh')).toBe(true)
+  })
+
+  it('keeps a disk plugin untouched when fingerprint is unchanged', async () => {
+    const host = new PluginHost(new Registry())
+    const activate = vi.fn()
+
+    await host.refreshPlugins([disk('gh', 'a:1', activate)])
+    await host.refreshPlugins([disk('gh', 'a:1', activate)])
+
+    expect(activate).toHaveBeenCalledOnce()
+  })
+
+  it('deactivates a disk plugin that disappeared from discovered list', async () => {
+    const host = new PluginHost(new Registry())
+    const dispose = vi.fn()
+
+    await host.refreshPlugins([
+      disk('gh', 'a:1', (ctx) => ctx.subscriptions.push({ dispose }))
+    ])
+    await host.refreshPlugins([])
+
+    expect(host.has('gh')).toBe(false)
+    expect(dispose).toHaveBeenCalledOnce()
+  })
+
+  it('never reloads or removes builtin plugins not in pluginFingerprints', async () => {
+    const host = new PluginHost(new Registry())
+    const builtinActivate = vi.fn()
+    await host.activate({ manifest: { id: 'builtin' }, activate: builtinActivate })
+
+    await host.refreshPlugins([disk('gh', 'a:1', () => undefined)])
+    expect(host.has('builtin')).toBe(true)
+    expect(builtinActivate).toHaveBeenCalledOnce()
+
+    await host.refreshPlugins([disk('gh', 'b:2', () => undefined)])
+    expect(host.has('builtin')).toBe(true)
+    expect(builtinActivate).toHaveBeenCalledOnce()
+
+    await host.refreshPlugins([])
+    expect(host.has('builtin')).toBe(true)
+  })
+
+  it('skips a disk plugin whose activate throws, keeping other plugins', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const host = new PluginHost(new Registry())
+    const goodActivate = vi.fn()
+
+    await host.refreshPlugins([
+      disk('bad', 'a:1', () => { throw new Error('boom') }),
+      disk('good', 'b:2', goodActivate)
+    ])
+
+    expect(host.has('bad')).toBe(false)
+    expect(host.has('good')).toBe(true)
+    expect(goodActivate).toHaveBeenCalledOnce()
+    expect(errorSpy).toHaveBeenCalledOnce()
+    errorSpy.mockRestore()
+  })
+
+  it('leaves a plugin inactive when reload throws; recovers on next refresh with same fingerprint', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const host = new PluginHost(new Registry())
+    const dispose = vi.fn()
+
+    await host.refreshPlugins([
+      disk('gh', 'a:1', (ctx) => ctx.subscriptions.push({ dispose }))
+    ])
+    expect(host.has('gh')).toBe(true)
+    expect(dispose).not.toHaveBeenCalled()
+
+    await host.refreshPlugins([
+      disk('gh', 'b:2', () => { throw new Error('reload-fail') })
+    ])
+    expect(host.has('gh')).toBe(false)
+    expect(dispose).toHaveBeenCalledOnce()
+    expect(errorSpy).toHaveBeenCalledOnce()
+
+    const recoverActivate = vi.fn()
+    await host.refreshPlugins([disk('gh', 'b:2', recoverActivate)])
+    expect(host.has('gh')).toBe(true)
+    expect(recoverActivate).toHaveBeenCalledOnce()
+    errorSpy.mockRestore()
+  })
+
+  it('tolerates duplicate ids inside a single discovered list (last fingerprint wins without double-activate)', async () => {
+    const host = new PluginHost(new Registry())
+    const activate = vi.fn()
+    const firstActivate = vi.fn()
+
+    await host.refreshPlugins([
+      disk('gh', 'a:1', firstActivate),
+      disk('gh', 'a:1', activate)
+    ])
+
+    expect(firstActivate).toHaveBeenCalledOnce()
+    expect(activate).not.toHaveBeenCalled()
+    expect(host.has('gh')).toBe(true)
   })
 })

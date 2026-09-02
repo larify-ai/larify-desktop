@@ -48,13 +48,16 @@ function createWorker(track?: SessionTrack): {
     error: ReturnType<typeof vi.fn>
     end: ReturnType<typeof vi.fn>
   }
+  pluginHost: { refreshPlugins: ReturnType<typeof vi.fn> }
 } {
   const sink = { chunk: vi.fn(), title: vi.fn(), error: vi.fn(), end: vi.fn() }
   const sessions = { loadMessages: vi.fn<() => UIMessage[]>(() => []), saveMessages: vi.fn(), saveStart: vi.fn() }
+  const pluginHost = { refreshPlugins: vi.fn(async () => undefined) }
   return {
-    worker: new AgentWorker(sessions as never, sink, track),
+    worker: new AgentWorker(sessions as never, sink, pluginHost as never, track),
     sessions,
-    sink
+    sink,
+    pluginHost
   }
 }
 
@@ -230,10 +233,11 @@ describe('AgentWorker', () => {
         return undefined
       })
       .mockResolvedValueOnce(undefined)
-    const { worker, sessions, sink } = createWorker()
+    const { worker, sessions, sink, pluginHost } = createWorker()
 
     await worker.run({ ...input, runtime })
 
+    expect(pluginHost.refreshPlugins).toHaveBeenCalledTimes(1)
     expect(mocks.run).toHaveBeenCalledTimes(2)
     const nextMessage = mocks.run.mock.calls[1][1].message
     expect(nextMessage).toMatchObject({
@@ -275,10 +279,11 @@ describe('AgentWorker', () => {
         expect(readAtFor(otherSessionId, file)).toBe(2_000)
         return undefined
       })
-    const { worker } = createWorker()
+    const { worker, pluginHost } = createWorker()
 
     await worker.run({ ...input, sessionId, runtime })
 
+    expect(pluginHost.refreshPlugins).toHaveBeenCalledTimes(1)
     expect(mocks.run).toHaveBeenCalledTimes(2)
     expect(readAtFor(sessionId, file)).toBeUndefined()
     expect(readAtFor(otherSessionId, file)).toBe(2_000)

@@ -42,7 +42,7 @@ const sessions = {
   saveMessages: vi.fn(),
   saveStart: vi.fn()
 }
-const pluginHost = {}
+const pluginHost = { refreshPlugins: vi.fn(async () => undefined) }
 
 beforeEach(() => {
   vi.clearAllMocks()

@@ -1144,6 +1144,57 @@ describe('interaction assistant message list', () => {
     ).toBe('open')
   })
 
+  it('expands every stage group while ask user waits (waiting not only streaming)', async () => {
+    // 用户报告：ask_user 等待回答时，跨阶段 activity-history 的进度组（如「调研会话前进后退功能」）
+    // 被折叠成标题行。修复后 waiting 时进度组应默认展开（defaultOpen = streaming || waiting）。
+    const response = {
+      id: 'waiting-click-stage',
+      role: 'assistant',
+      parts: [
+        {
+          type: 'dynamic-tool',
+          toolName: 'agent_show_progress',
+          toolCallId: 'stage-progress',
+          state: 'output-available',
+          input: { title: '调研会话前进后退功能' },
+          output: 'Progress shown.'
+        },
+        { type: 'reasoning', text: '分析当前实现', state: 'done' },
+        {
+          type: 'dynamic-tool',
+          toolName: 'agent_ask_user',
+          toolCallId: 'ask-option',
+          state: 'input-available',
+          input: { toolCallTitle: '确认推荐方向' }
+        }
+      ]
+    } as UIMessage
+
+    await render({ messages: [response], recentStart: 0, live: false })
+
+    const props = captured.props as VirtuosoProps
+    expect(props.computeItemKey(0)).toBe('waiting-click-stage-activity-history')
+
+    await act(async () => root.render(props.itemContent(0)))
+
+    // 顶层 activity history 因 waiting 展开
+    const historyTrigger = container.querySelector<HTMLButtonElement>(
+      '[data-activity-history] > button'
+    )
+    expect(historyTrigger?.dataset.state).toBe('open')
+
+    // 进度组（stage 的 ActivityGroupPart）因 waiting 默认展开（而非仅 streaming 时）
+    const stageTriggers = container.querySelectorAll<HTMLButtonElement>(
+      '[data-activity-group] > button'
+    )
+    expect(stageTriggers.length).toBeGreaterThan(0)
+    const stageTrigger = [...stageTriggers].find((b) =>
+      b.textContent?.includes('调研会话前进后退功能')
+    )
+    expect(stageTrigger).toBeTruthy()
+    expect(stageTrigger?.dataset.state).toBe('open')
+  })
+
   it('starts named stages before work with show progress independently of reset', async () => {
     const response = {
       id: 'progress-before-work',

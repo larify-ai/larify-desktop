@@ -120,7 +120,9 @@ export function ActivityHistoryPart({
                 item={{
                   ...section.item,
                   summary: section.title,
-                  defaultOpen: streaming
+                  // waiting（ask_user 暂停、等待回答）时处理未结束，进度组应展开让用户看到
+                  // 进度（而非只折叠成标题行），不应只在 streaming 时展开。
+                  defaultOpen: streaming || waiting
                 }}
                 message={section.message}
                 streaming={section.streaming}

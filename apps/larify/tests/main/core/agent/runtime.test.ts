@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from 'vitest'
-import { join } from 'node:path'
 import { z } from 'zod'
 import type { AgentOptions } from '../../../../src/main/core/agent/engine'
 import { contextRolloverPrompt } from '../../../../src/main/core/agent/context-rollover'
@@ -16,14 +15,18 @@ vi.mock('../../../../src/main/model-api/service', () => ({
 }))
 
 describe('createAgentRuntime', () => {
-  it('loads the bundled agent skill into the runtime prompt', async () => {
+  it('renders posix environment directories and no removed bundled skills', async () => {
     const host = new PluginHost(new Registry(), new FilesystemSkillDiscovery())
     await host.activate({ manifest: { id: 'agent' }, activate: () => undefined })
 
     const runtime = createAgentRuntime({ sessionId: 'session', cwd: 'cwd' }, host)
 
-    expect(runtime.system).toContain('agent_task-representation')
-    expect(runtime.system).toContain(join('task-representation', 'SKILL.md'))
+    expect(runtime.system).toContain('.larify/memory')
+    expect(runtime.system).toContain('.larify/tasks')
+    expect(runtime.system).toContain('.larify/plugins')
+    expect(runtime.system).not.toContain('agent_task-representation')
+    expect(runtime.system).not.toContain('grounding-guidelines')
+    expect(runtime.system).not.toContain('inquiry-dimensions')
   })
 
   it('assembles plugin tools and their session context', async () => {

@@ -1,5 +1,5 @@
 import { Liquid } from 'liquidjs'
-import { larifyPath } from '../../utils/app-paths'
+import { larifyPath, toPosixPath } from '../../utils/app-paths'
 
 const liquid = new Liquid()
 
@@ -15,8 +15,9 @@ export function buildSystemPrompt(
     .parseAndRenderSync(template, {
       platform: platformName(),
       cwd,
-      memoryDirectory: larifyPath('memory'),
-      taskDirectory: larifyPath('tasks'),
+      memoryDirectory: toPosixPath(larifyPath('memory')),
+      taskDirectory: toPosixPath(larifyPath('tasks')),
+      pluginsDirectory: toPosixPath(larifyPath('plugins')),
       ...context
     })
     .trim()

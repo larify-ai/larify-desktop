@@ -5,6 +5,8 @@ import { app } from 'electron'
 
 export const larifyPath = (...segments: string[]): string => join(homedir(), '.larify', ...segments)
 
+export const toPosixPath = (path: string): string => path.replaceAll('\\', '/')
+
 export const ensureLarifyPath = (...segments: string[]): string => {
   const path = larifyPath(...segments)
   mkdirSync(path, { recursive: true })

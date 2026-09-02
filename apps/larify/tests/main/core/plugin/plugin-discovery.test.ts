@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const hoisted = vi.hoisted(() => {
-  const connectMcp = vi.fn(async () => {})
+  const connectMcp = vi.fn(async () => { })
   const existsSync = vi.fn(() => true)
   const readdirSync = vi.fn(() => [])
   const readFileSync = vi.fn(() => '{}')
@@ -83,7 +83,7 @@ describe('FilesystemPluginDiscovery.discover', () => {
   })
 
   it('skips a malformed plugin.json without throwing, loading the rest', () => {
-    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => { })
     hoisted.readdirSync.mockReturnValue([dir('bad'), dir('good')])
     hoisted.readFileSync.mockImplementation((p: string) =>
       p.includes('bad') ? '{not valid json' : JSON.stringify({ mcpServers: {} })
@@ -125,7 +125,7 @@ describe('FilesystemPluginDiscovery.discover', () => {
   })
 
   it('logs and skips a plugin when statSync on plugin.json throws (e.g. race delete)', () => {
-    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => { })
     hoisted.readdirSync.mockReturnValue([dir('gone'), dir('good')])
     hoisted.statSync.mockImplementation((p: string) => {
       if (String(p).includes('gone')) throw new Error('ENOENT')

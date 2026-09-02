@@ -1,6 +1,6 @@
 import type { ModelMessage, PrepareStepFunction, ToolSet } from 'ai'
 
-export const contextRolloverPrompt = 'Because the accumulated context becomes too large, first update the task and memory representations in Chinese following the `task-representation` and `memory-representation` skills to help prevent context loss, then call `agent_reset_context` with a Markdown handoff linking to the relevant task and memory files to reset the model context and continue from the handoff.'
+export const contextRolloverPrompt = 'Because the accumulated context becomes too large, first update the task progress and knowledge representation to help prevent context loss, finally call `agent_reset_context` with a Markdown handoff linking to the related files to reset the model context and continue from the handoff.'
 
 function includesRolloverPrompt(messages: ModelMessage[]): boolean {
   return messages.some((message) => {

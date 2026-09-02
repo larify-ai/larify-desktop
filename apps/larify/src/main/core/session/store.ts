@@ -73,6 +73,25 @@ export class SessionStore implements Disposable {
     return messages.map(({ value }) => JSON.parse(value as string) as UIMessage)
   }
 
+  // reset_context 续写时，模型输入被 sessions.start 截断（loadMessages 只返回 compaction 及其后），
+  // 末尾是 compaction user → AI SDK 判定新消息、不复用 reset 前 assistant id（UI 多一条「已完成」）。
+  // 这里只读截断前最后一条 assistant（单条，非全量），供 UI 消息身份判定并入，使 reset 前后合并成
+  // 一条。仅取一条，性能开销可忽略，不影响模型输入（模型输入仍用 loadMessages 截断版，压缩保留）。
+  loadLastAssistantBeforeStart(id: string): UIMessage | undefined {
+    const row = this.database
+      .prepare(
+        `SELECT messages.value FROM messages
+         JOIN sessions ON sessions.id = messages.session_id
+         WHERE messages.session_id = ?
+           AND messages.position < COALESCE(sessions.start, 9223372036854775807)
+           AND json_extract(messages.value, '$.role') = 'assistant'
+         ORDER BY messages.position DESC
+         LIMIT 1`
+      )
+      .get(id)
+    return row ? (JSON.parse(row.value as string) as UIMessage) : undefined
+  }
+
   loadVisibleMessages(id: string, offset = 0, limit = 50): UIMessage[] {
     const messages = this.database
       .prepare(

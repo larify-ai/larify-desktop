@@ -81,6 +81,43 @@ describe('runStoredAgentSession', () => {
     expect(result).toBe(finalAssistant)
   })
 
+  it('passes the reset continuation assistant into the UI merge identity', async () => {
+    // reset 续写：模型输入末尾是 compaction user。应读取截断前最后一条 assistant 并作为
+    // uiOriginalMessages 末尾传入 runAgentSession，使 AI SDK 复用其 id 合并成一条。
+    const compactionUser: UIMessage = {
+      id: 'compaction',
+      role: 'user',
+      metadata: { compaction: true },
+      parts: [{ type: 'text', text: '# Handoff\nContinue.' }]
+    }
+    const earlierAssistant: UIMessage = {
+      id: 'earlier',
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'prior' }]
+    }
+    mocks.prepare.mockResolvedValue([compactionUser])
+    mocks.run.mockResolvedValue([compactionUser])
+    const sessions = {
+      hasSession: vi.fn(() => true),
+      loadMessages: vi.fn(() => [compactionUser]),
+      loadLastAssistantBeforeStart: vi.fn(() => earlierAssistant),
+      renameSession: vi.fn(),
+      saveMessages: vi.fn()
+    }
+
+    await runStoredAgentSession(sessions as never, {
+      sessionId: 'session',
+      cwd: 'cwd',
+      message: user,
+      options: {} as never
+    })
+
+    expect(sessions.loadLastAssistantBeforeStart).toHaveBeenCalledWith('session')
+    expect(mocks.run).toHaveBeenCalledTimes(1)
+    // 第 5 参 uiOriginalMessages 应为「模型输入 + reset 前 assistant」作为合并底座
+    expect(mocks.run.mock.calls[0][4]).toEqual([compactionUser, earlierAssistant])
+  })
+
   it('does not return an assistant message from an earlier run', async () => {
     mocks.run.mockResolvedValue([history, user])
     const sessions = {

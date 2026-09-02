@@ -36,15 +36,28 @@ export async function runStoredAgentSession(
         .catch(() => {})
     : undefined
   const messages = await prepareMessages(sessions.loadMessages(sessionId))
+  // reset_context 续写：模型输入末尾是 compaction user，AI SDK 据此判定新消息 → UI 多一条
+  // 「已完成」。这里读截断前最后一条 assistant 并入 UI 消息身份判定（originalMessages 末尾
+  // 是 assistant），使 AI SDK 复用其 id 合并成一条、时长跨段连续。模型输入 messages 不变
+  // （压缩保留）；仅 reset 续写（末尾 compaction）才读，普通提问末尾是 assistant 不读。
+  const lastMsg = messages.at(-1)
+  const isCompaction =
+    lastMsg?.role === 'user' &&
+    (lastMsg?.metadata as Record<string, unknown> | undefined)?.compaction === true
+  const continuationOf = isCompaction
+    ? sessions.loadLastAssistantBeforeStart(sessionId)
+    : undefined
+  const uiOriginalMessages = continuationOf ? [...messages, continuationOf] : undefined
   let latestResponse: UIMessage | undefined
   const finalMessages = await runAgentSession(messages, options, onChunk, (response) => {
     latestResponse = response
     sessions.saveMessages(sessionId, [response])
-  })
-  const finalResponse = finalMessages
-    .slice(messages.length)
-    .findLast((candidate) => candidate.role === 'assistant')
-  if (finalResponse) {
+  }, uiOriginalMessages)
+  // originalMessages（含 continuationOf）可能比 messages 长；AI SDK 在续写时把合并后的消息放
+  // 末尾，故取末尾 assistant，而非 slice(messages.length)（会把旧历史误当本轮新增）。
+  const finalResponse = finalMessages.at(-1)
+  const isAssistant = finalResponse?.role === 'assistant'
+  if (isAssistant && finalResponse) {
     latestResponse = finalResponse
     sessions.saveMessages(sessionId, [finalResponse])
   }

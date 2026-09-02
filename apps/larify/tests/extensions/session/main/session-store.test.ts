@@ -178,6 +178,36 @@ describe('SessionStore', () => {
     store.dispose()
   })
 
+  it('loads the last assistant before the compaction start', async () => {
+    const store = await createStore()
+    // 会话：user → assistant(prior) → user(mid) → assistant(before-reset) → compaction
+    save(store, 'chat', [message('u1', 'go')], '/cwd', 'chat')
+    store.saveMessages('chat', [
+      response('a1', 'first reply'),
+      message('u2', 'more'),
+      response('a2', 'second reply')
+    ])
+    store.saveStart('chat', compaction('compact', 'query', 'summary'))
+
+    // 截断前最后一条 assistant 是 a2（second reply）
+    expect(store.loadLastAssistantBeforeStart('chat')).toMatchObject({
+      id: 'a2',
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'second reply' }]
+    })
+    store.dispose()
+  })
+
+  it('returns undefined when only compaction exists with no prior assistant', async () => {
+    const store = await createStore()
+    save(store, 'chat', [message('u1', 'go')], '/cwd', 'chat')
+    store.saveStart('chat', compaction('compact', 'query', 'summary'))
+
+    // compaction 前只有 user（无 assistant），应返回 undefined
+    expect(store.loadLastAssistantBeforeStart('chat')).toBeUndefined()
+    store.dispose()
+  })
+
   it('keeps the compaction cursor internal', async () => {
     const store = await createStore()
     save(store, 'chat', [message('one', 'old')], '/cwd', 'chat')
@@ -370,4 +400,5 @@ describe('SessionStore', () => {
     expect(store.loadMessages('missing')).toEqual([])
     store.dispose()
   })
+
 })

@@ -424,6 +424,92 @@ describe('runAgentSession', () => {
     expect(metadata.totalProcessingMs).toBe(2_000 + elapsed)
   })
 
+  it('reuses the UI message id for merge while the model sees the compacted input', async () => {
+    // reset 续写：模型输入 messages 末尾是 compaction user（压缩上下文），但 UI 合并
+    // 底座 uiOriginalMessages 末尾应为 reset 前 assistant（对应 UI 完整展示序列，handoff
+    // compaction 被 loadVisibleMessages 排除）。AI SDK 复用该 id 在新的 UI 流上合并，
+    // 模型 prompt 仍只用截断后的 compaction 输入（上下文压缩保留）。
+    const previous: UIMessage = {
+      id: 'assistant-prev',
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'first run' }],
+      metadata: { startedAt: 1_000, completedAt: 2_000, totalProcessingMs: 1_000 }
+    }
+    const chunks: Array<{ type: string; messageId?: string }> = []
+    const session = await runAgentSession(
+      // 模型输入（截断）：末尾是 compaction user
+      [
+        { id: 'user-1', role: 'user', parts: [{ type: 'text', text: 'go' }] },
+        {
+          id: 'user-compaction',
+          role: 'user',
+          metadata: { compaction: true },
+          parts: [{ type: 'text', text: '# Handoff\nContinue.' }]
+        }
+      ],
+      {
+        tools: {},
+        activeTools: [],
+        toolsContext: {},
+        model: mockModel(['continuation'])
+      },
+      (chunk) => {
+        if (chunk.type === 'start') chunks.push({ type: chunk.type, messageId: chunk.messageId })
+      },
+      undefined,
+      // UI 合并底座：完整展示序列（排除 compaction），末尾是 reset 前 assistant
+      [
+        { id: 'user-1', role: 'user', parts: [{ type: 'text', text: 'go' }] },
+        previous
+      ]
+    )
+
+    // start chunk 复用 reset 前 assistant id → 渲染端合并成一条
+    expect(chunks).toEqual([{ type: 'start', messageId: 'assistant-prev' }])
+    const response = session.at(-1)
+    expect(response?.id).toBe('assistant-prev')
+    // 合并消息包含上一轮与这一轮 parts
+    expect(textOf(response!)).toBe('first runcontinuation')
+  })
+
+  it('accumulates duration across a reset via uiOriginalMessages', async () => {
+    // reset 续写：模型输入 messages 末尾是 compaction（无旧段），但 uiOriginalMessages 末尾是
+    // reset 前 assistant（带旧累计）。previousTotalProcessingMs 应选用 uiOriginalMessages，
+    // 使合并后的总时长 = 旧段累计 + 本段新增。
+    const prior: UIMessage = {
+      id: 'assistant-prior',
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'prior' }],
+      metadata: { startedAt: 1_000, completedAt: 3_000, totalProcessingMs: 2_000 }
+    }
+    const compaction: UIMessage = {
+      id: 'user-comp',
+      role: 'user',
+      metadata: { compaction: true },
+      parts: [{ type: 'text', text: '# Handoff\nContinue.' }]
+    }
+    const result = await runAgentSession(
+      [
+        { id: 'user-1', role: 'user', parts: [{ type: 'text', text: 'go' }] },
+        compaction
+      ],
+      {
+        tools: {},
+        activeTools: [],
+        toolsContext: {},
+        model: mockModel(['hello'])
+      },
+      undefined,
+      undefined,
+      // uiOriginalMessages 末尾是 reset 前 assistant（带旧累计 2000ms）
+      [{ id: 'user-1', role: 'user', parts: [{ type: 'text', text: 'go' }] }, prior]
+    )
+    const metadata = result.at(-1)?.metadata as Record<string, unknown>
+    const elapsed = (metadata.completedAt as number) - (metadata.startedAt as number)
+    // 总时长 = 旧段 2000 累加 + 本段 elapsed
+    expect(metadata.totalProcessingMs).toBe(2_000 + elapsed)
+  })
+
   it('records elapsed-time metadata when the run is aborted', async () => {
     const controller = new AbortController()
     let streamStarted!: () => void

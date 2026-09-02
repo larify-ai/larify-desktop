@@ -539,6 +539,33 @@ describe('WorkspaceView', () => {
     expect(container.querySelector('button[aria-label="查看源码"]')).not.toBeNull()
   })
 
+  it('reopens with the anchor root when revealing fails for a memory file', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    h.revealFile.mockRejectedValueOnce(new Error('outside root'))
+    const opened = vi.fn()
+    window.addEventListener('larify:workbench-open', opened as EventListener)
+    await render()
+
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent('larify:workspace-navigation', {
+          detail: {
+            kind: 'file',
+            path: 'C:\\Users\\hylnb\\.larify\\memory\\larify-desktop\\index.md',
+            resourceId: 42
+          }
+        })
+      )
+      await Promise.resolve()
+    })
+
+    const open = opened.mock.calls[0][0] as CustomEvent<{
+      options: { root: string }
+    }>
+    expect(open.detail.options.root).toBe('C:\\Users\\hylnb\\.larify\\memory')
+    window.removeEventListener('larify:workbench-open', opened as EventListener)
+  })
+
   it('replays navigation when the same file and hash are selected again', async () => {
     await render()
     const navigate = async (): Promise<void> => {
@@ -569,19 +596,13 @@ describe('WorkspaceView', () => {
     h.invoke.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
     window.addEventListener('larify:workbench-select-resource', selected)
     await render()
+    await openFile('site/index.html')
 
-    act(() => {
-      window.dispatchEvent(
-        new CustomEvent('larify:workspace-markdown-open-external', {
-          detail: { resourceId: 42, url: 'https://first.example' }
-        })
-      )
-      window.dispatchEvent(
-        new CustomEvent('larify:workspace-markdown-open-external', {
-          detail: { resourceId: 42, url: 'https://second.example' }
-        })
-      )
-    })
+    const open = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="在内置浏览器中打开"]'
+    )!
+    act(() => open.click())
+    act(() => open.click())
     await act(async () => second.resolve(2))
     await act(async () => first.resolve(1))
 
@@ -597,13 +618,12 @@ describe('WorkspaceView', () => {
     h.invoke.mockReturnValueOnce(browser.promise)
     window.addEventListener('larify:workbench-select-resource', selected)
     await render()
+    await openFile('site/index.html')
 
     act(() => {
-      window.dispatchEvent(
-        new CustomEvent('larify:workspace-markdown-open-external', {
-          detail: { resourceId: 42, url: 'https://example.com' }
-        })
-      )
+      container
+        .querySelector<HTMLButtonElement>('button[aria-label="在内置浏览器中打开"]')!
+        .click()
     })
     await openFile('README.md')
     await act(async () => browser.resolve(3))
@@ -618,13 +638,12 @@ describe('WorkspaceView', () => {
     const browser = deferred<number>()
     h.invoke.mockReturnValueOnce(browser.promise)
     await render()
+    await openFile('site/index.html')
 
     act(() => {
-      window.dispatchEvent(
-        new CustomEvent('larify:workspace-markdown-open-external', {
-          detail: { resourceId: 42, url: 'https://example.com' }
-        })
-      )
+      container
+        .querySelector<HTMLButtonElement>('button[aria-label="在内置浏览器中打开"]')!
+        .click()
     })
     await act(async () => root.unmount())
     await act(async () => browser.resolve(4))

@@ -291,6 +291,42 @@ describe('createMessageLinkHandler', () => {
     expect(detail.options.root).toBe('D:\\Other\\notes')
   })
 
+  it('anchors a memory file link to the whole ~/.larify/memory root', async () => {
+    const handler = createMessageLinkHandler(cwd, sessionId)
+
+    handler({
+      kind: 'file',
+      target: 'C:\\Users\\hylnb\\.larify\\memory\\larify-desktop\\index.md'
+    })
+
+    await vi.waitFor(() => expect(dispatchSpy).toHaveBeenCalled())
+
+    const detail = (
+      dispatchSpy.mock.calls[0][0] as CustomEvent<{
+        options: { root: string }
+      }>
+    ).detail
+    expect(detail.options.root).toBe('C:\\Users\\hylnb\\.larify\\memory')
+  })
+
+  it('anchors a tasks file link to the whole ~/.larify/tasks root', async () => {
+    const handler = createMessageLinkHandler('', sessionId)
+
+    handler({
+      kind: 'file',
+      target: 'C:\\Users\\hylnb\\.larify\\tasks\\some-task\\task.md'
+    })
+
+    await vi.waitFor(() => expect(dispatchSpy).toHaveBeenCalled())
+
+    const detail = (
+      dispatchSpy.mock.calls[0][0] as CustomEvent<{
+        options: { root: string }
+      }>
+    ).detail
+    expect(detail.options.root).toBe('C:\\Users\\hylnb\\.larify\\tasks')
+  })
+
   it('opens a Windows absolute file from the default space', async () => {
     const handler = createMessageLinkHandler('', sessionId)
 

@@ -8,3 +8,9 @@ dist/
 
 # TS incremental build info
 *.tsbuildinfo
+
+# Larify dev memory & ad-hoc probe scripts (not source)
+.workbuddy/
+
+# Local VPS ops script w/ hardcoded credentials (sensitive, never commit)
+vps_exec.py

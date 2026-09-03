@@ -3,7 +3,11 @@ import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { app } from 'electron'
 
-export const larifyPath = (...segments: string[]): string => join(homedir(), '.larify', ...segments)
+// Dev-only override: set LARIFY_HOME to point ~/.larify (tasks/memory/plugins/workspace)
+// at an empty directory for isolated testing. Unset in production -> falls back to homedir().
+const larifyHome = process.env.LARIFY_HOME || homedir()
+
+export const larifyPath = (...segments: string[]): string => join(larifyHome, '.larify', ...segments)
 
 export const toPosixPath = (path: string): string => path.replaceAll('\\', '/')
 

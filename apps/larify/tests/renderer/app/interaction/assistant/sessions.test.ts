@@ -556,137 +556,137 @@ describe('AssistantSessionsProvider', () => {
     expect(sessions.canForward).toBe(false)
   })
 
-  it('navigates back and forward across visited sessions', async () => {
-    const first = sessions.activeId
-    await act(async () => {
-      sessions.setPersisted(first)
-      sessions.create()
-    })
-    const second = sessions.activeId
-    expect(sessions.canBack).toBe(true)
-    expect(sessions.canForward).toBe(false)
-
-    await act(async () => sessions.back())
-    expect(sessions.activeId).toBe(first)
-    expect(sessions.canForward).toBe(true)
-
-    await act(async () => sessions.forward())
-    expect(sessions.activeId).toBe(second)
-    expect(sessions.canForward).toBe(false)
-  })
-
-  it('truncates forward history after a new visit', async () => {
-    const first = sessions.activeId
-    await act(async () => {
-      sessions.setPersisted(first)
-      sessions.create()
-    })
-    await act(async () => sessions.back())
-    expect(sessions.activeId).toBe(first)
-    expect(sessions.canForward).toBe(true)
-
-    // 新建会复用未持久化的 draft；无论落到哪个会话，都不应保留"前进"分支。
-    await act(async () => {
-      sessions.setPersisted(first)
-      sessions.create()
-    })
-    expect(sessions.canForward).toBe(false)
-  })
-
-  it('records history when selecting a session directly', async () => {
-    const first = sessions.activeId
-    await act(async () => {
-      sessions.setPersisted(first)
-      sessions.create()
-    })
-    const second = sessions.activeId
-    await act(async () => sessions.select(first))
-    // first 是历史最早访问，回到它后无可后退；可前进到 second。
-    expect(sessions.activeId).toBe(first)
-    expect(sessions.canBack).toBe(false)
-    expect(sessions.canForward).toBe(true)
-
-    await act(async () => sessions.forward())
-    expect(sessions.activeId).toBe(second)
-    expect(sessions.canBack).toBe(true)
-    expect(sessions.canForward).toBe(false)
-  })
-
-  it('cannot go back past the oldest visited session', async () => {
-    const first = sessions.activeId
-    await act(async () => {
-      sessions.setPersisted(first)
-      sessions.create()
-      sessions.setPersisted(sessions.activeId)
-      sessions.create()
-    })
-    // 反复 back 到最早会话后，canBack=false，且不再越界。
-    await act(async () => sessions.back())
-    await act(async () => sessions.back())
-    await act(async () => sessions.back())
-    expect(sessions.canBack).toBe(false)
-    expect(sessions.activeId).toBe(first)
-  })
-
-  it('cannot go forward past the newest visited session', async () => {
-    const first = sessions.activeId
-    await act(async () => {
-      sessions.setPersisted(first)
-      sessions.create()
-      sessions.setPersisted(sessions.activeId)
-      sessions.create()
-    })
-    const deepest = sessions.activeId
-    await act(async () => sessions.back())
-    await act(async () => sessions.back())
-    await act(async () => sessions.forward())
-    await act(async () => sessions.forward())
-    // 到达最深处后，canForward=false。
-    expect(sessions.canForward).toBe(false)
-    expect(sessions.canBack).toBe(true)
-  })
-
-  it('selecting the current session does not duplicate it in history', async () => {
-    const first = sessions.activeId
-    await act(async () => {
-      sessions.setPersisted(first)
-      sessions.create()
-    })
-    const current = sessions.activeId
-    // 反复 select 当前会话，不应改变历史位置或重复压栈。
-    for (let index = 0; index < 3; index += 1) {
-      await act(async () => sessions.select(current))
-    }
-    expect(sessions.activeId).toBe(current)
-    // 回到 first 仍只有一条路径（无重复）。
-    await act(async () => sessions.back())
-    expect(sessions.activeId).toBe(first)
-    await act(async () => sessions.forward())
-    expect(sessions.activeId).toBe(current)
-  })
-
-  it('keeps a clean history when Strict Mode replays create', async () => {
+  it('navigates back (older) and forward (newer) within the updatedAt-ordered directory', async () => {
     act(() => root.unmount())
+    invoke.mockImplementation((channel: string, cwd?: string) => {
+      if (channel === 'session:cwds') return Promise.resolve([''])
+      if (channel === 'session:list') {
+        return Promise.resolve(
+          ['newest', 'middle', 'oldest'].map((id) => ({ id, title: id, cwd: '' }))
+        )
+      }
+      if (channel === 'session:msg-count') return Promise.resolve(1)
+      if (channel === 'session:msgs') return Promise.resolve([])
+      return Promise.resolve([])
+    })
     root = createRoot(document.createElement('div'))
     await act(async () => {
-      root.render(
-        createElement(
-          StrictMode,
-          null,
-          createElement(AssistantSessionsProvider, null, createElement(Probe))
-        )
-      )
+      root.render(createElement(AssistantSessionsProvider, null, createElement(Probe)))
     })
-    const first = sessions.activeId
-    await act(async () => {
-      sessions.setPersisted(first)
-      sessions.create()
-    })
-    const second = sessions.activeId
+
+    // 目录按 updated_at DESC（最新在前）。后退=更早、前进=更新，顺序恒定，与点击顺序无关。
+    await act(async () => sessions.select('newest'))
+    expect(sessions.activeId).toBe('newest')
+    expect(sessions.canForward).toBe(false)
+    expect(sessions.canBack).toBe(true)
+
     await act(async () => sessions.back())
-    // StrictMode 下 create 被 replay 也不应产生脏历史（能回到 first）。
-    expect(sessions.activeId).toBe(first)
+    expect(sessions.activeId).toBe('middle')
+    await act(async () => sessions.back())
+    expect(sessions.activeId).toBe('oldest')
+    expect(sessions.canBack).toBe(false)
+
     await act(async () => sessions.forward())
-    expect(sessions.activeId).toBe(second)
+    expect(sessions.activeId).toBe('middle')
+    await act(async () => sessions.forward())
+    expect(sessions.activeId).toBe('newest')
+    expect(sessions.canForward).toBe(false)
+  })
+
+  it('keeps navigation order by updatedAt regardless of click order', async () => {
+    act(() => root.unmount())
+    invoke.mockImplementation((channel: string, cwd?: string) => {
+      if (channel === 'session:cwds') return Promise.resolve([''])
+      if (channel === 'session:list') {
+        return Promise.resolve(
+          ['newest', 'middle', 'oldest'].map((id) => ({ id, title: id, cwd: '' }))
+        )
+      }
+      if (channel === 'session:msg-count') return Promise.resolve(1)
+      if (channel === 'session:msgs') return Promise.resolve([])
+      return Promise.resolve([])
+    })
+    root = createRoot(document.createElement('div'))
+    await act(async () => {
+      root.render(createElement(AssistantSessionsProvider, null, createElement(Probe)))
+    })
+
+    // 乱序点击后，顺序仍由目录的 updatedAt 决定（newest 始终最前）。
+    await act(async () => sessions.select('newest'))
+    await act(async () => sessions.select('oldest'))
+    await act(async () => sessions.select('newest'))
+    expect(sessions.activeId).toBe('newest')
+    expect(sessions.canForward).toBe(false)
+    expect(sessions.canBack).toBe(true)
+
+    await act(async () => sessions.back())
+    expect(sessions.activeId).toBe('middle')
+  })
+
+  it('treats the current draft as newest and only allows back', async () => {
+    act(() => root.unmount())
+    invoke.mockImplementation((channel: string, cwd?: string) => {
+      if (channel === 'session:cwds') return Promise.resolve([''])
+      if (channel === 'session:list') {
+        return Promise.resolve(
+          ['newest', 'middle', 'oldest'].map((id) => ({ id, title: id, cwd: '' }))
+        )
+      }
+      if (channel === 'session:msg-count') return Promise.resolve(1)
+      if (channel === 'session:msgs') return Promise.resolve([])
+      return Promise.resolve([])
+    })
+    root = createRoot(document.createElement('div'))
+    await act(async () => {
+      root.render(createElement(AssistantSessionsProvider, null, createElement(Probe)))
+    })
+
+    // 当前未持久化 draft 视为最新置于序列最前，故只能后退到更早的会话。
+    expect(sessions.canBack).toBe(true)
+    expect(sessions.canForward).toBe(false)
+
+    await act(async () => sessions.back())
+    expect(sessions.activeId).toBe('newest')
+    expect(sessions.canBack).toBe(true)
+    await act(async () => sessions.back())
+    expect(sessions.activeId).toBe('middle')
+  })
+
+  it('cannot navigate past the boundaries of the ordered sequence', async () => {
+    act(() => root.unmount())
+    invoke.mockImplementation((channel: string, cwd?: string) => {
+      if (channel === 'session:cwds') return Promise.resolve([''])
+      if (channel === 'session:list') {
+        return Promise.resolve(
+          ['newest', 'middle', 'oldest'].map((id) => ({ id, title: id, cwd: '' }))
+        )
+      }
+      if (channel === 'session:msg-count') return Promise.resolve(1)
+      if (channel === 'session:msgs') return Promise.resolve([])
+      return Promise.resolve([])
+    })
+    root = createRoot(document.createElement('div'))
+    await act(async () => {
+      root.render(createElement(AssistantSessionsProvider, null, createElement(Probe)))
+    })
+
+    await act(async () => sessions.select('newest'))
+    // 前进越界：仍停留 newest。
+    await act(async () => sessions.forward())
+    await act(async () => sessions.forward())
+    expect(sessions.activeId).toBe('newest')
+
+    await act(async () => sessions.select('oldest'))
+    // 后退越界：仍停留 oldest。
+    await act(async () => sessions.back())
+    await act(async () => sessions.back())
+    expect(sessions.activeId).toBe('oldest')
+    expect(sessions.canBack).toBe(false)
+  })
+
+  it('keeps a single draft when no persisted sessions are loaded', () => {
+    // 目录为空（默认 mock）时，唯一 draft 无前后邻居，导航不可用。
+    expect(sessions.canBack).toBe(false)
+    expect(sessions.canForward).toBe(false)
   })
 })

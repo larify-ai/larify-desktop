@@ -39,11 +39,6 @@ const closeSessionResources = async (sessionId: string): Promise<void> => {
   )
 }
 
-interface NavigationHistory {
-  stack: string[]
-  index: number
-}
-
 export function AssistantSessionsProvider({
   children
 }: {
@@ -56,26 +51,22 @@ export function AssistantSessionsProvider({
   const loading = useRef(new Set<string>())
   const closingResources = useRef(new Set<string>())
   const selected = useRef(state.activeId)
-  // 会话访问历史栈：记录用户通过侧边栏点击/新建访问过的会话顺序，用于前进/后退。
-  const navRef = useRef<NavigationHistory | null>(null)
-  if (navRef.current === null) navRef.current = { stack: [state.activeId], index: 0 }
-  const [navTick, setNavTick] = useState(0)
 
-  const recordVisit = useCallback((id: string): void => {
-    const nav = navRef.current!
-    if (nav.stack[nav.index] === id) return
-    const incoming = nav.stack.indexOf(id)
-    if (incoming >= 0) {
-      // 目标会话已在历史中：把指针移回该位置（保留其后的前进分支），不新增重复条目。
-      nav.index = incoming
-    } else {
-      // 新会话：丢弃当前位置之后的历史，再压入。
-      nav.stack.length = nav.index + 1
-      nav.stack.push(id)
-      nav.index = nav.stack.length - 1
-    }
-    setNavTick((tick) => tick + 1)
-  }, [])
+  // 导航候选序列：当前会话所属 cwd 分组内的会话，目录已按 updated_at DESC（最新在前）返回，
+  // 直接作为有序序列。若当前会话是未持久化的 draft，则视为最新置于序列最前。
+  // 前进/后退就是在这个「按更新时间排序」的序列内移动指针，顺序与侧边栏及点击顺序无关，
+  // 参照 zcode 的 taskNav（后退=更早、前进=更新）。
+  const navigation = useMemo(() => {
+    const active = state.sessions.find(({ id }) => id === state.activeId)
+    const cwd = active?.cwd ?? ''
+    const directoryIds = (directory.find((group) => group.cwd === cwd)?.sessions ?? []).map(
+      ({ id }) => id
+    )
+    const ordered = active?.persisted
+      ? directoryIds
+      : [state.activeId, ...directoryIds.filter((id) => id !== state.activeId)]
+    return { ordered, index: ordered.indexOf(state.activeId) }
+  }, [directory, state.activeId, state.sessions])
 
   const refresh = useCallback(async () => {
     const version = ++refreshVersion.current
@@ -96,7 +87,6 @@ export function AssistantSessionsProvider({
       setState((current) => {
         const draft = current.sessions.find(({ persisted }) => !persisted)
         if (draft) {
-          recordVisit(draft.id)
           selected.current = draft.id
           queueMicrotask(() => {
             if (closingResources.current.has(draft.id)) return
@@ -113,12 +103,11 @@ export function AssistantSessionsProvider({
           }
         }
 
-        recordVisit(session.id)
         selected.current = session.id
         return { sessions: [...current.sessions, session], activeId: session.id }
       })
     },
-    [recordVisit]
+    []
   )
   const applySelect = useCallback(
     async (activeId: string) => {
@@ -170,27 +159,21 @@ export function AssistantSessionsProvider({
 
   const select = useCallback(
     async (id: string) => {
-      recordVisit(id)
       await applySelect(id)
     },
-    [applySelect, recordVisit]
+    [applySelect]
   )
+  // 后退 = 同 cwd 序列中更早（updatedAt 更小）的会话；前进 = 更新（updatedAt 更大）的会话。
   const back = useCallback(() => {
-    const nav = navRef.current!
-    if (nav.index <= 0) return
-    nav.index -= 1
-    setNavTick((tick) => tick + 1)
-    void applySelect(nav.stack[nav.index])
-  }, [applySelect])
+    const target = navigation.ordered[navigation.index + 1]
+    if (target !== undefined) void applySelect(target)
+  }, [applySelect, navigation])
   const forward = useCallback(() => {
-    const nav = navRef.current!
-    if (nav.index >= nav.stack.length - 1) return
-    nav.index += 1
-    setNavTick((tick) => tick + 1)
-    void applySelect(nav.stack[nav.index])
-  }, [applySelect])
-  const canBack = (navRef.current?.index ?? 0) > 0
-  const canForward = (navRef.current?.index ?? 0) < (navRef.current?.stack.length ?? 1) - 1
+    const target = navigation.ordered[navigation.index - 1]
+    if (target !== undefined) void applySelect(target)
+  }, [applySelect, navigation])
+  const canBack = navigation.index < navigation.ordered.length - 1
+  const canForward = navigation.index > 0
   const loadMore = useCallback(
     async (cwd: string) => {
       const group = directory.find((item) => item.cwd === cwd)
@@ -326,7 +309,6 @@ export function AssistantSessionsProvider({
       directory,
       forward,
       loadMore,
-      navTick,
       refresh,
       rename,
       select,

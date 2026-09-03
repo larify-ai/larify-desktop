@@ -15,8 +15,8 @@ describe('MarkdownPreview', () => {
     expect(stripYamlFrontmatter('Before\n---\nAfter')).toBe('Before\n---\nAfter')
   })
 
-  it('keeps the document readable when the YAML header is invalid', () => {
+  it('strips an invalid-YAML but closed frontmatter block (no leak)', () => {
     const markdown = '---\ntags: [\n---\n# Body'
-    expect(stripYamlFrontmatter(markdown)).toBe(markdown)
+    expect(stripYamlFrontmatter(markdown)).toBe('# Body')
   })
 })

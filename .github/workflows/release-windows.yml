@@ -46,10 +46,16 @@ jobs:
             gh api --method POST repos/larify-ai/larify-desktop/git/refs -f ref="refs/tags/${{ github.ref_name }}" -f sha=$sha
           }
 
-      - name: Build and publish Windows release
+      - name: Build Windows release
         run: npm run release:win --workspace apps/larify
+
+      - name: Publish to GitHub Releases
+        shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          DIST_DIR: apps/larify/dist
+        run: node .github/scripts/publish-release.mjs
 
       - name: Trigger CNB release sync
         env:

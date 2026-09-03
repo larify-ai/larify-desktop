@@ -246,7 +246,7 @@ export function createBrowserTools(service: BrowserService): Record<string, Tool
         },
       }),
       list_tabs: defineTool({
-        description: "List all open browser tabs with their navigation state.",
+        description: "List all open browser tabs with their navigation state before creating a new tab.",
         metadata: { icon: "browser", eager: true },
         inputSchema: z.object({}).strict(),
         execute: async (_args, ctx) =>

@@ -164,6 +164,7 @@ describe('runAgentSession', () => {
     expect(session.at(-1)?.metadata).toEqual({
       startedAt: expect.any(Number),
       completedAt: expect.any(Number),
+      finishReason: 'stop',
       totalProcessingMs: expect.any(Number)
     })
   })
@@ -290,6 +291,7 @@ describe('runAgentSession', () => {
       startedAt: expect.any(Number),
       completedAt: expect.any(Number),
       outcome: 'error',
+      finishReason: 'error',
       // 主进程把错误原因写入 metadata，渲染端摘要直接透出
       error: 'interrupted',
       totalProcessingMs: expect.any(Number)
@@ -341,6 +343,7 @@ describe('runAgentSession', () => {
       startedAt: expect.any(Number),
       completedAt: expect.any(Number),
       outcome: 'error',
+      finishReason: 'error',
       error: 'connection failed',
       totalProcessingMs: expect.any(Number)
     })

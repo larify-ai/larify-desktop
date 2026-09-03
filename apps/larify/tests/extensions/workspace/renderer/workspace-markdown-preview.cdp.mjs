@@ -62,6 +62,15 @@ flowchart LR
   writeFile(
     join(fixtureRoot, 'fixture.html'),
     '<!doctype html><title>Larify Markdown CDP Fixture</title><h1>HTML fixture</h1>'
+  ),
+  writeFile(
+    join(fixtureRoot, '03-invalid-yaml.md'),
+    `---
+title: Hidden invalid frontmatter
+description: Contains Failed to parse URL: ERR_INVALID_URL
+---
+# Invalid YAML fixture
+`
   )
 ])
 
@@ -210,6 +219,23 @@ try {
   assert.ok(preview.mermaid > 0)
   assert.equal(preview.localImage, true)
   assert.equal(preview.hasErrorOverlay, false)
+
+  assert.equal(await clickTreeItem('03-invalid-yaml.md'), true, 'invalid-YAML fixture is missing')
+  await wait(700)
+  assert.deepEqual(
+    await app.evaluate(`(() => {
+      const workspace = document.querySelector(${JSON.stringify(activeWorkspaceSelector)})
+      const element = workspace?.querySelector('.workspace-markdown-preview')
+      return {
+        hasFrontmatter: /(?:^|\\n)(?:title|author|tags|description):/.test(element?.innerText ?? ''),
+        headings: Array.from(element?.querySelectorAll('h1') ?? []).map((heading) => heading.textContent)
+      }
+    })()`),
+    {
+      hasFrontmatter: false,
+      headings: ['Invalid YAML fixture']
+    }
+  )
 
   assert.equal(await click('button[aria-label="查看源码"]'), true)
   await wait(500)

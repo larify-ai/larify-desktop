@@ -115,7 +115,9 @@ function hasStageBoundary(message: UIMessage | undefined): boolean {
 function isInternalStagePart(part: UIMessage['parts'][number] | undefined): boolean {
   if (!part || !isToolUIPart(part)) return false
   const name = getToolName(part)
-  return name === 'agent_reset_context' || name === 'agent_show_progress'
+  // 仅 show_progress 仍作为"内部阶段部件"隐藏其工具卡片本体（其 title 由 stageTitle 提取为阶段标题）；
+  // reset_context 现在作为普通工具卡片展示，不再被过滤。
+  return name === 'agent_show_progress'
 }
 
 function toolPartTitle(part: UIMessage['parts'][number] | undefined): string | undefined {

@@ -92,10 +92,19 @@ export async function runAgentSession(
           }
           if (part.type === 'finish') {
             const completedAt = Math.max(Date.now(), startedAt)
-            return {
+            // 透出 finishReason，用于区分「正常 stop」与「断流 other/error」：
+            // 断流（DeepSeek insufficient_system_resource→error、无 finish→other）
+            // 在内容已流出后不被 ai-retry 重试，finish 原样流向下游，此时若不记录
+            // finishReason，数据库里断流与正常 stop 无法区分（都无 outcome）。
+            const finishReason = (part as { finishReason?: unknown }).finishReason
+            const metadata: Record<string, unknown> = {
               completedAt,
               totalProcessingMs: previousTotalProcessingMs + (completedAt - startedAt)
             }
+            if (finishReason != null && typeof finishReason === 'string') {
+              metadata.finishReason = finishReason
+            }
+            return metadata
           }
           if (part.type === 'abort') {
             const completedAt = Math.max(Date.now(), startedAt)

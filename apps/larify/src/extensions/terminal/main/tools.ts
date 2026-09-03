@@ -234,7 +234,7 @@ const terminalResult = (
 export function createTerminalToolkit(service: TerminalService): Record<string, Tool> {
   return {
       list: defineTool({
-        description: 'List all terminals',
+        description: 'List all terminals before creating a new terminal.',
         metadata: { icon: 'terminal', eager: true },
         inputSchema: z.object({}).strict(),
         execute: async (_args, ctx) => service.state(ctx.sessionId).terminals

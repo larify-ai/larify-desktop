@@ -80,6 +80,7 @@ describe('workspace IPC', () => {
     registerWorkspaceIpc(manager as never, window as never)
 
     expect([...electron.handlers.keys()].sort()).toEqual([
+      'workspace:default-root',
       'workspace:inspect',
       'workspace:list',
       'workspace:path-kind',

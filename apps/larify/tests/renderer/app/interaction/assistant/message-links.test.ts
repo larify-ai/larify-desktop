@@ -21,9 +21,12 @@ describe('createMessageLinkHandler', () => {
     dispatchSpy.mockClear()
     vi.stubGlobal('dispatchEvent', dispatchSpy)
     window.bridge = {
-      invoke: vi.fn((channel: string) =>
-        Promise.resolve(channel === 'workspace:path-kind' ? 'file' : 42)
-      )
+      invoke: vi.fn((channel: string) => {
+        if (channel === 'workspace:path-kind') return Promise.resolve('file')
+        if (channel === 'workspace:default-root')
+          return Promise.resolve('C:\\Users\\hylnb\\.larify\\workspace')
+        return Promise.resolve(42)
+      })
     } as unknown as typeof window.bridge
   })
 
@@ -206,15 +209,37 @@ describe('createMessageLinkHandler', () => {
     consoleError.mockRestore()
   })
 
-  it('does not open a relative file link in the default space (no base)', async () => {
+  it('logs path inspection failures in the default space without opening a workspace', async () => {
+    const error = new Error('inspect failed')
+    vi.mocked(window.bridge.invoke).mockImplementation((channel) => {
+      if (channel === 'workspace:default-root')
+        return Promise.resolve('C:\\Users\\hylnb\\.larify\\workspace')
+      return Promise.reject(error)
+    })
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const handler = createMessageLinkHandler('', sessionId)
+
+    handler({ kind: 'file', target: 'missing.ts' })
+    await vi.waitFor(() => {
+      expect(consoleError).toHaveBeenCalledWith('[message-link:inspect-path]', error)
+    })
+
+    expect(dispatchSpy).not.toHaveBeenCalled()
+    consoleError.mockRestore()
+  })
+
+  it('resolves a relative file link in the default space against the fallback root', async () => {
     const handler = createMessageLinkHandler('', sessionId)
 
     handler({ kind: 'file', target: 'src/main.ts' })
 
-    expect(window.bridge.invoke).not.toHaveBeenCalled()
-    expect(dispatchSpy).not.toHaveBeenCalled()
-    consoleError.mockRestore()
+    // 默认空间先向主进程取应用工作区根，再把相对路径解析为绝对路径并打开。
+    await vi.waitFor(() => expect(dispatchSpy).toHaveBeenCalled())
+    expect(window.bridge.invoke).toHaveBeenCalledWith('workspace:default-root')
+    expect(window.bridge.invoke).toHaveBeenCalledWith(
+      'workspace:path-kind',
+      'C:\\Users\\hylnb\\.larify\\workspace\\src\\main.ts'
+    )
   })
 
   it('does not select a pending browser resource after the handler is disposed', async () => {
@@ -353,7 +378,13 @@ describe('createMessageLinkHandler', () => {
   })
 
   it('opens a directory link as the workspace root without file navigation', async () => {
-    vi.mocked(window.bridge.invoke).mockResolvedValueOnce('directory')
+    vi.mocked(window.bridge.invoke).mockImplementation((channel, ...args) => {
+      if (channel === 'workspace:path-kind')
+        return Promise.resolve((args[0] as string).endsWith('workspace') ? 'directory' : 'file')
+      if (channel === 'workspace:default-root')
+        return Promise.resolve('C:\\Users\\hylnb\\.larify\\workspace')
+      return Promise.resolve(42)
+    })
     const handler = createMessageLinkHandler('', sessionId)
 
     handler({ kind: 'file', target: 'C:\\Users\\test\\workspace' })

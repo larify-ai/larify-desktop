@@ -1,8 +1,10 @@
 import { ipcMain, type BrowserWindow } from 'electron'
 import { stat } from 'node:fs/promises'
+import { larifyWorkspacePath } from '../../../main/utils/app-paths'
 import type { WorkspaceManager } from './manager'
 
 const channels = [
+  'workspace:default-root',
   'workspace:inspect',
   'workspace:path-kind',
   'workspace:list',
@@ -25,6 +27,9 @@ export function registerWorkspaceIpc(manager: WorkspaceManager, window: BrowserW
   ipcMain.handle('workspace:inspect', (_event, id: number, file: string) =>
     manager.inspectFile(id, file)
   )
+  // 默认空间（会话 cwd 为空）下相对路径的解析基准：主进程持有 homedir，
+  // 返回应用工作区根，与 agent 侧对空 cwd 的兜底保持一致。
+  ipcMain.handle('workspace:default-root', () => larifyWorkspacePath())
   ipcMain.handle('workspace:path-kind', async (_event, file: string) =>
     (await stat(file)).isDirectory() ? 'directory' : 'file'
   )

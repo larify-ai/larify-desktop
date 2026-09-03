@@ -72,20 +72,22 @@ export function createMessageLinkHandler(
       openUrlInBrowser(sessionId, link.target, isCurrent)
       return
     }
-    let resolved: { path: string; hash?: string }
-    try {
-      resolved = resolveWorkspaceLink(cwd, link.target)
-    } catch (error) {
-      if (isCurrent()) console.error('[message-link:resolve]', error)
-      return
-    }
-    const { path, hash } = resolved
-    void window.bridge
-      .invoke('workspace:path-kind', path)
-      .then((kind) => {
-        if (!isCurrent()) return
-        if (kind === 'directory') openWorkspaceDirectory(path, isCurrent)
-        else openWorkspaceFile(cwd, path, isCurrent, hash)
+    // 默认空间（cwd 为空）时相对路径没有前端基准，由后端提供默认工作区根
+    // （与应用侧 agent 相对路径解析基准一致），再交由渲染层继续解析。
+    void (cwd
+      ? Promise.resolve(cwd)
+      : window.bridge.invoke('workspace:default-root')
+    )
+      .then((base: string) => resolveWorkspaceLink(base, link.target))
+      .then((resolved) => {
+        const { path, hash } = resolved
+        return window.bridge
+          .invoke('workspace:path-kind', path)
+          .then((kind: string) => {
+            if (!isCurrent()) return
+            if (kind === 'directory') openWorkspaceDirectory(path, isCurrent)
+            else openWorkspaceFile(cwd, path, isCurrent, hash)
+          })
       })
       .catch((error) => {
         if (!isCurrent()) return

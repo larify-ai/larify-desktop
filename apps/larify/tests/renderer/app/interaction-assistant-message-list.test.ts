@@ -1256,7 +1256,8 @@ describe('interaction assistant message list', () => {
       '列出当前目录',
       '读取 package.json'
     ])
-    expect(history.props.sections[0].item.partIndexes).toEqual([1])
+    // reset_context 也从隐藏变为可见工具卡片，故纳入其所在 stage（'列出当前目录'）的 partIndexes。
+    expect(history.props.sections[0].item.partIndexes).toEqual([1, 2])
     expect(history.props.sections[1].item.partIndexes).toEqual([4])
     expect(history.props.sections[1].continuations).toHaveLength(1)
     expect(history.props.sections[1].continuations[0].item.partIndexes).toEqual([6])
@@ -1307,7 +1308,7 @@ describe('interaction assistant message list', () => {
     expect(fragment.props.children[1][0].props.children.props.additions).toBe(2)
   })
 
-  it('hides reset context without treating its old title as a stage', async () => {
+  it('renders reset context as a normal tool card without treating its title as a stage', async () => {
     const response = {
       id: 'legacy-reset-stage',
       role: 'assistant',
@@ -1328,7 +1329,8 @@ describe('interaction assistant message list', () => {
 
     const props = captured.props as VirtuosoProps
     expect(props.totalCount).toBe(1)
-    expect(props.itemContent(0).props.children.props.renderItem.partIndexes).toEqual([0])
+    // reset_context 现在作为可见工具卡片渲染（含其自身 part），不再被 hidden。
+    expect(props.itemContent(0).props.children.props.renderItem.partIndexes).toEqual([0, 1])
   })
 
   it('keeps the live changes card after every renderable response fragment', async () => {

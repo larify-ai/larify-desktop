@@ -124,6 +124,7 @@
     "tldts": "^7.4.10",
     "tw-shimmer": "^0.4.11",
     "unist-util-visit": "^5.1.0",
+    "undici": "^6.27.0",
     "use-stick-to-bottom": "^1.1.6",
     "vscode-languageserver-protocol": "^3.18.2",
     "which": "^5.0.0",

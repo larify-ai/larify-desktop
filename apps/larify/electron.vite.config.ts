@@ -37,7 +37,9 @@ export default defineConfig({
       minify: true,
       sourcemap: false,
       rollupOptions: {
-        external: ['canvas']
+        // undici 需 external：它的 setGlobalDispatcher 要与 Node 内置 fetch 共享
+        // 全局 dispatcher（依赖运行时同一份 undici），打包会切成副本导致不共享。
+        external: ['canvas', 'undici']
       }
     }
   },

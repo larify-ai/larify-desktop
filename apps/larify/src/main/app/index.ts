@@ -14,9 +14,14 @@ import { registerUpdate } from '../update'
 import { registerAuth } from '../auth'
 import { registerModelApi } from '../model-api'
 import { openMainWindow, registerWindow } from '../window'
+import { configureUndiciPool } from '../core/net/undici-pool'
 import type { Application } from './application'
 
 async function createApplication(electron: App): Promise<Application> {
+  // 调大 AI SDK 底层 globalThis.fetch 的连接池 keep-alive，并用普通 Agent 强制直连
+  // （覆盖 Node 默认读 env 代理的行为；实测直连香港服务器比走代理更快）。
+  // 必须在首次模型请求前配置，故放在 createApplication 最早期。
+  configureUndiciPool()
   const registry = new Registry()
   const window = openMainWindow(electron)
   const application: Application = {

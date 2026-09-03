@@ -29,7 +29,7 @@ export interface AgentModelConfig {
 
 export const defaultModelConfig: AgentModelConfig = {
   modelId: 'deepseek-v4-flash-vision-exp',
-  reasoningEffort: 'off'
+  reasoningEffort: 'high'
 }
 
 export function isModelId(value: unknown): value is ModelId {

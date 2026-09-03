@@ -83,7 +83,7 @@ describe('createModelRuntime', () => {
     const runtime = createModelRuntime()
     expect(runtime.model).toEqual({ modelId: 'deepseek-v4-flash-vision-exp' })
     expect(runtime.providerOptions).toEqual({
-      deepseek: { thinking: { type: 'disabled' } }
+      deepseek: { thinking: { type: 'enabled' }, reasoningEffort: 'high' }
     })
   })
 })

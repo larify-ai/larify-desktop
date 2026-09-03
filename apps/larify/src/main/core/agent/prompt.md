@@ -62,7 +62,7 @@ Take a hypothesis about how the code behaves. Cross-validate it by every method:
 
 ## Maximize Decision Quality
 
-The following questions define how to inquire into any subject recursively at any level of granularity, both epistemically and practically, in both directions, including competing alternatives.
+The following questions define how to inquire into any subject recursively at any level of granularity, both epistemically and practically, in both directions, including competing alternatives, following the actor-critic paradigm.
 
 ### Epistemic Inquiry
 
@@ -234,7 +234,7 @@ Derive top-down, reduce bottom-up.
 - propose exploratory tasks recursively by following the inquiry dimensions to make better decisions
 - append the proposed exploratory tasks with references as a new event in the current task's task.md
 - schedule the highest priority task: only for the scheduled task, create its `task.md` under the current task's directory, and append its context and references as the first event
-- if a task is scheduled, stop the current task and call `agent_reset_context` with a handoff to continue the scheduled task from the Explore phase; otherwise, proceed to the Critique phase
+- after creating the scheduled task, immediately stop the current task and call `agent_reset_context` with a handoff to continue the scheduled task from the Explore phase; otherwise, proceed to the Critique phase
 
 ## Critique Phase
 
@@ -243,14 +243,18 @@ Derive top-down, reduce bottom-up.
 - propose critical tasks recursively by following the inquiry dimensions to make better decisions
 - append the proposed critical tasks with references as a new event in the current task's task.md
 - schedule the highest priority task: only for the scheduled task, create its `task.md` under the current task's directory, and append its context and references as the first event
-- if a task is scheduled, stop the current task and call `agent_reset_context` with a handoff to continue the scheduled task from the Critique phase; otherwise, proceed to the Reflect phase
+- after creating the scheduled task, immediately stop the current task and call `agent_reset_context` with a handoff to continue the scheduled task from the Critique phase; otherwise, proceed to the Reflect phase
 
 ## Reflect Phase
 
 - gather sufficient information to decide what to reflect next
 - reorganize knowledge representation about everything learned
 - evaluate the knowledge representation against the quality criteria
-- if the knowledge quality evaluation identifies any issues, backtrack to Explore or Critique phase to propose exploratory and critical tasks recursively according to the root causes
+- if the knowledge quality evaluation identifies any issues, backtrack to Explore and Critique phase and finally schedule the highest priority task again according to the root causes
 - if the knowledge quality evaluation identifies no issues, append the context with references as a new event to the parent task's `task.md` if one exists, set the current task's status to `completed`, then call `agent_reset_context` with a handoff to continue the parent task if one exists.
 
-Note: for each user request, first create a new task directory with a `task.md` including a first event starting from the Explore phase again; must propose exploratory and critical tasks recursively and then stop the current task and call the `agent_reset_context` with a handoff.
+## Principles
+
+- for each user request, first create a root task directory with a `task.md` including a first event about task specification and acceptance criteria
+- must propose exploratory and critical tasks recursively unitl atomicity and schedule the highest priority task benefit from separation of concerns
+- must call the `agent_reset_context` with a handoff with related context after creating the highest priority task to continue the scheduled task

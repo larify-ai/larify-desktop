@@ -26,6 +26,15 @@ vi.mock('../../../../src/main/utils/app-paths', () => ({
   larifyPath: (...segments: string[]) => mocks.larifyRoot + segments.join('/'),
   larifyWorkspacePath: () => mocks.workspace
 }))
+// 全量快照服务在 Agent 运行时真实建立基线并捕获工作区；agent 单元测试聚焦
+// 装配/续写/复用逻辑，故把快照服务 mock 掉：start/compare 都视为"无变更"，
+// saveReview 走增量兜底路径，行为与接入前一致。
+vi.mock('../../../../src/main/core/git/snapshot', () => ({
+  GitSnapshotService: class {
+    start = vi.fn(async () => null)
+    compare = vi.fn(async () => null)
+  }
+}))
 
 import { Agent } from '../../../../src/main/core/agent/agent'
 

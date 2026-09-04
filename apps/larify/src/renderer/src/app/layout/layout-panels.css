@@ -155,7 +155,9 @@
 .larify-allotment-animated
   > .split-view-container
   > .split-view-view:not(.split-view-view-visible) {
-  content-visibility: visible;
+  /* 动画期间不再强制整棵子树排版：内容在真正进入视口时才被排版/绘制，
+     避免侧边栏拖入/拖出时逐帧重排大量工作空间与会话节点。 */
+  content-visibility: auto;
   transition:
     left 180ms ease-out,
     width 180ms ease-out,

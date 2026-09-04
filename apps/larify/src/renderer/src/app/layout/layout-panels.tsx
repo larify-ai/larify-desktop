@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo } from 'react'
+import { memo, useLayoutEffect, useMemo } from 'react'
 import { Allotment } from 'allotment'
 import 'allotment/dist/style.css'
 import { Interaction } from '../interaction/interaction'
@@ -6,6 +6,13 @@ import { ConversationHeader } from '../interaction/assistant/conversation-header
 import { Navigation } from '../navigation/navigation'
 import { useAssistantSessions } from '../interaction/assistant/sessions-context'
 import { WorkbenchHost } from '../workbench/workbench'
+
+// 折叠侧边栏时只应改变布局，不应触发交互/工作台/导航树的整棵重建。
+// memo 让这些子树只在真实依赖（sessions 上下文、activeId、sessions 数组）变化时才重渲染，
+// 折叠/展开的 animating 状态变化不再连带重渲染它们。
+const MemoInteraction = memo(Interaction)
+const MemoWorkbenchHost = memo(WorkbenchHost)
+const MemoNavigation = memo(Navigation)
 import { expandedContentMinSize, layoutSpec, mainLayoutDefaultSizes } from './layout-spec'
 import { Titlebar } from './titlebar'
 import { useAllotmentToggle } from './use-allotment-toggle'
@@ -39,9 +46,9 @@ export function LayoutPanels(): React.JSX.Element {
   const navigation = useAllotmentToggle()
   const workbench = useAllotmentToggle(true)
   const setWorkbenchCollapsed = workbench.setCollapsed
-  const interaction = useMemo(() => <Interaction />, [])
+  const interaction = useMemo(() => <MemoInteraction />, [])
   const workbenchHost = useMemo(
-    () => <WorkbenchHost activeId={activeId} sessions={sessions} />,
+    () => <MemoWorkbenchHost activeId={activeId} sessions={sessions} />,
     [activeId, sessions]
   )
 
@@ -86,7 +93,7 @@ export function LayoutPanels(): React.JSX.Element {
           className="h-full w-full overflow-hidden [contain:layout_paint]"
           style={{ minWidth: layoutSpec.navigation.minSize }}
         >
-          <Navigation onCollapse={navigation.toggle} showToggle={!navigation.collapsed} />
+          <MemoNavigation onCollapse={navigation.toggle} showToggle={!navigation.collapsed} />
         </div>
       </Allotment.Pane>
       <Allotment.Pane

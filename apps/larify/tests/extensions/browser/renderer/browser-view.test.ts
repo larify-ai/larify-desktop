@@ -335,6 +335,33 @@ describe('BrowserView', () => {
     expect(h.invoke).toHaveBeenNthCalledWith(2, 'browser:attach', 'session-a', 42, 100)
   })
 
+  it('parks the webview when the workbench panel is collapsed', async () => {
+    h.state = { id: 42, url: 'https://example.com' } as BrowserTabState
+    await renderView()
+    const viewport = container.querySelector('[data-testid="browser-viewport"]') as HTMLDivElement
+    viewport.getBoundingClientRect = vi.fn(() =>
+      DOMRect.fromRect({ x: 11, y: 22, width: 333, height: 444 })
+    )
+    window.dispatchEvent(new CustomEvent('larify:native-layout'))
+    const host = webview().parentElement!
+    expect(host.style.left).toBe('11px')
+
+    // 折叠工作台：派发可见性 false，webview 应移出屏幕
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('larify:workbench-animation', { detail: { visible: false } }))
+    })
+    expect(host.style.left).toBe('-10000px')
+    expect(host.style.top).toBe('-10000px')
+
+    // 重新展开：派发可见性 true，webview 恢复正常定位
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('larify:workbench-animation', { detail: { visible: true } }))
+      window.dispatchEvent(new CustomEvent('larify:native-layout'))
+    })
+    expect(host.style.left).toBe('11px')
+    expect(host.style.top).toBe('22px')
+  })
+
   it('routes address navigation and contains rejected toolbar operations', async () => {
     h.state = {
       id: 42,

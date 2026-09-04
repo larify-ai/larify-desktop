@@ -1,6 +1,10 @@
-import { useEffect, useLayoutEffect, useRef } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { nativeLayoutEvent } from '@renderer/app/layout/native-layout'
+import {
+  nativeLayoutEvent,
+  workbenchAnimationEvent,
+  type WorkbenchAnimationState
+} from '@renderer/app/layout/native-layout'
 import type { WorkbenchRendererProps } from '@renderer/app/registry/workbench-renderers'
 import { BROWSER_PARTITION } from '../shared/types'
 import { BrowserToolbar } from './browser-toolbar'
@@ -20,7 +24,18 @@ export function BrowserView({
   const browser = useBrowser(sessionId, resourceId)
   const tab = browser.state
   const hasPage = Boolean(tab?.url && tab.url !== 'about:blank')
-  const shown = Boolean(active) && hasPage
+  // 工作台面板折叠时，webview（portal 到 body）不会被面板的 visibility 隐藏，
+  // 只能靠 place() 移出屏幕。这里以工作台可见性为准，折叠时把 webview 定位到屏幕外。
+  const [workbenchVisible, setWorkbenchVisible] = useState(true)
+  useEffect(() => {
+    const onWorkbenchAnimation = (event: Event): void => {
+      const detail = (event as CustomEvent<WorkbenchAnimationState | undefined>).detail
+      if (detail) setWorkbenchVisible(detail.visible)
+    }
+    window.addEventListener(workbenchAnimationEvent, onWorkbenchAnimation)
+    return () => window.removeEventListener(workbenchAnimationEvent, onWorkbenchAnimation)
+  }, [])
+  const shown = Boolean(active) && hasPage && workbenchVisible
   const webviewRef = useRef<Electron.WebviewTag>(null)
   const viewportRef = useRef<HTMLDivElement>(null)
   const hostRef = useRef<HTMLDivElement>(null)

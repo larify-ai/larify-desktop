@@ -112,6 +112,32 @@ describe('Tool', () => {
     expect(container.textContent).toContain('Failed')
   })
 
+  it('confines ToolInput code scroll to a height-limited scroller so the horizontal bar stays visible', async () => {
+    await act(async () => {
+      root.render(createElement(ToolInput, { input: { name: 'fs_read', args: { path: 'a' } } }))
+    })
+
+    // CodeBlockContent 应携带 max-h-80 + overflow-auto：该层成为受限滚动容器，
+    // 横向+纵向滚动都在其内部，横向滚动条固定在其视口底部（任何垂直位置均可见）。
+    const scroller = container.querySelector<HTMLElement>(
+      '.max-h-80.overflow-auto'
+    )
+    expect(scroller).not.toBeNull()
+    expect(scroller?.textContent).toContain('fs_read')
+  })
+
+  it('confines ToolOutput code scroll to a height-limited scroller so the horizontal bar stays visible', async () => {
+    await act(async () => {
+      root.render(createElement(ToolOutput, { output: { name: 'ok', value: 1 }, errorText: undefined }))
+    })
+
+    const scroller = container.querySelector<HTMLElement>(
+      '.max-h-80.overflow-auto'
+    )
+    expect(scroller).not.toBeNull()
+    expect(scroller?.textContent).toContain('ok')
+  })
+
   async function renderTool(
     props: { open?: boolean; onOpenChange?: (open: boolean) => void } = {}
   ): Promise<void> {

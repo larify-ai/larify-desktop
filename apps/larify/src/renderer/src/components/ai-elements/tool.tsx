@@ -31,6 +31,11 @@ import { createContext, isValidElement, useContext } from 'react'
 
 import { CodeBlock } from './code-block'
 
+// 工具卡片参数/结果区的代码块需要一个受限高度的滚动容器：
+// 让横向+纵向滚动都发生在 CodeBlockContent 内部（该层自带 overflow-auto），
+// 此处仅补充 max-height。这样横向滚动条固定在滚动容器视口底部，任何垂直位置均可见。
+const TOOL_CODE_CONTENT_CLASS = 'max-h-80 overflow-auto'
+
 export type ToolProps = ComponentProps<typeof Collapsible>
 
 const ToolOpenContext = createContext(false)
@@ -192,8 +197,12 @@ const cleanToolInput = (input: ToolPart['input']): unknown => {
 export const ToolInput = ({ className, input, ...props }: ToolInputProps): React.JSX.Element => (
   <div className={cn('space-y-2 overflow-hidden', className)} {...props}>
     <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">参数</h4>
-    <div className="max-h-80 overflow-y-auto rounded-md bg-muted/50">
-      <CodeBlock code={JSON.stringify(cleanToolInput(input), null, 2) ?? ''} language="json" />
+    <div className="rounded-md bg-muted/50">
+      <CodeBlock
+        code={JSON.stringify(cleanToolInput(input), null, 2) ?? ''}
+        language="json"
+        contentClassName={TOOL_CODE_CONTENT_CLASS}
+      />
     </div>
   </div>
 )
@@ -217,9 +226,15 @@ export const ToolOutput = ({
   if (isValidElement(output)) {
     Output = output
   } else if (typeof output === 'string') {
-    Output = <CodeBlock code={output} language="json" />
+    Output = <CodeBlock code={output} language="json" contentClassName={TOOL_CODE_CONTENT_CLASS} />
   } else {
-    Output = <CodeBlock code={JSON.stringify(output, null, 2) ?? ''} language="json" />
+    Output = (
+      <CodeBlock
+        code={JSON.stringify(output, null, 2) ?? ''}
+        language="json"
+        contentClassName={TOOL_CODE_CONTENT_CLASS}
+      />
+    )
   }
 
   return (
@@ -229,7 +244,7 @@ export const ToolOutput = ({
       </h4>
       <div
         className={cn(
-          'max-h-80 overflow-auto rounded-md text-xs [&_table]:w-full',
+          'rounded-md text-xs [&_table]:w-full',
           errorText ? 'bg-destructive/10 text-destructive' : 'bg-muted/50 text-foreground'
         )}
       >

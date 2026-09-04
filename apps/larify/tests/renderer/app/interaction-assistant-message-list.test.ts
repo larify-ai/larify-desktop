@@ -517,6 +517,29 @@ describe('interaction assistant message list', () => {
     expect(container.querySelector('button')).toBeNull()
   })
 
+  it('does not snap back to following when a navigation scroll moves up within the bottom tolerance', async () => {
+    // 用户在最底部（following），点击导航上滑定位目标。scrollToIndex 启动上滑的瞬间仍接近底部，
+    // 若 onScrollCapture 仅凭 distanceFromBottom<=threshold 就把 reading 切回 following，
+    // 会被 followOutput/底部锚定拉回底部，表现为"点击导航上滑一点又反弹回底部，需多点几次"。
+    // 修复：向上滚动（movedUp）时不恢复 following，只在用户向下滚回接近底部时恢复。
+    await render({ messages: [message('latest')], recentStart: 0 })
+    act(() => (captured.props as VirtuosoProps).atBottomStateChange(true))
+    const scroller = createScroller(100)
+    container.firstElementChild?.append(scroller)
+    act(() => (captured.props as VirtuosoProps).scrollerRef(scroller))
+
+    // 用户/导航进入 reading（阅读中的定位状态）：上滑意图
+    act(() => container.firstElementChild?.dispatchEvent(new WheelEvent('wheel', { deltaY: -200 })))
+
+    // 模拟 scrollToIndex 一开始的上滑：scrollTop 100 -> 92（movedUp，distanceFromBottom = 8 <= 16）
+    scroller.scrollTop = 92
+    act(() => scroller.dispatchEvent(new Event('scroll')))
+    await act(() => new Promise((resolve) => setTimeout(resolve, 2)))
+
+    // 不应恢复 following（无反弹），故 followOutput 不为 'auto'
+    expect((captured.props as VirtuosoProps).followOutput(true)).toBe(false)
+  })
+
   it('shows the return button only after the reader leaves the bottom tolerance', async () => {
     await render({ messages: [message('latest')], recentStart: 0 })
     act(() => (captured.props as VirtuosoProps).atBottomStateChange(true))

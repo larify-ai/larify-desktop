@@ -202,6 +202,7 @@ export const ToolInput = ({ className, input, ...props }: ToolInputProps): React
         code={JSON.stringify(cleanToolInput(input), null, 2) ?? ''}
         language="json"
         contentClassName={TOOL_CODE_CONTENT_CLASS}
+        highlight={false}
       />
     </div>
   </div>
@@ -226,13 +227,21 @@ export const ToolOutput = ({
   if (isValidElement(output)) {
     Output = output
   } else if (typeof output === 'string') {
-    Output = <CodeBlock code={output} language="json" contentClassName={TOOL_CODE_CONTENT_CLASS} />
+    Output = (
+      <CodeBlock
+        code={output}
+        language="json"
+        contentClassName={TOOL_CODE_CONTENT_CLASS}
+        highlight={false}
+      />
+    )
   } else {
     Output = (
       <CodeBlock
         code={JSON.stringify(output, null, 2) ?? ''}
         language="json"
         contentClassName={TOOL_CODE_CONTENT_CLASS}
+        highlight={false}
       />
     )
   }

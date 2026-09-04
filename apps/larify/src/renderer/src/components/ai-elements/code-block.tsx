@@ -113,6 +113,7 @@ type CodeBlockProps = HTMLAttributes<HTMLDivElement> & {
   language: BundledLanguage;
   showLineNumbers?: boolean;
   contentClassName?: string;
+  highlight?: boolean;
 };
 
 interface TokenizedCode {
@@ -387,19 +388,21 @@ export const CodeBlockContent = ({
   language,
   showLineNumbers = false,
   className,
+  highlight = true,
 }: {
   code: string;
   language: BundledLanguage;
   showLineNumbers?: boolean;
   className?: string;
+  highlight?: boolean;
 }) => {
   // Memoized raw tokens for immediate display
   const rawTokens = useMemo(() => createRawTokens(code), [code]);
 
   // Synchronous cache lookup — avoids setState in effect for cached results
   const syncTokens = useMemo(
-    () => highlightCode(code, language) ?? rawTokens,
-    [code, language, rawTokens]
+    () => (highlight ? highlightCode(code, language) ?? rawTokens : rawTokens),
+    [code, language, rawTokens, highlight]
   );
 
   // Async highlighting result (populated after shiki loads)
@@ -410,6 +413,11 @@ export const CodeBlockContent = ({
   } | null>(null);
 
   useEffect(() => {
+    // highlight=false 时不触发 shiki 高亮：shiki 的 codeToTokens 是同步 CPU
+    // 密集操作，对超长工具输出（如 fs_read 顶格 10 万字符）会在主线程阻塞数百
+    // 毫秒到数秒，导致展开工具卡片时界面冻结。纯文本渲染实测仅 ~80ms。
+    if (!highlight) return;
+
     let cancelled = false;
 
     highlightCode(code, language, (result) => {
@@ -421,10 +429,13 @@ export const CodeBlockContent = ({
     return () => {
       cancelled = true;
     };
-  }, [code, language, tokenKey]);
+  }, [code, language, tokenKey, highlight]);
 
-  const tokenized =
-    asyncResult?.key === tokenKey ? asyncResult.tokens : syncTokens;
+  const tokenized = highlight
+    ? asyncResult?.key === tokenKey
+      ? asyncResult.tokens
+      : syncTokens
+    : rawTokens;
 
   return (
     <div className={cn("relative overflow-auto", className)}>
@@ -439,6 +450,7 @@ export const CodeBlock = ({
   showLineNumbers = false,
   className,
   contentClassName,
+  highlight = true,
   children,
   ...props
 }: CodeBlockProps) => {
@@ -453,6 +465,7 @@ export const CodeBlock = ({
           language={language}
           showLineNumbers={showLineNumbers}
           className={contentClassName}
+          highlight={highlight}
         />
       </CodeBlockContainer>
     </CodeBlockContext.Provider>

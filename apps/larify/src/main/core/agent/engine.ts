@@ -55,6 +55,21 @@ function toolImages(imageCapable: boolean): LanguageModelMiddleware {
   }
 }
 
+// 流级恢复（streamRetries）的可重试判定：与上方 ai-retry 的"黑名单外一概重试"
+// 策略保持一致——用户主动取消、SDK 校验/配置类错误、客户端 4xx（429 限流除外）
+// 不重试；其余（网络中断 terminated/ECONNRESET、5xx、SSE Overloaded 等）视为
+// 瞬时错误，请求重跑当前失败的模型 step。
+export function isRetryableStreamError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false
+  if (error.name === 'AbortError') return false
+  if (AISDKError.isInstance(error) && !APICallError.isInstance(error)) return false
+  if (APICallError.isInstance(error) && typeof error.statusCode === 'number') {
+    const code = error.statusCode
+    if (code !== 429 && code >= 400 && code < 500) return false
+  }
+  return true
+}
+
 export function runAgent(
   messages: ModelMessage[],
   options: AgentOptions
@@ -94,6 +109,13 @@ export function runAgent(
     model: wrappedModel,
     messages,
     maxRetries: 0,
+    // 流级恢复：内容已流出后（mid-stream）收到错误时，只重跑失败的模型 step，
+    // 保留已完成的历史 steps、工具调用与工具结果（不重放已完成工作）。
+    // streamRetries: 0 关闭自动流重试，改由 onError 回调精确控制：仅对瞬时
+    // 错误（terminated/ECONNRESET/5xx/429 等）请求重试，不重试用户主动取消。
+    // 与上方 ai-retry 互补：ai-retry 负责"内容未流出"的重试，本处负责"内容流出后"。
+    streamRetries: 0,
+    onError: ({ error }) => (isRetryableStreamError(error) ? { retry: true } : undefined),
     toolsContext: toolsContext as never,
     experimental_transform: smoothStream({
       delayInMs: 20,

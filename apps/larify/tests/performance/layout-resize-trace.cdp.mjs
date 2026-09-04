@@ -168,7 +168,7 @@ if (stressSessionId) {
 }
 const baselineExternalTargetIds = new Set(
   (await fetch('http://127.0.0.1:9222/json/list').then((response) => response.json()))
-    .filter(({ type, url }) => type === 'page' && !url.startsWith('http://localhost:'))
+    .filter(({ type, url }) => (type === 'page' || type === 'webview') && !url.startsWith('http://localhost:'))
     .map(({ id }) => id)
 )
 const staleStressResourceCount = await evaluate(`(async () => {
@@ -441,7 +441,7 @@ if (workbenchTab || workbenchRenderer) {
           )
           const activeTarget = browserTargets.find(
             ({ id, type, url }) =>
-              type === 'page' &&
+              (type === 'page' || type === 'webview') &&
               !baselineExternalTargetIds.has(id) &&
               url.includes(`larify_perf_tab=${marker}`)
           )
@@ -482,7 +482,7 @@ if (workbenchTab || workbenchRenderer) {
         )
         stressTargets = browserTargets.filter(
           ({ id, type, url }) =>
-            type === 'page' &&
+            (type === 'page' || type === 'webview') &&
             !url.startsWith('http://localhost:') &&
             !baselineExternalTargetIds.has(id)
         )
@@ -663,7 +663,7 @@ if (workbenchTab || workbenchRenderer) {
         )
         stressBrowserTargets = browserTargets.filter(
           ({ id, type, url }) =>
-            type === 'page' &&
+            (type === 'page' || type === 'webview') &&
             Boolean(url) &&
             !url.startsWith('http://localhost:') &&
             !baselineExternalTargetIds.has(id)

@@ -4,8 +4,16 @@ import { join } from 'node:path'
 export const stressSessionId = 'larify-performance-long-history-v1'
 export const stressSessionTitle = 'PERF 超长对话 2000 条（自动清理）'
 
+// 应用的会话数据库在 app.getPath('userData')/sessions.db。
+// - dev:debug（本次性能测试运行方式）用 `LARIFY_HOME=.../.larify-debug` + `--user-data-dir=.../.larify-debug`，
+//   此时 userData 即 LARIFY_HOME，数据库在 `<LARIFY_HOME>/sessions.db`。
+// - 生产/默认实例 userData = %APPDATA%/larify，数据库在 `%APPDATA%/larify/sessions.db`。
+// fixture 必须写入**应用实例实际读取的数据库**，否则创建出的 stress 会话不会被侧边栏索引。
 const databasePath =
-  process.env.LARIFY_PERF_SESSION_DB ?? join(process.env.APPDATA, 'larify', 'sessions.db')
+  process.env.LARIFY_PERF_SESSION_DB ??
+  (process.env.LARIFY_HOME
+    ? join(process.env.LARIFY_HOME, 'sessions.db')
+    : join(process.env.APPDATA, 'larify', 'sessions.db'))
 
 export function removeStressSession() {
   const database = new DatabaseSync(databasePath)

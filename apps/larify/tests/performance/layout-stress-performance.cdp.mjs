@@ -10,12 +10,43 @@ import {
   stressSessionId,
   stressSessionTitle
 } from './layout-stress-fixture.mjs'
+import { connectLarifyCdp } from '../manual/cdp-client.mjs'
+
+// 探测应用当前实际打开的 workspace 的 cwd（用于创建 stress 会话，使其被侧边栏索引）。
+// 应用侧边栏按 cwd 索引会话（session:list 用 WHERE cwd = ? 严格匹配），若 stress 会话的
+// cwd 不在应用已知 workspace 列表里，侧边栏不会显示它，trace 的 threadTitle 查找会找不到
+// 而 evaluate 超时。故这里优先用应用实际激活的 workspace cwd，而非固定的桌面目录。
+async function detectActiveWorkspaceCwd(fallback) {
+  try {
+    const cdp = await connectLarifyCdp()
+    try {
+      const cwds = await cdp.evaluate(`window.bridge.invoke('session:cwds')`)
+      if (Array.isArray(cwds)) {
+        const nonEmpty = cwds.filter((cwd) => typeof cwd === 'string' && cwd.length > 0)
+        // 优先选项目根（本次性能测试所在、内容最丰富的 workspace），否则第一个非空 cwd。
+        const normalizedFallback = fallback.replaceAll('\\', '/').replace(/[/]+$/, '').toLowerCase()
+        const preferred = nonEmpty.find(
+          (cwd) => cwd.replaceAll('\\', '/').replace(/[/]+$/, '').toLowerCase() === normalizedFallback
+        )
+        if (preferred) return preferred
+        if (nonEmpty.length > 0) return nonEmpty[0]
+      }
+    } finally {
+      cdp.close()
+    }
+  } catch {
+    // CDP 不可用时退回 fallback
+  }
+  return fallback
+}
 
 const traceScript = fileURLToPath(new URL('./layout-resize-trace.cdp.mjs', import.meta.url))
 const syntheticMessageCount = Number(process.env.LARIFY_PERF_MESSAGE_COUNT ?? 2_000)
 const browserTabCount = Number(process.env.LARIFY_PERF_BROWSER_TAB_COUNT ?? 9)
 const workbenchTabCount = browserTabCount + 3
-const desktopCwd = process.env.LARIFY_PERF_CWD ?? `${process.env.USERPROFILE}\\Desktop`
+const projectRoot = fileURLToPath(new URL('../../../..', import.meta.url))
+const desktopCwd =
+  process.env.LARIFY_PERF_CWD ?? (await detectActiveWorkspaceCwd(projectRoot))
 const heavyBrowserUrls = [
   'https://en.wikipedia.org/wiki/Electron_(software_framework)',
   'https://en.wikipedia.org/wiki/Chromium_(web_browser)',

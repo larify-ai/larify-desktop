@@ -1102,6 +1102,96 @@ describe('interaction assistant message list', () => {
     expect(container.querySelectorAll('[data-stage-status="completed"]')).toHaveLength(1)
   })
 
+  it('keeps a manually expanded stage open after virtualization remounts the history', async () => {
+    // 用户报告：流式进行到第二个进度项时，点击第一个（已完成）进度项会展开又立即被收起。
+    // 根因是内层 stage 的展开状态未持久化到 openActivities，虚拟列表回收重挂载后弹回折叠。
+    // 此测试在真实 message-list 全链路下复现并验证修复：点击已完成 stage → 触发清理 →
+    // remount，stage 仍应保持展开。
+    const response = {
+      id: 'two-stage-history',
+      role: 'assistant',
+      parts: [
+        {
+          type: 'dynamic-tool',
+          toolName: 'agent_show_progress',
+          toolCallId: 'progress-one',
+          state: 'output-available',
+          input: { title: '调研' },
+          output: 'Progress shown.'
+        },
+        { type: 'reasoning', text: '调研现有实现', state: 'done' },
+        {
+          type: 'dynamic-tool',
+          toolName: 'fs_read',
+          toolCallId: 'read-1',
+          state: 'output-available',
+          input: { toolCallTitle: '读取现有实现' },
+          output: 'done'
+        },
+        {
+          type: 'dynamic-tool',
+          toolName: 'agent_show_progress',
+          toolCallId: 'progress-two',
+          state: 'output-available',
+          input: { title: '实现' },
+          output: 'Progress shown.'
+        },
+        { type: 'reasoning', text: '修改功能实现', state: 'streaming' }
+      ]
+    } as UIMessage
+
+    await render({ messages: [response], recentStart: 0, live: true })
+
+    const itemContainer = document.createElement('div')
+    document.body.append(itemContainer)
+    let itemRoot = createRoot(itemContainer)
+    try {
+      await act(async () => itemRoot.render((captured.props as VirtuosoProps).itemContent(0)))
+
+      // 找到内层已完成 stage（'调研'）的按钮，它默认折叠
+      const stageButton = [...itemContainer.querySelectorAll<HTMLButtonElement>('button')].find(
+        (button) => button.textContent?.trim() === '调研'
+      )
+      expect(stageButton).toBeTruthy()
+      expect(stageButton?.getAttribute('data-state')).toBe('closed')
+
+      // 点击已完成 stage 展开
+      await act(async () => stageButton?.click())
+      expect(
+        [...itemContainer.querySelectorAll<HTMLButtonElement>('button')].find(
+          (button) => button.textContent?.trim() === '调研'
+        )?.getAttribute('data-state')
+      ).toBe('open')
+
+      // 触发消息更新（recentItems 重建，清理 openActivities 的 effect 会运行）
+      await render({
+        messages: [
+          {
+            ...response,
+            parts: [...response.parts, { type: 'text', text: '最终答案', state: 'streaming' }]
+          } as UIMessage
+        ],
+        recentStart: 0,
+        live: true
+      })
+
+      // 虚拟列表回收后重挂载同一行
+      await act(async () => itemRoot.unmount())
+      itemRoot = createRoot(itemContainer)
+      await act(async () => itemRoot.render((captured.props as VirtuosoProps).itemContent(0)))
+
+      // 关键：重挂载后，用户手动展开的已完成 stage 仍应保持展开（而非弹回折叠）
+      expect(
+        [...itemContainer.querySelectorAll<HTMLButtonElement>('button')].find(
+          (button) => button.textContent?.trim() === '调研'
+        )?.getAttribute('data-state')
+      ).toBe('open')
+    } finally {
+      await act(async () => itemRoot.unmount())
+      itemContainer.remove()
+    }
+  })
+
   it('keeps an activity history expanded while ask user waits for an answer', async () => {
     const response = {
       id: 'waiting-history',

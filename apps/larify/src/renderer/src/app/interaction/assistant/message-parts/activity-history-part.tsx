@@ -24,17 +24,38 @@ export interface ActivityHistorySection {
   }>
 }
 
+// 阶段分组（stage section）展开状态的持久化 key。key 的单一来源：
+// ActivityHistoryPart 内部渲染与调用方（message-list）清理 openActivities 时
+// 都复用这一函数，避免两处硬编码格式不同步。
+export function activityHistorySectionKey(
+  section: ActivityHistorySection,
+  index: number
+): string {
+  return `${section.message.id}-section-${index}`
+}
+
 export function ActivityHistoryPart({
   sections,
   waiting = false,
   initialOpen,
   onOpenChange,
+  stageOpen,
   active = true
 }: {
   sections: ActivityHistorySection[]
   waiting?: boolean
   initialOpen?: boolean
   onOpenChange?: (open: boolean) => void
+  // 阶段分组（stage section）展开状态的持久化通道。虚拟列表回收重挂载后，
+  // 内层 stage 的 open 状态不能丢；否则用户手动展开的已完成 stage 在流式
+  // 继续推进（行被 remount）时会弹回折叠（defaultOpen=false）。
+  // 说明：调用方通常复用与"外层展开"相同的 handleActivityOpenChange，因此展开
+  // 内层 stage 也会退出底部跟随/保持阅读位置/显示返回按钮——这是有意为之，
+  // 与整体展开行为一致，让用户能稳定查看展开的 stage 而不被流式"顶走"。
+  stageOpen?: {
+    get(key: string): boolean | undefined
+    set(key: string, open: boolean): void
+  }
   active?: boolean
 }): React.JSX.Element {
   const defaultOpen = sections.some(({ streaming }) => streaming) || waiting
@@ -114,6 +135,7 @@ export function ActivityHistoryPart({
         <CollapsibleContent className="mt-3 flex flex-col gap-3">
           {sections.map((section, index) => {
             const streaming = section.streaming
+            const sectionKey = activityHistorySectionKey(section, index)
             return (
               <ActivityGroupPart
                 key={`${section.message.id}-${index}`}
@@ -127,6 +149,15 @@ export function ActivityHistoryPart({
                 message={section.message}
                 streaming={section.streaming}
                 active={active}
+                initialOpen={
+                  // 用户已手动开合过该 stage 时，用持久化值覆盖 defaultOpen；
+                  // 否则让 useStickyOpen 走 defaultOpen（streaming/waiting 时默认展开）。
+                  // 传入 undefined 时 useStickyOpen 内部回退到 defaultOpen。
+                  stageOpen ? stageOpen.get(sectionKey) : undefined
+                }
+                onOpenChange={
+                  stageOpen ? (open) => stageOpen.set(sectionKey, open) : undefined
+                }
                 additionalContent={section.continuations?.map((continuation, continuationIndex) => (
                   <ActivityGroupPart
                     key={`${continuation.message.id}-${continuationIndex}`}

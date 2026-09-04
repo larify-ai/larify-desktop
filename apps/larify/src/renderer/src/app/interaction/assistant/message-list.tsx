@@ -16,6 +16,7 @@ import {
 } from './message-render-items'
 import {
   ActivityHistoryPart,
+  activityHistorySectionKey,
   type ActivityHistorySection
 } from './message-parts/activity-history-part'
 import {
@@ -529,6 +530,18 @@ function boundaryActivityHistory(
   return undefined
 }
 
+// 收集需要保留在 openActivities 里的持久化 key：外层的 content activity 与
+// activity-history，以及 activity-history 内层的阶段分组（stage section）。
+// stage 的展开状态也持久化到 openActivities（否则虚拟列表回收重挂载时被清理，
+// 用户手动展开的 stage 会弹回折叠），故其 key 需一并保留。
+function collectActivityPersistKeys(activity: MessageActivityHistoryListItem): string[] {
+  const keys = [activity.key]
+  activity.sections.forEach((section, index) => {
+    keys.push(activityHistorySectionKey(section, index))
+  })
+  return keys
+}
+
 function HistoricalMessageSpacer({
   height,
   index
@@ -644,14 +657,21 @@ function ActiveAssistantMessageList({
   useEffect(() => {
     const currentActivityKeys = new Set<string>()
     for (const item of recentItems) {
-      if (
-        item.kind === 'activity-history' ||
-        (item.kind === 'content' && item.renderItem && isActivityRenderItem(item.renderItem))
+      if (item.kind === 'activity-history') {
+        for (const key of collectActivityPersistKeys(item)) currentActivityKeys.add(key)
+      } else if (
+        item.kind === 'content' &&
+        item.renderItem &&
+        isActivityRenderItem(item.renderItem)
       ) {
         currentActivityKeys.add(item.key)
       }
     }
-    if (boundaryHistory) currentActivityKeys.add(boundaryHistory.item.key)
+    if (boundaryHistory) {
+      for (const key of collectActivityPersistKeys(boundaryHistory.item)) {
+        currentActivityKeys.add(key)
+      }
+    }
     for (const key of openActivities.current.keys()) {
       if (!currentActivityKeys.has(key)) openActivities.current.delete(key)
     }
@@ -1082,6 +1102,10 @@ function ActiveAssistantMessageList({
                     initialOpen={openActivities.current.get(listItem.key)}
                     active={active}
                     onOpenChange={(open) => handleActivityOpenChange(listItem.key, open)}
+                    stageOpen={{
+                      get: (key) => openActivities.current.get(key),
+                      set: (key, open) => handleActivityOpenChange(key, open)
+                    }}
                   />
                   {listItem.trailing?.map((trailing) =>
                     trailing.kind === 'changes' ? (

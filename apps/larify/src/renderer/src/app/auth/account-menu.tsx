@@ -4,6 +4,7 @@ import {
   CrownIcon,
   LogOutIcon,
   PaletteIcon,
+  SettingsIcon,
   UserRoundIcon
 } from 'lucide-react'
 import { useTheme } from 'next-themes'
@@ -27,11 +28,13 @@ import {
   DropdownMenuTrigger
 } from '@renderer/components/ui/dropdown-menu'
 import { useAuth } from './auth-context'
+import { SettingsDialog } from '../settings/settings-dialog'
 
 export function AccountMenu(): React.JSX.Element {
   const { email, logout } = useAuth()
   const { resolvedTheme, setTheme } = useTheme()
   const [confirming, setConfirming] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [isLoggingOut, setIsLoggingOut] = useState(false)
   const [updateStatus, setUpdateStatus] = useState('')
   const [logoutError, setLogoutError] = useState('')
@@ -177,6 +180,16 @@ export function AccountMenu(): React.JSX.Element {
           </div>
           <DropdownMenuItem
             className="grid min-h-10 grid-cols-[20px_auto_minmax(0,1fr)] gap-2 rounded-lg px-2 text-sm"
+            onSelect={() => {
+              // 等下拉菜单收起再开弹窗，否则两层浮层会互相抢焦点。
+              window.setTimeout(() => setSettingsOpen(true), 0)
+            }}
+          >
+            <SettingsIcon aria-hidden="true" className="size-5 stroke-[1.75] text-foreground" />
+            <span className="min-w-16 whitespace-nowrap">设置</span>
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            className="grid min-h-10 grid-cols-[20px_auto_minmax(0,1fr)] gap-2 rounded-lg px-2 text-sm"
             onSelect={(event) => {
               event.preventDefault()
               void checkForUpdates()
@@ -203,6 +216,9 @@ export function AccountMenu(): React.JSX.Element {
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+
+      {/* 只在打开时挂载：每次展开都重新读一次已保存的 Key，省去 effect 同步。 */}
+      {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
 
       <Dialog open={confirming} onOpenChange={(open) => !isLoggingOut && setConfirming(open)}>
         <DialogContent showCloseButton={false} className="max-w-sm">

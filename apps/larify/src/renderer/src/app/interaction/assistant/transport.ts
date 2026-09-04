@@ -1,6 +1,7 @@
 import type { ChatTransport, UIMessage, UIMessageChunk } from 'ai'
 import { USAGE_CHANGED_EVENT } from '@shared/events'
 import type { AgentModelConfig } from '../../../../../main/core/model/config'
+import { readOwnApiKey } from '../../settings/api-key'
 import { invalidateGitStatus } from '../../../../../extensions/workspace/renderer/changes/git-status-invalidation'
 
 function isGitSnapshotChunk(chunk: unknown): boolean {
@@ -92,6 +93,17 @@ function openAgentStream(
   })
 }
 
+/**
+ * 用户在设置里配了自有 Key 就带上，主进程据此直连官方、跳过网关。
+ *
+ * Key 只在真正发请求时挂上去，不会随模型配置一起被 session.tsx
+ * 写进模型选择的 localStorage 条目。
+ */
+function withOwnApiKey(config: AgentModelConfig): AgentModelConfig {
+  const apiKey = readOwnApiKey()
+  return apiKey ? { ...config, apiKey } : config
+}
+
 export function createIpcTransport(
   getCwd: () => string,
   getModelConfig: () => AgentModelConfig,
@@ -103,7 +115,7 @@ export function createIpcTransport(
       const message = messages.at(-1)
       if (!message) throw new Error('A message is required.')
       const cwd = getCwd()
-      const modelConfig = getModelConfig()
+      const modelConfig = withOwnApiKey(getModelConfig())
 
       return openAgentStream(
         chatId,

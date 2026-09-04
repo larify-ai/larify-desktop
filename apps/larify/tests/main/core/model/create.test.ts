@@ -17,6 +17,7 @@ vi.mock('../../../../src/main/model-api/service', () => ({
 }))
 
 import { createModelRuntime } from '../../../../src/main/core/model/create'
+import { officialModelBaseUrl } from '../../../../src/main/core/model/config'
 
 const CREDENTIALS = { baseUrl: 'https://api.larify.ai', apiKey: 'sk-test-key' }
 
@@ -83,7 +84,55 @@ describe('createModelRuntime', () => {
     const runtime = createModelRuntime()
     expect(runtime.model).toEqual({ modelId: 'deepseek-v4-flash-vision-exp' })
     expect(runtime.providerOptions).toEqual({
-      deepseek: { thinking: { type: 'enabled' }, reasoningEffort: 'high' }
+      deepseek: { thinking: { type: 'disabled' } }
+    })
+  })
+
+  it('routes to DeepSeek official (trimmed key) when an own API key is present', () => {
+    // 走官方直连时不应当读取网关凭据。
+    modelApi.getModelApiService.mockReturnValue({
+      getCachedCredentialsSync: () => {
+        throw new Error('must not be called')
+      }
+    })
+    createModelRuntime({
+      modelId: 'deepseek-v4-flash',
+      reasoningEffort: 'high',
+      apiKey: '  sk-own  '
+    })
+    expect(deepseek.createDeepSeek).toHaveBeenCalledWith({
+      baseURL: officialModelBaseUrl,
+      apiKey: 'sk-own'
+    })
+  })
+
+  it('applies the same reasoning options when using the official API', () => {
+    const runtime = createModelRuntime({
+      modelId: 'deepseek-v4-flash',
+      reasoningEffort: 'max',
+      apiKey: 'sk-own'
+    })
+    expect(runtime.model).toEqual({ modelId: 'deepseek-v4-flash' })
+    expect(runtime.providerOptions).toEqual({
+      deepseek: {
+        thinking: { type: 'enabled' },
+        reasoningEffort: 'max'
+      }
+    })
+  })
+
+  it('treats a whitespace-only own key as unconfigured and falls back to the gateway', () => {
+    const runtime = createModelRuntime({
+      modelId: 'deepseek-v4-flash',
+      reasoningEffort: 'off',
+      apiKey: '   '
+    })
+    expect(deepseek.createDeepSeek).toHaveBeenCalledWith({
+      baseURL: 'https://api.larify.ai/v1',
+      apiKey: 'sk-test-key'
+    })
+    expect(runtime.providerOptions).toEqual({
+      deepseek: { thinking: { type: 'disabled' } }
     })
   })
 })

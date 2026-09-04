@@ -397,6 +397,46 @@ describe('interaction assistant transport', () => {
     expect(bridge.invoke).not.toHaveBeenCalled()
   })
 
+  it('attaches the user-configured own API key to the model config', async () => {
+    const bridge = createBridge(async (channel) => {
+      if (channel === 'agent:send') bridge.emit('agent:end:session-1')
+    })
+    vi.stubGlobal('window', { bridge, dispatchEvent: vi.fn() })
+    vi.stubGlobal('localStorage', {
+      getItem: () => ' sk-own-123 ',
+      setItem: vi.fn(),
+      removeItem: vi.fn()
+    })
+
+    await readAll(await send())
+
+    expect(bridge.invoke).toHaveBeenCalledWith(
+      'agent:send',
+      expect.objectContaining({
+        modelConfig: { ...defaultModelConfig, apiKey: 'sk-own-123' }
+      })
+    )
+  })
+
+  it('treats a whitespace-only stored key as unconfigured', async () => {
+    const bridge = createBridge(async (channel) => {
+      if (channel === 'agent:send') bridge.emit('agent:end:session-1')
+    })
+    vi.stubGlobal('window', { bridge, dispatchEvent: vi.fn() })
+    vi.stubGlobal('localStorage', {
+      getItem: () => '   ',
+      setItem: vi.fn(),
+      removeItem: vi.fn()
+    })
+
+    await readAll(await send())
+
+    expect(bridge.invoke).toHaveBeenCalledWith(
+      'agent:send',
+      expect.objectContaining({ modelConfig: defaultModelConfig })
+    )
+  })
+
   it('does not register listeners when request configuration fails', async () => {
     const bridge = createBridge()
     vi.stubGlobal('window', { bridge, dispatchEvent: vi.fn() })

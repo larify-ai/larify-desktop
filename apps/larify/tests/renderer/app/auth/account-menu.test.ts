@@ -8,6 +8,21 @@ const accountMenu = readFileSync(
 )
 
 describe('AccountMenu', () => {
+  it('places 设置 above 检查更新 and mounts SettingsDialog on demand', () => {
+    expect(accountMenu).toContain("import { SettingsDialog } from '../settings/settings-dialog'")
+    expect(accountMenu).toContain('<SettingsIcon')
+    expect(accountMenu).toContain('window.setTimeout(() => setSettingsOpen(true), 0)')
+    expect(accountMenu).toContain('>设置</span>')
+    // 顺序：设置项必须出现在「检查更新」之前。
+    expect(accountMenu.indexOf('>设置</span>')).toBeLessThan(
+      accountMenu.indexOf('>检查更新</span>')
+    )
+    // 设置弹窗按需挂载（打开才渲染），不常驻。
+    expect(accountMenu).toContain(
+      '{settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}'
+    )
+  })
+
   it('matches the menu width to its trigger and confirms before logging out', () => {
     expect(accountMenu).toContain('w-[var(--radix-dropdown-menu-trigger-width)]')
     expect(accountMenu).toContain('<DialogTitle>确认退出登录</DialogTitle>')

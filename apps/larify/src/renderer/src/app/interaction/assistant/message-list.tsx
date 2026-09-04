@@ -30,6 +30,7 @@ const Message = memo(
     !next.streaming &&
     previous.streaming === next.streaming &&
     previous.message === next.message &&
+    previous.renderItem === next.renderItem &&
     previous.activityKey === next.activityKey &&
     previous.activityOpen === next.activityOpen &&
     previous.onActivityOpenChange === next.onActivityOpenChange &&

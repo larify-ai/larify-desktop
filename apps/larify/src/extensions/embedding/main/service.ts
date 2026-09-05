@@ -1,4 +1,4 @@
-import { ensureLarifyPath } from '../../../main/utils/app-paths'
+import { ensureLarifyPath } from '../../../main/utils/larify-paths'
 import { defineService } from '@shared/infra/registry'
 
 export const embeddingWorkerToken = defineService()

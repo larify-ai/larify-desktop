@@ -1,23 +1,10 @@
 import { mkdirSync } from 'node:fs'
-import { homedir, tmpdir } from 'node:os'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { app } from 'electron'
+import { larifyPath, toPosixPath, ensureLarifyPath, larifyWorkspacePath } from './larify-paths'
 
-// Dev-only override: set LARIFY_HOME to point ~/.larify (tasks/memory/plugins/workspace)
-// at an empty directory for isolated testing. Unset in production -> falls back to homedir().
-const larifyHome = process.env.LARIFY_HOME || homedir()
-
-export const larifyPath = (...segments: string[]): string => join(larifyHome, '.larify', ...segments)
-
-export const toPosixPath = (path: string): string => path.replaceAll('\\', '/')
-
-export const ensureLarifyPath = (...segments: string[]): string => {
-  const path = larifyPath(...segments)
-  mkdirSync(path, { recursive: true })
-  return path
-}
-
-export const larifyWorkspacePath = (): string => ensureLarifyPath('workspace')
+export { larifyPath, toPosixPath, ensureLarifyPath, larifyWorkspacePath }
 
 export const sessionDatabasePath = (): string => join(app.getPath('userData'), 'sessions.db')
 

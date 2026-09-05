@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { ensureLarifyPath } from '../../../main/utils/app-paths'
+import { ensureLarifyPath } from '../../../main/utils/larify-paths'
 import { readContextDocument, type ContextDocument } from './document'
 import { isMarkdown, isWithin, markdownFiles, markdownLinks, resolveContextLink } from './files'
 import { GraphIndex } from './graph'

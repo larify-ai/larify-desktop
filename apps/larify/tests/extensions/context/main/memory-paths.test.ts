@@ -4,7 +4,7 @@ const mocks = vi.hoisted(() => ({
   ensureLarifyPath: vi.fn((directory: string) => directory)
 }))
 
-vi.mock('../../../../src/main/utils/app-paths', () => mocks)
+vi.mock('../../../../src/main/utils/larify-paths', () => mocks)
 
 import { memoryIndexPath, memoryRootPath } from '../../../../src/extensions/context/main/indexer'
 

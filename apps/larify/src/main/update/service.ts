@@ -5,6 +5,13 @@ import type { Application } from '../app/application'
 export const UPDATE_FEED_URL =
   'https://cnb.cool/larify-ai/larify-desktop/-/releases/latest/download'
 
+// checkForUpdatesAndNotify 下载完成后弹系统通知；默认文案是英文，这里自定义为中文。
+// title/body 支持 {appName} 与 {version} 占位符。
+const DOWNLOAD_NOTIFICATION = {
+  title: '新版本已准备好安装',
+  body: '{appName} 新版本 {version} 已下载，退出应用时会自动安装'
+}
+
 export interface UpdateChecker {
   checkForUpdates(): Promise<unknown>
 }
@@ -40,13 +47,14 @@ export async function checkForUpdates(
 }
 
 export function registerUpdate(application: Application): void {
-  void checkForUpdates(application.electron.isPackaged).catch((error) =>
+  // 启动时静默检查更新；若发现并下载完成，由 checkForUpdatesAndNotify 弹中文系统通知。
+  void checkForUpdatesAndNotify(application.electron.isPackaged).catch((error) =>
     console.error('[update]', error)
   )
   ipcMain.handle('update:check', async (): Promise<UpdateCheckResponse> => {
     if (!application.electron.isPackaged) return { status: 'development' }
 
-    const result = (await getAutoUpdater().checkForUpdates()) as
+    const result = (await checkForUpdatesAndNotify(true)) as
       | { updateInfo?: { version?: string } }
       | null
     const version = result?.updateInfo?.version
@@ -54,4 +62,10 @@ export function registerUpdate(application: Application): void {
       ? { status: 'available', version }
       : { status: 'current', version }
   })
+}
+
+// 检查更新；下载完成后自动弹中文系统通知，提示用户新版本已就绪（官方最佳实践）。
+async function checkForUpdatesAndNotify(isPackaged: boolean): Promise<unknown> {
+  if (!isPackaged) return null
+  return getAutoUpdater().checkForUpdatesAndNotify(DOWNLOAD_NOTIFICATION)
 }

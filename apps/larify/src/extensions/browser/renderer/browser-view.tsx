@@ -47,7 +47,13 @@ export function BrowserView({
     if (!host || !viewport) return
     const place = (): void => {
       if (host.dataset.browserRendering === 'true') {
-        host.style.zIndex = shown ? '' : '-1'
+        // webview 正处于渲染租赁（截图/录屏等临时渲染）期间，主进程 setRendererRendering
+        // 已把它临时定位到屏幕左上角 (0,0)。这里绝不能把 z-index 恢复为 ''（fixed z-10）：
+        // 否则若 shown 为 true，webview 会以高 z-index 停在 (0,0)，正好覆盖屏幕左上的侧边栏，
+        // 拦截其全部点击，导致"侧边栏可见但点不了、无法切换会话"。
+        // 渲染租赁期间一律保持 z-index=-1（低于侧边栏），等租赁结束 place() 走常规分支
+        // 重新定位到工作台视口并恢复正确层级，既不影响截图/录屏，也绝不遮挡侧边栏。
+        host.style.zIndex = '-1'
         return
       }
       const viewportBounds = shown ? viewport.getBoundingClientRect() : null

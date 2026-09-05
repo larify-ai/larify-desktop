@@ -262,7 +262,9 @@ describe('BrowserView', () => {
       )
     })
     expect(webview()).toBe(guest)
-    expect(host.style.zIndex).toBe('')
+    // 修复：渲染租赁期间 webview 恒保持 z-index=-1（低于侧边栏），
+    // 即使 tab 变 active 也不得恢复为 z-10，否则会以 fixed z-10 停在 (0,0) 覆盖侧边栏。
+    expect(host.style.zIndex).toBe('-1')
 
     await act(async () => {
       root.render(
@@ -276,6 +278,45 @@ describe('BrowserView', () => {
     })
     expect(host.style.left).toBe('0px')
     expect(host.style.zIndex).toBe('-1')
+  })
+
+  it('regression: leased webview never overlays the sidebar even when active', async () => {
+    // Bug 复现：渲染租赁期间主进程 setRendererRendering 会把 host 临时定位到 (0,0)。
+    // 旧逻辑在 tab 变 active（shown=true）时恢复 z-index=''（fixed z-10），使 webview
+    // 停在 (0,0) 覆盖屏幕左上的侧边栏，拦截其点击（侧边栏可见但点不了）。
+    // 修复：渲染租赁期间恒保持 z-index='-1'，绝不恢复为 z-10，从而不遮挡侧边栏。
+    h.state = { id: 42, url: 'https://example.com' } as BrowserTabState
+    await act(async () => {
+      root.render(
+        createElement(BrowserView, {
+          active: false,
+          resourceId: 42,
+          sessionId: 'session-a',
+          updateTab: vi.fn()
+        })
+      )
+    })
+    const host = webview().parentElement!
+    // 模拟 setRendererRendering(enabled=true) 对非 active webview 的定位
+    host.dataset.browserRendering = 'true'
+    host.style.left = '0px'
+    host.style.top = '0px'
+    window.dispatchEvent(new Event('resize'))
+    expect(host.style.zIndex).toBe('-1')
+
+    // tab 变 active（shown=true），触发 place()：z-index 必须保持 -1，不恢复 z-10
+    await act(async () => {
+      root.render(
+        createElement(BrowserView, {
+          active: true,
+          resourceId: 42,
+          sessionId: 'session-a',
+          updateTab: vi.fn()
+        })
+      )
+    })
+    expect(host.style.zIndex).toBe('-1')
+    expect(host.style.left).toBe('0px')
   })
 
   it('registers the guest WebContents when the webview is ready', async () => {

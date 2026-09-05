@@ -6,6 +6,18 @@ import { splitLines } from '../../../main/utils/text'
 
 const DEFAULT_TIMEOUT_MS = 10 * 60_000
 
+// @vscode/ripgrep 的 rgPath 用 require.resolve 解析，在打包（app.asar）环境下会
+// 返回 app.asar 内的路径。spawn 无法执行 asar 内虚拟文件 -> ENOENT。
+// 而 electron-builder 的 asarUnpack 已把 @vscode/ripgrep* 解压到 app.asar.unpacked，
+// 因此把 asar 路径改写为 asar.unpacked 路径即可正常执行二进制。
+function resolveRgPath(): string {
+  const asarMarker = `${path.sep}app.asar${path.sep}`
+  if (rgPath.includes(asarMarker)) {
+    return rgPath.replace(asarMarker, `${path.sep}app.asar.unpacked${path.sep}`)
+  }
+  return rgPath
+}
+
 interface RunRipgrepOptions {
   offset?: number
   limit?: number
@@ -31,7 +43,7 @@ export function runRipgrepStream(
     const decoder = new StringDecoder('utf8')
     let stderr = ''
 
-    const child = spawn(rgPath, [...args, target], {
+    const child = spawn(resolveRgPath(), [...args, target], {
       cwd,
       signal,
       windowsHide: true,

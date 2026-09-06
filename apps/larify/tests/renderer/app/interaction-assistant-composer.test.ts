@@ -1,12 +1,32 @@
 // @vitest-environment jsdom
 
-import { act, createElement } from 'react'
+import { act, createElement, useState } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AssistantComposer } from '../../../src/renderer/src/app/interaction/assistant/composer'
+import {
+  ModelConfigContext,
+  type ModelConfigContextValue,
+  writeModelConfig
+} from '../../../src/renderer/src/app/interaction/assistant/model-config'
+import { defaultModelConfig, type AgentModelConfig } from '../../../src/main/core/model/config'
 import { TooltipProvider } from '../../../src/renderer/src/components/ui/tooltip'
 
 const reactEnvironment = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
+
+// AssistantSession 是 ModelConfigContext 的提供方（state 驱动 + onChange 写 localStorage）；
+// 测试直接渲染 composer，需手动提供一个行为等价的 Provider 以支撑其内部 ModelSelector。
+function ModelConfigProvider({ children }: { children: React.ReactNode }): React.JSX.Element {
+  const [value, setValue] = useState<AgentModelConfig>(defaultModelConfig)
+  const context: ModelConfigContextValue = {
+    value,
+    onChange: (next) => {
+      setValue(next)
+      writeModelConfig(localStorage, next)
+    }
+  }
+  return createElement(ModelConfigContext.Provider, { value: context }, children)
+}
 
 describe('AssistantComposer', () => {
   let container: HTMLDivElement
@@ -17,16 +37,20 @@ describe('AssistantComposer', () => {
       createElement(
         TooltipProvider,
         null,
-        createElement(AssistantComposer, {
-          cwd: '',
-          history: [],
-          status: 'ready',
-          showWorkspace: true,
-          onCwdChange: vi.fn(),
-          onSubmit: vi.fn(),
-          onStop: vi.fn(),
-          ...props
-        })
+        createElement(
+          ModelConfigProvider,
+          null,
+          createElement(AssistantComposer, {
+            cwd: '',
+            history: [],
+            status: 'ready',
+            showWorkspace: true,
+            onCwdChange: vi.fn(),
+            onSubmit: vi.fn(),
+            onStop: vi.fn(),
+            ...props
+          })
+        )
       )
     )
   }

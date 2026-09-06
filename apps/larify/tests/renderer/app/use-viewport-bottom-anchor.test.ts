@@ -97,8 +97,9 @@ describe('viewport bottom anchor', () => {
     expect(readViewport).not.toHaveBeenCalled()
     expect(readItem).not.toHaveBeenCalled()
 
-    scroller.dispatchEvent(new Event('scrollend'))
-    await nextFrame()
+    // 滚动（'scroll'）结束后经 150ms 无滚动事件节流才重新捕获锚定。
+    scroller.dispatchEvent(new Event('scroll'))
+    await flushScrollDebounce()
 
     expect(readViewport).toHaveBeenCalledOnce()
     expect(readItem).toHaveBeenCalledOnce()
@@ -227,8 +228,8 @@ describe('viewport bottom anchor', () => {
     captureIndex(7)
     await nextFrame()
     itemBottom = 340
-    scroller.dispatchEvent(new Event('scrollend'))
-    await nextFrame()
+    scroller.dispatchEvent(new Event('scroll'))
+    await flushScrollDebounce()
 
     viewportBottom = 300
     resize?.()
@@ -257,8 +258,8 @@ describe('viewport bottom anchor', () => {
     previousBottom = -100
     currentTop = 200
     currentBottom = 340
-    scroller.dispatchEvent(new Event('scrollend'))
-    await nextFrame()
+    scroller.dispatchEvent(new Event('scroll'))
+    await flushScrollDebounce()
 
     viewportBottom = 300
     resize?.()
@@ -451,4 +452,11 @@ function captureIndex(index: number): void {
 
 async function nextFrame(): Promise<void> {
   await act(async () => new Promise((resolve) => requestAnimationFrame(resolve)))
+}
+
+// 滚动事件用"150ms 无滚动事件"近似滚动结束，触发 captureAnchor 重新捕获锚定，
+// 捕获内部再经一帧 rAF 执行。故需等待真实 150ms 节流窗口 + 一帧。
+async function flushScrollDebounce(): Promise<void> {
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 170)))
+  await nextFrame()
 }

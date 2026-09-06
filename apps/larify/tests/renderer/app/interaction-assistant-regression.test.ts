@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { createElement } from 'react'
 import { renderToString } from 'react-dom/server'
 import {
+  ModelConfigContext,
   readModelConfig,
   writeModelConfig
 } from '../../../src/renderer/src/app/interaction/assistant/model-config'
@@ -10,7 +11,17 @@ import { ModelSelector } from '../../../src/renderer/src/app/interaction/assista
 
 describe('interaction assistant model configuration', () => {
   it('renders with the default model when browser storage is unavailable', () => {
-    expect(renderToString(createElement(ModelSelector))).toContain('DeepSeek-V4-Flash')
+    // ModelSelector 经 useModelConfig 读取配置；SSR 下无 browser storage，
+    // 由 AssistantSession 降级为 defaultModelConfig 后传入。测试用等值 Provider 支撑。
+    expect(
+      renderToString(
+        createElement(
+          ModelConfigContext.Provider,
+          { value: { value: defaultModelConfig, onChange: () => undefined } },
+          createElement(ModelSelector)
+        )
+      )
+    ).toContain('DeepSeek-V4-Flash')
   })
 
   it('falls back to the default model for malformed persisted data', () => {

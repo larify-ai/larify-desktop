@@ -4,6 +4,7 @@ const electron = vi.hoisted(() => ({
   options: undefined as Electron.BrowserWindowConstructorOptions | undefined,
   maximize: vi.fn(),
   show: vi.fn(),
+  setSize: vi.fn(),
   loadFile: vi.fn(() => Promise.resolve()),
   webContentsIsDestroyed: vi.fn(() => false),
   webContentsOn: vi.fn(),
@@ -26,6 +27,7 @@ vi.mock('electron', () => ({
       on: electron.windowOn,
       maximize: electron.maximize,
       show: electron.show,
+      setSize: electron.setSize,
       loadFile: electron.loadFile,
       loadURL: vi.fn(() => Promise.resolve())
     }
@@ -50,6 +52,7 @@ beforeEach(() => {
   electron.loadFile.mockClear()
   electron.maximize.mockClear()
   electron.show.mockClear()
+  electron.setSize.mockClear()
   electron.webContentsOn.mockClear()
   electron.setWindowOpenHandler.mockClear()
   electron.webContentsSend.mockClear()
@@ -70,6 +73,8 @@ describe('createWindow', () => {
     expect(electron.maximize).not.toHaveBeenCalled()
     expect(electron.show).toHaveBeenCalledOnce()
     expect(electron.options).toMatchObject({ width: 1280, height: 820, x: 320, y: 130 })
+    // 多显示器混合 DPI 下，显示前用 setSize 按目标 DIP 尺寸矫正窗口物理大小。
+    expect(electron.setSize).toHaveBeenCalledWith(1280, 820)
   })
 
   it('opens only Larify authentication pages in the system browser', () => {

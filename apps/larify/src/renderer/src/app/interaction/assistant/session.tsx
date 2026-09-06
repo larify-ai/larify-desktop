@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Chat } from '@ai-sdk/react'
 import { lastAssistantMessageIsCompleteWithToolCalls, type UIMessage } from 'ai'
-import type { AgentModelConfig } from '../../../../../main/core/model/config'
+import { defaultModelConfig, type AgentModelConfig } from '../../../../../main/core/model/config'
 import { createIpcTransport } from './transport'
 import {
   ModelConfigContext,
@@ -43,7 +43,13 @@ export function AssistantSession({
   // 会话级模型配置：state 驱动 ModelSelector 显示；ref 镜像最新选择，
   // 供 transport 发送时读取（transport 闭包在 useState 初始化时创建，
   // 无法捕获最新的 state，故用 ref 保证"所见即所发"）。
-  const modelConfigRef = useRef<AgentModelConfig>(readSessionModelConfig(id, localStorage))
+  // 首次渲染（含 SSR/测试的无 localStorage 环境）需安全降级：layout 测试用
+  // renderToStaticMarkup 纯 SSR 渲染 Layout，此时 localStorage 未定义。
+  const modelConfigRef = useRef<AgentModelConfig>(
+    typeof localStorage !== 'undefined'
+      ? readSessionModelConfig(id, localStorage)
+      : defaultModelConfig
+  )
   const [modelConfig, setModelConfigState] = useState<AgentModelConfig>(modelConfigRef.current)
   const updateModelConfig = useCallback((next: AgentModelConfig): void => {
     modelConfigRef.current = next

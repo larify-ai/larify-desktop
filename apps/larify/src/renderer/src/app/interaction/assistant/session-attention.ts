@@ -1,6 +1,5 @@
 import { createContext, useContext } from 'react'
-import { isToolUIPart, type ChatStatus, type UIMessage } from 'ai'
-import { pendingAskUserIndex } from './message-render-items'
+import { getToolName, isToolUIPart, type ChatStatus, type UIMessage } from 'ai'
 
 export type SessionAttentionState = 'idle' | 'active' | 'waiting' | 'unread'
 export type SessionAttentionReport = (
@@ -23,12 +22,12 @@ export function sessionAttentionState(
   const latest = messages.at(-1)
   const waiting =
     latest?.role === 'assistant' &&
-    (latest.parts.some(
-      (part) => isToolUIPart(part) && part.state === 'approval-requested'
-    ) ||
-      // 与 message-render-items 同口径：只在最后一个 step-start 之后找可见的待回答 ask_user，
-      // 避免隐藏(raw)/历史 step 的 ask_user 误点亮黄点。
-      pendingAskUserIndex(latest) >= 0)
+    latest.parts.some(
+      (part) =>
+        isToolUIPart(part) &&
+        (part.state === 'approval-requested' ||
+          (getToolName(part) === 'agent_ask_user' && part.state === 'input-available'))
+    )
 
   if (waiting) return 'waiting'
   if (status === 'submitted' || status === 'streaming') return 'active'

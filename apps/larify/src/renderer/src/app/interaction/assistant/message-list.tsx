@@ -708,14 +708,32 @@ function ActiveAssistantMessageList({
   )
 
   const handleTotalListHeightChanged = useCallback(() => {
-    if (activityScrollTop.current === null) return
-    const element = scrollElement.current
-    const scrollTop = activityScrollTop.current
-    activityScrollTop.current = null
-    queueMicrotask(() => {
-      if (element) element.scrollTop = scrollTop
-    })
-  }, [])
+    if (activityScrollTop.current !== null) {
+      const element = scrollElement.current
+      const scrollTop = activityScrollTop.current
+      activityScrollTop.current = null
+      queueMicrotask(() => {
+        if (element) element.scrollTop = scrollTop
+      })
+      return
+    }
+    // 进入/切换会话时，等待回答的活动历史会默认展开，item 真实高度(数千 px)远超
+    // defaultItemHeight 估计值，导致 Vituoso 用低估高度算出 totalHeight，滚底不到位、
+    // 末尾 ask_user 停在视口外/命中错位而"点不动/变更卡片 hover 不弹"。
+    // 总高度被真实测量后(totalListHeightChanged)，若仍在"初始定位(positioning)"且尚未
+    // 真正到底，则重新滚到底部，让已正确测量的末尾 ask_user 就位。
+    // 用户上翻看上文(reading/escaped)不打扰；流式跟随靠 followOutput 自动，不重复滚底。
+    if (scrollMode.current === 'positioning') {
+      const element = scrollElement.current
+      const atBottom = element
+        ? element.scrollHeight - element.clientHeight - element.scrollTop <= 1
+        : false
+      if (!atBottom) {
+        list.current?.autoscrollToBottom()
+        scrollViewportToBottom()
+      }
+    }
+  }, [scrollViewportToBottom])
 
   useLayoutEffect(() => {
     if (live && scrollMode.current === 'following') {

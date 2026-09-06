@@ -58,6 +58,8 @@ export function useViewportBottomAnchor(resetKey?: unknown): {
   const renderedRange = useRef<RenderedRange | null>(null)
   const captureFrame = useRef<number | null>(null)
   const restoreFrame = useRef<number | null>(null)
+  const isScrolling = useRef(false)
+  const scrollTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const resetAnchor = useCallback(() => {
     anchor.current = null
@@ -103,10 +105,22 @@ export function useViewportBottomAnchor(resetKey?: unknown): {
   useEffect(() => {
     if (!scroller || typeof ResizeObserver === 'undefined') return
 
-    const handleScrollEnd = (): void => captureAnchor()
-    scroller.addEventListener('scrollend', handleScrollEnd, { passive: true })
+    // 用"150ms 无滚动事件"近似判断用户停止滚动。关键：用户正在滚动（尤其往下滚）时，
+    // 若流式增长触发 anchor 恢复，会把正在往下滚的 scrollTop 往回拉，表现为"往下滚被
+    // 往上顶、回不到底"。故滚动中跳过恢复；用户停止后再重新捕获锚定并恢复，既能保持
+    // 阅读位置不被流式顶走，又不阻止用户往下滚。
+    const handleScroll = (): void => {
+      isScrolling.current = true
+      if (scrollTimer.current !== null) clearTimeout(scrollTimer.current)
+      scrollTimer.current = setTimeout(() => {
+        isScrolling.current = false
+        captureAnchor()
+      }, 150)
+    }
+    scroller.addEventListener('scroll', handleScroll, { passive: true })
     const observer = new ResizeObserver(() => {
       if (scroller.closest('.larify-workbench-split[data-resizing]')) return
+      if (isScrolling.current) return
       const viewport = scroller.getBoundingClientRect()
       if (viewport.width === 0 || viewport.height === 0) return
       const saved = anchor.current
@@ -134,7 +148,8 @@ export function useViewportBottomAnchor(resetKey?: unknown): {
 
     return () => {
       observer.disconnect()
-      scroller.removeEventListener('scrollend', handleScrollEnd)
+      if (scrollTimer.current !== null) clearTimeout(scrollTimer.current)
+      scroller.removeEventListener('scroll', handleScroll)
       if (captureFrame.current !== null) cancelAnimationFrame(captureFrame.current)
       if (restoreFrame.current !== null) cancelAnimationFrame(restoreFrame.current)
       captureFrame.current = null

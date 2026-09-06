@@ -99,9 +99,10 @@ describe('Agent', () => {
 
     agent.send(input, first)
     await vi.waitFor(() => expect(mocks.run).toHaveBeenCalledOnce())
-    expect(() => agent.send(input, { chunk: vi.fn(), error: vi.fn(), end: vi.fn() })).toThrow(
-      'Agent is already running.'
-    )
+    // send() 现在是 async：重复发送在 async 体内同步 throw，表现为 Promise 拒绝。
+    await expect(
+      agent.send(input, { chunk: vi.fn(), error: vi.fn(), end: vi.fn() })
+    ).rejects.toThrow('Agent is already running.')
     expect(mocks.run).toHaveBeenCalledOnce()
     continueStep()
     await vi.waitFor(() => expect(first.end).toHaveBeenCalledOnce())
@@ -152,9 +153,10 @@ describe('Agent', () => {
     })
     const agent = new Agent(sessions as never, pluginHost as never)
 
-    expect(() => agent.send(input, { chunk: vi.fn(), error: vi.fn(), end: vi.fn() })).toThrow(
-      'runtime failed'
-    )
+    // send() 是 async：装配失败表现为 Promise 拒绝；worker 已清理，可重试。
+    await expect(
+      agent.send(input, { chunk: vi.fn(), error: vi.fn(), end: vi.fn() })
+    ).rejects.toThrow('runtime failed')
     agent.send(input, { chunk: vi.fn(), error: vi.fn(), end: vi.fn() })
 
     await vi.waitFor(() => expect(mocks.run).toHaveBeenCalledOnce())
@@ -386,9 +388,7 @@ describe('Agent', () => {
     )
     await vi.waitFor(() => expect(second.end).toHaveBeenCalledOnce())
 
-    const lastSaved = sessions.saveMessages.mock.calls.at(-1)?.[1]?.[0] as
-      | UIMessage
-      | undefined
+    const lastSaved = sessions.saveMessages.mock.calls.at(-1)?.[1]?.[0] as UIMessage | undefined
     expect(lastSaved?.parts).toContainEqual(
       expect.objectContaining({ type: 'data-git-snapshot', id: 'review' })
     )

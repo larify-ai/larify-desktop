@@ -52,9 +52,11 @@ export class AgentWorker {
     try {
       // ask_user 回答/reset_context 都是同一任务的续写：追踪器由 Agent 按会话持有，
       // 跨 worker 复用（track?.review/track?.tracker），不会因为新 worker 而丢文件。
-      const activeReview = this.track?.review ?? new AgentReview(input.cwd, (chunk) => {
-        if (!controller.signal.aborted) this.sink.chunk(chunk)
-      })
+      const activeReview =
+        this.track?.review ??
+        new AgentReview(input.cwd, (chunk) => {
+          if (!controller.signal.aborted) this.sink.chunk(chunk)
+        })
       const fileChanges = this.track?.tracker ?? new FileChangeTracker()
       // 每轮结束时把当前任务快照写回持久化：
       // runStoredAgentSession 的 onMessage 只保存流内消息（不含 review part），
@@ -186,7 +188,13 @@ export class AgentWorker {
   }
 
   cancel(): void {
-    if (!this.controller) return
+    if (this.closed) return
+    // 尚未 run()（例如在 send() 等待插件/OAuth 刷新期间被取消）：标记关闭，
+    // 让 run() 直接跳过，避免刷新完成后继续执行本次消息。
+    if (!this.controller) {
+      this.closed = true
+      return
+    }
     this.controller.abort()
     this.finish(() => this.sink.end())
   }

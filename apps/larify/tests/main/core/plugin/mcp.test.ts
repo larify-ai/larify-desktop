@@ -22,15 +22,59 @@ const { mockCreateMCPClient, mockClient, MockStdioTransport } = vi.hoisted(() =>
   }
 })
 
-vi.mock('@ai-sdk/mcp', () => ({ createMCPClient: mockCreateMCPClient }))
+const electronMocks = vi.hoisted(() => ({
+  userDataPath: '',
+  openExternal: vi.fn()
+}))
+
+const mockAuth = vi.hoisted(() => vi.fn(async () => 'AUTHORIZED' as const))
+const mockWaitForCode = vi.hoisted(() =>
+  vi.fn(async () => ({ code: 'code-x', state: 'state-s', iss: 'https://iss' }))
+)
+const MockUnauthorizedError = vi.hoisted(
+  () =>
+    class UnauthorizedError extends Error {
+      constructor() {
+        super('Unauthorized')
+      }
+    }
+)
+
+vi.mock('@ai-sdk/mcp', () => ({
+  createMCPClient: mockCreateMCPClient,
+  auth: mockAuth,
+  UnauthorizedError: MockUnauthorizedError
+}))
 vi.mock('@ai-sdk/mcp/mcp-stdio', () => ({
   Experimental_StdioMCPTransport: MockStdioTransport
+}))
+vi.mock('../../../../src/main/auth/mcp-oauth-callback', () => ({
+  waitForMcpAuthorizationCode: mockWaitForCode
+}))
+vi.mock('electron', () => ({
+  app: { getPath: () => electronMocks.userDataPath },
+  safeStorage: {
+    isEncryptionAvailable: () => true,
+    getSelectedStorageBackend: () => 'gnome_libsecret',
+    encryptString: (value: string) => Buffer.from(`encrypted:${value}`),
+    decryptString: (value: Buffer) => {
+      const decoded = value.toString()
+      if (!decoded.startsWith('encrypted:')) throw new Error('invalid ciphertext')
+      return decoded.slice('encrypted:'.length)
+    }
+  },
+  net: { fetch: vi.fn() },
+  shell: { openExternal: electronMocks.openExternal }
 }))
 
 import { connectMcp } from '../../../../src/main/core/plugin/mcp'
 import type { PluginContext } from '../../../../src/main/core/plugin/protocol'
 
-function makeCtx() {
+function makeCtx(): {
+  ctx: PluginContext
+  registered: Array<{ name: string; tool: Record<string, unknown> }>
+  subscriptions: Array<{ dispose: () => void }>
+} {
   const registered: Array<{ name: string; tool: Record<string, unknown> }> = []
   const subscriptions: Array<{ dispose: () => void }> = []
   const ctx = {
@@ -62,6 +106,8 @@ beforeEach(() => {
   mockClient.tools.mockReset()
   mockClient.close.mockReset()
   mockClient.tools.mockResolvedValue(toolSet)
+  mockAuth.mockClear()
+  mockWaitForCode.mockClear()
 })
 
 describe('connectMcp', () => {
@@ -92,26 +138,36 @@ describe('connectMcp', () => {
     expect(mockClient.close).toHaveBeenCalledOnce()
   })
 
-  it('http: passes spec straight through as transport (no wrapper)', async () => {
+  it('http: attaches the authProvider so OAuth is auto-detected on 401', async () => {
     const { ctx, registered } = makeCtx()
     const spec = { type: 'http' as const, url: 'https://mcp.example.com', headers: { x: '1' } }
 
     await connectMcp(ctx as unknown as PluginContext, { web: spec })
 
-    const cfg = mockCreateMCPClient.mock.calls[0]![0] as { transport: unknown }
-    expect(cfg.transport).toEqual(spec)
+    const cfg = mockCreateMCPClient.mock.calls[0]![0] as {
+      transport: { authProvider?: unknown; fetch?: unknown; url: string; headers?: unknown }
+    }
+    expect(cfg.transport.url).toBe('https://mcp.example.com')
+    expect(cfg.transport.headers).toEqual({ x: '1' })
+    expect(cfg.transport.authProvider).toBeDefined()
+    expect(cfg.transport.fetch).toBeDefined()
+    // Public server: no OAuth was triggered.
+    expect(mockAuth).not.toHaveBeenCalled()
 
     expect(registered.map((r) => r.name)).toEqual(['search', 'fetch'])
   })
 
-  it('sse: passes spec straight through as transport (deprecated but still in SDK union)', async () => {
+  it('sse: attaches the authProvider as well', async () => {
     const { ctx, registered } = makeCtx()
     const spec = { type: 'sse' as const, url: 'https://mcp.example.com/sse' }
 
     await connectMcp(ctx as unknown as PluginContext, { legacy: spec })
 
-    const cfg = mockCreateMCPClient.mock.calls[0]![0] as { transport: unknown }
-    expect(cfg.transport).toEqual(spec)
+    const cfg = mockCreateMCPClient.mock.calls[0]![0] as {
+      transport: { authProvider?: unknown; url: string }
+    }
+    expect(cfg.transport.url).toBe('https://mcp.example.com/sse')
+    expect(cfg.transport.authProvider).toBeDefined()
     expect(registered.map((r) => r.name)).toEqual(['search', 'fetch'])
   })
 
@@ -123,17 +179,17 @@ describe('connectMcp', () => {
     await connectMcp(ctx as unknown as PluginContext, { gh, fetch: fetchCfg })
 
     expect(registered.map((r) => r.name)).toEqual([
-      'gh_search', 'gh_fetch',
-      'fetch_search', 'fetch_fetch'
+      'gh_search',
+      'gh_fetch',
+      'fetch_search',
+      'fetch_fetch'
     ])
   })
 
   it('empty config: registers nothing, does not throw', async () => {
     const { ctx, registered } = makeCtx()
 
-    await expect(
-      connectMcp(ctx as unknown as PluginContext, {})
-    ).resolves.toBeUndefined()
+    await expect(connectMcp(ctx as unknown as PluginContext, {})).resolves.toBeUndefined()
 
     expect(ctx.registerTool).not.toHaveBeenCalled()
     expect(registered).toHaveLength(0)
@@ -149,5 +205,36 @@ describe('connectMcp', () => {
 
     expect(ctx.registerTool).not.toHaveBeenCalled()
     expect(registered).toHaveLength(0)
+  })
+
+  it('401 triggers OAuth: captures the loopback code, exchanges, then reconnects', async () => {
+    const { ctx } = makeCtx()
+    const spec = { type: 'http' as const, url: 'https://mcp.example.com' }
+
+    // First connect is rejected by the transport because the server needs OAuth;
+    // after the auth exchange the retry succeeds.
+    mockCreateMCPClient
+      .mockRejectedValueOnce(new MockUnauthorizedError())
+      .mockResolvedValueOnce(mockClient)
+
+    await connectMcp(ctx as unknown as PluginContext, { web: spec })
+
+    // The transport's 401 surfaced UnauthorizedError; we captured the loopback
+    // callback and exchanged the code via auth().
+    expect(mockWaitForCode).toHaveBeenCalledOnce()
+    const exchange = mockAuth.mock.calls.at(-1)![1] as {
+      authorizationCode: string
+      callbackState: string
+      callbackIssuer: string
+      serverUrl: string
+    }
+    expect(exchange.authorizationCode).toBe('code-x')
+    expect(exchange.callbackState).toBe('state-s')
+    expect(exchange.callbackIssuer).toBe('https://iss')
+    expect(exchange.serverUrl).toBe('https://mcp.example.com')
+
+    // The client is retried after auth and connects successfully.
+    expect(mockCreateMCPClient).toHaveBeenCalledTimes(2)
+    expect(ctx.registerTool).toHaveBeenCalled()
   })
 })

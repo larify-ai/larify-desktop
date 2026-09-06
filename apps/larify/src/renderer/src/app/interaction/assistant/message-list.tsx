@@ -1033,16 +1033,13 @@ function ActiveAssistantMessageList({
         const { scrollTop } = element
         const movedUp = scrollTop < lastScrollTop.current
         const distanceFromBottom = element.scrollHeight - element.clientHeight - scrollTop
-        // 恢复跟随（reading→following）只应发生在"用户向下滚回到接近底部"时。
-        // 若在向上滚动（movedUp）时也基于 distanceFromBottom<=threshold 切回 following，
-        // 则程序化定位（scrollToIndex 上滑）启动的瞬间，滚动还没离开底部（distanceFromBottom
-        // 仍 <=threshold）就会被切回 following，随后被 followOutput/底部锚定拉回底部，
-        // 表现为"点击导航上滑一点又反弹回底部，需多次点击才定位"。故上滑时不恢复 following。
-        if (
-          !movedUp &&
-          distanceFromBottom <= returnBottomThreshold &&
-          scrollMode.current === 'reading'
-        ) {
+        // 恢复跟随（reading→following）：原要求"距底 ≤ returnBottomThreshold(16)"。
+        // 但流式高频增长时你往下滚却常在中间/较远（距底>16），永远切不回 following，
+        // 导致"想回底部却追不上最新、视图被往上顶"。故改为"只要向下滚动(!movedUp)即恢复跟随"，
+        // 从任意距离往下滚都能重新跟随到底/最新。
+        // 注意：向上滚动(movedUp)仍不恢复 following，避免程序化定位(scrollToIndex 上滑)
+        // 启动瞬间距离仍<=threshold 被误切回 following，导致"上滑一点又反弹回底部"。
+        if (!movedUp && scrollMode.current === 'reading') {
           scrollMode.current = 'following'
           setPosition((current) => ({ ...current, escaped: false }))
         }

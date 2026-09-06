@@ -102,6 +102,13 @@ export function createWindow(): BrowserWindow {
       ? window.loadURL(process.env['ELECTRON_RENDERER_URL'])
       : window.loadFile(join(__dirname, '../renderer/index.html'))
   window.on('ready-to-show', () => {
+    // 修复多显示器混合 DPI 下窗口过小：在 Windows 上，当屏幕同时存在不同缩放
+    // （主屏 200%、副屏 100%）时，new BrowserWindow 的 width/height 会被按主屏 DPI
+    // 换算，导致窗口落在低缩放副屏上时物理尺寸被缩小一半。这里在显示前用
+    // setSize 以目标 DIP 尺寸矫正，保证任意显示器上窗口都显示正确大小。
+    if (process.platform === 'win32') {
+      window.setSize(width, height)
+    }
     window.show()
   })
   void loading.catch((error) => console.error('Failed to load renderer:', error))

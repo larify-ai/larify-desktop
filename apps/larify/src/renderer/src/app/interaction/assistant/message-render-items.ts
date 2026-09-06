@@ -103,14 +103,21 @@ function isPendingAskUser(
   )
 }
 
-function pendingAskUserIndex(message: UIMessage, superseded = false): number {
+export function pendingAskUserIndex(message: UIMessage, superseded = false): number {
+  // 在"最后一个 step-start 之后"的范围内查找第一个可见的待回答 ask_user，
+  // 而非只看"最后一个可见工具是不是 ask_user"。原因：模型在同一 step 并行调用
+  // ask_user 与其他工具（如 fs_list）时，最后一个可见工具是 fs_list，ask_user 会被
+  // 误判为"非等待回答" → 顶部显示"已完成"且 ask_user 卡片被折叠不可见。
+  // 限定在最后一个 step-start 之后以排除历史 step 的旧提问；
+  // isVisibleToolPart + isPendingAskUser 排除隐藏(raw)与已 superseded(用户发新消息跳过)的 ask_user。
   const lastStepStartIndex = message.parts.findLastIndex((part) => part.type === 'step-start')
-  const index = message.parts.findLastIndex(
-    (part, partIndex) =>
-      partIndex > lastStepStartIndex && isToolUIPart(part) && isVisibleToolPart(part)
+  return message.parts.findIndex(
+    (part, index) =>
+      index > lastStepStartIndex &&
+      isToolUIPart(part) &&
+      isVisibleToolPart(part) &&
+      isPendingAskUser(part, superseded)
   )
-  if (index < 0) return -1
-  return isPendingAskUser(message.parts[index], superseded) ? index : -1
 }
 
 function toolIcon(part: UIMessage['parts'][number]): string | undefined {

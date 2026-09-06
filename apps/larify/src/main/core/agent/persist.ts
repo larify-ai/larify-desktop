@@ -2,6 +2,7 @@ import type { UIMessage, UIMessageChunk } from 'ai'
 import type { SessionStore } from '../session'
 import { saveSessionMessages } from '../session/save'
 import { generateSessionTitle } from '../session/title'
+import type { AgentModelConfig } from '../model/config'
 import type { AgentOptions } from './engine'
 import { prepareMessages } from './messages'
 import { runAgentSession } from './session'
@@ -14,20 +15,22 @@ export interface AgentRequest {
   options: AgentOptions
   onChunk?: (chunk: UIMessageChunk) => void
   onTitle?: (title: string) => void
+  /** 复用本次会话模型配置（携带 apiKey 时标题生成同样直连官方、不消耗网关额度）。 */
+  modelConfig?: AgentModelConfig
 }
 
 export async function runStoredAgentSession(
   sessions: SessionStore,
   request: AgentRequest
 ): Promise<UIMessage | undefined> {
-  const { sessionId, cwd, message, options, onChunk } = request
+  const { sessionId, cwd, message, options, onChunk, modelConfig } = request
   const text = message.parts.find((part) => part.type === 'text')?.text.trim() ?? ''
   const shouldGenerateTitle =
     request.title === undefined && !sessions.hasSession(sessionId) && text.length >= 6
 
   saveSessionMessages(sessions, sessionId, cwd, [message], request.title)
   const titleTask = shouldGenerateTitle
-    ? generateSessionTitle(text)
+    ? generateSessionTitle(text, modelConfig)
         .then((title) => {
           if (!title) return
           sessions.renameSession(sessionId, title)

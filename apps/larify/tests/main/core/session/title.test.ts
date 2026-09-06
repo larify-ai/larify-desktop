@@ -30,3 +30,29 @@ it('uses the flash model and returns trimmed title text', async () => {
     maxOutputTokens: 20
   })
 })
+
+it('forwards the own api key to the runtime so the title path uses the official provider', async () => {
+  await generateSessionTitle('Explain the issue', {
+    modelId: 'deepseek-v4-pro',
+    reasoningEffort: 'off',
+    apiKey: 'sk-own'
+  })
+
+  expect(mocks.createModelRuntime).toHaveBeenCalledWith({
+    modelId: 'deepseek-v4-flash',
+    reasoningEffort: 'off',
+    apiKey: 'sk-own'
+  })
+})
+
+it('does not forward an empty api key', async () => {
+  await generateSessionTitle('Explain the issue', {
+    modelId: 'deepseek-v4-pro',
+    reasoningEffort: 'off'
+  })
+
+  expect(mocks.createModelRuntime).toHaveBeenCalledWith({
+    modelId: 'deepseek-v4-flash',
+    reasoningEffort: 'off'
+  })
+})

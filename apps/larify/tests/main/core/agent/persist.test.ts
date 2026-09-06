@@ -181,8 +181,34 @@ describe('runStoredAgentSession', () => {
     await vi.waitFor(() =>
       expect(sessions.renameSession).toHaveBeenCalledWith('session', 'Greeting')
     )
-    expect(mocks.title).toHaveBeenCalledWith('explain this issue')
+    expect(mocks.title).toHaveBeenCalledWith('explain this issue', undefined)
     expect(onTitle).toHaveBeenCalledWith('Greeting')
+  })
+
+  it('forwards the model config (own api key) to title generation', async () => {
+    mocks.run.mockResolvedValue([user])
+    const sessions = {
+      hasSession: vi.fn(() => false),
+      loadMessages: vi.fn(() => [user]),
+      renameSession: vi.fn(),
+      saveMessages: vi.fn()
+    }
+
+    await runStoredAgentSession(sessions as never, {
+      sessionId: 'session',
+      cwd: 'cwd',
+      message: { ...user, parts: [{ type: 'text', text: 'explain this issue' }] },
+      modelConfig: { modelId: 'deepseek-v4-pro', reasoningEffort: 'off', apiKey: 'sk-own' },
+      options: {} as never
+    })
+    await vi.waitFor(() =>
+      expect(sessions.renameSession).toHaveBeenCalledWith('session', 'Greeting')
+    )
+    expect(mocks.title).toHaveBeenCalledWith('explain this issue', {
+      modelId: 'deepseek-v4-pro',
+      reasoningEffort: 'off',
+      apiKey: 'sk-own'
+    })
   })
 
   it('finishes only after the generated title is persisted', async () => {

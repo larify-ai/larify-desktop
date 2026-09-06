@@ -2,6 +2,7 @@ import type { UIMessage, UIMessageChunk } from 'ai'
 import { randomUUID } from 'node:crypto'
 import { clearReadState } from '../../../extensions/fs/main/state'
 import type { SessionStore } from '../session'
+import type { AgentModelConfig } from '../model/config'
 import type { AgentOptions } from './engine'
 import { runStoredAgentSession } from './persist'
 import { AgentReview, FileChangeTracker, reviewChunk } from './review'
@@ -16,6 +17,8 @@ export interface AgentWorkerInput {
   cwd: string
   message: UIMessage
   runtime: AgentOptions
+  /** 复用本次会话模型配置（携带 apiKey 时标题生成同样直连官方）。 */
+  modelConfig?: AgentModelConfig
 }
 
 export interface SessionTrack {
@@ -104,6 +107,7 @@ export class AgentWorker {
           sessionId: input.sessionId,
           cwd: input.cwd,
           message,
+          modelConfig: input.modelConfig,
           options: {
             ...input.runtime,
             toolsContext,

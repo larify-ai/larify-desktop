@@ -136,6 +136,37 @@ describe('Agent', () => {
     expect(mocks.run.mock.calls[0][1].options.system).toBe('runtime')
   })
 
+  it('awaits the plugin refresh BEFORE assembling the runtime so new MCP tools are picked up', async () => {
+    const order: string[] = []
+    pluginHost.refreshPlugins.mockImplementation(async () => {
+      order.push('refresh')
+    })
+    mocks.runtime.mockImplementation(() => {
+      order.push('runtime')
+      return { system: 'runtime', toolsContext: {} }
+    })
+    const agent = new Agent(sessions as never, pluginHost as never)
+
+    // 用 assistant 续写消息，模拟 ask_user 回答后的新一轮 send()。
+    const continuation: UIMessage = {
+      id: 'assistant-continuation',
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'continue' }]
+    }
+    await agent.send(
+      { ...input, message: continuation },
+      {
+        chunk: vi.fn(),
+        error: vi.fn(),
+        end: vi.fn()
+      }
+    )
+
+    // 关键顺序：先 refreshPlugins（发现/激活新 MCP），再 createAgentRuntime（收集工具集）。
+    // 否则 agent 装了/新装了 MCP 后，ask_user 续写（新 send()）的工具集不会包含新工具。
+    expect(order).toEqual(['refresh', 'runtime'])
+  })
+
   it('uses the default workspace when cwd is absent', async () => {
     const agent = new Agent(sessions as never, pluginHost as never)
     const request = { sessionId: 'session', message }

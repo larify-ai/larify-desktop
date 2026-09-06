@@ -38,7 +38,7 @@ export function wrapTool(tool: Tool): Tool {
           .string()
           .trim()
           .min(1)
-          .describe('Short user-facing step in Chinese, required')
+          .describe('Must show short title to the user before each tool call, required')
       })
       .strict(),
     execute:

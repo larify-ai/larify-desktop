@@ -17,13 +17,15 @@ import {
   FileTextIcon,
   GlobeIcon,
   ImageIcon,
-  MessageSquareTextIcon,
+  ListChecksIcon,
   type LucideIcon,
+  MessageSquareTextIcon,
+  RepeatIcon,
   SearchIcon,
   SquareTerminalIcon,
   SquarePenIcon,
   TerminalIcon,
-  WrenchIcon,
+  WandSparklesIcon,
   XCircleIcon
 } from 'lucide-react'
 import type { ComponentProps, ReactNode } from 'react'
@@ -76,7 +78,9 @@ const kindIcons: Record<string, LucideIcon> = {
   read: FileTextIcon,
   edit: SquarePenIcon,
   image: ImageIcon,
-  other: WrenchIcon
+  repeat: RepeatIcon,
+  'list-checks': ListChecksIcon,
+  other: WandSparklesIcon
 }
 
 export const ToolIcon = ({
@@ -85,7 +89,7 @@ export const ToolIcon = ({
 }: Omit<ComponentProps<LucideIcon>, 'ref'> & {
   kind?: string
 }): React.JSX.Element => {
-  const Icon = kindIcons[kind ?? 'other'] ?? WrenchIcon
+  const Icon = kindIcons[kind ?? 'other'] ?? WandSparklesIcon
   return <Icon {...props} />
 }
 

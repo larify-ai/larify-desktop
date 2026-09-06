@@ -39,7 +39,7 @@ describe('Tool', () => {
   it('falls back to the generic tool icon for an unknown icon name', async () => {
     await renderHeader({ icon: 'unknown' })
 
-    expect(container.querySelector('.lucide-wrench')).not.toBeNull()
+    expect(container.querySelector('.lucide-wand-sparkles')).not.toBeNull()
     expect(container.textContent).toContain('运行中')
   })
 

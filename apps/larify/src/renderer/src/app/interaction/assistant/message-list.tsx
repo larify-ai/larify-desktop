@@ -602,6 +602,10 @@ function ActiveAssistantMessageList({
   const resizeVersion = useRef(0)
   const scrollIntentTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const positioningStarted = useRef(false)
+  // 切换进入会话（active false→true，Virtuoso 复用保持挂载）时，需要重新滚到底部。
+  // 用 prevActiveRef 记录上一次 active，判断"刚从隐藏切到显示"这一次性事件。
+  // 用户确认：切换会话应滚到底部（不保留滚动位置）。
+  const prevActiveRef = useRef(active)
   const [previousLive, setPreviousLive] = useState(live)
   const openActivities = useRef(new Map<string, boolean>())
   const activityScrollTop = useRef<number | null>(null)
@@ -775,12 +779,22 @@ function ActiveAssistantMessageList({
       ? position
       : { key: positioningKey, complete: false, escaped: false }
 
-  // 只在第一次具备定位条件时滚到底部；会话保持挂载，active 切换不重建，
-  // 因此不会重复定位（避免切换时跳变/闪烁）。
   useLayoutEffect(() => {
     if (scrollIntentTimer.current !== null) {
       clearTimeout(scrollIntentTimer.current)
       scrollIntentTimer.current = null
+    }
+    // 切换进入会话（active 从 false→true，Virtuoso 复用保持挂载）时，重置
+    // "已滚到底部"的一次性标志，让列表重新滚到底部。否则切换会话时
+    // initialTopMostItemIndex（只在首次挂载生效）不会重新触发，且 positioningStarted
+    // 已为 true，ask_user 等末尾卡片会停在旧位置/视口外，表现为"点进会话点不动/看不到"；
+    // 用户滑动一下（触发重测/重排）才恢复，正是此根因。用户确认切换会话应滚到底部。
+    if (active && !prevActiveRef.current) {
+      prevActiveRef.current = true
+      positioningStarted.current = false
+      setPosition((current) => ({ ...current, escaped: false }))
+    } else if (!active) {
+      prevActiveRef.current = false
     }
     if (!positioningKey) return
     if (positioningStarted.current) return
@@ -788,7 +802,7 @@ function ActiveAssistantMessageList({
     scrollMode.current = 'positioning'
     list.current?.autoscrollToBottom()
     scrollViewportToBottom()
-  }, [positioningKey, scrollViewportToBottom])
+  }, [positioningKey, scrollViewportToBottom, active])
 
   const scrollToBottom = (): void => {
     // 使用 following（而非 positioning）：虚拟列表最后几项的高度在最后一帧才确定，
@@ -1049,6 +1063,12 @@ function ActiveAssistantMessageList({
         initialItemCount={Math.min(12, loadedCount)}
         initialTopMostItemIndex={loadedCount > 0 ? { index: 'LAST', align: 'end' } : 0}
         increaseViewportBy={renderBuffer}
+        // 等待回答时活动历史会默认展开到数千 px（实测 4353），远超 defaultItemHeight(80)。
+        // 只用像素缓冲(增加increaseViewportBy)时，这条大 item 初始可能不在渲染范围，Vituoso
+        // 一直按 80px 记它，导致其后的 ask_user 被定位到错误位置（视口底/输入框覆盖区）而
+        // 点不中。minOverscanItemCount 让视口边界前后始终渲染指定数量的 item，从而把这条
+        // 大 item 也渲染出来并真实测量，后续 ask_user 定位随之正确。
+        minOverscanItemCount={{ top: 12, bottom: 8 }}
         overscan={renderChunk}
         followOutput={() => (scrollMode.current === 'following' ? 'auto' : false)}
         rangeChanged={rangeChanged}

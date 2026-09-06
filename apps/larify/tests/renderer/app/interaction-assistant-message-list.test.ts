@@ -447,8 +447,9 @@ describe('interaction assistant message list', () => {
     expect(captured.autoscrollToBottom).toHaveBeenCalledOnce()
   })
 
-  it('positions once and never re-positions when reactivated', async () => {
-    // 列表保持挂载：切换会话时不卸装/重建，恢复时内容直接可见（无"先背景后内容"的闪烁）。
+  it('re-positions to the bottom when reactivated', async () => {
+    // 用户确认切换会话应滚到底部（不保留滚动位置）：重新激活（active false→true）时
+    // 重新滚底，而不是只在首次挂载定位一次。列表仍保持挂载（mounts 不增）。
     const props = { messages: [message('latest')], recentStart: 0 }
     await render({ ...props, active: true })
     expect(captured.autoscrollToBottom).toHaveBeenCalledTimes(1)
@@ -456,13 +457,12 @@ describe('interaction assistant message list', () => {
     await render({ ...props, active: false })
     captured.autoscrollToBottom.mockClear()
     await render({ ...props, active: true })
-    expect(captured.autoscrollToBottom).not.toHaveBeenCalled()
+    expect(captured.autoscrollToBottom).toHaveBeenCalled()
     expect(captured.mounts).toBe(1)
   })
 
-  it('keeps the scroll position across conversation switches', async () => {
-    // 用户切走前正在阅读历史中部：列表保持挂载，切回后滚动位置必须原样保留
-    // （不能先跳底部、也不能因重建丢失位置）。
+  it('re-scrolls to the bottom when the conversation becomes active again', async () => {
+    // 用户确认切换会话应滚到底部（不保留滚动位置）：切走再切回时重新滚底。
     const props = { messages: [message('latest')], recentStart: 0 }
     await render({ ...props, active: true })
     const scroller = createScroller(100)
@@ -473,10 +473,11 @@ describe('interaction assistant message list', () => {
     await act(() => new Promise((resolve) => setTimeout(resolve, 2)))
 
     await render({ ...props, active: false })
+    captured.autoscrollToBottom.mockClear()
     await render({ ...props, active: true })
 
     expect(captured.mounts).toBe(1)
-    expect(scroller.scrollTop).toBe(77)
+    expect(captured.autoscrollToBottom).toHaveBeenCalled()
     expect(container.firstElementChild?.getAttribute('style')).not.toContain('display: none')
   })
 

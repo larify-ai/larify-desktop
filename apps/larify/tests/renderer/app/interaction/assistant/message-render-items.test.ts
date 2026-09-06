@@ -333,6 +333,32 @@ describe('assistant message render items', () => {
     )
   })
 
+  it('keeps an ask user pending even when a regular tool runs in the same step', () => {
+    // ask_user 与普通工具在同一 step 并行（如 ask_user + fs_list）时，
+    // ask_user 不再是"最后一个可见工具"。修复：在最后一个 step-start 后并行范围内
+    // 找到第一个可见的待回答 ask_user，仍应判为等待回答且卡片可交互。
+    const waiting = {
+      ...message(
+        tool('ask', 'Choose one', 'input-available', 'agent_ask_user'),
+        tool('list', 'List dir', 'output-available', 'fs_list')
+      ),
+      metadata: { startedAt: 1_000, completedAt: 34_000 }
+    } as UIMessage
+
+    const items = buildAssistantRenderItems(waiting, false)
+
+    // 关键：ask_user 不再被折叠隐藏，而是展开可交互的 pending-ask-user 卡片
+    const askItem = items.find((item) => item.kind === 'pending-ask-user')
+    expect(askItem).toEqual(
+      expect.objectContaining({ summary: 'Choose one', defaultOpen: true, partIndexes: [0] })
+    )
+    // 其他工具正常归入 activity-group，且状态为"等待回答"
+    const activity = items.find((item) => item.kind === 'activity-group')
+    expect(activity).toEqual(
+      expect.objectContaining({ summary: '等待回答 · 处理了 33秒', defaultOpen: true })
+    )
+  })
+
   it('folds a pending ask-user into a collapsed tool group once superseded by a later user message', () => {
     const waiting = buildAssistantRenderItems(
       message(

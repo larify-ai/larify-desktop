@@ -65,6 +65,9 @@ import { AccountMenu } from '../../../../src/renderer/src/app/auth/account-menu'
 
 const reactEnvironment = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
 
+// Capture update event handlers so tests can drive the progress/ready dialogs.
+const updateHandlers: Record<string, (payload?: unknown) => void> = {}
+
 function findButton(container: HTMLElement, text: string): HTMLButtonElement {
   return [...container.querySelectorAll('button')].find(
     (button) => button.textContent === text
@@ -87,12 +90,23 @@ describe('AccountMenu interactions', () => {
     container = document.createElement('div')
     document.body.append(container)
     root = createRoot(container)
+    for (const key of Object.keys(updateHandlers)) delete updateHandlers[key]
     window.bridge = {
-      invoke: vi.fn().mockImplementation((channel: string) =>
-        channel === 'model-api:get-balance'
-          ? Promise.resolve({ wallet: { quota: 0, usedQuota: 0 }, subscriptions: [] })
-          : Promise.resolve({ status: 'current' })
-      )
+      invoke: vi
+        .fn()
+        .mockImplementation((channel: string) =>
+          channel === 'model-api:get-balance'
+            ? Promise.resolve({ wallet: { quota: 0, usedQuota: 0 }, subscriptions: [] })
+            : channel === 'update:downloadedVersion'
+              ? Promise.resolve(null)
+              : Promise.resolve({ status: 'current' })
+        ),
+      on: (channel: string, listener: (payload?: unknown) => void) => {
+        updateHandlers[channel] = listener
+        return () => {
+          delete updateHandlers[channel]
+        }
+      }
     } as unknown as typeof window.bridge
     await render()
   })
@@ -267,5 +281,63 @@ describe('AccountMenu interactions', () => {
     window.dispatchEvent(new Event('focus'))
 
     expect(invoke).not.toHaveBeenCalled()
+  })
+
+  it('shows the download progress percentage when progress events arrive', () => {
+    act(() => updateHandlers['update:progress']({ percent: 45 }))
+
+    expect(container.textContent).toContain('45%')
+  })
+
+  it('clears the progress bar once the update is ready', () => {
+    act(() => updateHandlers['update:progress']({ percent: 99 }))
+    expect(container.textContent).toContain('99%')
+
+    act(() => updateHandlers['update:ready']('2.1.0'))
+    expect(container.textContent).not.toContain('99%')
+  })
+
+  it('opens the restart dialog when the update finishes downloading', () => {
+    act(() => updateHandlers['update:ready']('2.1.0'))
+
+    expect(container.querySelector('[data-testid="dialog-title"]')?.textContent).toContain(
+      '更新已就绪'
+    )
+    expect(container.textContent).toContain('2.1.0')
+  })
+
+  it('calls update:install when the restart button is clicked', async () => {
+    act(() => updateHandlers['update:ready']('2.1.0'))
+    await act(async () => findButton(container, '重启并安装').click())
+
+    expect(window.bridge.invoke).toHaveBeenCalledWith('update:install')
+  })
+
+  it('surfaces an update error message', () => {
+    act(() => updateHandlers['update:error']('下载失败'))
+
+    expect(container.textContent).toContain('下载失败')
+  })
+
+  it('prompts to restart on mount if an update was already downloaded', async () => {
+    // Fresh container/root so the mount-time downloadedVersion check runs with
+    // the overridden invoke (the beforeEach already mounted with the default mock).
+    act(() => root.unmount())
+    container.remove()
+
+    container = document.createElement('div')
+    document.body.append(container)
+    root = createRoot(container)
+    vi.mocked(window.bridge.invoke).mockImplementation((channel: string) =>
+      channel === 'update:downloadedVersion'
+        ? Promise.resolve('2.2.0')
+        : Promise.resolve({ status: 'current' })
+    )
+
+    await act(async () => root.render(createElement(AccountMenu)))
+
+    expect(container.querySelector('[data-testid="dialog-title"]')?.textContent).toContain(
+      '更新已就绪'
+    )
   })
 })

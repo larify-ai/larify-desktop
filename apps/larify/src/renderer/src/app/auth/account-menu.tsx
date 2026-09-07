@@ -28,15 +28,16 @@ import {
   DropdownMenuTrigger
 } from '@renderer/components/ui/dropdown-menu'
 import { useAuth } from './auth-context'
+import { useUpdateCheck } from './use-update-check'
 import { SettingsDialog } from '../settings/settings-dialog'
 
 export function AccountMenu(): React.JSX.Element {
   const { email, logout } = useAuth()
   const { resolvedTheme, setTheme } = useTheme()
+  const update = useUpdateCheck()
   const [confirming, setConfirming] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [isLoggingOut, setIsLoggingOut] = useState(false)
-  const [updateStatus, setUpdateStatus] = useState('')
   const [logoutError, setLogoutError] = useState('')
   const [balance, setBalance] = useState<ModelApiBalance | null>(null)
   const [balanceError, setBalanceError] = useState('')
@@ -73,31 +74,10 @@ export function AccountMenu(): React.JSX.Element {
 
   const subscription = balance?.subscriptions?.[0]
   const planTitle = subscription?.planTitle ?? '未开通'
-  const remaining = subscription && subscription.total > 0
-    ? Math.max(0, subscription.total - subscription.used)
-    : 0
-  const remainingRatio = subscription && subscription.total > 0
-    ? Math.min(1, remaining / subscription.total)
-    : 0
-
-  const checkForUpdates = async (): Promise<void> => {
-    setUpdateStatus('检查中…')
-    try {
-      const result = (await window.bridge.invoke('update:check')) as {
-        status?: 'current' | 'available' | 'development'
-        version?: string
-      }
-      if (result.status === 'available') {
-        setUpdateStatus(result.version ? `发现 ${result.version}` : '发现新版本')
-      } else if (result.status === 'development') {
-        setUpdateStatus('开发版本')
-      } else {
-        setUpdateStatus('已是最新')
-      }
-    } catch {
-      setUpdateStatus('检查失败')
-    }
-  }
+  const remaining =
+    subscription && subscription.total > 0 ? Math.max(0, subscription.total - subscription.used) : 0
+  const remainingRatio =
+    subscription && subscription.total > 0 ? Math.min(1, remaining / subscription.total) : 0
 
   const confirmLogout = async (): Promise<void> => {
     setIsLoggingOut(true)
@@ -126,7 +106,11 @@ export function AccountMenu(): React.JSX.Element {
               <span className="truncate">{planTitle}</span>
             </span>
             <span className="whitespace-nowrap text-xs text-muted-foreground">
-              {subscription ? `剩余 ${Math.round(remainingRatio * 100)}%` : balanceError ? '—' : '···'}
+              {subscription
+                ? `剩余 ${Math.round(remainingRatio * 100)}%`
+                : balanceError
+                  ? '—'
+                  : '···'}
             </span>
             <span className="col-span-2 h-1 overflow-hidden rounded-full bg-muted">
               <span
@@ -192,18 +176,32 @@ export function AccountMenu(): React.JSX.Element {
             className="grid min-h-10 grid-cols-[20px_auto_minmax(0,1fr)] gap-2 rounded-lg px-2 text-sm"
             onSelect={(event) => {
               event.preventDefault()
-              void checkForUpdates()
+              void update.checkForUpdates()
             }}
           >
             <CircleArrowUpIcon
               aria-hidden="true"
-              className={`size-5 stroke-[1.75] text-foreground ${updateStatus === '检查中…' ? 'animate-spin' : ''}`}
+              className={`size-5 stroke-[1.75] text-foreground ${update.status === '检查中…' ? 'animate-spin' : ''}`}
             />
             <span className="min-w-16 whitespace-nowrap">检查更新</span>
-            {updateStatus && (
+            {update.progress ? (
               <span className="col-start-3 w-full whitespace-nowrap text-right text-xs text-muted-foreground">
-                {updateStatus}
+                <span className="flex items-center justify-end gap-1">
+                  <span className="h-1 w-16 overflow-hidden rounded-full bg-muted">
+                    <span
+                      className="block h-full rounded-full bg-foreground transition-all"
+                      style={{ width: `${Math.min(100, Math.round(update.progress.percent))}%` }}
+                    />
+                  </span>
+                  {Math.round(update.progress.percent)}%
+                </span>
               </span>
+            ) : (
+              update.status && (
+                <span className="col-start-3 w-full whitespace-nowrap text-right text-xs text-muted-foreground">
+                  {update.status}
+                </span>
+              )
             )}
           </DropdownMenuItem>
           <DropdownMenuSeparator className="my-2" />
@@ -239,6 +237,30 @@ export function AccountMenu(): React.JSX.Element {
             <Button disabled={isLoggingOut} onClick={() => void confirmLogout()}>
               {isLoggingOut ? '正在退出…' : '确认退出'}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 更新已就绪：重启并安装 */}
+      <Dialog open={update.dialogOpen} onOpenChange={update.setDialogOpen}>
+        <DialogContent showCloseButton={false} className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>更新已就绪</DialogTitle>
+            <DialogDescription>
+              {update.version
+                ? `新版本 ${update.version} 已下载完成，重启应用后即可生效。`
+                : '新版本已下载完成，重启应用后即可生效。'}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => update.setDialogOpen(false)}
+              className="focus-visible:ring-0 focus-visible:border-input dark:focus-visible:border-input"
+            >
+              稍后
+            </Button>
+            <Button onClick={update.installUpdate}>重启并安装</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

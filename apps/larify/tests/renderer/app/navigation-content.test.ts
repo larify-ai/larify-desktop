@@ -15,6 +15,16 @@ beforeEach(() => {
   localStorage.clear()
   container = document.createElement('div')
   root = createRoot(container)
+  // AccountMenu (rendered by NavigationContent) subscribes to update events on
+  // mount, so the bridge must expose an `on` that returns an unsubscribe and an
+  // `invoke` that resolves (the mount-time update:getState awaits it).
+  Object.defineProperty(window, 'bridge', {
+    configurable: true,
+    value: {
+      invoke: vi.fn().mockResolvedValue(undefined),
+      on: vi.fn().mockReturnValue(() => {})
+    }
+  })
 })
 
 afterEach(() => {
@@ -91,7 +101,7 @@ describe('navigation content', () => {
     const invoke = vi.fn().mockResolvedValue(['D:\\Added workspace'])
     Object.defineProperty(window, 'bridge', {
       configurable: true,
-      value: { invoke }
+      value: { invoke, on: vi.fn().mockReturnValue(() => {}) }
     })
     renderNavigation(create)
 

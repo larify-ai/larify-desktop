@@ -2,10 +2,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-const accountMenu = readFileSync(
-  resolve('src/renderer/src/app/auth/account-menu.tsx'),
-  'utf8'
-)
+const accountMenu = readFileSync(resolve('src/renderer/src/app/auth/account-menu.tsx'), 'utf8')
 
 describe('AccountMenu', () => {
   it('places 设置 above 检查更新 and mounts SettingsDialog on demand', () => {
@@ -37,7 +34,10 @@ describe('AccountMenu', () => {
     expect(accountMenu).toContain('>主题</span>')
     expect(accountMenu).toContain("setTheme('light')")
     expect(accountMenu).toContain("setTheme('dark')")
-    expect(accountMenu).toContain("window.bridge.invoke('update:check')")
+    // 更新逻辑封装在 useUpdateCheck hook，组件只做渲染。
+    expect(accountMenu).toContain("import { useUpdateCheck } from './use-update-check'")
+    expect(accountMenu).toContain('const update = useUpdateCheck()')
+    expect(accountMenu).toContain('>重启并安装</Button>')
     // The dropdown was simplified back to the legacy structure: no subscription
     // blocks, no manual credential/refresh buttons inside the menu.
     expect(accountMenu).not.toContain('获取凭据')

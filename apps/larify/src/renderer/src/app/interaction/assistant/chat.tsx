@@ -165,6 +165,11 @@ export function AssistantChat({
         onSubmit={({ text, files }) => {
           runStartedAt.current = Date.now()
           if (error) clearError()
+          // 用户发送新消息后应强制滚到底部并开启流式跟随（与 submitToolOutput 一致）。
+          // 否则若发送前用户曾上翻阅读（scrollMode='reading'），live 触发时
+          // `scrollMode==='following'` 不成立、followOutput 返回 false，视图不会滚底，
+          // 表现为"发送了消息却没自动滚到底部"。
+          setFollowRequest((current) => current + 1)
           void sendMessage({ text, files })
         }}
         onStop={() => void stopAndMarkAborted()}

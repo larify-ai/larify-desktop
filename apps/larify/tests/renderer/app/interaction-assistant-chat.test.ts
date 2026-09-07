@@ -148,7 +148,8 @@ describe('AssistantChat', () => {
       toolCallId: 'call-1',
       output: ['Safe']
     })
-    expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ followRequest: 1 }))
+    // 发送新消息（composer.onSubmit）已递增一次，工具输出再递增一次 → followRequest=2
+    expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ followRequest: 2 }))
 
     onHeadingChange.mockClear()
     await act(async () =>
@@ -332,6 +333,26 @@ describe('AssistantChat', () => {
       completedAt: 12_000,
       outcome: 'aborted'
     })
+  })
+
+  it('requests bottom following after submitting a new message', async () => {
+    await act(async () =>
+      root?.render(
+        createElement(AssistantChat, {
+          chat: { id: 'session' } as never,
+          cwd: '',
+          onCwdChange: vi.fn(),
+          onHeadingChange: vi.fn()
+        })
+      )
+    )
+
+    const composer = mocks.composer.mock.calls.at(-1)?.[0]
+    await act(async () => composer.onSubmit({ text: 'new question', files: [] }))
+
+    // 用户发送新消息后应强制滚到底部并开启流式跟随（scrollMode='following'）。
+    expect(mocks.sendMessage).toHaveBeenCalledWith({ text: 'new question', files: [] })
+    expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ followRequest: 1 }))
   })
 
   it('requests bottom following after every tool output', async () => {

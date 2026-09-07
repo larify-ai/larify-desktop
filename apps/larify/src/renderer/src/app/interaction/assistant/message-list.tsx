@@ -929,6 +929,15 @@ function ActiveAssistantMessageList({
     }
     return entries
   }, [navigationItems, olderMessages, recentItems, recentStart])
+  // 导航轨道的高亮"当前位置"：底部跟随(streaming/following，complete 且未上翻阅读)时指向
+  // 最后一个用户消息（轨道最底部）的 index，而非视口顶部索引 visibleStartIndex。
+  // 否则流式输出时底部内容持续增高，会把视口顶部索引往更早消息方向推，rail 高亮 marker
+  // 随之在轨道上不断上移，与"用户一直在底部看最新内容"的预期不符。
+  // 用户上翻阅读（escaped）时恢复按视口顶部索引指示。
+  const railCurrentIndex =
+    currentPosition.complete && !currentPosition.escaped
+      ? (navigationEntries.at(-1)?.index ?? visibleStartIndex)
+      : visibleStartIndex
   const navigateToMessage = useCallback(
     (entry: ConversationNavigationEntry, behavior: 'auto' | 'smooth'): void => {
       const { index } = entry
@@ -1206,7 +1215,7 @@ function ActiveAssistantMessageList({
       />
       <ConversationNavigationRail
         entries={navigationEntries}
-        currentIndex={visibleStartIndex}
+        currentIndex={railCurrentIndex}
         onNavigate={navigateToMessage}
         onLoadOlder={onLoadOlderNavigation}
       />

@@ -145,6 +145,37 @@ describe('interaction assistant message list', () => {
     ).toBe('true')
   })
 
+  it('keeps the rail highlight on the last user message while at the bottom', async () => {
+    // 底部跟随(streaming/following)时，导航轨道高亮应固定在最后一个用户消息（轨道最底部），
+    // 而不是随视口顶部索引 visibleStartIndex 上移。否则流式输出内容持续增高会把视口顶部索引
+    // 往更早消息方向推，高亮 marker 不断上移，与"用户一直在底部看最新内容"不符。
+    // 修复前 rail 用 visibleStartIndex（此处模拟视口顶部在 index 0），会高亮 user-one；
+    // 修复后当在底部(complete && !escaped)时用最后一个用户消息的 index，高亮 user-two。
+    await render({
+      messages: [
+        userMessage('user-one', 'first'),
+        message('response'),
+        userMessage('user-two', 'second')
+      ],
+      recentStart: 0
+    })
+
+    // 模拟视口顶部索引在第一条（流式增高曾把顶部往更早推），并触发在底部跟随。
+    act(() => (captured.props as VirtuosoProps).rangeChanged({ startIndex: 0, endIndex: 2 }))
+    act(() => (captured.props as VirtuosoProps).atBottomStateChange(true))
+
+    expect(
+      container
+        .querySelector<HTMLButtonElement>('[data-navigation-entry="user-two"]')
+        ?.getAttribute('aria-current')
+    ).toBe('true')
+    expect(
+      container
+        .querySelector<HTMLButtonElement>('[data-navigation-entry="user-one"]')
+        ?.getAttribute('aria-current')
+    ).not.toBe('true')
+  })
+
   it('does not expose compaction messages or attach their responses to the previous prompt', async () => {
     vi.useFakeTimers()
     await render({

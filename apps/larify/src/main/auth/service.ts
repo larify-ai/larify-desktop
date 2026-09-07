@@ -56,11 +56,22 @@ export class AuthService {
     if (!refreshToken) return null
     try {
       const tokens = await oidc.refreshTokenGrant(await this.getConfig(), refreshToken)
-      this.adoptTokens(tokens)
-      // Persist a rotated refresh token so the session survives an app restart.
-      if (tokens.refresh_token && this.state.status === 'authenticated') {
-        await this.persist(tokens.refresh_token, this.state.user)
+      // 服务端每次刷新都会轮换刷新令牌（旧令牌立即作废）。必须【先落盘】新 refresh token
+      // 到 auth.json，再更新内存，确保进程退出时文件里始终是最新令牌、绝不留已作废的旧令牌；
+      // 否则重启 restore 用旧令牌刷新会被服务端判为"已撤销"并触发 invalidateRefreshFamily
+      // 全量清空，导致"重启后需重新登录"。getAccessToken 已保证此处为 authenticated，
+      // 故 user 必然存在（仅用类型守卫取得），不把持久化绑定在可变状态上。
+      // 关键：即使 persist 失败（磁盘/锁异常），也必须无条件 adoptTokens 更新内存为新令牌，
+      // 否则内存停留旧令牌，下次刷新继续用旧令牌会触发服务端家族撤销（正是本 bug 的根因）。
+      const user = this.state.status === 'authenticated' ? this.state.user : undefined
+      if (tokens.refresh_token && user) {
+        try {
+          await this.persist(tokens.refresh_token, user)
+        } catch {
+          // persist 失败不阻断：下方 adoptTokens 仍会把内存更新为新令牌，避免复用旧令牌。
+        }
       }
+      this.adoptTokens(tokens)
       return this.accessToken ?? null
     } catch {
       return null

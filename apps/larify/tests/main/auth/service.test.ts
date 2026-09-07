@@ -455,6 +455,35 @@ describe('AuthService', () => {
       expect(mocks.refreshTokenGrant).toHaveBeenCalledTimes(3)
     })
 
+    it('still adopts the new refresh token in memory even when persistence fails', async () => {
+      mocks.loadCredentials.mockResolvedValue({
+        refreshToken: 'rt',
+        user: { id: 'u1', email: 'a@b.c' }
+      })
+      mocks.refreshTokenGrant
+        .mockResolvedValueOnce({ access_token: 'at-1', expires_in: 0, refresh_token: 'rt' })
+        // 第二次 refresh 成功返回新令牌，但持久化到 auth.json 失败（磁盘/锁异常）。
+        .mockResolvedValueOnce({ access_token: 'at-2', expires_in: 0, refresh_token: 'rt-2' })
+        // 第三次 refresh：应使用内存里的新令牌 rt-2（而非已 revoked 的旧 rt）。
+        .mockResolvedValueOnce({ access_token: 'at-3', expires_in: 3600, refresh_token: 'rt-3' })
+      mocks.fetchUserInfo.mockResolvedValue({ sub: 'u1', email: 'a@b.c' })
+
+      const service = new AuthService()
+      await service.restore()
+
+      // 第二次 refresh，persist 失败：仍必须返回新 access token（at-2），
+      // 且内存已采用新 refresh token（rt-2），否则下次刷新会用旧令牌 rt 触发服务端家族撤销。
+      mocks.saveCredentials.mockRejectedValueOnce(new Error('disk is full'))
+      expect(await service.getAccessToken()).toBe('at-2')
+      // 再次刷新应使用新令牌 rt-2 而非旧 rt，第三次持久化成功。
+      expect(await service.getAccessToken()).toBe('at-3')
+      expect(mocks.refreshTokenGrant).toHaveBeenCalledTimes(3)
+      expect(mocks.saveCredentials).toHaveBeenLastCalledWith({
+        refreshToken: 'rt-3',
+        user: { id: 'u1', email: 'a@b.c' }
+      })
+    })
+
     it('returns the token obtained at login without refreshing', async () => {
       mocks.authorizationCodeGrant.mockResolvedValue({
         access_token: 'at-login',

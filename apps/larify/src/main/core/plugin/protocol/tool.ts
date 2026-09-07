@@ -38,7 +38,7 @@ export function wrapTool(tool: Tool): Tool {
           .string()
           .trim()
           .min(1)
-          .describe('Must show short title to the user before each tool call, required')
+          .describe('Must show short user-facing title before each tool call excluding tool name, required')
       })
       .strict(),
     execute:

@@ -23,11 +23,16 @@ let downloadedVersion: string | null = null
 function getAutoUpdater(): AppUpdater {
   autoUpdaterInstance ??= (() => {
     const updater = electronUpdater.autoUpdater
+    // cnb.cool 的 CDN（asset.cnb.cool）不支持 Range 请求（实测返回 200 全量而非 206）。
+    // 差量下载基于 blockmap + Range，必然失败并回退全量——这会先走一段差量进度、
+    // 再重置回全量重新下载，导致进度条"回退"。
+    // 故彻底禁用差量（disableDifferentialDownload 是 AppUpdater 实例属性）直接全量下载，
+    // 进度从 0 单调递增不回退。
+    updater.disableDifferentialDownload = true
     updater.setFeedURL({
       provider: 'generic',
       url: UPDATE_FEED_URL,
-      // cnb.cool 的 CDN（asset.cnb.cool）不支持 Range 请求（实测返回 200 全量而非 206），
-      // 差量更新必然失败并回退全量；直接禁用可跳过注定失败的差量尝试。
+      // 禁用 range 请求，避免差量内部的 range 尝试。
       useMultipleRangeRequest: false
     })
     return updater

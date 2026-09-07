@@ -7,15 +7,18 @@ const mocks = vi.hoisted(() => {
     emit: (event: string, ...args: unknown[]): void => {
       for (const handler of handlers[event] ?? []) handler(...args)
     },
-    setFeedURL: vi.fn(),
-    checkForUpdates: vi.fn().mockResolvedValue({}),
-    quitAndInstall: vi.fn(),
-    on: vi.fn((event: string, handler: (...args: unknown[]) => void): void => {
-      ;(handlers[event] ??= []).push(handler)
-    }),
-    removeListener: vi.fn(),
     handle: vi.fn(),
-    removeHandler: vi.fn()
+    removeHandler: vi.fn(),
+    autoUpdater: {
+      disableDifferentialDownload: false,
+      setFeedURL: vi.fn(),
+      checkForUpdates: vi.fn().mockResolvedValue({}),
+      quitAndInstall: vi.fn(),
+      on: vi.fn((event: string, handler: (...args: unknown[]) => void): void => {
+        ;(handlers[event] ??= []).push(handler)
+      }),
+      removeListener: vi.fn()
+    }
   }
 })
 
@@ -24,15 +27,7 @@ vi.mock('electron', () => ({
 }))
 
 vi.mock('electron-updater', () => ({
-  default: {
-    autoUpdater: {
-      setFeedURL: mocks.setFeedURL,
-      checkForUpdates: mocks.checkForUpdates,
-      quitAndInstall: mocks.quitAndInstall,
-      on: mocks.on,
-      removeListener: mocks.removeListener
-    }
-  }
+  default: { autoUpdater: mocks.autoUpdater }
 }))
 
 import { registerUpdate } from '../../../src/main/update/service'
@@ -71,14 +66,18 @@ describe('registerUpdate', () => {
     const register = vi.fn()
     registerUpdate(buildApplication(window, register).application as never)
 
-    expect(mocks.setFeedURL).toHaveBeenCalledWith(expect.objectContaining({ provider: 'generic' }))
-    expect(mocks.on).toHaveBeenCalledTimes(3)
+    expect(mocks.autoUpdater.setFeedURL).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: 'generic', useMultipleRangeRequest: false })
+    )
+    // 禁用差量下载（CDN 不支持 Range，差量必失败回退导致进度回退）。
+    expect(mocks.autoUpdater.disableDifferentialDownload).toBe(true)
+    expect(mocks.autoUpdater.on).toHaveBeenCalledTimes(3)
     expect(mocks.handle.mock.calls.map(([ch]) => ch)).toEqual([
       'update:check',
       'update:install',
       'update:downloadedVersion'
     ])
-    expect(mocks.checkForUpdates).toHaveBeenCalledOnce()
+    expect(mocks.autoUpdater.checkForUpdates).toHaveBeenCalledOnce()
   })
 
   it('broadcasts progress / ready / error and remembers the downloaded version', () => {
@@ -116,7 +115,7 @@ describe('registerUpdate', () => {
     registerUpdate(buildApplication(window, register).application as never)
     const handlers = Object.fromEntries(mocks.handle.mock.calls)
 
-    mocks.checkForUpdates.mockResolvedValueOnce({
+    mocks.autoUpdater.checkForUpdates.mockResolvedValueOnce({
       isUpdateAvailable: true,
       updateInfo: { version: '0.0.12' }
     })
@@ -125,7 +124,7 @@ describe('registerUpdate', () => {
       version: '0.0.12'
     })
 
-    mocks.checkForUpdates.mockResolvedValueOnce({ isUpdateAvailable: false })
+    mocks.autoUpdater.checkForUpdates.mockResolvedValueOnce({ isUpdateAvailable: false })
     await expect(handlers['update:check']()).resolves.toEqual({ status: 'current' })
   })
 
@@ -136,7 +135,7 @@ describe('registerUpdate', () => {
     const handlers = Object.fromEntries(mocks.handle.mock.calls)
 
     await expect(handlers['update:check']()).resolves.toEqual({ status: 'development' })
-    expect(mocks.checkForUpdates).not.toHaveBeenCalled()
+    expect(mocks.autoUpdater.checkForUpdates).not.toHaveBeenCalled()
   })
 
   it('update:install calls quitAndInstall and update:downloadedVersion returns the version', () => {
@@ -152,7 +151,7 @@ describe('registerUpdate', () => {
     expect(handlers['update:downloadedVersion']()).toBe('0.0.13')
 
     handlers['update:install']()
-    expect(mocks.quitAndInstall).toHaveBeenCalledOnce()
+    expect(mocks.autoUpdater.quitAndInstall).toHaveBeenCalledOnce()
   })
 
   it('dispose removes listeners and IPC handlers', () => {
@@ -163,7 +162,7 @@ describe('registerUpdate', () => {
     const disposable = register.mock.calls[0][1]
     disposable.dispose()
 
-    expect(mocks.removeListener).toHaveBeenCalledTimes(3)
+    expect(mocks.autoUpdater.removeListener).toHaveBeenCalledTimes(3)
     expect(mocks.removeHandler.mock.calls.map(([ch]) => ch)).toEqual([
       'update:check',
       'update:install',

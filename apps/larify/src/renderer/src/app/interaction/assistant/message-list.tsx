@@ -720,10 +720,13 @@ function ActiveAssistantMessageList({
     // 进入/切换会话时，等待回答的活动历史会默认展开，item 真实高度(数千 px)远超
     // defaultItemHeight 估计值，导致 Vituoso 用低估高度算出 totalHeight，滚底不到位、
     // 末尾 ask_user 停在视口外/命中错位而"点不动/变更卡片 hover 不弹"。
-    // 总高度被真实测量后(totalListHeightChanged)，若仍在"初始定位(positioning)"且尚未
-    // 真正到底，则重新滚到底部，让已正确测量的末尾 ask_user 就位。
-    // 用户上翻看上文(reading/escaped)不打扰；流式跟随靠 followOutput 自动，不重复滚底。
-    if (scrollMode.current === 'positioning') {
+    // 总高度被真实测量后(totalListHeightChanged)，若当前仍处于"滚底跟随"意图
+    // （positioning=进入/切换会话初始定位，或 following=对话中 agent 新增 ask_user 后
+    // 持续跟着底部），且尚未真正到底，则重新滚到底部，让已正确测量的末尾 ask_user 就位、
+    // 并触发 Vituoso 重排对齐命中层。用户明确反馈：滚动/resize 后即恢复可点，说明只要
+    // 一次重排/滚底即可对齐；若此处不加，用户只能手动滚动才恢复。reading/escaped（用户
+    // 上翻阅读）不打扰；流式增量跟随靠 followOutput/followGrowingList 自动，不重复滚底。
+    if (scrollMode.current === 'positioning' || scrollMode.current === 'following') {
       const element = scrollElement.current
       const atBottom = element
         ? element.scrollHeight - element.clientHeight - element.scrollTop <= 1

@@ -1,8 +1,4 @@
-export const modelIds = [
-  'deepseek-v4-flash-vision-exp',
-  'deepseek-v4-flash',
-  'deepseek-v4-pro'
-] as const
+export const modelIds = ['deepseek-flash', 'deepseek-v4-pro'] as const
 
 export type ModelId = (typeof modelIds)[number]
 export const reasoningEfforts = ['off', 'high', 'max'] as const
@@ -15,18 +11,16 @@ export type ReasoningEffort = (typeof reasoningEfforts)[number]
 export const officialModelBaseUrl = 'https://api.deepseek.com/v1'
 
 export const modelLabels: Record<ModelId, string> = {
-  'deepseek-v4-flash': 'DeepSeek-V4-Flash',
-  'deepseek-v4-pro': 'DeepSeek-V4-Pro',
-  'deepseek-v4-flash-vision-exp': 'DeepSeek-V4-Flash-Vision'
+  'deepseek-flash': 'DeepSeek-Flash',
+  'deepseek-v4-pro': 'DeepSeek-Pro'
 }
 
 export const modelContextWindows: Record<ModelId, { limit: number; rollover: number }> = {
-  'deepseek-v4-flash': { limit: 1_000_000, rollover: 800_000 },
-  'deepseek-v4-pro': { limit: 1_000_000, rollover: 800_000 },
-  'deepseek-v4-flash-vision-exp': { limit: 1_000_000, rollover: 800_000 }
+  'deepseek-flash': { limit: 1_000_000, rollover: 800_000 },
+  'deepseek-v4-pro': { limit: 1_000_000, rollover: 800_000 }
 }
 
-export const imageCapableModelIds = new Set<ModelId>(['deepseek-v4-flash-vision-exp'])
+export const imageCapableModelIds = new Set<ModelId>(['deepseek-flash'])
 
 export interface AgentModelConfig {
   modelId: ModelId
@@ -41,7 +35,7 @@ export interface AgentModelConfig {
 }
 
 export const defaultModelConfig: AgentModelConfig = {
-  modelId: 'deepseek-v4-flash-vision-exp',
+  modelId: 'deepseek-flash',
   reasoningEffort: 'off'
 }
 

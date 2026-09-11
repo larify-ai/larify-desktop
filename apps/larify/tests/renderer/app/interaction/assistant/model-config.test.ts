@@ -26,14 +26,14 @@ describe('model config storage', () => {
     })
 
     it('falls back to the global default when the session is not set', () => {
-      const global = { modelId: 'deepseek-v4-flash', reasoningEffort: 'high' }
+      const global = { modelId: 'deepseek-flash', reasoningEffort: 'high' }
       writeModelConfig(localStorage, global)
 
       expect(readSessionModelConfig('chat', localStorage)).toEqual(global)
     })
 
     it('treats an invalid session config as unset and falls back', () => {
-      const global = { modelId: 'deepseek-v4-flash', reasoningEffort: 'off' }
+      const global = { modelId: 'deepseek-flash', reasoningEffort: 'off' }
       writeModelConfig(localStorage, global)
       localStorage.setItem(`${MODEL_CONFIG_KEY}.chat`, 'not-json')
 
@@ -44,13 +44,13 @@ describe('model config storage', () => {
       const a = { modelId: 'deepseek-v4-pro', reasoningEffort: 'max' }
       writeSessionModelConfig('chat-a', localStorage, a)
       writeSessionModelConfig('chat-b', localStorage, {
-        modelId: 'deepseek-v4-flash',
+        modelId: 'deepseek-flash',
         reasoningEffort: 'off'
       })
 
       expect(readSessionModelConfig('chat-a', localStorage)).toEqual(a)
       expect(readSessionModelConfig('chat-b', localStorage)).toEqual({
-        modelId: 'deepseek-v4-flash',
+        modelId: 'deepseek-flash',
         reasoningEffort: 'off'
       })
       expect(readSessionModelConfig('chat-c', localStorage)).toEqual(readModelConfig(localStorage))
@@ -61,7 +61,7 @@ describe('model config storage', () => {
       writeSessionModelConfig('chat', localStorage, session)
 
       // 用户在别处改了全局默认，但该会话仍回显自己的固化值
-      writeModelConfig(localStorage, { modelId: 'deepseek-v4-flash', reasoningEffort: 'off' })
+      writeModelConfig(localStorage, { modelId: 'deepseek-flash', reasoningEffort: 'off' })
 
       expect(readSessionModelConfig('chat', localStorage)).toEqual(session)
     })
@@ -73,7 +73,7 @@ describe('model config storage', () => {
       })
       localStorage.removeItem(`${MODEL_CONFIG_KEY}.chat`)
 
-      const global = { modelId: 'deepseek-v4-flash-vision-exp', reasoningEffort: 'high' }
+      const global = { modelId: 'deepseek-flash', reasoningEffort: 'high' }
       writeModelConfig(localStorage, global)
       expect(readSessionModelConfig('chat', localStorage)).toEqual(global)
     })
@@ -81,7 +81,7 @@ describe('model config storage', () => {
 
   describe('writeSessionModelConfig', () => {
     it('stores the config under the session key only, leaving the global untouched', () => {
-      const global = { modelId: 'deepseek-v4-flash', reasoningEffort: 'off' }
+      const global = { modelId: 'deepseek-flash', reasoningEffort: 'off' }
       writeModelConfig(localStorage, global)
       writeSessionModelConfig('chat', localStorage, {
         modelId: 'deepseek-v4-pro',

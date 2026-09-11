@@ -35,13 +35,13 @@ describe('createModelRuntime', () => {
     modelApi.getModelApiService.mockReturnValue({
       getCachedCredentialsSync: () => null
     })
-    expect(() => createModelRuntime({ modelId: 'deepseek-v4-flash', reasoningEffort: 'off' })).toThrow(
+    expect(() => createModelRuntime({ modelId: 'deepseek-flash', reasoningEffort: 'off' })).toThrow(
       '模型凭据未就绪'
     )
   })
 
   it('points the DeepSeek client at the gateway with the user token', () => {
-    createModelRuntime({ modelId: 'deepseek-v4-flash', reasoningEffort: 'off' })
+    createModelRuntime({ modelId: 'deepseek-flash', reasoningEffort: 'off' })
     expect(deepseek.createDeepSeek).toHaveBeenCalledWith({
       baseURL: 'https://api.larify.ai/v1',
       apiKey: 'sk-test-key'
@@ -54,14 +54,14 @@ describe('createModelRuntime', () => {
   })
 
   it('maps reasoningEffort off to thinking:disabled (no reasoning_effort sent)', () => {
-    const runtime = createModelRuntime({ modelId: 'deepseek-v4-flash', reasoningEffort: 'off' })
+    const runtime = createModelRuntime({ modelId: 'deepseek-flash', reasoningEffort: 'off' })
     expect(runtime.providerOptions).toEqual({
       deepseek: { thinking: { type: 'disabled' } }
     })
   })
 
   it('maps reasoningEffort high to thinking:enabled + reasoningEffort high', () => {
-    const runtime = createModelRuntime({ modelId: 'deepseek-v4-flash', reasoningEffort: 'high' })
+    const runtime = createModelRuntime({ modelId: 'deepseek-flash', reasoningEffort: 'high' })
     expect(runtime.providerOptions).toEqual({
       deepseek: {
         thinking: { type: 'enabled' },
@@ -82,7 +82,7 @@ describe('createModelRuntime', () => {
 
   it('defaults to the default config when called without arguments', () => {
     const runtime = createModelRuntime()
-    expect(runtime.model).toEqual({ modelId: 'deepseek-v4-flash-vision-exp' })
+    expect(runtime.model).toEqual({ modelId: 'deepseek-flash' })
     expect(runtime.providerOptions).toEqual({
       deepseek: { thinking: { type: 'disabled' } }
     })
@@ -96,7 +96,7 @@ describe('createModelRuntime', () => {
       }
     })
     createModelRuntime({
-      modelId: 'deepseek-v4-flash',
+      modelId: 'deepseek-flash',
       reasoningEffort: 'high',
       apiKey: '  sk-own  '
     })
@@ -108,11 +108,11 @@ describe('createModelRuntime', () => {
 
   it('applies the same reasoning options when using the official API', () => {
     const runtime = createModelRuntime({
-      modelId: 'deepseek-v4-flash',
+      modelId: 'deepseek-flash',
       reasoningEffort: 'max',
       apiKey: 'sk-own'
     })
-    expect(runtime.model).toEqual({ modelId: 'deepseek-v4-flash' })
+    expect(runtime.model).toEqual({ modelId: 'deepseek-flash' })
     expect(runtime.providerOptions).toEqual({
       deepseek: {
         thinking: { type: 'enabled' },
@@ -123,7 +123,7 @@ describe('createModelRuntime', () => {
 
   it('treats a whitespace-only own key as unconfigured and falls back to the gateway', () => {
     const runtime = createModelRuntime({
-      modelId: 'deepseek-v4-flash',
+      modelId: 'deepseek-flash',
       reasoningEffort: 'off',
       apiKey: '   '
     })

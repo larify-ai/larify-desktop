@@ -147,7 +147,7 @@ describe('AssistantComposer', () => {
       '默认空间'
     )
     expect(container.querySelector('[aria-label="配置模型和思考强度"]')?.textContent).toContain(
-      'DeepSeek-V4-Flash-Vision低'
+      'DeepSeek-Flash低'
     )
     await act(async () => submit())
     expect(onSubmit).not.toHaveBeenCalled()
@@ -178,7 +178,7 @@ describe('AssistantComposer', () => {
     }
 
     await open()
-    await select('DeepSeek-V4-Pro')
+    await select('DeepSeek-Pro')
     await open()
     const max = [...document.querySelectorAll<HTMLButtonElement>('button')].find(
       (button) =>
@@ -191,7 +191,7 @@ describe('AssistantComposer', () => {
       '{"modelId":"deepseek-v4-pro","reasoningEffort":"max"}'
     )
     expect(container.querySelector('[aria-label="配置模型和思考强度"]')?.textContent).toContain(
-      'DeepSeek-V4-Pro高'
+      'DeepSeek-Pro高'
     )
 
     await act(async () => render({ status: 'streaming' }))

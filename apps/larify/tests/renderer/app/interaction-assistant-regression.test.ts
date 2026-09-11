@@ -21,7 +21,7 @@ describe('interaction assistant model configuration', () => {
           createElement(ModelSelector)
         )
       )
-    ).toContain('DeepSeek-V4-Flash')
+    ).toContain('DeepSeek-Flash')
   })
 
   it('falls back to the default model for malformed persisted data', () => {
@@ -43,10 +43,10 @@ describe('interaction assistant model configuration', () => {
 
   it('persists the complete model configuration as one value', () => {
     const storage = { getItem: vi.fn(), setItem: vi.fn() }
-    writeModelConfig(storage, { modelId: 'deepseek-v4-flash', reasoningEffort: 'off' })
+    writeModelConfig(storage, { modelId: 'DeepSeek-Flash', reasoningEffort: 'off' })
     expect(storage.setItem).toHaveBeenCalledWith(
       'larify.modelConfig',
-      '{"modelId":"deepseek-v4-flash","reasoningEffort":"off"}'
+      '{"modelId":"DeepSeek-Flash","reasoningEffort":"off"}'
     )
   })
 })

@@ -17,7 +17,7 @@ export async function generateSessionTitle(
 ): Promise<string> {
   const { text } = await generateText({
     ...createModelRuntime({
-      modelId: 'deepseek-v4-flash',
+      modelId: 'deepseek-flash',
       reasoningEffort: 'off',
       ...(modelConfig?.apiKey ? { apiKey: modelConfig.apiKey } : {})
     }),

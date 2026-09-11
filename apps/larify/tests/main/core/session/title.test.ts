@@ -19,7 +19,7 @@ it('uses the flash model and returns trimmed title text', async () => {
   await expect(generateSessionTitle('Explain the issue')).resolves.toBe('Generated title')
 
   expect(mocks.createModelRuntime).toHaveBeenCalledWith({
-    modelId: 'deepseek-v4-flash',
+    modelId: 'deepseek-flash',
     reasoningEffort: 'off'
   })
   expect(mocks.generateText).toHaveBeenCalledWith({
@@ -39,7 +39,7 @@ it('forwards the own api key to the runtime so the title path uses the official 
   })
 
   expect(mocks.createModelRuntime).toHaveBeenCalledWith({
-    modelId: 'deepseek-v4-flash',
+    modelId: 'deepseek-flash',
     reasoningEffort: 'off',
     apiKey: 'sk-own'
   })
@@ -52,7 +52,7 @@ it('does not forward an empty api key', async () => {
   })
 
   expect(mocks.createModelRuntime).toHaveBeenCalledWith({
-    modelId: 'deepseek-v4-flash',
+    modelId: 'deepseek-flash',
     reasoningEffort: 'off'
   })
 })

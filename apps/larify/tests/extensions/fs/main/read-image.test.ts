@@ -39,7 +39,7 @@ const readImage = (filePath: string, cwd: string): Promise<ReadImageResult> =>
   callTool<ReadImageResult>(
     readImageTool,
     { file_path: filePath },
-    { cwd, sessionId: 'session', modelId: 'deepseek-v4-flash-vision-exp' }
+    { cwd, sessionId: 'session', modelId: 'deepseek-flash' }
   )
 
 describe('read_image', () => {

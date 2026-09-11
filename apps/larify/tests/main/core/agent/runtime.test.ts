@@ -84,12 +84,12 @@ describe('createAgentRuntime', () => {
       files_edit: {
         sessionId: 'session',
         cwd: 'cwd',
-        modelId: 'deepseek-v4-flash-vision-exp'
+        modelId: 'deepseek-flash'
       },
       files_read: {
         sessionId: 'session',
         cwd: 'cwd',
-        modelId: 'deepseek-v4-flash-vision-exp'
+        modelId: 'deepseek-flash'
       }
     })
     expect(runtime.system).toContain('cwd')
@@ -105,7 +105,7 @@ describe('createAgentRuntime', () => {
       {
         sessionId: 'session',
         cwd: 'cwd',
-        modelConfig: { modelId: 'deepseek-v4-flash', reasoningEffort: 'off' }
+        modelConfig: { modelId: 'deepseek-v4-pro', reasoningEffort: 'off' }
       },
       new PluginHost(new Registry())
     )

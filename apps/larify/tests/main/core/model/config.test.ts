@@ -3,9 +3,8 @@ import { isAgentModelConfig, isModelId, isReasoningEffort } from '../../../../sr
 
 describe('model config guards', () => {
   it('accepts valid model ids and reasoning efforts', () => {
-    expect(isModelId('deepseek-v4-flash')).toBe(true)
+    expect(isModelId('deepseek-flash')).toBe(true)
     expect(isModelId('deepseek-v4-pro')).toBe(true)
-    expect(isModelId('deepseek-v4-flash-vision-exp')).toBe(true)
     expect(isReasoningEffort('off')).toBe(true)
     expect(isReasoningEffort('high')).toBe(true)
     expect(isReasoningEffort('max')).toBe(true)
@@ -18,7 +17,7 @@ describe('model config guards', () => {
   })
 
   it('accepts a minimal gateway config', () => {
-    expect(isAgentModelConfig({ modelId: 'deepseek-v4-flash', reasoningEffort: 'off' })).toBe(true)
+    expect(isAgentModelConfig({ modelId: 'deepseek-flash', reasoningEffort: 'off' })).toBe(true)
   })
 
   it('accepts an own-api-key config without stripping the apiKey field', () => {
@@ -31,7 +30,7 @@ describe('model config guards', () => {
 
   it('rejects configs with an invalid model id or effort', () => {
     expect(isAgentModelConfig({ modelId: 'gpt-4o', reasoningEffort: 'off' })).toBe(false)
-    expect(isAgentModelConfig({ modelId: 'deepseek-v4-flash', reasoningEffort: 'auto' })).toBe(false)
+    expect(isAgentModelConfig({ modelId: 'deepseek-flash', reasoningEffort: 'auto' })).toBe(false)
     expect(isAgentModelConfig(null)).toBe(false)
   })
 })

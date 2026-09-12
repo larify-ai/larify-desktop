@@ -20,6 +20,8 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock('electron', () => ({
+  // AuthService 的 dev 免登录开关会读取 app.isPackaged；这里固定为已打包（false 会启用开关）。
+  app: { isPackaged: true },
   net: { fetch: vi.fn() },
   shell: { openExternal: mocks.openExternal }
 }))

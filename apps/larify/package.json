@@ -49,7 +49,7 @@
     "start": "electron-vite preview",
     "dev": "electron-vite dev",
     "dev:preview": "electron-vite build && electron-vite preview",
-    "dev:debug": "cross-env LARIFY_HOME=%USERPROFILE%\\.larify-debug electron-vite dev -- --remote-debugging-port=9222 --user-data-dir=%USERPROFILE%\\.larify-debug",
+    "dev:debug": "cross-env LARIFY_HOME=%USERPROFILE%\\.larify-debug LARIFY_DEV_NO_AUTH=1 electron-vite dev -- --remote-debugging-port=9222 --user-data-dir=%USERPROFILE%\\.larify-debug",
     "build": "npm run typecheck && electron-vite build",
     "build:unpack": "npm run build && electron-builder --dir",
     "build:win": "npm run build && electron-builder --win",

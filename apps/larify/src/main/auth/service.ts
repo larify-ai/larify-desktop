@@ -1,4 +1,4 @@
-import { net, shell } from 'electron'
+import { app, net, shell } from 'electron'
 import * as oidc from 'openid-client'
 
 import type { AuthState, AuthUser } from '@shared/auth'
@@ -8,6 +8,17 @@ import { openLoopbackCallback } from './loopback'
 const ISSUER = new URL(process.env.LARIFY_AUTH_ISSUER ?? 'https://larify.ai/api/auth')
 const CLIENT_ID = process.env.LARIFY_AUTH_CLIENT_ID ?? 'larify-desktop'
 const SCOPES = 'openid email offline_access'
+
+/**
+ * Development-only escape hatch: `LARIFY_DEV_NO_AUTH=1` starts the app in a
+ * fake authenticated state so UI work is not gated behind an OAuth round trip.
+ * It is hard-disabled in packaged builds, so a shipped app can never skip auth
+ * even if the variable leaks into its environment.
+ */
+const devAuthBypass = (): { id: string; email: string } | null =>
+  !app.isPackaged && process.env.LARIFY_DEV_NO_AUTH === '1'
+    ? { email: 'dev@localhost', id: 'dev-local' }
+    : null
 
 let authService: AuthService | undefined
 
@@ -93,6 +104,11 @@ export class AuthService {
   }
 
   async restore(): Promise<void> {
+    const bypass = devAuthBypass()
+    if (bypass) {
+      this.setState({ status: 'authenticated', user: bypass })
+      return
+    }
     try {
       const stored = await loadCredentials()
       if (!stored) {
@@ -128,6 +144,9 @@ export class AuthService {
   }
 
   async logout(): Promise<void> {
+    // With the dev bypass there is no real session to revoke; staying
+    // authenticated keeps the fake state consistent with `restore()`.
+    if (devAuthBypass()) return
     const refreshToken = this.refreshToken
     await clearCredentials()
     this.refreshToken = undefined

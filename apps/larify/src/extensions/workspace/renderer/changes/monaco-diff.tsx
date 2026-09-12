@@ -12,6 +12,7 @@ import {
   workspaceMonacoLanguage,
   workspaceMonacoTheme
 } from '../preview/monaco'
+import { classifyWholeFile, type WholeFile } from './whole-file'
 
 const editorOptions = {
   automaticLayout: false,
@@ -38,13 +39,13 @@ const options = {
   useInlineViewWhenSpaceIsLimited: false
 } satisfies editor.IStandaloneDiffEditorConstructionOptions
 
-const highlightAddedLines = (instance: editor.IStandaloneCodeEditor): void => {
+const highlightWholeFile = (instance: editor.IStandaloneCodeEditor, kind: WholeFile): void => {
   const model = instance.getModel()
   if (!model) return
   instance.createDecorationsCollection([
     {
       range: model.getFullModelRange(),
-      options: { className: 'workspace-added-line', isWholeLine: true }
+      options: { className: `workspace-${kind}-line`, isWholeLine: true }
     }
   ])
 }
@@ -137,21 +138,19 @@ export function MonacoContentDiff({
 }: MonacoContentDiffProps): React.JSX.Element {
   const { resolvedTheme } = useTheme()
   const { containerRef, mountEditor } = useActiveEditorLayout(active)
-  const deletedOnly = mode === 'unified' && modified.length === 0 && original.length > 0
-  const addedOnly = mode === 'unified' && original.length === 0 && modified.length > 0
-  const renderedModified = deletedOnly ? original : modified
-  const renderedOriginal = deletedOnly ? '' : original
+  const wholeFile = classifyWholeFile(mode, original, modified)
   const split = mode === 'split'
   const diffOptions = useMemo(
     () => ({ ...options, compactMode: !split, renderSideBySide: split }),
     [split]
   )
-  const mountAddedEditor = useCallback(
+  const mountWholeFileEditor = useCallback(
     (instance: editor.IStandaloneCodeEditor) => {
-      highlightAddedLines(instance)
+      // Only used by the whole-file branch below, so `kind` is always set here.
+      if (wholeFile) highlightWholeFile(instance, wholeFile)
       mountEditor(instance)
     },
-    [mountEditor]
+    [mountEditor, wholeFile]
   )
   const modifiedModelPath = modelPath(
     modifiedPath,
@@ -160,26 +159,28 @@ export function MonacoContentDiff({
   )
   const originalModelPath = modelPath(originalPath, scheme, modelKey)
 
-  if (addedOnly) {
+  if (wholeFile) {
+    const content = wholeFile === 'added' ? modified : original
+    const contentPath = wholeFile === 'added' ? modifiedPath : originalPath
     return (
+      // No data-*-empty here: those attributes only drive rules scoped to
+      // `.monaco-diff-editor`, which a whole-file render never contains. The
+      // direction is carried by the `workspace-{kind}-only-editor` class.
       <div
-        className="workspace-added-only-editor workspace-file-preview h-full"
-        data-added-only="true"
+        className={`workspace-${wholeFile}-only-editor workspace-file-preview h-full`}
         data-diff-mode={mode}
-        data-modified-empty="false"
-        data-original-empty="true"
         ref={containerRef}
       >
         <MonacoEditor
           height="100%"
           key={modifiedModelPath}
-          language={workspaceMonacoLanguage(modifiedPath, modified)}
+          language={workspaceMonacoLanguage(contentPath, content)}
           loading={null}
-          onMount={mountAddedEditor}
+          onMount={mountWholeFileEditor}
           options={editorOptions}
           path={modifiedModelPath}
           theme={workspaceMonacoTheme(resolvedTheme === 'dark')}
-          value={modified}
+          value={content}
         />
       </div>
     )
@@ -189,20 +190,17 @@ export function MonacoContentDiff({
     <div
       className="workspace-file-preview h-full"
       data-diff-mode={mode}
-      data-added-only={addedOnly}
-      data-deleted-only={deletedOnly}
-      data-modified-empty={renderedModified.length === 0}
-      data-original-empty={renderedOriginal.length === 0}
+      data-added-only="false"
+      data-deleted-only="false"
+      data-modified-empty={modified.length === 0 ? 'true' : 'false'}
+      data-original-empty={original.length === 0 ? 'true' : 'false'}
       ref={containerRef}
     >
       <DiffEditor
         height="100%"
         loading={null}
-        modified={renderedModified}
-        modifiedLanguage={workspaceMonacoLanguage(
-          deletedOnly ? originalPath : modifiedPath,
-          renderedModified
-        )}
+        modified={modified}
+        modifiedLanguage={workspaceMonacoLanguage(modifiedPath, modified)}
         modifiedModelPath={modifiedModelPath}
         onMount={(instance) => {
           mountEditor(instance)
@@ -242,8 +240,8 @@ export function MonacoContentDiff({
           })
         }}
         options={diffOptions}
-        original={renderedOriginal}
-        originalLanguage={workspaceMonacoLanguage(originalPath, renderedOriginal)}
+        original={original}
+        originalLanguage={workspaceMonacoLanguage(originalPath, original)}
         originalModelPath={originalModelPath}
         theme={workspaceMonacoTheme(resolvedTheme === 'dark')}
       />

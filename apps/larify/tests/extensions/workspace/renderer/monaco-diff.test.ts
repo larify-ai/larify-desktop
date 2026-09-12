@@ -73,6 +73,7 @@ import {
   MonacoContentDiff,
   MonacoDiff
 } from '../../../../src/extensions/workspace/renderer/changes/monaco-diff'
+import { classifyWholeFile } from '../../../../src/extensions/workspace/renderer/changes/whole-file'
 
 const setPreviewSize = (container: HTMLElement, width = 900, height = 600): void => {
   const preview = container.querySelector<HTMLElement>('.workspace-file-preview')
@@ -100,6 +101,28 @@ function deferred<T>(): {
   })
   return { promise, resolve }
 }
+
+// 整文件判定的全部边界。曾出现过一次重构回归：漏掉 modified 为空的判断后，
+// 「普通修改」被误判成 'removed'，整块文件被涂成删除色。这里逐条锁死。
+describe('classifyWholeFile', () => {
+  it.each([
+    ['普通修改', 'unified', 'before', 'after', null],
+    ['新增文件', 'unified', '', 'after', 'added'],
+    ['删除文件', 'unified', 'before', '', 'removed'],
+    ['两侧皆空', 'unified', '', '', null],
+    ['split 普通修改', 'split', 'before', 'after', null],
+    ['split 新增', 'split', '', 'after', null],
+    ['split 删除', 'split', 'before', '', null]
+  ] as const)('%s', (_label, mode, original, modified, expected) => {
+    expect(classifyWholeFile(mode, original, modified)).toBe(expected)
+  })
+
+  it('treats only a truly empty side as a whole-file change', () => {
+    // 空白字符不等于空：只有长度为 0 才算整文件变更。
+    expect(classifyWholeFile('unified', '\n', 'after')).toBe(null)
+    expect(classifyWholeFile('unified', 'before', '\n')).toBe(null)
+  })
+})
 
 describe('MonacoDiff', () => {
   beforeEach(() => {
@@ -292,7 +315,7 @@ describe('MonacoDiff', () => {
     await act(async () => root.unmount())
   })
 
-  it('uses an empty modified side for a deleted file', async () => {
+  it('renders a deleted file in a plain editor highlighted as removed', async () => {
     const container = document.createElement('div')
     const root = createRoot(container)
 
@@ -310,12 +333,34 @@ describe('MonacoDiff', () => {
 
     expect(harness.readFile).not.toHaveBeenCalled()
     expect(harness.inspectFile).not.toHaveBeenCalled()
+    // The deleted content is shown by a plain editor (not the diff editor), so
+    // it cannot be mistaken for an insertion.
     expect(harness.props).toHaveBeenLastCalledWith(
-      expect.objectContaining({ modified: 'before', original: '' })
+      expect.not.objectContaining({ original: expect.anything() })
     )
-    expect(container.querySelector('[data-deleted-only="true"]')).not.toBeNull()
-    expect(container.querySelector('[data-modified-empty="false"]')).not.toBeNull()
-    expect(container.querySelector('[data-original-empty="true"]')).not.toBeNull()
+    expect(harness.props).toHaveBeenLastCalledWith(expect.objectContaining({ value: 'before' }))
+    expect(container.querySelector('[data-testid="added-editor"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="diff-editor"]')).toBeNull()
+    // The direction is carried by the class the highlight rule targets; the
+    // whole-file branch intentionally carries no data-*-empty attributes.
+    expect(container.querySelector('.workspace-removed-only-editor')).not.toBeNull()
+    expect(container.querySelector('.workspace-added-only-editor')).toBeNull()
+
+    const removedEditorProps = harness.props.mock.lastCall?.[0] as {
+      onMount(editor: unknown): void
+    }
+    const range = { endColumn: 1, endLineNumber: 2, startColumn: 1, startLineNumber: 1 }
+    const createDecorationsCollection = vi.fn()
+    removedEditorProps.onMount({
+      createDecorationsCollection,
+      getModel: () => ({ getFullModelRange: () => range })
+    })
+    expect(createDecorationsCollection).toHaveBeenCalledWith([
+      {
+        options: { className: 'workspace-removed-line', isWholeLine: true },
+        range
+      }
+    ])
     await act(async () => root.unmount())
   })
 
@@ -338,7 +383,128 @@ describe('MonacoDiff', () => {
     expect(harness.props).toHaveBeenLastCalledWith(
       expect.objectContaining({ modified: '', original: 'before' })
     )
-    expect(container.querySelector('[data-deleted-only="false"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="diff-editor"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="added-editor"]')).toBeNull()
+    // split 模式仍走 diff 编辑器，原侧（红）保留。
+    expect(container.querySelector('.workspace-removed-only-editor')).toBeNull()
+    await act(async () => root.unmount())
+  })
+
+  // 整文件分支不带 data-*-empty：这些属性只驱动 `.monaco-diff-editor` 作用域内的规则，
+  // 而整文件渲染根本不含 diff 编辑器。方向改由 `workspace-{kind}-only-editor` 类名承载。
+  it.each([
+    ['added', { index: 'A', working_dir: ' ' }, true, '.workspace-added-only-editor'],
+    ['deleted', { working_dir: 'D' }, false, '.workspace-removed-only-editor']
+  ])(
+    'marks a %s file with its whole-file class and no dead data attributes',
+    async (_label, overrides, originalMissing, expectedClass) => {
+      if (originalMissing) harness.original.mockResolvedValue(null)
+      const container = document.createElement('div')
+      const root = createRoot(container)
+
+      await act(async () => {
+        root.render(
+          createElement(MonacoDiff, {
+            mode: 'unified',
+            resourceId: 7,
+            root: 'D:\\workspace',
+            status: status(overrides as Partial<FileStatusResult>)
+          })
+        )
+        await Promise.resolve()
+      })
+
+      const preview = container.querySelector('.workspace-file-preview')
+      expect(preview?.matches(expectedClass)).toBe(true)
+      // 死属性必须不存在，避免再次引入“写了没人读”的噪音。
+      expect(preview?.hasAttribute('data-added-only')).toBe(false)
+      expect(preview?.hasAttribute('data-deleted-only')).toBe(false)
+      expect(preview?.hasAttribute('data-original-empty')).toBe(false)
+      expect(preview?.hasAttribute('data-modified-empty')).toBe(false)
+      await act(async () => root.unmount())
+    }
+  )
+
+  it('marks a normal modified file as neither added-only nor deleted-only', async () => {
+    const container = document.createElement('div')
+    const root = createRoot(container)
+
+    await act(async () => {
+      root.render(
+        createElement(MonacoDiff, {
+          mode: 'unified',
+          resourceId: 7,
+          root: 'D:\\workspace',
+          status: status({ working_dir: 'M' })
+        })
+      )
+      await Promise.resolve()
+    })
+
+    expect(container.querySelector('[data-testid="diff-editor"]')).not.toBeNull()
+    expect(container.querySelector('.workspace-removed-only-editor')).toBeNull()
+    expect(container.querySelector('.workspace-added-only-editor')).toBeNull()
+    // diff 分支保留 data-*-empty（CSS 的幻影行规则依赖它们）。
+    expect(container.querySelector('[data-modified-empty="false"]')).not.toBeNull()
+    expect(container.querySelector('[data-original-empty="false"]')).not.toBeNull()
+    await act(async () => root.unmount())
+  })
+
+  it('falls back to the diff editor when both sides are empty', async () => {
+    harness.original.mockResolvedValue(null)
+    harness.readFile.mockResolvedValue('')
+    const container = document.createElement('div')
+    const root = createRoot(container)
+
+    await act(async () => {
+      root.render(
+        createElement(MonacoDiff, {
+          mode: 'unified',
+          resourceId: 7,
+          root: 'D:\\workspace',
+          status: status()
+        })
+      )
+      await Promise.resolve()
+    })
+
+    // 两侧都空既不是新增也不是删除，不能落入整文件着色分支。
+    expect(container.querySelector('[data-testid="diff-editor"]')).not.toBeNull()
+    expect(container.querySelector('.workspace-removed-only-editor')).toBeNull()
+    expect(container.querySelector('.workspace-added-only-editor')).toBeNull()
+    await act(async () => root.unmount())
+  })
+
+  it('empties the original side for an added file with empty content', async () => {
+    harness.original.mockResolvedValue(null)
+    harness.readFile.mockResolvedValue('fresh\n')
+    const container = document.createElement('div')
+    const root = createRoot(container)
+
+    await act(async () => {
+      root.render(
+        createElement(MonacoDiff, {
+          mode: 'unified',
+          resourceId: 7,
+          root: 'D:\\workspace',
+          status: status({ index: 'A', working_dir: ' ' })
+        })
+      )
+      await Promise.resolve()
+    })
+
+    const addedEditorProps = harness.props.mock.lastCall?.[0] as {
+      onMount(editor: unknown): void
+    }
+    const range = { endColumn: 1, endLineNumber: 2, startColumn: 1, startLineNumber: 1 }
+    const createDecorationsCollection = vi.fn()
+    addedEditorProps.onMount({
+      createDecorationsCollection,
+      getModel: () => ({ getFullModelRange: () => range })
+    })
+    expect(createDecorationsCollection).toHaveBeenCalledWith([
+      { options: { className: 'workspace-added-line', isWholeLine: true }, range }
+    ])
     await act(async () => root.unmount())
   })
 
@@ -448,9 +614,7 @@ describe('MonacoDiff', () => {
 
     expect(harness.readFile).not.toHaveBeenCalled()
     expect(harness.inspectFile).not.toHaveBeenCalled()
-    expect(harness.props).toHaveBeenLastCalledWith(
-      expect.objectContaining({ modified: 'before', original: '' })
-    )
+    expect(harness.props).toHaveBeenLastCalledWith(expect.objectContaining({ value: 'before' }))
     await act(async () => root.unmount())
   })
 
@@ -505,8 +669,7 @@ describe('MonacoDiff', () => {
     ])
     expect(layout).toHaveBeenCalledWith({ height: 600, width: 900 })
     frame.mockRestore()
-    expect(container.querySelector('[data-original-empty="true"]')).not.toBeNull()
-    expect(container.querySelector('[data-modified-empty="false"]')).not.toBeNull()
+    expect(container.querySelector('.workspace-added-only-editor')).not.toBeNull()
     await act(async () => root.unmount())
   })
 

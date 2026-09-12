@@ -135,8 +135,14 @@
   left: 1px !important;
 }
 
+/* Whole-file renders (new file / deleted file) use a plain read-only editor;
+   the line decoration carries the diff color for the matching direction. */
 .workspace-added-only-editor .workspace-added-line {
   background: var(--vscode-diffEditor-insertedLineBackground, rgb(46 160 67 / 20%));
+}
+
+.workspace-removed-only-editor .workspace-removed-line {
+  background: var(--vscode-diffEditor-removedTextBackground, rgb(208 42 35 / 20%));
 }
 
 /* Monaco draws shadows from both editors toward the split, which makes the
@@ -176,22 +182,14 @@
   background: var(--border-strong);
 }
 
-/* Monaco models an empty document as one empty line. Hide the resulting
-   phantom deletion/insertion so new and deleted files match the Git patch. */
+/* Monaco models an empty document as one empty line, so a diff whose one side
+   is empty still renders a phantom deletion/insertion row. Hide it so the
+   remaining (real) rows match the Git patch. Whole-file additions and deletions
+   never reach the diff editor (they use `.workspace-*-only-editor`), so this
+   only applies to partially-empty diffs. */
 .workspace-file-preview[data-original-empty='true'] .monaco-diff-editor .line-delete,
 .workspace-file-preview[data-original-empty='true'] .monaco-diff-editor .char-delete.diff-range-empty,
 .workspace-file-preview[data-modified-empty='true'] .monaco-diff-editor .line-insert,
 .workspace-file-preview[data-modified-empty='true'] .monaco-diff-editor .char-insert.diff-range-empty {
   background: transparent;
-}
-
-/* Monaco's inline diff renders deleted blocks in a view zone without line
-   numbers. Deleted files are rendered on the numbered side, then recolored. */
-.workspace-file-preview[data-deleted-only='true'] .monaco-diff-editor .line-insert,
-.workspace-file-preview[data-deleted-only='true'] .monaco-diff-editor .char-insert {
-  background: var(--vscode-diffEditor-removedTextBackground);
-}
-
-.workspace-file-preview[data-deleted-only='true'] .monaco-diff-editor .diagonal-fill {
-  background-image: none;
 }

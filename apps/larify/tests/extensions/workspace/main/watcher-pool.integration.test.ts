@@ -41,4 +41,28 @@ describe('Workspace watcher integration', () => {
 
     await second.dispose()
   })
+
+  it('forwards real changes for a file whose directory was never listed, once opened', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'larify-watcher-pool-integration-'))
+    roots.push(root)
+    const nested = path.join(root, 'src', 'deep')
+    await mkdir(nested, { recursive: true })
+    const file = path.join(nested, 'watched.txt')
+    await writeFile(file, 'one')
+
+    const onChange = vi.fn()
+    const service = new WorkspaceService(root, onChange)
+    // 只 list 根目录：nested 从未被展开（修复前的盲区）。
+    await service.list(root)
+
+    // 先打开（inspect）该文件——修复后应补齐其父目录监听。
+    await service.inspectFile(file)
+
+    // 确保父目录 watcher 已 ready。
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    await writeFile(file, 'two')
+
+    await vi.waitFor(() => expect(onChange).toHaveBeenCalledWith(nested, file))
+    await service.dispose()
+  })
 })

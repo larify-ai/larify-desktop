@@ -339,6 +339,153 @@ describe('WorkspaceService watcher', () => {
     await service.dispose()
   })
 
+  it('watches a file parent directory on inspect even when it was never listed', async () => {
+    const root = await createRoot()
+    const nested = path.join(root, 'src', 'deep')
+    await mkdir(nested, { recursive: true })
+    const file = path.join(nested, 'file.ts')
+    const { writeFile } = await import('node:fs/promises')
+    await writeFile(file, 'export const value = 1')
+    const onChange = vi.fn()
+    const service = new WorkspaceService(root, onChange)
+
+    // 不 list 任何目录，直接检查深层文件：应补齐其父目录监听。
+    await expect(service.inspectFile(file)).resolves.toMatchObject({ path: file })
+
+    expect(chokidar.watch).toHaveBeenCalledWith(nested, {
+      atomic: true,
+      depth: 0,
+      ignoreInitial: true
+    })
+
+    const changed = path.join(nested, 'file.ts')
+    chokidar.watchers.at(-1)?.emit('change', changed)
+    expect(onChange).toHaveBeenCalledWith(nested, changed)
+    await service.dispose()
+  })
+
+  it('does not watch directories outside the workspace on inspect', async () => {
+    const root = await createRoot()
+    const outside = await createRoot()
+    const file = path.join(outside, 'outside.ts')
+    const { writeFile } = await import('node:fs/promises')
+    await writeFile(file, 'value')
+    const service = new WorkspaceService(root, () => undefined)
+
+    await service.inspectFile(file)
+
+    expect(chokidar.watch).toHaveBeenCalledTimes(1)
+    expect(chokidar.watch).toHaveBeenCalledWith(root, expect.anything())
+    await service.dispose()
+  })
+
+  it('watches a nested asset parent directory on read even when it was never listed', async () => {
+    const root = await createRoot()
+    const assets = path.join(root, 'docs', 'assets')
+    await mkdir(assets, { recursive: true })
+    const image = path.join(assets, 'logo.png')
+    const { writeFile } = await import('node:fs/promises')
+    await writeFile(image, Buffer.from([1, 2, 3]))
+    const service = new WorkspaceService(root, () => undefined)
+
+    // 不 list 任何目录，直接读取 Markdown 内嵌图片：应补齐其父目录监听。
+    await expect(service.readAsset(image)).resolves.toMatchObject({ mime: 'image/png' })
+
+    expect(chokidar.watch).toHaveBeenCalledWith(assets, {
+      atomic: true,
+      depth: 0,
+      ignoreInitial: true
+    })
+    await service.dispose()
+  })
+
+  it('does not watch directories outside the workspace on asset read', async () => {
+    const root = await createRoot()
+    const outside = await createRoot()
+    const image = path.join(outside, 'outside.png')
+    const { writeFile } = await import('node:fs/promises')
+    await writeFile(image, Buffer.from([1, 2, 3]))
+    const service = new WorkspaceService(root, () => undefined)
+
+    await service.readAsset(image)
+
+    expect(chokidar.watch).toHaveBeenCalledTimes(1)
+    expect(chokidar.watch).toHaveBeenCalledWith(root, expect.anything())
+    await service.dispose()
+  })
+
+  it('watches the parent directory when inspecting before the root resolves', async () => {
+    const root = await createRoot()
+    const nested = path.join(root, 'src')
+    await mkdir(nested, { recursive: true })
+    const file = path.join(nested, 'file.ts')
+    const { writeFile } = await import('node:fs/promises')
+    await writeFile(file, 'export const value = 1')
+    const service = new WorkspaceService(root, () => undefined)
+
+    // 不 await rootPath：inspect 紧随构造之后（manager.open 同步登记、initialize 异步完成），
+    // watch 必须等待 initialize 完成，否则会漏掉父目录监听。
+    await expect(service.inspectFile(file)).resolves.toMatchObject({ path: file })
+
+    expect(chokidar.watch).toHaveBeenCalledWith(nested, {
+      atomic: true,
+      depth: 0,
+      ignoreInitial: true
+    })
+    await service.dispose()
+  })
+
+  it('reads files and assets even when the workspace root cannot be opened', async () => {
+    const missingRoot = path.join(await createRoot(), 'missing')
+    const outside = await createRoot()
+    const file = path.join(outside, 'note.txt')
+    const image = path.join(outside, 'logo.png')
+    const { writeFile } = await import('node:fs/promises')
+    await writeFile(file, 'note')
+    await writeFile(image, Buffer.from([1, 2, 3]))
+    const service = new WorkspaceService(missingRoot, () => undefined)
+
+    await expect(service.readFile(file)).resolves.toBe('note')
+    await expect(service.readAsset(image)).resolves.toMatchObject({ mime: 'image/png' })
+    await expect(service.inspectFile(file)).resolves.toMatchObject({ path: file })
+    // 消费 initialize 的失败，避免未处理拒绝；同时确认 rootPath 如实上报错误。
+    await expect(service.rootPath()).rejects.toThrow()
+  })
+
+  it('normalizes a file path before watching its parent directory', async () => {
+    const root = await createRoot()
+    const nested = path.join(root, 'src', 'deep')
+    await mkdir(nested, { recursive: true })
+    const file = path.join(nested, 'file.ts')
+    const { writeFile } = await import('node:fs/promises')
+    await writeFile(file, 'value')
+    const service = new WorkspaceService(root, () => undefined)
+
+    // 含 `..` 段的路径：父目录需先归一化再监听，否则会监听 `src/deep/..`。
+    const unnormalized = `${file}${path.sep}..${path.sep}${path.basename(file)}`
+    await service.inspectFile(unnormalized)
+
+    expect(chokidar.watch).toHaveBeenCalledWith(nested, {
+      atomic: true,
+      depth: 0,
+      ignoreInitial: true
+    })
+    await service.dispose()
+  })
+
+  it('does not watch the workspace root itself when inspecting a root file', async () => {
+    const root = await createRoot()
+    const file = path.join(root, 'readme.md')
+    const { writeFile } = await import('node:fs/promises')
+    await writeFile(file, '# hi')
+    const service = new WorkspaceService(root, () => undefined)
+
+    await service.inspectFile(file)
+
+    expect(chokidar.watch).toHaveBeenCalledTimes(1)
+    await service.dispose()
+  })
+
   it('closes a watcher while inactive and recreates it on resume', async () => {
     const root = await createRoot()
     const service = new WorkspaceService(root, () => undefined, false)

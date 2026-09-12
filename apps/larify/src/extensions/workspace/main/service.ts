@@ -15,6 +15,9 @@ export class WorkspaceService {
   constructor(root: string, onChange: (directory: string, path: string) => void, active = true) {
     this.active = active
     this.root = this.initialize(root, onChange)
+    // 调用方可能稍后才 await（rootPath/dispose），先挂一个兜底 handler，
+    // 避免根目录打开失败时产生未处理拒绝；真实错误仍由后续 await 抛出。
+    void this.root.catch(() => undefined)
   }
 
   rootPath(): Promise<string> {
@@ -36,11 +39,10 @@ export class WorkspaceService {
       if (error.code !== 'ENOENT') throw error
       return candidate
     })
-    const relative = path.relative(root, target)
-    if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    if (this.outside(root, target)) {
       throw new Error('Path is outside the workspace')
     }
-    const parts = relative.split(path.sep)
+    const parts = path.relative(root, target).split(path.sep)
     return [
       ...parts.slice(0, -1).map((_, index) => path.join(root, ...parts.slice(0, index + 1))),
       target
@@ -58,6 +60,7 @@ export class WorkspaceService {
   async readAsset(file: string): Promise<{ bytes: Uint8Array; mime: string }> {
     const size = (await stat(file)).size
     if (size > 20 * 1024 * 1024) throw new Error('图片过大，无法预览')
+    await this.watchFile(file)
     return {
       bytes: await readFile(file),
       mime: lookup(file) || 'application/octet-stream'
@@ -67,11 +70,25 @@ export class WorkspaceService {
   async inspectFile(file: string): Promise<FileDescriptor> {
     const normalized = path.normalize(file)
     const detected = await fileTypeFromFile(normalized)
+    await this.watchFile(normalized)
     return {
       binary: detected !== undefined,
       mime: detected?.mime ?? (lookup(normalized) || 'application/octet-stream'),
       path: normalized
     }
+  }
+
+  private async watchFile(file: string): Promise<void> {
+    const root = await this.root.catch(() => null)
+    if (root === null) return
+    const directory = path.dirname(path.normalize(file))
+    if (directory === root || this.outside(root, directory)) return
+    await this.subscription?.add(directory)
+  }
+
+  private outside(root: string, target: string): boolean {
+    const relative = path.relative(root, target)
+    return relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)
   }
 
   async dispose(): Promise<void> {

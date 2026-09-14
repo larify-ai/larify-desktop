@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { defineTool } from '../../../main/core/plugin/protocol'
 
 export const showProgressTool = defineTool({
-  description: 'Must show TODO before each small step, required.',
+  description: 'Must show TODO before each milestone step, required.',
   metadata: { eager: true, icon: 'list-checks' },
   inputSchema: z
     .object({

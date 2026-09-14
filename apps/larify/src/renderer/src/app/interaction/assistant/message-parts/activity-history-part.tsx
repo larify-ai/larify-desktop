@@ -121,7 +121,8 @@ export function ActivityHistoryPart({
       }}
       className="not-prose min-w-0"
     >
-      <CollapsibleTrigger className="group/summary flex w-full min-w-0 cursor-pointer flex-wrap items-center gap-x-2 gap-y-3 text-sm text-muted-foreground">
+      {/* 不能用 flex-wrap：同 activity-group-part，长标题会把箭头挤到下一行。 */}
+      <CollapsibleTrigger className="group/summary flex w-full min-w-0 cursor-pointer flex-nowrap items-center gap-x-2 gap-y-3 text-sm text-muted-foreground">
         <span className="min-w-0 truncate">{summary}</span>
         <ChevronRightIcon
           className={cn(

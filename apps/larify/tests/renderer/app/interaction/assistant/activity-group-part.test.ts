@@ -604,7 +604,8 @@ describe('activity group part', () => {
     await act(async () => container.querySelector<HTMLButtonElement>('button')?.click())
     expect(container.querySelectorAll('button')).toHaveLength(2)
     expect(container.querySelector('[data-detail]')).toBeNull()
-    expect(container.querySelectorAll('button')[0]?.className).toContain('flex-wrap')
+    // 摘要行必须 flex-nowrap：flex-wrap 会让长标题把箭头挤到下一行。
+    expect(container.querySelectorAll('button')[0]?.className).toContain('flex-nowrap')
     expect(container.querySelectorAll('button')[0]?.className).toContain('text-muted-foreground')
     expect(container.querySelectorAll('button')[1]?.className).toContain('flex-nowrap')
     expect(container.querySelectorAll('button')[1]?.className).toContain('text-foreground')

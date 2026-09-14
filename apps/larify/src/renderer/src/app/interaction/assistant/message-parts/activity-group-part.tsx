@@ -146,7 +146,10 @@ export const ActivityGroupPart = memo(function ActivityGroupPart({
       <CollapsibleTrigger
         className={cn(
           'group/summary flex w-full min-w-0 cursor-pointer select-none items-center gap-x-2 text-sm',
-          isGroup ? 'flex-wrap gap-y-3' : 'flex-nowrap',
+          // 不能用 flex-wrap：标题过长时它会是"换行候选"（truncate 仍占整行宽），
+          // 把箭头挤到下一行。保持单行，长标题只截断自身。
+          'flex-nowrap',
+          isGroup ? 'gap-y-3' : '',
           summaryClassName ?? (isGroup ? 'text-muted-foreground' : 'text-foreground')
         )}
       >

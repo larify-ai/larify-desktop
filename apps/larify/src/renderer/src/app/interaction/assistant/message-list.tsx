@@ -1126,7 +1126,7 @@ function ActiveAssistantMessageList({
           return message ? (
             <div
               ref={index === totalCount - 1 ? followGrowingList : undefined}
-              className={`mx-auto w-full max-w-4xl min-w-0 px-6 ${listItem.kind === 'changes' ? '' : '[contain:layout_paint_style]'} ${joinsPrevious ? (listItem.kind === 'changes' ? 'pt-4' : followsActivityHistory ? 'pt-3' : 'pt-0') : 'pt-3'} ${joinsNext ? 'pb-0' : index === totalCount - 1 ? 'pb-30' : 'pb-3'}`}
+              className={`mx-auto w-full max-w-4xl min-w-0 px-6 [contain:layout_paint_style] ${joinsPrevious ? (listItem.kind === 'changes' ? 'pt-4' : followsActivityHistory ? 'pt-3' : 'pt-0') : 'pt-3'} ${joinsNext ? 'pb-0' : index === totalCount - 1 ? 'pb-30' : 'pb-3'}`}
               data-message-index={index}
               data-message-layout-shell
             >

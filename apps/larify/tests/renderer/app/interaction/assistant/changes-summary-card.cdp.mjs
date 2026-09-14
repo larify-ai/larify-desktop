@@ -100,50 +100,39 @@ try {
   await evaluate(
     `(${cardExpression})?.querySelectorAll(${JSON.stringify(rowSelector)})[0]?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))`
   )
-  const hoverPath = await waitFor(
-    `Boolean((${cardExpression})?.parentElement?.querySelector('.larify-file-diff'))`,
-    'hover diff preview'
-  )
-  const placement = await evaluate(`(() => {
+  const previewExpression = `document.querySelector('[data-testid="changes-preview"]')`
+  const hoverPath = await waitFor(`Boolean(${previewExpression})`, 'hover diff preview')
+  const measurePlacement = `(() => {
     const card = (${cardExpression})
-    const preview = card?.parentElement?.querySelector('.larify-file-diff')?.parentElement
+    const preview = ${previewExpression}
     const viewport = card?.closest('[data-message-scroll-viewport]')
     if (!card || !preview || !viewport) return null
     const previewRect = preview.getBoundingClientRect()
     const viewportRect = viewport.getBoundingClientRect()
     return {
-      below: preview.classList.contains('top-full'),
+      portaledToBody: preview.parentElement === document.body,
+      positionFixed: getComputedStyle(preview).position === 'fixed',
       previewBottom: previewRect.bottom,
       previewTop: previewRect.top,
       viewportBottom: viewportRect.bottom,
       viewportTop: viewportRect.top
     }
-  })()`)
+  })()`
+  const placement = await evaluate(measurePlacement)
   if (!placement) throw new Error('Unable to measure hover diff placement')
+  if (!placement.portaledToBody || !placement.positionFixed) {
+    throw new Error(`Hover diff is not a fixed body portal: ${JSON.stringify(placement)}`)
+  }
   if (
     placement.previewTop < placement.viewportTop - 1 ||
     placement.previewBottom > placement.viewportBottom + 1
   ) {
     throw new Error(`Hover diff is clipped: ${JSON.stringify(placement)}`)
   }
-  // 内容异步渲染（git-diff-view + shiki）后仍必须完整落在视口内：放置应在预览变高后
-  // 自动重算（或钳制高度并内部滚动），而不是靠后续 resize/滚动才修正。
+  // 内容异步渲染（git-diff-view + shiki）后仍必须完整落在视口内：预览是 fixed 挂 body，
+  // 任何滚动容器都无法裁剪它，故等待内容稳定后依然是同样的判定。
   await wait(1_200)
-  const settled = await evaluate(`(() => {
-    const card = (${cardExpression})
-    const preview = card?.parentElement?.querySelector('.larify-file-diff')?.parentElement
-    const viewport = card?.closest('[data-message-scroll-viewport]')
-    if (!card || !preview || !viewport) return null
-    const previewRect = preview.getBoundingClientRect()
-    const viewportRect = viewport.getBoundingClientRect()
-    return {
-      clamped: Boolean(preview.style.getPropertyValue('--larify-preview-max')),
-      previewBottom: previewRect.bottom,
-      previewTop: previewRect.top,
-      viewportBottom: viewportRect.bottom,
-      viewportTop: viewportRect.top
-    }
-  })()`)
+  const settled = await evaluate(measurePlacement)
   if (!settled) throw new Error('Unable to measure settled hover diff placement')
   if (
     settled.previewTop < settled.viewportTop - 1 ||

@@ -4,6 +4,10 @@ import {
   changesRootForFile,
   requestChangesNavigation
 } from '../../../../../extensions/workspace/renderer/changes/changes-navigation'
+import {
+  requestWorkspaceNavigation,
+  workspaceRootForFile
+} from '../../../../../extensions/workspace/renderer/workspace-navigation'
 import type { ChangeSummary } from './change-summary'
 import { ReviewHoverDiff } from './review-hover-diff'
 
@@ -97,7 +101,25 @@ export function ChangesSummaryCard({
   }, [activeFile])
 
   const openChanges = (selectedPath?: string): void => {
-    const targetRoot = root && selectedPath ? changesRootForFile(root, selectedPath) : root
+    // A file outside the card root (e.g. ~/.larify tasks/memory artifacts, which
+    // live in another repository) has no diff under the root, so the Changes view
+    // would show "暂无变更". Open its full text in the Workspace view instead,
+    // reusing changesRootForFile to detect "outside" and the anchor-root resolver
+    // shared with message links.
+    if (root && selectedPath && changesRootForFile(root, selectedPath) !== root) {
+      const targetRoot = workspaceRootForFile(root, selectedPath)
+      window.dispatchEvent(
+        new CustomEvent('larify:workbench-open', {
+          detail: {
+            rendererId: 'workspace',
+            options: { root: targetRoot },
+            onOpen: (resourceId: number) =>
+              requestWorkspaceNavigation({ path: selectedPath, resourceId })
+          }
+        })
+      )
+      return
+    }
     window.dispatchEvent(
       new CustomEvent('larify:workbench-open', {
         detail: {
@@ -108,7 +130,7 @@ export function ChangesSummaryCard({
                   resourceId
                 })
             : undefined,
-          options: targetRoot ? { root: targetRoot } : undefined,
+          options: root ? { root } : undefined,
           rendererId: 'changes'
         }
       })

@@ -6,12 +6,35 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
-const { requestChangesNavigation } = vi.hoisted(() => ({ requestChangesNavigation: vi.fn() }))
+const { requestChangesNavigation, requestWorkspaceNavigation } = vi.hoisted(() => ({
+  requestChangesNavigation: vi.fn(),
+  requestWorkspaceNavigation: vi.fn()
+}))
 
 vi.mock('../../../../../src/extensions/workspace/renderer/changes/changes-navigation', () => ({
-  changesRootForFile: (root: string, file: string) =>
-    file === 'E:\\other\\outside.ts' ? 'E:\\other' : root,
+  // Mirrors the real resolve: relative target or inside root → root; otherwise
+  // the target's own directory.
+  changesRootForFile: (root: string, file: string) => {
+    if (!/^(?:[a-z]:[\\/]|\\\\)/i.test(file)) return root
+    if (file.startsWith(`${root}\\`) || file.startsWith(`${root}/`)) return root
+    const parts = file.split(/[\\/]/)
+    parts.pop()
+    return parts.join('\\')
+  },
   requestChangesNavigation
+}))
+
+vi.mock('../../../../../src/extensions/workspace/renderer/workspace-navigation', () => ({
+  // Mirrors the real resolve: .larify/memory|tasks anchor → that root; else the
+  // file's own directory (the file is always outside the card root here).
+  workspaceRootForFile: (_base: string, file: string) => {
+    const anchor = /^(.+[\\/]\.larify[\\/](?:memory|tasks))(?:[\\/]|$)/i.exec(file)?.[1]
+    if (anchor) return anchor
+    const parts = file.split(/[\\/]/)
+    parts.pop()
+    return parts.join('\\')
+  },
+  requestWorkspaceNavigation
 }))
 
 vi.mock('../../../../../src/renderer/src/app/interaction/assistant/review-hover-diff', () => ({
@@ -66,6 +89,7 @@ describe('ChangesSummaryCard', () => {
     document.body.append(container)
     root = createRoot(container)
     requestChangesNavigation.mockClear()
+    requestWorkspaceNavigation.mockClear()
     window.addEventListener('larify:workbench-open', captureOpen)
   })
 
@@ -147,32 +171,31 @@ describe('ChangesSummaryCard', () => {
     })
   })
 
-  it('opens an outside file in a scoped changes workbench', async () => {
-    await act(async () => {
-      root.render(
-        createElement(ChangesSummaryCard, {
-          additions: 1,
-          deletions: 0,
-          files: [
-            {
-              additions: 1,
-              deletions: 0,
-              patch: '+outside',
-              path: 'E:\\other\\outside.ts'
-            }
-          ],
-          root: 'D:\\repo'
-        })
-      )
-    })
+  it('opens an out-of-root file as full text, anchored at its larify root for tasks/memory', async () => {
+    const cases = [
+      { path: 'E:\\other\\outside.ts', root: 'E:\\other' },
+      { path: 'C:\\Users\\me\\.larify\\tasks\\demo\\task.md', root: 'C:\\Users\\me\\.larify\\tasks' }
+    ]
+    for (const { path, root: expectedRoot } of cases) {
+      await act(async () => {
+        root.render(
+          createElement(ChangesSummaryCard, {
+            additions: 1,
+            deletions: 0,
+            files: [{ additions: 1, deletions: 0, patch: '+x', path }],
+            root: 'D:\\repo'
+          })
+        )
+      })
 
-    act(() => container.querySelectorAll('button')[1].click())
-    expect(openRequest?.options).toEqual({ root: 'E:\\other' })
-    act(() => openRequest?.onOpen?.(42))
-    expect(requestChangesNavigation).toHaveBeenCalledWith({
-      path: 'E:\\other\\outside.ts',
-      resourceId: 42
-    })
+      act(() => container.querySelectorAll('button')[1].click())
+      expect(openRequest?.rendererId).toBe('workspace')
+      expect(openRequest?.options).toEqual({ root: expectedRoot })
+      act(() => openRequest?.onOpen?.(42))
+      expect(requestWorkspaceNavigation).toHaveBeenCalledWith({ path, resourceId: 42 })
+      expect(requestChangesNavigation).not.toHaveBeenCalled()
+      requestWorkspaceNavigation.mockClear()
+    }
   })
 
   it('keeps a relative selection for a legacy card without a root', async () => {

@@ -31,6 +31,18 @@ describe('changes navigation', () => {
     expect(changesRootForFile('/repo', '/other/file.ts')).toBe('/other')
   })
 
+  it('returns the root unchanged only for files inside it (card in/out decision)', () => {
+    // The change card decides 变更页 vs 文件页 by `changesRootForFile(root, file) !== root`.
+    // Lock that contract for the real-world cases.
+    const root = 'D:\\Workspace\\context-os'
+    expect(changesRootForFile(root, 'src/app.ts')).toBe(root) // relative, inside
+    expect(changesRootForFile(root, 'D:\\Workspace\\context-os\\src\\app.ts')).toBe(root) // absolute, inside
+    expect(
+      changesRootForFile(root, 'C:\\Users\\hylnb\\.larify-debug\\.larify\\tasks\\t\\task.md')
+    ).not.toBe(root) // tasks artifact, other repository
+    expect(changesRootForFile(root, 'E:\\other\\outside.ts')).not.toBe(root) // cross drive
+  })
+
   it('compares paths using the workspace platform rules', () => {
     expect(sameChangesPath('D:\\repo', 'D:\\repo\\File.ts', 'd:\\REPO\\file.ts')).toBe(true)
     expect(sameChangesPath('/repo', '/repo/File.ts', '/repo/file.ts')).toBe(false)

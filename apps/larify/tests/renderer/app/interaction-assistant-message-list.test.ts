@@ -1508,10 +1508,8 @@ describe('interaction assistant message list', () => {
     expect(props.itemContent(0).props.children.props.renderItem.partIndexes).toEqual([0, 2])
     expect(props.itemContent(1).props.children.props.files[0].path).toBe('file.ts')
     expect(props.itemContent(1).props.className).toContain('pt-4')
-    // 变更卡片的 hover 预览已改为 fixed 挂 body 的 portal，不再受 item 外壳的
-    // contain:paint 裁剪，故 changes item 也统一带 contain，无需再留例外。
     expect(props.itemContent(0).props.className).toContain('[contain:layout_paint_style]')
-    expect(props.itemContent(1).props.className).toContain('[contain:layout_paint_style]')
+    expect(props.itemContent(1).props.className).not.toContain('[contain:layout_paint_style]')
   })
 
   it('keeps existing fragment keys stable when output continues after a change', async () => {

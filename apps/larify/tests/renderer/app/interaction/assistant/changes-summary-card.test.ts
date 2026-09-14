@@ -223,7 +223,7 @@ describe('ChangesSummaryCard', () => {
       vi.advanceTimersByTime(HOVER_DELAY)
     })
 
-    expect(document.querySelector('[data-testid="hover-diff"]')?.textContent).toBe('a.ts')
+    expect(container.querySelector('[data-testid="hover-diff"]')?.textContent).toBe('a.ts')
     vi.useRealTimers()
   })
 
@@ -235,44 +235,59 @@ describe('ChangesSummaryCard', () => {
     )!
     act(() => row.focus())
 
-    expect(document.querySelector('[data-testid="hover-diff"]')?.textContent).toBe('a.ts')
+    expect(container.querySelector('[data-testid="hover-diff"]')?.textContent).toBe('a.ts')
   })
 
-  it('portals the preview to document.body so no scroll container can clip it', async () => {
+  it('places the preview below the card when the viewport clips the space above it', async () => {
     vi.useFakeTimers()
     await render()
-    container.setAttribute('data-message-scroll-viewport', '')
     const card = container.querySelector<HTMLElement>('.relative.mt-3')!
-    vi.spyOn(card, 'getBoundingClientRect').mockReturnValue(rect(80, 100))
-
-    hoverRow('a.ts')
-    const preview = document.querySelector<HTMLElement>('[data-testid="changes-preview"]')!
-
-    // 挂到 body（不在滚动容器内），固定定位，按卡片矩形对齐、按视口可用空间限高。
-    expect(container.querySelector('[data-testid="changes-preview"]')).toBeNull()
-    expect(preview.parentElement).toBe(document.body)
-    expect(preview.classList).toContain('fixed')
-    expect(preview.style.left).toBe('0px')
-    expect(preview.style.width).toBe('900px')
-    // 上方仅 72px（80-8）、下方 580px（innerHeight 768 - 180 - 8）→ 选下方，限高 580。
-    expect(preview.style.maxHeight).toBe('580px')
-    expect(preview.style.top).toBe('184px')
-  })
-
-  it('places the preview above the card when there is more room above', async () => {
-    vi.useFakeTimers()
-    await render()
     container.setAttribute('data-message-scroll-viewport', '')
-    const card = container.querySelector<HTMLElement>('.relative.mt-3')!
-    vi.spyOn(card, 'getBoundingClientRect').mockReturnValue(rect(500, 100))
+    vi.spyOn(container, 'getBoundingClientRect').mockReturnValue({
+      bottom: 700,
+      height: 700,
+      left: 0,
+      right: 900,
+      top: 0,
+      width: 900,
+      x: 0,
+      y: 0,
+      toJSON: () => ({})
+    })
+    vi.spyOn(card, 'getBoundingClientRect').mockReturnValue({
+      bottom: 180,
+      height: 100,
+      left: 0,
+      right: 900,
+      top: 80,
+      width: 900,
+      x: 0,
+      y: 80,
+      toJSON: () => ({})
+    })
 
+    const originalRect = HTMLElement.prototype.getBoundingClientRect
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      if (this.querySelector?.('[data-testid="hover-diff"]')) {
+        return {
+          bottom: 0,
+          height: 320,
+          left: 0,
+          right: 900,
+          top: -320,
+          width: 900,
+          x: 0,
+          y: -320,
+          toJSON: () => ({})
+        }
+      }
+      return originalRect.call(this)
+    })
     hoverRow('a.ts')
-    const preview = document.querySelector<HTMLElement>('[data-testid="changes-preview"]')!
+    const preview = container.querySelector<HTMLElement>('[data-testid="hover-diff"]')!.parentElement!
 
-    // 上方空间更大 → 贴卡片上沿；用 bottom 锚定，高度上限为上方可用空间。
-    expect(preview.style.top).toBe('')
-    expect(preview.style.bottom).toBe(`${window.innerHeight - 500 + 4}px`)
-    expect(preview.style.maxHeight).toBe('492px')
+    expect(preview.classList).toContain('top-full')
+    expect(preview.classList).not.toContain('bottom-full')
   })
 
   it('hides a keyboard preview after focus leaves the card', async () => {
@@ -318,15 +333,21 @@ describe('ChangesSummaryCard', () => {
     container.setAttribute('data-message-scroll-viewport', '')
     const card = container.querySelector<HTMLElement>('.relative.mt-3')!
     let cardTop = 500
+    vi.spyOn(container, 'getBoundingClientRect').mockReturnValue(rect(0, 700))
     vi.spyOn(card, 'getBoundingClientRect').mockImplementation(() => rect(cardTop, 100))
+    const originalRect = HTMLElement.prototype.getBoundingClientRect
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      if (this.querySelector?.('[data-testid="hover-diff"]')) return rect(0, 320)
+      return originalRect.call(this)
+    })
 
     hoverRow('a.ts')
-    const preview = document.querySelector<HTMLElement>('[data-testid="changes-preview"]')!
-    expect(preview.style.top).toBe('')
+    const preview = container.querySelector<HTMLElement>('[data-testid="hover-diff"]')!.parentElement!
+    expect(preview.classList).toContain('bottom-full')
 
     cardTop = 80
     act(() => container.dispatchEvent(new Event('scroll')))
-    expect(preview.style.top).toBe('184px')
+    expect(preview.classList).toContain('top-full')
   })
 
   it('drops the preview when the active file disappears', async () => {
@@ -345,7 +366,7 @@ describe('ChangesSummaryCard', () => {
       )
     })
 
-    expect(document.querySelector('[data-testid="hover-diff"]')).toBeNull()
+    expect(container.querySelector('[data-testid="hover-diff"]')).toBeNull()
   })
 
   it('keeps the preview when streaming updates the hovered file', async () => {
@@ -388,9 +409,8 @@ describe('ChangesSummaryCard', () => {
     expect(hoverDiff()).toBe('a.ts')
   })
 
-  // 预览经 portal 渲染到 document.body，故查询范围是 document。
   const hoverDiff = (): string | undefined =>
-    document.querySelector('[data-testid="hover-diff"]')?.textContent
+    container.querySelector('[data-testid="hover-diff"]')?.textContent
 
   const hoverRow = (path: string, advance = HOVER_DELAY): HTMLElement => {
     const row = rowFor(path)
@@ -494,9 +514,9 @@ describe('ChangesSummaryCard', () => {
     })
     hoverRow('b.ts', 0)
     act(() => {
-      document
-        .querySelector<HTMLElement>('[data-testid="changes-preview"]')!
-        .dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
+      container
+        .querySelector<HTMLElement>('[data-testid="hover-diff"]')!
+        .parentElement!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
       vi.advanceTimersByTime(150)
     })
 

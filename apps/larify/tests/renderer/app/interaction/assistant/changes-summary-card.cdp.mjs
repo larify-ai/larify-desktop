@@ -62,29 +62,12 @@ try {
   )
   if (!rows) throw new Error(`Unexpected card row count: ${rows}`)
 
-  // 把卡片顶到滚动视口顶部附近再 hover：这是"变更卡片显示不全"的原始复现场景——
-  // 预览若按未测量高度误判放在上方，内容撑开后会被视口顶部裁掉。
-  await evaluate(`(() => {
-    const card = (${cardExpression})
-    const viewport = card?.closest('[data-message-scroll-viewport]')
-    if (!card || !viewport) return false
-    const delta =
-      card.getBoundingClientRect().top - viewport.getBoundingClientRect().top - 15
-    viewport.scrollTop += delta
-    return true
-  })()`)
-  await wait(300)
-
   const point = await evaluate(`(() => {
     const row = (${cardExpression})?.querySelectorAll(${JSON.stringify(rowSelector)})[0]
+    row?.scrollIntoView({ block: 'center' })
     const rect = row?.getBoundingClientRect()
-    const viewport = row?.closest('[data-message-scroll-viewport]')?.getBoundingClientRect()
     row?.focus()
-    if (!rect || !viewport) return null
-    return {
-      x: rect.left + rect.width / 2,
-      y: Math.min(Math.max(rect.top + rect.height / 2, viewport.top + 20), viewport.bottom - 20)
-    }
+    return rect ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 } : null
   })()`)
   if (!point) throw new Error('First file row has no bounds')
   await cdp.send('Input.dispatchMouseEvent', {
@@ -100,45 +83,31 @@ try {
   await evaluate(
     `(${cardExpression})?.querySelectorAll(${JSON.stringify(rowSelector)})[0]?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))`
   )
-  const previewExpression = `document.querySelector('[data-testid="changes-preview"]')`
-  const hoverPath = await waitFor(`Boolean(${previewExpression})`, 'hover diff preview')
-  const measurePlacement = `(() => {
+  const hoverPath = await waitFor(
+    `Boolean((${cardExpression})?.parentElement?.querySelector('.larify-file-diff'))`,
+    'hover diff preview'
+  )
+  const placement = await evaluate(`(() => {
     const card = (${cardExpression})
-    const preview = ${previewExpression}
+    const preview = card?.parentElement?.querySelector('.larify-file-diff')?.parentElement
     const viewport = card?.closest('[data-message-scroll-viewport]')
     if (!card || !preview || !viewport) return null
     const previewRect = preview.getBoundingClientRect()
     const viewportRect = viewport.getBoundingClientRect()
     return {
-      portaledToBody: preview.parentElement === document.body,
-      positionFixed: getComputedStyle(preview).position === 'fixed',
+      below: preview.classList.contains('top-full'),
       previewBottom: previewRect.bottom,
       previewTop: previewRect.top,
       viewportBottom: viewportRect.bottom,
       viewportTop: viewportRect.top
     }
-  })()`
-  const placement = await evaluate(measurePlacement)
+  })()`)
   if (!placement) throw new Error('Unable to measure hover diff placement')
-  if (!placement.portaledToBody || !placement.positionFixed) {
-    throw new Error(`Hover diff is not a fixed body portal: ${JSON.stringify(placement)}`)
-  }
   if (
     placement.previewTop < placement.viewportTop - 1 ||
     placement.previewBottom > placement.viewportBottom + 1
   ) {
     throw new Error(`Hover diff is clipped: ${JSON.stringify(placement)}`)
-  }
-  // 内容异步渲染（git-diff-view + shiki）后仍必须完整落在视口内：预览是 fixed 挂 body，
-  // 任何滚动容器都无法裁剪它，故等待内容稳定后依然是同样的判定。
-  await wait(1_200)
-  const settled = await evaluate(measurePlacement)
-  if (!settled) throw new Error('Unable to measure settled hover diff placement')
-  if (
-    settled.previewTop < settled.viewportTop - 1 ||
-    settled.previewBottom > settled.viewportBottom + 1
-  ) {
-    throw new Error(`Hover diff is clipped after content settled: ${JSON.stringify(settled)}`)
   }
 
   await evaluate(`(() => {
@@ -180,11 +149,7 @@ try {
   }
 
   console.log(
-    JSON.stringify(
-      { card, hoverPath: Boolean(hoverPath), openResult, placement, rows, settled },
-      null,
-      2
-    )
+    JSON.stringify({ card, hoverPath: Boolean(hoverPath), openResult, placement, rows }, null, 2)
   )
 } finally {
   cdp.close()

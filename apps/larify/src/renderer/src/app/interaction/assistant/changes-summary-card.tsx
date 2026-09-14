@@ -1,5 +1,4 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
 import { ChangesIcon } from '../../../../../extensions/workspace/renderer/changes/changes-icon'
 import {
   changesRootForFile,
@@ -15,30 +14,6 @@ import { ReviewHoverDiff } from './review-hover-diff'
 export const HIDE_DELAY = 300
 export const HOVER_DELAY = 200
 const UPWARD_SWITCH_DELAY = 150
-const VIEWPORT_MARGIN = 8
-
-interface PreviewAnchor {
-  left: number
-  width: number
-  top: number
-  bottom: number
-}
-
-// 预览以 position: fixed 渲染到 body（portal），而不是放在卡片里的 absolute 元素。
-// 卡片位于 Virtuoso 滚动容器（overflow:auto）内部，任何 absolute 子元素都会被该容器
-// 裁剪——这是 CSS 的固有行为，靠"放置翻转/高度钳制"只能打补丁。挂到 body 后预览不在
-// 任何滚动容器内，永不可能被裁剪；这里只需按视口可用空间定位与限高。
-function placePreview(anchor: PreviewAnchor): { top: number; left: number; width: number; maxHeight: number } {
-  const spaceAbove = anchor.top - VIEWPORT_MARGIN
-  const spaceBelow = window.innerHeight - anchor.bottom - VIEWPORT_MARGIN
-  const below = spaceAbove < spaceBelow
-  return {
-    top: below ? anchor.bottom : anchor.top,
-    left: anchor.left,
-    width: anchor.width,
-    maxHeight: Math.max(120, below ? spaceBelow : spaceAbove)
-  }
-}
 
 export function ChangesSummaryCard({
   additions,
@@ -47,8 +22,9 @@ export function ChangesSummaryCard({
   root
 }: ChangeSummary): React.JSX.Element {
   const [activePath, setActivePath] = useState<string | null>(null)
-  const [anchor, setAnchor] = useState<PreviewAnchor | null>(null)
+  const [previewPlacement, setPreviewPlacement] = useState<'above' | 'below'>('above')
   const cardRef = useRef<HTMLDivElement | null>(null)
+  const previewRef = useRef<HTMLDivElement | null>(null)
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const switchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const moveDir = useRef<'up' | 'down' | null>(null)
@@ -97,30 +73,30 @@ export function ChangesSummaryCard({
   }, [activePath, files])
 
   useLayoutEffect(() => {
-    if (!activeFile || !cardRef.current) {
-      setAnchor(null)
-      return
-    }
-    const updateAnchor = (): void => {
-      const rect = cardRef.current?.getBoundingClientRect()
-      if (!rect) return
-      setAnchor((current) =>
-        current &&
-        current.left === rect.left &&
-        current.width === rect.width &&
-        current.top === rect.top &&
-        current.bottom === rect.bottom
-          ? current
-          : { bottom: rect.bottom, left: rect.left, top: rect.top, width: rect.width }
-      )
-    }
-    updateAnchor()
+    if (!activeFile || !cardRef.current || !previewRef.current) return
+
     const viewport = cardRef.current.closest<HTMLElement>('[data-message-scroll-viewport]')
-    viewport?.addEventListener('scroll', updateAnchor, { passive: true })
-    window.addEventListener('resize', updateAnchor)
+    const updatePlacement = (): void => {
+      if (!cardRef.current || !previewRef.current) return
+      const card = cardRef.current.getBoundingClientRect()
+      const previewHeight = previewRef.current.getBoundingClientRect().height
+      const viewportRect = viewport?.getBoundingClientRect()
+      const viewportTop = viewportRect?.top ?? 0
+      const viewportBottom = viewportRect?.bottom ?? window.innerHeight
+      const spaceAbove = card.top - viewportTop
+      const spaceBelow = viewportBottom - card.bottom
+      const nextPlacement =
+        spaceAbove >= previewHeight || spaceAbove >= spaceBelow ? 'above' : 'below'
+
+      setPreviewPlacement((current) => (current === nextPlacement ? current : nextPlacement))
+    }
+
+    updatePlacement()
+    viewport?.addEventListener('scroll', updatePlacement, { passive: true })
+    window.addEventListener('resize', updatePlacement)
     return () => {
-      viewport?.removeEventListener('scroll', updateAnchor)
-      window.removeEventListener('resize', updateAnchor)
+      viewport?.removeEventListener('scroll', updatePlacement)
+      window.removeEventListener('resize', updatePlacement)
     }
   }, [activeFile])
 
@@ -161,8 +137,6 @@ export function ChangesSummaryCard({
     )
   }
 
-  const placement = anchor ? placePreview(anchor) : null
-
   return (
     <div
       ref={cardRef}
@@ -176,29 +150,20 @@ export function ChangesSummaryCard({
         else if (event.movementY > 1) moveDir.current = 'down'
       }}
     >
-      {activeFile &&
-        placement &&
-        createPortal(
-          <div
-            data-testid="changes-preview"
-            onMouseEnter={() => {
-              clearTimers()
-            }}
-            onMouseLeave={scheduleHide}
-            className="fixed z-50"
-            style={{
-              left: placement.left,
-              width: placement.width,
-              maxHeight: placement.maxHeight,
-              ...(placement.top === anchor?.bottom
-                ? { top: placement.top + 4 }
-                : { bottom: window.innerHeight - placement.top + 4 })
-            }}
-          >
-            <ReviewHoverDiff file={activeFile} />
-          </div>,
-          document.body
-        )}
+      {activeFile && (
+        <div
+          ref={previewRef}
+          onMouseEnter={() => {
+            clearTimers()
+          }}
+          onMouseLeave={scheduleHide}
+          className={`pointer-events-auto absolute inset-x-0 z-50 ${
+            previewPlacement === 'above' ? 'bottom-full mb-1' : 'top-full mt-1'
+          }`}
+        >
+          <ReviewHoverDiff file={activeFile} />
+        </div>
+      )}
       <section
         aria-label={`已编辑 ${files.length} 个文件`}
         className="not-prose w-full overflow-hidden rounded-xl border border-border bg-card"

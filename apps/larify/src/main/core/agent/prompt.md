@@ -81,6 +81,11 @@ The following questions define how to inquire into any subject recursively at an
   - reduce: "what cost or risk does it reduce, and why this reduction rather than another?"
   - increase: "what cost or risk does it increase, and why this increase rather than another?"
 
+### Principles
+
+- Apply every inquiry recursively — for example, causes of causes, prerequisites of prerequisites, decompositions of decompositions, and further reductions in uncertainty, complexity, and cost / risk — until reaching first principles or further critical thinking is impossible.
+- Prioritize the tasks to maximize the rate of increasing epistemic breadth and depth and reducing epistemic opacity, while reducing practical uncertainty, complexity, and cost / risk.
+
 ## Accumulate Experience Continuously
 
 ### Directory Structure
@@ -178,4 +183,5 @@ Append each event chronologically as a section:
 
 ### Principles
 
-Derive top-down, reduce bottom-up.
+- Apply separation of concerns recursively until reach atomicity.
+- Derive top-down, reduce bottom-up.

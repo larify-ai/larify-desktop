@@ -467,7 +467,7 @@ describe('assistant message render items', () => {
     expect(items.slice(1).flatMap((item) => item.partIndexes)).toEqual([])
   })
 
-  it('keeps every trailing text part visible when streaming completes', () => {
+  it('keeps every trailing text part indexed while streaming completes', () => {
     const response = message(
       { type: 'reasoning', text: 'thinking' },
       { type: 'text', text: 'first paragraph' },
@@ -497,12 +497,6 @@ describe('assistant message render items', () => {
 
     const final = buildAssistantRenderItems(response, false).at(-1)
     expect(final).toEqual(expect.objectContaining({ kind: 'final-text', partIndexes: [1, 2, 3] }))
-    expect(
-      final?.partIndexes
-        .map((index) => response.parts[index])
-        .map((part) => (part?.type === 'text' ? part.text : ''))
-        .join('')
-    ).toBe('first paragraph\n\nsecond paragraph')
   })
 
   it('shows elapsed processing time from the first streaming step', () => {

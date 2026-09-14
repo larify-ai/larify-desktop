@@ -319,6 +319,18 @@ describe('interaction assistant message view', () => {
     expect(markup).toContain('LAST_CONTENT')
     expect(markup).not.toContain('FIRST_CONTENT')
   })
+
+  it('renders the last non-empty text part without concatenating earlier fragments', () => {
+    const value = message([
+      { type: 'reasoning', text: 'thinking' },
+      { type: 'text', text: 'first paragraph' },
+      { type: 'text', text: 'second paragraph' }
+    ])
+    const markup = render(value, { renderItem: item('final-text', [1, 2]) })
+
+    expect(markup).toContain('second paragraph')
+    expect(markup).not.toContain('first paragraph')
+  })
 })
 
 function render(value: UIMessage, props: Omit<ComponentProps<typeof MessageView>, 'message'> = {}): string {

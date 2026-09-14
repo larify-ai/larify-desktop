@@ -62,12 +62,29 @@ try {
   )
   if (!rows) throw new Error(`Unexpected card row count: ${rows}`)
 
+  // 把卡片顶到滚动视口顶部附近再 hover：这是"变更卡片显示不全"的原始复现场景——
+  // 预览若按未测量高度误判放在上方，内容撑开后会被视口顶部裁掉。
+  await evaluate(`(() => {
+    const card = (${cardExpression})
+    const viewport = card?.closest('[data-message-scroll-viewport]')
+    if (!card || !viewport) return false
+    const delta =
+      card.getBoundingClientRect().top - viewport.getBoundingClientRect().top - 15
+    viewport.scrollTop += delta
+    return true
+  })()`)
+  await wait(300)
+
   const point = await evaluate(`(() => {
     const row = (${cardExpression})?.querySelectorAll(${JSON.stringify(rowSelector)})[0]
-    row?.scrollIntoView({ block: 'center' })
     const rect = row?.getBoundingClientRect()
+    const viewport = row?.closest('[data-message-scroll-viewport]')?.getBoundingClientRect()
     row?.focus()
-    return rect ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 } : null
+    if (!rect || !viewport) return null
+    return {
+      x: rect.left + rect.width / 2,
+      y: Math.min(Math.max(rect.top + rect.height / 2, viewport.top + 20), viewport.bottom - 20)
+    }
   })()`)
   if (!point) throw new Error('First file row has no bounds')
   await cdp.send('Input.dispatchMouseEvent', {
@@ -109,6 +126,31 @@ try {
   ) {
     throw new Error(`Hover diff is clipped: ${JSON.stringify(placement)}`)
   }
+  // 内容异步渲染（git-diff-view + shiki）后仍必须完整落在视口内：放置应在预览变高后
+  // 自动重算（或钳制高度并内部滚动），而不是靠后续 resize/滚动才修正。
+  await wait(1_200)
+  const settled = await evaluate(`(() => {
+    const card = (${cardExpression})
+    const preview = card?.parentElement?.querySelector('.larify-file-diff')?.parentElement
+    const viewport = card?.closest('[data-message-scroll-viewport]')
+    if (!card || !preview || !viewport) return null
+    const previewRect = preview.getBoundingClientRect()
+    const viewportRect = viewport.getBoundingClientRect()
+    return {
+      clamped: Boolean(preview.style.getPropertyValue('--larify-preview-max')),
+      previewBottom: previewRect.bottom,
+      previewTop: previewRect.top,
+      viewportBottom: viewportRect.bottom,
+      viewportTop: viewportRect.top
+    }
+  })()`)
+  if (!settled) throw new Error('Unable to measure settled hover diff placement')
+  if (
+    settled.previewTop < settled.viewportTop - 1 ||
+    settled.previewBottom > settled.viewportBottom + 1
+  ) {
+    throw new Error(`Hover diff is clipped after content settled: ${JSON.stringify(settled)}`)
+  }
 
   await evaluate(`(() => {
     const session = document.querySelector('[data-workbench-session][data-active]')
@@ -149,7 +191,11 @@ try {
   }
 
   console.log(
-    JSON.stringify({ card, hoverPath: Boolean(hoverPath), openResult, placement, rows }, null, 2)
+    JSON.stringify(
+      { card, hoverPath: Boolean(hoverPath), openResult, placement, rows, settled },
+      null,
+      2
+    )
   )
 } finally {
   cdp.close()

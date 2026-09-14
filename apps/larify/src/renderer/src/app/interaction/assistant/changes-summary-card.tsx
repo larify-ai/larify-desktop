@@ -14,6 +14,15 @@ import { ReviewHoverDiff } from './review-hover-diff'
 export const HIDE_DELAY = 300
 export const HOVER_DELAY = 200
 const UPWARD_SWITCH_DELAY = 150
+// 预览与卡片在"上/下"两向的间距（对应 mb-1 / mt-1），计算可用空间时一并扣除，
+// 避免预览边缘恰好在视口边界外 1px 而被裁。
+const PREVIEW_GAP = 4
+
+interface PreviewLayout {
+  placement: 'above' | 'below'
+  // 预览在所选方向上的可用高度上限；null 表示不限（空间足够）。
+  maxHeight: number | null
+}
 
 export function ChangesSummaryCard({
   additions,
@@ -22,7 +31,7 @@ export function ChangesSummaryCard({
   root
 }: ChangeSummary): React.JSX.Element {
   const [activePath, setActivePath] = useState<string | null>(null)
-  const [previewPlacement, setPreviewPlacement] = useState<'above' | 'below'>('above')
+  const [layout, setLayout] = useState<PreviewLayout>({ placement: 'above', maxHeight: null })
   const cardRef = useRef<HTMLDivElement | null>(null)
   const previewRef = useRef<HTMLDivElement | null>(null)
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -72,31 +81,76 @@ export function ChangesSummaryCard({
     if (activePath && !files.some(({ path }) => path === activePath)) setActivePath(null)
   }, [activePath, files])
 
+  // 预览放置：只依据"卡片相对视口的上下可用空间"决策，不依赖预览自身高度。
+  // 原因：预览内容（@git-diff-view/react + shiki）异步渲染，首次测量只能拿到头部
+  // 高度（实测 35px，而最终 323px）。若按未测量高度判断"上方放得下"，就会误放上方，
+  // 待内容撑开后溢出视口顶部被裁（用户所见"变更卡片显示不全"）。
+  // 现在改为：选空间更大的一侧；若该侧仍容不下预览，则钳制预览高度并让其内部滚动，
+  // 从而任何时刻预览都完整落在视口内。
   useLayoutEffect(() => {
     if (!activeFile || !cardRef.current || !previewRef.current) return
 
-    const viewport = cardRef.current.closest<HTMLElement>('[data-message-scroll-viewport]')
-    const updatePlacement = (): void => {
-      if (!cardRef.current || !previewRef.current) return
-      const card = cardRef.current.getBoundingClientRect()
-      const previewHeight = previewRef.current.getBoundingClientRect().height
+    const cardElement = cardRef.current
+    const previewElement = previewRef.current
+    const viewport = cardElement.closest<HTMLElement>('[data-message-scroll-viewport]')
+
+    // 预览的"自然高度"（未被钳制时应有的高度）。
+    // 取三者的最大值：
+    //   - 外层 wrapper 的渲染高度：未钳制时即等于自然高度（钳制后会变小，故需下面两项兜底）；
+    //   - 内容盒子的渲染高度：兜底无 scrollHeight/无布局的环境（如 jsdom）；
+    //   - 头部高度 + 内容区 scrollHeight：钳制后 clientHeight 变小但 scrollHeight 仍是完整
+    //     内容高度，用它才不会"钳制→量到变小→解除钳制→再变大"来回抖动。
+    const naturalHeight = (): number => {
+      const wrapperHeight = previewElement.getBoundingClientRect().height
+      const box = previewElement.firstElementChild
+      if (!box) return wrapperHeight
+      const boxHeight = box.getBoundingClientRect().height
+      const body = box.lastElementChild
+      if (!body) return Math.max(wrapperHeight, boxHeight)
+      const header = box.firstElementChild?.getBoundingClientRect().height ?? 0
+      const contentHeight = header + Math.max(body.getBoundingClientRect().height, body.scrollHeight || 0)
+      return Math.max(wrapperHeight, boxHeight, contentHeight)
+    }
+
+    const updateLayout = (): void => {
+      const card = cardElement.getBoundingClientRect()
       const viewportRect = viewport?.getBoundingClientRect()
       const viewportTop = viewportRect?.top ?? 0
       const viewportBottom = viewportRect?.bottom ?? window.innerHeight
-      const spaceAbove = card.top - viewportTop
-      const spaceBelow = viewportBottom - card.bottom
-      const nextPlacement =
-        spaceAbove >= previewHeight || spaceAbove >= spaceBelow ? 'above' : 'below'
-
-      setPreviewPlacement((current) => (current === nextPlacement ? current : nextPlacement))
+      const spaceAbove = card.top - viewportTop - PREVIEW_GAP
+      const spaceBelow = viewportBottom - card.bottom - PREVIEW_GAP
+      const natural = naturalHeight()
+      // 优先保持原有语义：上方放得下就放上方；否则下方放得下就放下方；
+      // 两侧都放不下才选空间更大的一侧，并钳制高度（内容内部滚动），避免被裁。
+      const placement = spaceAbove >= natural || spaceAbove >= spaceBelow ? 'above' : 'below'
+      const available = Math.max(0, placement === 'above' ? spaceAbove : spaceBelow)
+      const maxHeight = natural > available ? Math.floor(available) : null
+      setLayout((current) =>
+        current.placement === placement && current.maxHeight === maxHeight
+          ? current
+          : { placement, maxHeight }
+      )
     }
 
-    updatePlacement()
-    viewport?.addEventListener('scroll', updatePlacement, { passive: true })
-    window.addEventListener('resize', updatePlacement)
+    updateLayout()
+    viewport?.addEventListener('scroll', updateLayout, { passive: true })
+    window.addEventListener('resize', updateLayout)
+    // 预览内容异步变大（高亮完成）后必须重算：否则首次基于未测量高度的误判会被固化，
+    // 只有用户手动 resize/滚动才修正。观察内层预览内容尺寸变化即可。
+    const observer =
+      typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => updateLayout()) : null
+    if (observer) {
+      observer.observe(previewElement)
+      const box = previewElement.firstElementChild
+      if (box) {
+        observer.observe(box)
+        observer.observe(box.lastElementChild ?? box)
+      }
+    }
     return () => {
-      viewport?.removeEventListener('scroll', updatePlacement)
-      window.removeEventListener('resize', updatePlacement)
+      viewport?.removeEventListener('scroll', updateLayout)
+      window.removeEventListener('resize', updateLayout)
+      observer?.disconnect()
     }
   }, [activeFile])
 
@@ -158,8 +212,13 @@ export function ChangesSummaryCard({
           }}
           onMouseLeave={scheduleHide}
           className={`pointer-events-auto absolute inset-x-0 z-50 ${
-            previewPlacement === 'above' ? 'bottom-full mb-1' : 'top-full mt-1'
+            layout.placement === 'above' ? 'bottom-full mb-1' : 'top-full mt-1'
           }`}
+          style={
+            layout.maxHeight === null
+              ? undefined
+              : ({ '--larify-preview-max': `${layout.maxHeight}px` } as React.CSSProperties)
+          }
         >
           <ReviewHoverDiff file={activeFile} />
         </div>

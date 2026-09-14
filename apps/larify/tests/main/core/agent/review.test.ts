@@ -126,7 +126,7 @@ describe('FileChangeTracker', () => {
     })
   })
 
-  it('ignores task and memory artifacts under ~/.larify', () => {
+  it('tracks task and memory artifacts under ~/.larify', () => {
     const dir = mkdtempSync(join(tmpdir(), 'larify-review-'))
     tempDirs.push(dir)
     const appPath = join(dir, 'app.ts')
@@ -145,7 +145,11 @@ describe('FileChangeTracker', () => {
     tracker.update({ path: appPath, before: null, after: 'code\n' })
 
     const paths = tracker.syncResults().map((result) => result.path)
-    expect(paths).toEqual([appPath])
+    expect(paths).toEqual([
+      join(larifyPath('tasks'), 'task-1', 'task.md'),
+      join(larifyPath('memory'), 'subject.md'),
+      appPath
+    ])
   })
 })
 
@@ -193,6 +197,25 @@ describe('AgentReview', () => {
     review.update({ path, patch: '+change', additions: 1, deletions: 0, binary: false })
 
     expect(review.finish()?.files[0].path).toBe('..config')
+  })
+
+  it('sorts normal files first, then test files, then task and memory artifacts', () => {
+    const root = resolve('workspace')
+    const review = new AgentReview(root, vi.fn())
+    const taskPath = join(larifyPath('tasks'), 'task-1', 'task.md')
+    const memoryPath = join(larifyPath('memory'), 'subject.md')
+    const testPath = join(root, 'spec', 'foo.test.ts')
+
+    for (const path of [testPath, memoryPath, taskPath, join(root, 'src', 'app.ts')]) {
+      review.update({ path, patch: '+change', additions: 1, deletions: 0, binary: false })
+    }
+
+    expect(review.finish()?.files.map((file) => file.path)).toEqual([
+      join('src', 'app.ts'),
+      join('spec', 'foo.test.ts'),
+      taskPath,
+      memoryPath
+    ])
   })
 
   it('replaces the displayed patch for a file and recalculates its counts', () => {

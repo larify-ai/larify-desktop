@@ -23,16 +23,35 @@ interface TrackedFileChange {
   patch: string | null
 }
 
-/** Agent task/memory artifacts live under ~/.larify; they are not user-facing changes. */
-const internalRoots = [larifyPath('tasks'), larifyPath('memory')]
+const tasksRoot = larifyPath('tasks')
+const memoryRoot = larifyPath('memory')
 
-function isInternalPath(path: string): boolean {
-  return internalRoots.some((root) => isPathInside(root, path))
+/**
+ * Agent task/memory artifacts live under ~/.larify. They are kept in the card
+ * (so the user can see them) but sorted below every other change.
+ */
+function isTasksPath(path: string): boolean {
+  return isPathInside(tasksRoot, path)
 }
 
-/** Test files are sorted to the bottom of the change card. */
+function isMemoryPath(path: string): boolean {
+  return isPathInside(memoryRoot, path)
+}
+
+/** Test files are sorted below normal changes, but above task/memory artifacts. */
 function isTestPath(path: string): boolean {
   return path.toLowerCase().includes('test')
+}
+
+/**
+ * Change-card display priority: normal files first, then test files, then task
+ * artifacts, then memory artifacts. Lower value sorts higher in the card.
+ */
+function sortRank(path: string): number {
+  if (isMemoryPath(path)) return 3
+  if (isTasksPath(path)) return 2
+  if (isTestPath(path)) return 1
+  return 0
 }
 
 function displayPath(root: string, path: string): string {
@@ -54,7 +73,6 @@ export class FileChangeTracker {
   >()
 
   update({ path, before, after }: FileMutation): void {
-    if (isInternalPath(path)) return
     const key = fileKey(path)
     const existing = this.files.get(key)
     const original = existing ? existing.original : before
@@ -152,9 +170,7 @@ export class AgentReview {
   }
 
   private data(): GitSnapshotPartData | null {
-    const files = [...this.files.values()].sort(
-      (a, b) => Number(isTestPath(a.path)) - Number(isTestPath(b.path))
-    )
+    const files = [...this.files.values()].sort((a, b) => sortRank(a.path) - sortRank(b.path))
     return files.length ? { files, root: resolve(this.root) } : null
   }
 }

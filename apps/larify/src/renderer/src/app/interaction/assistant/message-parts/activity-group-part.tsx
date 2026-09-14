@@ -146,36 +146,37 @@ export const ActivityGroupPart = memo(function ActivityGroupPart({
       <CollapsibleTrigger
         className={cn(
           'group/summary flex w-full min-w-0 cursor-pointer select-none items-center gap-x-2 text-sm',
-          // 不能用 flex-wrap：标题过长时它会是"换行候选"（truncate 仍占整行宽），
-          // 把箭头挤到下一行。保持单行，长标题只截断自身。
-          'flex-nowrap',
-          isGroup ? 'gap-y-3' : '',
+          // 外层必须保留 flex-wrap：isGroup 时分隔线靠 order-last + basis-full 独占一行。
+          isGroup ? 'flex-wrap gap-y-3' : 'flex-nowrap',
           summaryClassName ?? (isGroup ? 'text-muted-foreground' : 'text-foreground')
         )}
       >
-        {streaming && !isGroup ? (
-          <>
-            {summaryIcon ?? <SummaryIcon item={item} />}
-            <ActivityShimmer className="min-w-0 text-foreground">
+        {/* 图标/标题/箭头单独包一层 flex-nowrap：长标题只截断自身，不会把箭头挤到下一行。 */}
+        <span className="flex w-full min-w-0 items-center gap-x-2">
+          {streaming && !isGroup ? (
+            <>
+              {summaryIcon ?? <SummaryIcon item={item} />}
+              <ActivityShimmer className="min-w-0 text-foreground">
+                <span className="min-w-0 truncate">
+                  {summary || (item.kind === 'reasoning' ? '思考' : '处理中')}
+                </span>
+              </ActivityShimmer>
+            </>
+          ) : (
+            <>
+              {summaryIcon ?? (isGroup ? null : <SummaryIcon item={item} />)}
               <span className="min-w-0 truncate">
                 {summary || (item.kind === 'reasoning' ? '思考' : '处理中')}
               </span>
-            </ActivityShimmer>
-          </>
-        ) : (
-          <>
-            {summaryIcon ?? (isGroup ? null : <SummaryIcon item={item} />)}
-            <span className="min-w-0 truncate">
-              {summary || (item.kind === 'reasoning' ? '思考' : '处理中')}
-            </span>
-          </>
-        )}
-        <ChevronRightIcon
-          className={cn(
-            'size-3.5 shrink-0 transition-[opacity,transform]',
-            open ? 'rotate-90 opacity-100' : 'opacity-0 group-hover/summary:opacity-100'
+            </>
           )}
-        />
+          <ChevronRightIcon
+            className={cn(
+              'size-3.5 shrink-0 transition-[opacity,transform]',
+              open ? 'rotate-90 opacity-100' : 'opacity-0 group-hover/summary:opacity-100'
+            )}
+          />
+        </span>
         {isGroup && !summaryIcon ? (
           <span className="order-last h-px w-full basis-full bg-border" />
         ) : null}

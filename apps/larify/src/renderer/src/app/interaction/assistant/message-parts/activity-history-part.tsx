@@ -121,15 +121,18 @@ export function ActivityHistoryPart({
       }}
       className="not-prose min-w-0"
     >
-      {/* 不能用 flex-wrap：同 activity-group-part，长标题会把箭头挤到下一行。 */}
-      <CollapsibleTrigger className="group/summary flex w-full min-w-0 cursor-pointer flex-nowrap items-center gap-x-2 gap-y-3 text-sm text-muted-foreground">
-        <span className="min-w-0 truncate">{summary}</span>
-        <ChevronRightIcon
-          className={cn(
-            'size-3.5 shrink-0 transition-[opacity,transform]',
-            open ? 'rotate-90 opacity-100' : 'opacity-0 group-hover/summary:opacity-100'
-          )}
-        />
+      {/* 外层保留 flex-wrap：分隔线靠 order-last + basis-full 独占一行。 */}
+      <CollapsibleTrigger className="group/summary flex w-full min-w-0 cursor-pointer flex-wrap items-center gap-x-2 gap-y-3 text-sm text-muted-foreground">
+        {/* 标题/箭头单独包一层 flex-nowrap：长标题只截断自身，不把箭头挤到下一行。 */}
+        <span className="flex w-full min-w-0 items-center gap-x-2">
+          <span className="min-w-0 truncate">{summary}</span>
+          <ChevronRightIcon
+            className={cn(
+              'size-3.5 shrink-0 transition-[opacity,transform]',
+              open ? 'rotate-90 opacity-100' : 'opacity-0 group-hover/summary:opacity-100'
+            )}
+          />
+        </span>
         <span className="order-last h-px w-full basis-full bg-border" />
       </CollapsibleTrigger>
       {open ? (

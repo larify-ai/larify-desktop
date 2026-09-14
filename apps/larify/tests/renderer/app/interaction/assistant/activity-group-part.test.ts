@@ -604,9 +604,15 @@ describe('activity group part', () => {
     await act(async () => container.querySelector<HTMLButtonElement>('button')?.click())
     expect(container.querySelectorAll('button')).toHaveLength(2)
     expect(container.querySelector('[data-detail]')).toBeNull()
-    // 摘要行必须 flex-nowrap：flex-wrap 会让长标题把箭头挤到下一行。
-    expect(container.querySelectorAll('button')[0]?.className).toContain('flex-nowrap')
-    expect(container.querySelectorAll('button')[0]?.className).toContain('text-muted-foreground')
+    // 摘要行外层保留 flex-wrap（isGroup 的分隔线靠 order-last + basis-full 独占一行）；
+    // 但图标/标题/箭头必须包在 flex-nowrap 的内层里，否则长标题会把箭头挤到下一行。
+    const summaryButton = container.querySelectorAll('button')[0]
+    expect(summaryButton?.className).toContain('flex-wrap')
+    expect(summaryButton?.className).toContain('text-muted-foreground')
+    const summaryLine = summaryButton?.querySelector('span')
+    expect(summaryLine?.className).toContain('flex')
+    expect(summaryLine?.className).toContain('min-w-0')
+    expect(summaryLine?.className).not.toContain('flex-wrap')
     expect(container.querySelectorAll('button')[1]?.className).toContain('flex-nowrap')
     expect(container.querySelectorAll('button')[1]?.className).toContain('text-foreground')
     const arrows = container.querySelectorAll('button svg[class*="transition-"]')

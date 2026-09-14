@@ -1058,7 +1058,10 @@ function ActiveAssistantMessageList({
           scrollMode.current = 'following'
           setPosition((current) => ({ ...current, escaped: false }))
         }
-        if (movedUp && scrollMode.current !== 'reading') {
+        // 窗口隐藏（最小化）期间浏览器会因窗口 bounds 重算而 clamp scrollTop，产生一次"向上"
+        // 的 scroll 事件。那是程序化滚动而非用户上翻，若据此切到 reading，恢复显示后会永久停在
+        // 非底部。故隐藏期间的向上滚动不改变滚动意图。
+        if (movedUp && !document.hidden && scrollMode.current !== 'reading') {
           if (scrollIntentTimer.current !== null) clearTimeout(scrollIntentTimer.current)
           scrollIntentTimer.current = setTimeout(() => {
             scrollIntentTimer.current = null

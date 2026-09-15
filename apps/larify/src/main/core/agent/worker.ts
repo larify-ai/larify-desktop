@@ -4,21 +4,33 @@ import { clearReadState } from '../../../extensions/fs/main/state'
 import type { SessionStore } from '../session'
 import type { AgentModelConfig } from '../model/config'
 import type { AgentOptions } from './engine'
-import { runStoredAgentSession } from './persist'
+import { markNested, runStoredAgentSession } from './persist'
 import { AgentReview, FileChangeTracker, reviewChunk } from './review'
 import type { PluginHost } from '../plugin/host'
 import { pluginDiscovery } from '../plugin/plugin-discovery'
 
 const reviewTools = new Set(['fs_edit', 'fs_write'])
 const resetContextTool = 'agent_reset_context'
+const scheduleTaskTool = 'agent_schedule_task'
 
 export interface AgentWorkerInput {
   sessionId: string
   cwd: string
-  message: UIMessage
+  /** 本轮新增的用户消息；undefined = 在主链上续跑（子任务链结束后回到主任务）。 */
+  message?: UIMessage
   runtime: AgentOptions
   /** 复用本次会话模型配置（携带 apiKey 时标题生成同样直连官方）。 */
   modelConfig?: AgentModelConfig
+  /** 递归子任务轮次：其消息仅 UI 可见，不进主链上下文。 */
+  nested?: boolean
+  /** 递归前几轮已累计的处理时长（ms）。 */
+  baseProcessingMs?: number
+}
+
+/** 一轮的产出：被调度的任务路径（一轮至多一个），以及该轮（含传入基数）的累计处理时长。 */
+export interface AgentRunResult {
+  scheduled?: string
+  totalProcessingMs?: number
 }
 
 export interface SessionTrack {
@@ -45,10 +57,15 @@ export class AgentWorker {
     private readonly track?: SessionTrack
   ) {}
 
-  async run(input: AgentWorkerInput): Promise<void> {
-    if (this.controller || this.closed) return
+  async run(input: AgentWorkerInput): Promise<AgentRunResult> {
+    if (this.controller || this.closed) return {}
     const controller = new AbortController()
     this.controller = controller
+    // 严格单任务：一轮只认第一个 schedule_task。任务结构是单链树（每个任务至多一个子任务，
+    // 「回父」由模型在子任务完成时再调一次 schedule_task(父) 实现），一轮多调度属违规
+    // （模型在同一响应里并行调了多次），只取首个、忽略其余。
+    let scheduled: string | undefined
+    let totalProcessingMs: number | undefined
     try {
       // ask_user 回答/reset_context 都是同一任务的续写：追踪器由 Agent 按会话持有，
       // 跨 worker 复用（track?.review/track?.tracker），不会因为新 worker 而丢文件。
@@ -79,6 +96,8 @@ export class AgentWorker {
         } else {
           response.parts.push(chunk as (typeof response.parts)[number])
         }
+        // response 已是**落库身份**（persist 返回：nested 轮次为「增量 + 新 id」那条），
+        // 直接按同 id 原地替换快照 part 即可，不会污染主链行。
         this.sessions.saveMessages(input.sessionId, [response])
       }
       let handoff: string | undefined
@@ -102,20 +121,33 @@ export class AgentWorker {
           }
         }
       }
+      const schedule = toolsContext[scheduleTaskTool]
+      if (schedule) {
+        toolsContext[scheduleTaskTool] = {
+          ...(schedule as Record<string, unknown>),
+          scheduleTask: (taskPath: string) => {
+            scheduled ??= taskPath
+          }
+        }
+      }
       const reviewToolCalls = new Set<string>()
       const originalStopWhen = input.runtime.stopWhen
-      const runOnce = (message: UIMessage): Promise<UIMessage | undefined> =>
+      const runOnce = (message: UIMessage | undefined): Promise<UIMessage | undefined> =>
         runStoredAgentSession(this.sessions, {
           sessionId: input.sessionId,
           cwd: input.cwd,
           message,
           modelConfig: input.modelConfig,
+          nested: input.nested,
+          baseProcessingMs: input.baseProcessingMs,
           options: {
             ...input.runtime,
             toolsContext,
             abortSignal: controller.signal,
             stopWhen: async (options) =>
-              handoff !== undefined || (originalStopWhen ? await originalStopWhen(options) : false)
+              handoff !== undefined ||
+              scheduled !== undefined ||
+              (originalStopWhen ? await originalStopWhen(options) : false)
           },
           onTitle: (title) => {
             if (!controller.signal.aborted) this.sink.title?.(title)
@@ -154,27 +186,43 @@ export class AgentWorker {
             }
           }
         })
+      // 每轮结束后统一收尾：写回变更快照、累计处理时长。
+      const settle = (value: UIMessage | undefined): void => {
+        if (value) saveReview(value)
+        const total = (value?.metadata as Record<string, unknown> | undefined)?.totalProcessingMs
+        if (typeof total === 'number' && Number.isFinite(total)) totalProcessingMs = total
+      }
       let response = await runOnce(input.message)
-      if (response) saveReview(response)
+      settle(response)
       while (handoff) {
-        if (controller.signal.aborted) return
-        const message: UIMessage = {
+        if (controller.signal.aborted) return { scheduled, totalProcessingMs }
+        const tagged: UIMessage = {
           id: randomUUID(),
           role: 'user',
           metadata: { compaction: true },
-          parts: [...input.message.parts, { type: 'text', text: `# Handoff\n\n${handoff}` }]
+          parts: [
+            ...(input.message?.parts ?? []),
+            { type: 'text', text: `# Handoff\n\n${handoff}` }
+          ]
         }
+        const message = input.nested ? markNested(tagged) : tagged
         handoff = undefined
         // reset_context 走进程内 handoff，不经过 Agent.send()，故此处显式刷新
         // 磁盘插件（增量 diff），让"重置上下文"后的续写立即可见新增/修改/删除的
         // MCP server。await：reset 本就是重置语义，阻塞等刷新完再续写。
         await this.pluginHost.refreshPlugins(pluginDiscovery.discover())
         clearReadState(input.sessionId)
-        this.sessions.saveStart(input.sessionId, message)
+        // 只有主链轮次才移动 `sessions.start`（reset 的截断游标）：`start` 决定
+        // `loadMessages` 的主链上下文边界。子任务（nested）走独立上下文（只喂本轮
+        // nest prompt），不依赖 `start`；若在此也 saveStart，会把主链游标推到子任务的
+        // 位置，使之后「回主链续跑」时 loadMessages 只返回子任务之后的残片——**主链
+        // 上下文被清空**（实测 loadMessages 返回 []）。故 nested 时跳过。
+        if (!input.nested) this.sessions.saveStart(input.sessionId, message)
         response = await runOnce(message)
-        if (response) saveReview(response)
+        settle(response)
       }
-      if (!controller.signal.aborted) this.finish(() => this.sink.end())
+      if (!controller.signal.aborted && scheduled === undefined) this.finish(() => this.sink.end())
+      return { scheduled, totalProcessingMs }
     } catch (error) {
       // abort 是用户主动停止（cancel()），预期路径，不按错误留痕。
       // 主进程留痕：agent 运行级错误（非流内部，如工具执行/持久化失败）。
@@ -182,6 +230,7 @@ export class AgentWorker {
         console.error('[agent] run failed:', error)
         this.finish(() => this.sink.error(error))
       }
+      return { scheduled, totalProcessingMs }
     } finally {
       if (this.controller === controller) this.controller = undefined
     }

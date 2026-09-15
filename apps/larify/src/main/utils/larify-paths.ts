@@ -9,10 +9,12 @@ import { join } from 'node:path'
 
 // Dev-only override: set LARIFY_HOME to point ~/.larify (tasks/memory/plugins/workspace)
 // at an empty directory for isolated testing. Unset in production -> falls back to homedir().
-const larifyHome = process.env.LARIFY_HOME || homedir()
+// 按调用时读取（而非模块加载时固化为常量）：便于测试在 import 之后设置 LARIFY_HOME 也能生效，
+// 且运行时切换 home 目录无需重新加载模块。
+const larifyHome = (): string => process.env.LARIFY_HOME || homedir()
 
 export const larifyPath = (...segments: string[]): string =>
-  join(larifyHome, '.larify', ...segments)
+  join(larifyHome(), '.larify', ...segments)
 
 export const toPosixPath = (path: string): string => path.replaceAll('\\', '/')
 

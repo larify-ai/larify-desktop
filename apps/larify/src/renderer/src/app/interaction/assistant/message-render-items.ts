@@ -170,7 +170,9 @@ export function buildAssistantRenderItems(
     (part, index) => index > lastStepStartIndex && (part.type === 'reasoning' || isToolUIPart(part))
   )
   const directTextStartIndex = Math.max(lastStepStartIndex, lastStepActivityIndex)
-  const canRenderFinalText = !interrupted && !streaming
+  // 递归子任务的全部文本都是过程（产出落在 task.md），不突出成"最终答案"。
+  const nested = (message.metadata as { nested?: unknown } | undefined)?.nested === true
+  const canRenderFinalText = !interrupted && !streaming && !nested
   const trailingTextParts = canRenderFinalText
     ? message.parts.flatMap((part, index) =>
       part.type === 'text' && index > directTextStartIndex ? [{ index, text: part.text }] : []

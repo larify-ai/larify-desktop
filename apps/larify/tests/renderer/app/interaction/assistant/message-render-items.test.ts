@@ -919,4 +919,29 @@ describe('assistant message render items', () => {
     expect(items.map((item) => item.kind)).toEqual(['activity-group'])
     expect(items[0].summary).toBe('已中断 · 处理了 8秒')
   })
+
+  it('does not expose a final answer for a recursive child task', () => {
+    // 子任务的文本全部是过程（产出落在 task.md），不应突出成"最终答案"。
+    const nested = {
+      ...message(tool('1', 'Read source'), { type: 'text', text: '子任务过程文字' }),
+      metadata: { nested: true, startedAt: 1_000, completedAt: 2_000 }
+    } as UIMessage
+
+    const items = buildAssistantRenderItems(nested, false)
+
+    expect(items.map((item) => item.kind)).toEqual(['activity-group'])
+    expect(items[0].children?.map((item) => item.kind)).toEqual(['tool-group', 'intermediate-text'])
+  })
+
+  it('still exposes a final answer for a normal assistant message', () => {
+    const normal = {
+      ...message(tool('1', 'Read source'), { type: 'text', text: '最终答案' }),
+      metadata: { startedAt: 1_000, completedAt: 2_000 }
+    } as UIMessage
+
+    expect(buildAssistantRenderItems(normal, false).map((item) => item.kind)).toEqual([
+      'activity-group',
+      'final-text'
+    ])
+  })
 })

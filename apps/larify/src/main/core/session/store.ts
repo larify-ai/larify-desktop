@@ -60,6 +60,10 @@ export class SessionStore implements Disposable {
     `)
   }
 
+  /**
+   * 模型输入（主链）：排除递归子任务消息（metadata.nested）。
+   * 子任务自身的上下文不走这里——它只喂本轮 nest prompt（见 persist.ts）。
+   */
   loadMessages(id: string): UIMessage[] {
     const messages = this.database
       .prepare(
@@ -67,28 +71,45 @@ export class SessionStore implements Disposable {
          JOIN sessions ON sessions.id = messages.session_id
          WHERE messages.session_id = ?
            AND messages.position >= COALESCE(sessions.start, -1)
+           AND json_extract(messages.value, '$.metadata.nested') IS NOT 1
          ORDER BY messages.position`
       )
       .all(id)
     return messages.map(({ value }) => JSON.parse(value as string) as UIMessage)
   }
 
-  // reset_context 续写时，模型输入被 sessions.start 截断（loadMessages 只返回 compaction 及其后），
-  // 末尾是 compaction user → AI SDK 判定新消息、不复用 reset 前 assistant id（UI 多一条「已完成」）。
-  // 这里只读截断前最后一条 assistant（单条，非全量），供 UI 消息身份判定并入，使 reset 前后合并成
-  // 一条。仅取一条，性能开销可忽略，不影响模型输入（模型输入仍用 loadMessages 截断版，压缩保留）。
-  loadLastAssistantBeforeStart(id: string): UIMessage | undefined {
-    const row = this.database
-      .prepare(
-        `SELECT messages.value FROM messages
-         JOIN sessions ON sessions.id = messages.session_id
-         WHERE messages.session_id = ?
-           AND messages.position < COALESCE(sessions.start, 9223372036854775807)
-           AND json_extract(messages.value, '$.role') = 'assistant'
-         ORDER BY messages.position DESC
-         LIMIT 1`
-      )
-      .get(id)
+  /**
+   * 最近一条 assistant（排除递归子任务消息 nested）；`side` 指定相对 reset 游标 `start` 的哪一侧：
+   * - `'before'`（`position < start`）：reset 续写时读**截断前**的 assistant，并入 UI 消息身份
+   *   判定，使 reset 前后合并成一条、时长跨段连续。模型输入不变（压缩保留）。
+   * - `'after'`（`position >= start`）：取**当前主链段**最后一条 assistant。递归子任务轮次用它作
+   *   UI 流式消息的身份锚点（originalMessages 末尾是它），使渲染端把该轮输出**合并进这条消息**
+   *   （复用 id），而不是新建一条带旧 parts 的副本。
+   * 仅取一条，性能开销可忽略；均不影响模型输入（模型输入用 loadMessages）。
+   */
+  lastAssistant(id: string, side: 'before' | 'after'): UIMessage | undefined {
+    // 两侧仅比较符与越界缺省不同：'before' 在 start 为 NULL 时应全量命中，缺省取 SQLite 最大
+    // 整数；'after' 缺省取 -1 使全部 position 命中。大整数以 SQL 文本内联——作 JS 数字字面量
+    // 会触发 no-loss-of-precision 告警（超过 Number.MAX_SAFE_INTEGER）。
+    const sql =
+      side === 'before'
+        ? `SELECT messages.value FROM messages
+             JOIN sessions ON sessions.id = messages.session_id
+             WHERE messages.session_id = ?
+               AND messages.position < COALESCE(sessions.start, 9223372036854775807)
+               AND json_extract(messages.value, '$.role') = 'assistant'
+               AND json_extract(messages.value, '$.metadata.nested') IS NOT 1
+             ORDER BY messages.position DESC
+             LIMIT 1`
+        : `SELECT messages.value FROM messages
+             JOIN sessions ON sessions.id = messages.session_id
+             WHERE messages.session_id = ?
+               AND messages.position >= COALESCE(sessions.start, -1)
+               AND json_extract(messages.value, '$.role') = 'assistant'
+               AND json_extract(messages.value, '$.metadata.nested') IS NOT 1
+             ORDER BY messages.position DESC
+             LIMIT 1`
+    const row = this.database.prepare(sql).get(id)
     return row ? (JSON.parse(row.value as string) as UIMessage) : undefined
   }
 
@@ -131,8 +152,10 @@ export class SessionStore implements Disposable {
       const messages = this.loadVisibleMessages(id, start, cursor - start)
       for (let localIndex = messages.length - 1; localIndex >= 0; localIndex -= 1) {
         const message = messages[localIndex]
+        const metadata = message.metadata as Record<string, unknown> | undefined
+        // 递归子任务消息不进导航（用户只按"自己的提问"导航）。
+        if (metadata?.nested === true) continue
         if (message.role === 'user') {
-          const metadata = message.metadata as Record<string, unknown> | undefined
           if (metadata?.compaction === true) {
             responsePreview = undefined
             continue

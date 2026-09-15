@@ -267,6 +267,44 @@ describe('AssistantChat', () => {
     expect(complete[0].metadata).toEqual({ startedAt: 1_000, completedAt: 2_000 })
   })
 
+  it('marks this run\u2019s already-completed round as aborted when the user stops a multi-round task', async () => {
+    // 多轮（nest 递归）下，中间轮可能已正常完成（带 completedAt、无 outcome）。用户点停止时，
+    // 整个任务被取消，最后一条属于本次 run 的 assistant 应显示为已中断，而不是"已完成"。
+    vi.useFakeTimers()
+    vi.setSystemTime(10_000)
+    await act(async () =>
+      root?.render(
+        createElement(AssistantChat, {
+          chat: { id: 'session' } as never,
+          cwd: '',
+          onCwdChange: vi.fn(),
+          onHeadingChange: vi.fn()
+        })
+      )
+    )
+
+    const composer = mocks.composer.mock.calls.at(-1)?.[0]
+    // 提交（设置本次 run 起点）后，最后一轮已正常完成。
+    act(() => composer.onSubmit({ text: 'task', files: [] }))
+    vi.setSystemTime(12_000)
+    composer.onStop()
+    const update = mocks.setMessages.mock.calls.at(-1)?.[0] as (current: UIMessage[]) => UIMessage[]
+    const completedRound: UIMessage[] = [
+      { id: 'user', role: 'user', parts: [{ type: 'text', text: 'task' }] },
+      {
+        id: 'assistant',
+        role: 'assistant',
+        metadata: { startedAt: 11_000, completedAt: 11_500 },
+        parts: [{ type: 'text', text: 'round done' }]
+      }
+    ]
+
+    expect(update(completedRound)[1].metadata).toMatchObject({
+      completedAt: 12_000,
+      outcome: 'aborted'
+    })
+  })
+
   it('does not mark the previous response as aborted before the new response starts', async () => {
     await act(async () =>
       root?.render(

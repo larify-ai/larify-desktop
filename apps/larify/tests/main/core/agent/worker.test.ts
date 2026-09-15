@@ -8,7 +8,11 @@ import { clearReadState, markRead, readAtFor } from '../../../../src/extensions/
 const mocks = vi.hoisted(() => ({ run: vi.fn() }))
 
 vi.mock('../../../../src/main/core/agent/persist', () => ({
-  runStoredAgentSession: mocks.run
+  runStoredAgentSession: mocks.run,
+  markNested: (value: UIMessage) => ({
+    ...value,
+    metadata: { ...(value.metadata as Record<string, unknown> | undefined), nested: true }
+  })
 }))
 
 import { AgentWorker, type SessionTrack } from '../../../../src/main/core/agent/worker'
@@ -51,7 +55,11 @@ function createWorker(track?: SessionTrack): {
   pluginHost: { refreshPlugins: ReturnType<typeof vi.fn> }
 } {
   const sink = { chunk: vi.fn(), title: vi.fn(), error: vi.fn(), end: vi.fn() }
-  const sessions = { loadMessages: vi.fn<() => UIMessage[]>(() => []), saveMessages: vi.fn(), saveStart: vi.fn() }
+  const sessions = {
+    loadMessages: vi.fn<() => UIMessage[]>(() => []),
+    saveMessages: vi.fn(),
+    saveStart: vi.fn()
+  }
   const pluginHost = { refreshPlugins: vi.fn(async () => undefined) }
   return {
     worker: new AgentWorker(sessions as never, sink, pluginHost as never, track),
@@ -256,6 +264,106 @@ describe('AgentWorker', () => {
     })
     expect(sessions.saveStart).toHaveBeenCalledWith('session', nextMessage)
     expect(sink.end).toHaveBeenCalledOnce()
+  })
+
+  it('re-saves the review snapshot under the (already stored) response identity for a child task', async () => {
+    // nested 标记与「增量 + 新 id」的换算已在 persist 层完成（runStoredAgentSession 返回值即
+    // 落库身份）。worker 的变更快照回写只需**按同一身份**原地替换快照，不能再自行改写 id/parts
+    // ——否则会把快照写到主链 anchor 行上或丢失增量。这里 persist 被 mock：模拟其返回的落库身份
+    // （nested、id 带 -nested 后缀），断言 worker 原样回写、并保留 nested 标记。
+    const stored: UIMessage = {
+      id: 'child-assistant-nested',
+      role: 'assistant',
+      metadata: { nested: true },
+      parts: []
+    }
+    mocks.run.mockImplementation(async () => stored)
+    const { sink } = createWorker()
+    const track = createTrack(workspace, sink)
+    track.review.update({
+      path: resolve(join(workspace, 'nested-file.ts')),
+      patch: '+nested',
+      additions: 1,
+      deletions: 0,
+      binary: false
+    })
+    const { worker, sessions } = createWorker(track)
+
+    await worker.run({ ...input, nested: true })
+
+    const lastSaved = sessions.saveMessages.mock.calls.at(-1)?.[1]?.[0] as UIMessage
+    expect(lastSaved.id).toBe('child-assistant-nested')
+    expect(lastSaved.metadata).toMatchObject({ nested: true })
+    expect(lastSaved.parts).toContainEqual(
+      expect.objectContaining({ type: 'data-git-snapshot', id: 'review' })
+    )
+  })
+
+  it('does not tag a top-level response as nested when re-saving the review snapshot', async () => {
+    // 顶层轮次：persist 返回原身份，worker 回写不得添加 nested（否则会被 loadMessages 过滤）。
+    mocks.run.mockImplementation(
+      async () => ({ id: 'top-assistant', role: 'assistant', parts: [] }) as UIMessage
+    )
+    const { sink } = createWorker()
+    const track = createTrack(workspace, sink)
+    track.review.update({
+      path: resolve(join(workspace, 'top-file.ts')),
+      patch: '+top',
+      additions: 1,
+      deletions: 0,
+      binary: false
+    })
+    const { worker, sessions } = createWorker(track)
+
+    await worker.run(input)
+
+    const lastSaved = sessions.saveMessages.mock.calls.at(-1)?.[1]?.[0] as UIMessage
+    expect(lastSaved.id).toBe('top-assistant')
+    expect((lastSaved.metadata as Record<string, unknown> | undefined)?.nested).toBeUndefined()
+  })
+
+  it('marks the reset handoff as nested during a child task without moving the main-chain start', async () => {
+    // 子任务（nested）的 reset 续写：handoff 消息仍打 nested 标记（UI 可见、不进主链上下文）。
+    // 但**绝不能**调用 saveStart：`sessions.start` 是主链上下文游标，子任务把它推到自己的位置后，
+    // 之后「回主链续跑」时 loadMessages 只会返回子任务之后的残片——主链上下文被清空（实测返回 []）。
+    const runtime = {
+      toolsContext: {
+        agent_reset_context: { sessionId: 'session', cwd: '/workspace' }
+      }
+    } as never
+    mocks.run
+      .mockImplementationOnce(async (_sessions, request) => {
+        request.options.toolsContext.agent_reset_context.requestContextReset('Continue.')
+        return undefined
+      })
+      .mockResolvedValueOnce(undefined)
+    const { worker, sessions } = createWorker()
+
+    await worker.run({ ...input, runtime, nested: true })
+
+    const nextMessage = mocks.run.mock.calls[1][1].message
+    expect(nextMessage.metadata).toMatchObject({ compaction: true, nested: true })
+    expect(sessions.saveStart).not.toHaveBeenCalled()
+  })
+
+  it('still moves the main-chain start for a top-level reset', async () => {
+    // 对照：主链轮次的 reset 仍必须 saveStart（截断模型输入，压缩保留）。
+    const runtime = {
+      toolsContext: {
+        agent_reset_context: { sessionId: 'session', cwd: '/workspace' }
+      }
+    } as never
+    mocks.run
+      .mockImplementationOnce(async (_sessions, request) => {
+        request.options.toolsContext.agent_reset_context.requestContextReset('Continue.')
+        return undefined
+      })
+      .mockResolvedValueOnce(undefined)
+    const { worker, sessions } = createWorker()
+
+    await worker.run({ ...input, runtime })
+
+    expect(sessions.saveStart).toHaveBeenCalledWith('session', mocks.run.mock.calls[1][1].message)
   })
 
   it('clears file read state after reset', async () => {

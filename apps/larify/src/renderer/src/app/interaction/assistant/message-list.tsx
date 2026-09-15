@@ -300,8 +300,14 @@ interface ActivityHistoryRun {
   sections: ActivityHistorySection[]
   trailing: MessageListItem[]
   waiting: boolean
+  /** 本次 run 内是否跨过 compaction 边界（递归轮次 / reset 续写的分隔消息）。 */
+  crossedCompaction: boolean
 }
 
+// 一次提问后的"处理过程"聚合不再要求首条 assistant 消息必须含 `agent_show_progress`
+// 阶段边界：无边界时归入一个默认（无标题）阶段。聚合资格由 qualifiesForAggregation 判定——
+// 只有"含命名阶段"或"跨过 compaction 续写边界"的 run 才聚合成一张 activity-history 卡，
+// 否则（如两条相邻的普通回复）退化为各自独立的 item，避免把不同回复误合并。
 function activityHistoryRun(
   messages: UIMessage[],
   itemsByMessage: MessageListItem[][],
@@ -318,6 +324,7 @@ function activityHistoryRun(
   let activeTitle: string | undefined
   let pendingStartTitle: string | undefined
   let seenBoundary = false
+  let crossedCompaction = false
   let waiting = false
   let cursor = start
 
@@ -329,7 +336,9 @@ function activityHistoryRun(
   ): void => {
     const entry = { message, item, streaming }
     const previous = sections.at(-1)
-    if (previous?.title === title) {
+    // 仅合并"同一条消息内、同标题"的阶段（continuation）；跨消息即使标题相同也另起 section，
+    // 否则子任务轮会因标题雷同被并入主任务阶段，造成内容错归与重复显示。
+    if (previous?.title === title && previous.message.id === message.id) {
       previous.continuations = [...(previous.continuations ?? []), entry]
       previous.streaming ||= streaming
     } else {
@@ -342,20 +351,30 @@ function activityHistoryRun(
     }
   }
   const startPendingStage = (): void => {
-    if (!pendingStartTitle) return
+    if (pendingStartTitle === undefined) return
     flushPending(activeTitle ?? pendingStartTitle)
     activeTitle = pendingStartTitle
+    pendingStartTitle = undefined
+  }
+  // 切换到下一条消息时收尾当前阶段：把已累积的 pending 归入当前 title，并清空阶段状态。
+  // 否则下一条消息（如 nest 子任务轮）的首段内容会被 flush 到上一条消息遗留的 activeTitle
+  // 之下，导致同一 title 下出现重复/错归的内容。
+  const endCurrentStage = (): void => {
+    if (pending.length > 0) flushPending(activeTitle ?? pendingStartTitle ?? '')
+    activeTitle = undefined
     pendingStartTitle = undefined
   }
 
   while (cursor < messages.length) {
     const message = messages[cursor]
     if (isCompactionMessage(message)) {
+      crossedCompaction = true
       cursor += 1
       continue
     }
     if (message.role !== 'assistant') break
-    if (cursor === start && !hasStageBoundary(message)) break
+    // 进入新消息前结束上一消息的阶段，避免跨消息复用 title。
+    if (cursor > start) endCurrentStage()
     const messageItems = itemsByMessage[cursor]
     waiting ||= messageItems.some(
       (item) => item.kind === 'content' && item.renderItem?.kind === 'pending-ask-user'
@@ -372,6 +391,8 @@ function activityHistoryRun(
       const title = stageTitle(part)
       return title ? [{ index, title }] : []
     })
+    // 尚未出现任何命名阶段前的内容归入默认（无标题）阶段；用于聚合"无 show_progress 的轮次"。
+    if (!boundaries.length && !seenBoundary) pendingStartTitle = ''
     let lowerBound = -1
     for (const { index: boundaryIndex, title } of boundaries) {
       const item = filterRenderItem(
@@ -390,19 +411,17 @@ function activityHistoryRun(
       seenBoundary = true
       lowerBound = boundaryIndex
     }
-    if (seenBoundary) {
-      const item = filterRenderItem(
-        activity.renderItem,
-        new Set(activity.renderItem.partIndexes.filter((partIndex) => partIndex > lowerBound))
-      )
-      if (item) {
-        startPendingStage()
-        pending.push({
-          message,
-          item,
-          streaming: live && message.id === messages.at(-1)?.id
-        })
-      }
+    const item = filterRenderItem(
+      activity.renderItem,
+      new Set(activity.renderItem.partIndexes.filter((partIndex) => partIndex > lowerBound))
+    )
+    if (item) {
+      startPendingStage()
+      pending.push({
+        message,
+        item,
+        streaming: live && message.id === messages.at(-1)?.id
+      })
     }
     for (const item of messageItems.filter((_, itemIndex) => itemIndex !== activityIndex)) {
       if (item.kind === 'changes') {
@@ -415,13 +434,24 @@ function activityHistoryRun(
     }
     cursor += 1
   }
-  if (activeTitle) {
-    if (live && cursor === messages.length && pendingStartTitle && pending.length > 0) {
+  if (activeTitle !== undefined || pending.length > 0) {
+    if (
+      live &&
+      cursor === messages.length &&
+      pendingStartTitle !== undefined &&
+      pending.length > 0
+    ) {
       pending[pending.length - 1].streaming = true
     }
-    flushPending(activeTitle, true)
+    flushPending(activeTitle ?? pendingStartTitle ?? '', true)
   }
-  return { cursor, sections, trailing, waiting }
+  return { cursor, sections, trailing, waiting, crossedCompaction }
+}
+
+// 聚合资格：含命名阶段（show_progress）或跨过 compaction 续写边界才聚合成一张卡。
+// 仅有一个默认（无标题）阶段的 run（例如相邻的两条普通回复）不聚合，保持各自独立。
+function qualifiesForAggregation(run: ActivityHistoryRun): boolean {
+  return run.crossedCompaction || run.sections.some((section) => section.title !== '')
 }
 
 function recentListItems(
@@ -451,12 +481,9 @@ function recentListItems(
       )
       continue
     }
-    if (!hasStageBoundary(messages[index])) {
-      result.push(...itemsByMessage[index])
-      continue
-    }
-    const { cursor, sections, trailing, waiting } = activityHistoryRun(messages, itemsByMessage, index, live)
-    if (sections.length === 0) {
+    const run = activityHistoryRun(messages, itemsByMessage, index, live)
+    const { cursor, sections, trailing, waiting } = run
+    if (sections.length === 0 || !qualifiesForAggregation(run)) {
       result.push(...itemsByMessage[index])
       continue
     }
@@ -504,9 +531,10 @@ function boundaryActivityHistory(
     )
   )
   for (let start = 0; start < boundary; start += 1) {
+    // 跨历史/最近分页的聚合仍只针对含命名阶段的 run，避免把分页前的普通回复一并吞入。
     if (!hasStageBoundary(combined[start])) continue
     const run = activityHistoryRun(combined, itemsByMessage, start, live)
-    if (!run.sections.length || run.cursor <= boundary) continue
+    if (!run.sections.some((section) => section.title !== '') || run.cursor <= boundary) continue
     const anchor = older.at(-1)![0]
     const olderIds = new Set(older.slice(start, boundary).map(([, message]) => message.id))
     return {

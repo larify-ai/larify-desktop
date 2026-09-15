@@ -28,7 +28,8 @@ export async function runAgentSession(
   options: AgentOptions,
   onChunk?: (chunk: UIMessageChunk) => void,
   onMessage?: (message: UIMessage) => void,
-  uiOriginalMessages?: UIMessage[]
+  uiOriginalMessages?: UIMessage[],
+  baseProcessingMs = 0
 ): Promise<UIMessage[]> {
   const startedAt = Date.now()
   // 跨 run 累加纯处理时长：
@@ -40,7 +41,7 @@ export async function runAgentSession(
   // sessions.start 截断、不含 reset 前 assistant，从它找会丢失旧段。故用 uiOriginalMessages 作累加
   // 基数来源，使合并成一条后的总时长 = 旧段累计 + 本段新增。
   // 遇 compaction（metadata.compaction=true）跳过；遇真实用户消息中断（新一轮问题，重置计时）。
-  const previousTotalProcessingMs = (() => {
+  const previousTotalProcessingMs = baseProcessingMs > 0 ? baseProcessingMs : (() => {
     const source = uiOriginalMessages ?? messages
     for (let i = source.length - 1; i >= 0; i--) {
       const msg = source[i]

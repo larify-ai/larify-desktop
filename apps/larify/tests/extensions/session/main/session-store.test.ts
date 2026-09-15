@@ -190,7 +190,7 @@ describe('SessionStore', () => {
     store.saveStart('chat', compaction('compact', 'query', 'summary'))
 
     // 截断前最后一条 assistant 是 a2（second reply）
-    expect(store.loadLastAssistantBeforeStart('chat')).toMatchObject({
+    expect(store.lastAssistant('chat', 'before')).toMatchObject({
       id: 'a2',
       role: 'assistant',
       parts: [{ type: 'text', text: 'second reply' }]
@@ -204,7 +204,7 @@ describe('SessionStore', () => {
     store.saveStart('chat', compaction('compact', 'query', 'summary'))
 
     // compaction 前只有 user（无 assistant），应返回 undefined
-    expect(store.loadLastAssistantBeforeStart('chat')).toBeUndefined()
+    expect(store.lastAssistant('chat', 'before')).toBeUndefined()
     store.dispose()
   })
 

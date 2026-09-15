@@ -81,6 +81,179 @@ describe('runStoredAgentSession', () => {
     expect(result).toBe(finalAssistant)
   })
 
+  it('feeds a recursive child only its own prompt, ignoring stored history', async () => {
+    mocks.run.mockResolvedValue([user])
+    const mainAssistant: UIMessage = {
+      id: 'main',
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'main work' }]
+    }
+    const sessions = {
+      hasSession: vi.fn(() => true),
+      loadMessages: vi.fn(() => [history, user]),
+      lastAssistant: vi.fn(() => mainAssistant),
+      renameSession: vi.fn(),
+      saveMessages: vi.fn()
+    }
+
+    await runStoredAgentSession(sessions as never, {
+      sessionId: 'session',
+      cwd: 'cwd',
+      message: user,
+      nested: true,
+      options: {} as never
+    })
+
+    // 子任务不从库读**模型上下文**：输入只有本轮 message。
+    expect(sessions.loadMessages).not.toHaveBeenCalled()
+    expect(mocks.prepare).not.toHaveBeenCalled()
+    expect(mocks.run.mock.calls[0][0]).toEqual([user])
+    // 但 UI 身份锚定主链最后一条 assistant（末尾 assistant）→ 渲染端复用其 id、合并成一条，
+    // 不再新建一条带旧 parts 的副本（曾导致 UI 重复父轮阶段）。
+    expect(sessions.lastAssistant).toHaveBeenCalledWith('session', 'after')
+    expect(mocks.run.mock.calls[0][4]).toEqual([mainAssistant])
+  })
+
+  it('stores the nested round as a delta with its own id (never clobbering the main-chain assistant)', async () => {
+    // UI 身份锚定主链 assistant 后，AI SDK 返回的是**合并消息**（id=anchor、parts=anchor+delta）。
+    // 必须换算为「增量 + 新 id」再落库，否则会用嵌套标记覆盖主链行。
+    const anchor: UIMessage = {
+      id: 'main',
+      role: 'assistant',
+      parts: [
+        { type: 'text', text: 'main a' },
+        { type: 'text', text: 'main b' }
+      ]
+    }
+    const merged: UIMessage = {
+      id: 'main',
+      role: 'assistant',
+      parts: [...anchor.parts, { type: 'text', text: 'child delta' }]
+    }
+    mocks.run.mockImplementation(async (_messages, _options, _onChunk, onMessage) => {
+      onMessage(merged)
+      return [merged]
+    })
+    const sessions = {
+      hasSession: vi.fn(() => true),
+      loadMessages: vi.fn(() => [anchor]),
+      lastAssistant: vi.fn(() => anchor),
+      renameSession: vi.fn(),
+      saveMessages: vi.fn()
+    }
+
+    const result = await runStoredAgentSession(sessions as never, {
+      sessionId: 'session',
+      cwd: 'cwd',
+      // nested 轮的 message 是内部 nest 判据（会被 saveSessionMessages 存为新 user）。
+      message: { id: 'nest', role: 'user', parts: [{ type: 'text', text: 'nest prompt' }] },
+      nested: true,
+      options: {} as never
+    })
+
+    // 落库：id 换新、parts 仅增量、带 nested 标记。
+    const stored = sessions.saveMessages.mock.calls.at(-1)?.[1]?.[0] as UIMessage
+    expect(stored.id).toBe('main-nested')
+    expect(stored.metadata).toMatchObject({ nested: true })
+    expect(stored.parts).toEqual([{ type: 'text', text: 'child delta' }])
+    // 返回值即落库身份（供 worker 快照回写复用）。
+    expect(result?.id).toBe('main-nested')
+    // 绝不按 anchor 的 id 回写（否则覆盖主链行）。
+    for (const [, messages] of sessions.saveMessages.mock.calls) {
+      for (const m of messages as UIMessage[]) {
+        if (m.role === 'assistant') expect(m.id).not.toBe('main')
+      }
+    }
+  })
+
+  it('feeds the top level the stored main-chain history', async () => {
+    mocks.run.mockResolvedValue([user])
+    const sessions = {
+      hasSession: vi.fn(() => true),
+      loadMessages: vi.fn(() => [history, user]),
+      renameSession: vi.fn(),
+      saveMessages: vi.fn()
+    }
+
+    await runStoredAgentSession(sessions as never, {
+      sessionId: 'session',
+      cwd: 'cwd',
+      message: user,
+      options: {} as never
+    })
+
+    expect(sessions.loadMessages).toHaveBeenCalledWith('session')
+    expect(mocks.run.mock.calls[0][0]).toEqual([history, user])
+  })
+
+  it('resumes the main chain without saving a new message when message is undefined', async () => {
+    // 「回主链续跑」：不新增消息，直接用主链历史作为模型输入（末尾是含 schedule_task 结果的
+    // assistant，AI SDK 从其之后继续）。用 -1 断言 loadMessages 被调用且不触发 saveSessionMessages。
+    const mainAssistant: UIMessage = {
+      id: 'main',
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'main work' }]
+    }
+    mocks.prepare.mockResolvedValue([user, mainAssistant])
+    mocks.run.mockResolvedValue([user, mainAssistant])
+    const sessions = {
+      hasSession: vi.fn(() => true),
+      loadMessages: vi.fn(() => [user, mainAssistant]),
+      renameSession: vi.fn(),
+      saveMessages: vi.fn()
+    }
+
+    await runStoredAgentSession(sessions as never, {
+      sessionId: 'session',
+      cwd: 'cwd',
+      message: undefined,
+      options: {} as never
+    })
+
+    // 不新增消息（不调用 saveSessionMessages）。
+    expect(mocks.save).not.toHaveBeenCalled()
+    // 用主链历史作为输入。
+    expect(sessions.loadMessages).toHaveBeenCalledWith('session')
+    expect(mocks.run.mock.calls[0][0]).toEqual([user, mainAssistant])
+    // 不生成标题。
+    expect(mocks.title).not.toHaveBeenCalled()
+  })
+
+  it('uses the main-chain assistant as the UI anchor for a nested reset continuation', async () => {
+    const compactionUser: UIMessage = {
+      id: 'compaction',
+      role: 'user',
+      metadata: { compaction: true, nested: true },
+      parts: [{ type: 'text', text: '# Handoff\nContinue.' }]
+    }
+    const mainAssistant: UIMessage = {
+      id: 'main',
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'main work' }]
+    }
+    mocks.run.mockResolvedValue([compactionUser])
+    const sessions = {
+      hasSession: vi.fn(() => true),
+      loadMessages: vi.fn(() => [history, user]),
+      lastAssistant: vi.fn(() => mainAssistant),
+      renameSession: vi.fn(),
+      saveMessages: vi.fn()
+    }
+
+    await runStoredAgentSession(sessions as never, {
+      sessionId: 'session',
+      cwd: 'cwd',
+      message: compactionUser,
+      nested: true,
+      options: {} as never
+    })
+
+    // 子任务的 UI 身份锚定主链 assistant：取 start **之后**（'after'），而非 reset 语义的 'before'。
+    expect(sessions.lastAssistant).toHaveBeenCalledWith('session', 'after')
+    expect(sessions.lastAssistant).not.toHaveBeenCalledWith('session', 'before')
+    expect(mocks.run.mock.calls[0][4]).toEqual([mainAssistant])
+  })
+
   it('passes the reset continuation assistant into the UI merge identity', async () => {
     // reset 续写：模型输入末尾是 compaction user。应读取截断前最后一条 assistant 并作为
     // uiOriginalMessages 末尾传入 runAgentSession，使 AI SDK 复用其 id 合并成一条。
@@ -100,7 +273,7 @@ describe('runStoredAgentSession', () => {
     const sessions = {
       hasSession: vi.fn(() => true),
       loadMessages: vi.fn(() => [compactionUser]),
-      loadLastAssistantBeforeStart: vi.fn(() => earlierAssistant),
+      lastAssistant: vi.fn(() => earlierAssistant),
       renameSession: vi.fn(),
       saveMessages: vi.fn()
     }
@@ -112,7 +285,7 @@ describe('runStoredAgentSession', () => {
       options: {} as never
     })
 
-    expect(sessions.loadLastAssistantBeforeStart).toHaveBeenCalledWith('session')
+    expect(sessions.lastAssistant).toHaveBeenCalledWith('session', 'before')
     expect(mocks.run).toHaveBeenCalledTimes(1)
     // 第 5 参 uiOriginalMessages 应为「模型输入 + reset 前 assistant」作为合并底座
     expect(mocks.run.mock.calls[0][4]).toEqual([compactionUser, earlierAssistant])

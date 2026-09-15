@@ -1453,6 +1453,136 @@ describe('interaction assistant message list', () => {
     expect(fragment.props.children[1][0].props.children.props.additions).toBe(2)
   })
 
+  it('aggregates a turn without stage boundaries across a nested compaction boundary', async () => {
+    // 用户报告：一次提问却出现两个 status（"已完成·处理了2秒" + "处理了6分钟"）。
+    // 递归子任务轮次之间用 compaction user 消息分隔；两段 assistant 都无 show_progress。
+    // 修复后应聚合成一张 activity-history（而非两张独立状态卡）。
+    const mainTurn = {
+      id: 'main-turn',
+      role: 'assistant',
+      metadata: { startedAt: 1_000, completedAt: 3_000 },
+      parts: [{ type: 'reasoning', text: 'main work', state: 'done' }]
+    } as UIMessage
+    const nestedTurn = {
+      id: 'nested-turn',
+      role: 'assistant',
+      metadata: { nested: true, startedAt: 3_000, completedAt: 363_000 },
+      parts: [{ type: 'reasoning', text: 'nested work', state: 'done' }]
+    } as UIMessage
+
+    await render({
+      messages: [
+        userMessage('user-one', 'do the task'),
+        mainTurn,
+        { ...userMessage('nested-prompt', 'nest prompt'), metadata: { nested: true, compaction: true } },
+        nestedTurn
+      ],
+      recentStart: 0
+    })
+
+    const props = captured.props as VirtuosoProps
+    // 用户消息 + 一张聚合卡（而非用户消息 + 两张独立状态卡）。
+    expect(props.totalCount).toBe(2)
+    expect(props.computeItemKey(1)).toBe('main-turn-activity-history')
+  })
+
+  it('keeps the same-titled stage of a child round as its own section instead of duplicating the parent', async () => {
+    // 回归：主任务与子任务（nest）轮的 show_progress 标题雷同，跨消息不应并入同一阶段，
+    // 否则子任务首段内容会被错归到主任务阶段下、并在 UI 上重复显示。
+    const progress = (id: string, title: string) => ({
+      type: 'dynamic-tool',
+      toolName: 'agent_show_progress',
+      toolCallId: id,
+      state: 'output-available',
+      input: { title },
+      output: 'ok'
+    })
+    const tool = (id: string, name: string, title: string) => ({
+      type: 'dynamic-tool',
+      toolName: name,
+      toolCallId: id,
+      state: 'output-available',
+      input: { toolCallTitle: title },
+      output: 'ok'
+    })
+    const main = {
+      id: 'main',
+      role: 'assistant',
+      metadata: { startedAt: 1, completedAt: 2, totalProcessingMs: 2000 },
+      parts: [
+        { type: 'step-start' },
+        { type: 'text', text: 'MAIN_PRELUDE', state: 'done' },
+        progress('p1', 'SAME_STAGE_TITLE'),
+        tool('w', 'fs_write', 'MAIN_WRITE'),
+        { type: 'step-start' },
+        tool('s', 'agent_schedule_task', 'SCHEDULE')
+      ]
+    } as unknown as UIMessage
+    const child = {
+      id: 'child',
+      role: 'assistant',
+      metadata: { nested: true, startedAt: 1, completedAt: 2, totalProcessingMs: 2000 },
+      parts: [
+        { type: 'step-start' },
+        { type: 'text', text: 'CHILD_PRELUDE', state: 'done' },
+        progress('cp', 'SAME_STAGE_TITLE'),
+        tool('cr', 'fs_read', 'CHILD_READ')
+      ]
+    } as unknown as UIMessage
+
+    await render({
+      messages: [
+        userMessage('u', 'do it'),
+        main,
+        { ...userMessage('nest', 'nest'), metadata: { nested: true, compaction: true } },
+        child
+      ],
+      recentStart: 0
+    })
+
+    const props = captured.props as VirtuosoProps
+    const fragment = props.itemContent(1).props.children
+    const history = fragment.props.sections ? fragment : fragment.props.children[0]
+    const sections = history.props.sections as Array<{
+      title: string
+      item: { partIndexes: number[] }
+      message: UIMessage
+      continuations?: Array<{ item: { partIndexes: number[] }; message: UIMessage }>
+    }>
+
+    // 两个同名 stage 各自成 section（跨消息不合并），且各自只含自己消息的内容。
+    expect(sections.map((s) => s.title)).toEqual(['SAME_STAGE_TITLE', 'SAME_STAGE_TITLE'])
+    expect(sections.map((s) => s.message.id)).toEqual(['main', 'child'])
+
+    const mainIndexes = [
+      ...sections[0].item.partIndexes,
+      ...(sections[0].continuations ?? []).flatMap((c) => c.item.partIndexes)
+    ]
+    const childIndexes = [
+      ...sections[1].item.partIndexes,
+      ...(sections[1].continuations ?? []).flatMap((c) => c.item.partIndexes)
+    ]
+    // 主任务 stage 不包含子任务的内容（prelude 是 part1；progress 是 part2 边界）。
+    expect(sections[0].item.partIndexes).toContain(1) // MAIN_PRELUDE
+    expect(mainIndexes).toEqual(expect.arrayContaining([1, 3, 5]))
+    // 子任务 stage 不包含主任务的内容（子任务 prelude 也是 part1，但归属子消息）。
+    expect(childIndexes).toEqual(expect.arrayContaining([1, 3]))
+    // 关键：主任务 stage 的 continuations 里不应混入子任务消息的条目。
+    for (const c of sections[0].continuations ?? []) expect(c.message.id).toBe('main')
+    for (const c of sections[1].continuations ?? []) expect(c.message.id).toBe('child')
+  })
+
+  it('does not aggregate two adjacent plain replies without stage boundaries or compaction', async () => {
+    await render({
+      messages: [userMessage('user-one', 'first'), message('one'), message('two')],
+      recentStart: 0
+    })
+
+    const props = captured.props as VirtuosoProps
+    // 用户 + 两条独立回复（不误合并）。
+    expect(props.totalCount).toBe(3)
+  })
+
   it('renders reset context as a normal tool card without treating its title as a stage', async () => {
     const response = {
       id: 'legacy-reset-stage',

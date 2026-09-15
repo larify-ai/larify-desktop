@@ -27,10 +27,7 @@ export interface ActivityHistorySection {
 // 阶段分组（stage section）展开状态的持久化 key。key 的单一来源：
 // ActivityHistoryPart 内部渲染与调用方（message-list）清理 openActivities 时
 // 都复用这一函数，避免两处硬编码格式不同步。
-export function activityHistorySectionKey(
-  section: ActivityHistorySection,
-  index: number
-): string {
+export function activityHistorySectionKey(section: ActivityHistorySection, index: number): string {
   return `${section.message.id}-section-${index}`
 }
 
@@ -94,13 +91,23 @@ export function ActivityHistoryPart({
     : hasDuration
       ? formatProcessingDuration(startedAt, completedAt)
       : null
-  const summary = defaultOpen ? (
-    waiting ? (
-      durationPart ? `等待回答 · ${durationPart}` : '等待回答'
-    ) : typeof startedAt === 'number' && Number.isFinite(startedAt) ? (
+  // 是否仍有阶段在真正处理（streaming）——这才是「该用实时墙钟计时」的唯一判据。
+  // 旧实现按 `defaultOpen`（是否展开）判断，于是「手动展开一个已结束的卡」或「waiting 使其
+  // 默认展开」都会被误判为"在跑"，走 LiveProcessingDuration（baseMs + now - startedAt，墙钟），
+  // 使一个已完成/已中断的卡时长随挂钟持续增长、甚至显示"小时"级，与折叠态显示的累计时长不一致。
+  // `active` 只代表"会话是否可见"，不代表任务在跑，故不能作为判据。
+  const streaming = sections.some(({ streaming }) => streaming)
+  const summary = streaming ? (
+    typeof startedAt === 'number' && Number.isFinite(startedAt) ? (
       <LiveProcessingDuration startedAt={startedAt} baseMs={baseProcessingMs} active={active} />
     ) : (
       '处理过程'
+    )
+  ) : waiting ? (
+    durationPart ? (
+      `等待回答 · ${durationPart}`
+    ) : (
+      '等待回答'
     )
   ) : durationPart ? (
     `${aborted ? interruptedSummary : '已完成'} · ${durationPart}`
@@ -140,9 +147,13 @@ export function ActivityHistoryPart({
           {sections.map((section, index) => {
             const streaming = section.streaming
             const sectionKey = activityHistorySectionKey(section, index)
+            // 默认（无标题）阶段：来自"未调 show_progress 的轮次"汇总。它没有阶段名，
+            // 若仍渲染内层折叠头会显示无意义的占位标题，故直接内联渲染其内容。
+            const contentOnly = section.title === ''
             return (
               <ActivityGroupPart
                 key={`${section.message.id}-${index}`}
+                contentOnly={contentOnly}
                 item={{
                   ...section.item,
                   summary: section.title,
@@ -159,9 +170,7 @@ export function ActivityHistoryPart({
                   // 传入 undefined 时 useStickyOpen 内部回退到 defaultOpen。
                   stageOpen ? stageOpen.get(sectionKey) : undefined
                 }
-                onOpenChange={
-                  stageOpen ? (open) => stageOpen.set(sectionKey, open) : undefined
-                }
+                onOpenChange={stageOpen ? (open) => stageOpen.set(sectionKey, open) : undefined}
                 additionalContent={section.continuations?.map((continuation, continuationIndex) => (
                   <ActivityGroupPart
                     key={`${continuation.message.id}-${continuationIndex}`}

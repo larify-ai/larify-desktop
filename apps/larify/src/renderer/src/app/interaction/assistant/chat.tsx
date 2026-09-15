@@ -88,14 +88,19 @@ export function AssistantChat({
           ({ role }, messageIndex) => role === 'assistant' && messageIndex > lastUserIndex
         )
         if (index < 0) return current
-        const next = [...current]
         const message = current[index]
         const metadata = (message.metadata ?? {}) as Record<string, unknown>
+        // 已标记为中断则幂等返回。
+        if (metadata.outcome === 'aborted') return current
         const currentRunStartedAt = runStartedAt.current
-        const alreadyTerminal =
-          typeof metadata.completedAt === 'number' &&
-          (currentRunStartedAt === undefined || metadata.completedAt >= currentRunStartedAt)
-        if (alreadyTerminal) return current
+        // 无本次 run 起点（例如尚未提交，或测试/外部直接触发 stop）时，不覆盖已有终态，
+        // 避免 stop 与"上一轮已完成"竞态时把历史响应误标为中断。有本次 run 起点时，
+        // 只要该响应属于本次 run（在最后一条 user 之后），取消就应把它标为 aborted，
+        // 即使它已正常完成——用户取消了整个任务，多轮中已完成的中间轮不应显示"已完成"。
+        if (currentRunStartedAt === undefined && typeof metadata.completedAt === 'number') {
+          return current
+        }
+        const next = [...current]
         next[index] = {
           ...message,
           metadata: {

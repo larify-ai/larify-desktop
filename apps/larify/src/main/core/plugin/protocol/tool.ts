@@ -13,6 +13,7 @@ export interface FileMutation {
 
 export type TrackFileChange = (mutation: FileMutation) => void
 export type RequestContextReset = (handoff: string) => void
+export type ScheduleTask = (taskPath: string) => void
 
 export function wrapTool(tool: Tool): Tool {
   const execute = tool.execute
@@ -58,7 +59,8 @@ export const toolContextSchema = z.object({
   trackFileChange: z.custom<TrackFileChange>((value) => typeof value === 'function').optional(),
   requestContextReset: z
     .custom<RequestContextReset>((value) => typeof value === 'function')
-    .optional()
+    .optional(),
+  scheduleTask: z.custom<ScheduleTask>((value) => typeof value === 'function').optional()
 })
 
 export type ToolContext = z.infer<typeof toolContextSchema>

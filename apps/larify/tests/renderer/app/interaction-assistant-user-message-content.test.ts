@@ -61,7 +61,8 @@ describe('UserMessageContent', () => {
     expect(container.querySelector('.lucide-copy')).not.toBeNull()
   })
 
-  it('copies consecutive user text parts without inserting separators', async () => {
+  it('copies the last non-empty user text part', async () => {
+    // 一条用户消息实际只有 1 个 text part；多条时按 064f719 的决定取最后一个（不拼接）。
     await act(async () =>
       root.render(
         createElement(MessageView, {
@@ -78,7 +79,7 @@ describe('UserMessageContent', () => {
     )
 
     await act(async () => container.querySelector('button')?.click())
-    expect(writeText).toHaveBeenCalledWith('firstsecond')
+    expect(writeText).toHaveBeenCalledWith('second')
   })
 
   it('does not read layout', async () => {

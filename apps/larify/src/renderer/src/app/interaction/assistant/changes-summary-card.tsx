@@ -23,6 +23,9 @@ export function ChangesSummaryCard({
 }: ChangeSummary): React.JSX.Element {
   const [activePath, setActivePath] = useState<string | null>(null)
   const [previewPlacement, setPreviewPlacement] = useState<'above' | 'below'>('above')
+  // 预览的最大高度（px）：按所选方向在滚动视口内的可用空间钳制，保证预览完整落在视口内、
+  // 内容区内部滚动，而不是整体溢出被裁。0 表示不限高。
+  const [previewMaxHeight, setPreviewMaxHeight] = useState(0)
   const cardRef = useRef<HTMLDivElement | null>(null)
   const previewRef = useRef<HTMLDivElement | null>(null)
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -76,25 +79,35 @@ export function ChangesSummaryCard({
     if (!activeFile || !cardRef.current || !previewRef.current) return
 
     const viewport = cardRef.current.closest<HTMLElement>('[data-message-scroll-viewport]')
+    const GAP = 4
     const updatePlacement = (): void => {
       if (!cardRef.current || !previewRef.current) return
       const card = cardRef.current.getBoundingClientRect()
-      const previewHeight = previewRef.current.getBoundingClientRect().height
       const viewportRect = viewport?.getBoundingClientRect()
       const viewportTop = viewportRect?.top ?? 0
       const viewportBottom = viewportRect?.bottom ?? window.innerHeight
       const spaceAbove = card.top - viewportTop
       const spaceBelow = viewportBottom - card.bottom
-      const nextPlacement =
-        spaceAbove >= previewHeight || spaceAbove >= spaceBelow ? 'above' : 'below'
+      // ⚠️ 不要依赖 previewRef 的当前高度：预览内容（@git-diff-view/react + shiki）是异步渲染的，
+      // 首次测量只拿到头部高度（实测 35px，最终 323px），会误判"上方放得下"而把预览放到上方，
+      // 内容撑开后溢出滚动视口顶部被裁（用户报"变更卡片显示不全"，实测被裁 170px）。
+      // 改为纯空间比较：下方空间不小于上方时放下方，否则放上方。
+      const nextPlacement = spaceBelow >= spaceAbove ? 'below' : 'above'
+      // 按所选方向的可用空间钳制预览高度（扣除间距与视口内边距），保证完整落在视口内。
+      const available = (nextPlacement === 'below' ? spaceBelow : spaceAbove) - GAP - 8
+      const nextMaxHeight = Math.max(0, Math.floor(available))
 
       setPreviewPlacement((current) => (current === nextPlacement ? current : nextPlacement))
+      setPreviewMaxHeight((current) => (current === nextMaxHeight ? current : nextMaxHeight))
     }
 
     updatePlacement()
+    // 下一帧再确认一次，覆盖首帧布局尚未稳定的情况。
+    const frame = requestAnimationFrame(updatePlacement)
     viewport?.addEventListener('scroll', updatePlacement, { passive: true })
     window.addEventListener('resize', updatePlacement)
     return () => {
+      cancelAnimationFrame(frame)
       viewport?.removeEventListener('scroll', updatePlacement)
       window.removeEventListener('resize', updatePlacement)
     }
@@ -157,6 +170,7 @@ export function ChangesSummaryCard({
             clearTimers()
           }}
           onMouseLeave={scheduleHide}
+          style={previewMaxHeight > 0 ? { maxHeight: previewMaxHeight } : undefined}
           className={`pointer-events-auto absolute inset-x-0 z-50 ${
             previewPlacement === 'above' ? 'bottom-full mb-1' : 'top-full mt-1'
           }`}

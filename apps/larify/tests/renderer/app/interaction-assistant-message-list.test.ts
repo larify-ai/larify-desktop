@@ -1642,6 +1642,69 @@ describe('interaction assistant message list', () => {
     expect(props.itemContent(1).props.className).not.toContain('[contain:layout_paint_style]')
   })
 
+  it('drops contain on a message-group shell that embeds a changes card', async () => {
+    // 回归：变更卡片与普通内容合并成 message-group（历史消息既有文本又有 snapshot）时，
+    // 外壳若带 `contain: paint`，卡片内向上溢出的 hover diff 预览会被裁剪（用户报"变更卡片显示不全"）。
+    // 外壳必须整体去掉 contain。此前的判据只覆盖 `kind === 'changes'`，漏掉 message-group 路径。
+    // message-group 只在历史路径（historicalItem）产生：消息不在 recent 段而来自 olderMessages。
+    const response = {
+      id: 'grouped-with-changes',
+      role: 'assistant',
+      parts: [
+        { type: 'text', text: 'edited a file' },
+        {
+          type: 'data-git-snapshot',
+          data: {
+            files: [{ additions: 1, deletions: 0, patch: '@@ -0,0 +1 @@\n+change', path: 'file.ts' }]
+          }
+        }
+      ]
+    } as UIMessage
+
+    await render({
+      messages: [message('recent')],
+      recentStart: 1,
+      olderMessages: new Map([[0, response]])
+    })
+
+    const props = captured.props as VirtuosoProps
+    expect(props.totalCount).toBe(2)
+    // index 0 是来自 olderMessages 的历史消息（message-group，含变更卡片）。
+    expect(props.itemContent(0).props.className).not.toContain('[contain:layout_paint_style]')
+  })
+
+  it('drops contain on an activity history shell whose trailing holds a changes card', async () => {
+    // 回归：处理过程聚合卡（activity-history）把变更卡片放在 trailing 里，外壳同样必须去掉 contain，
+    // 否则卡片 hover 预览被 contain:paint 裁剪。
+    const response = {
+      id: 'history-with-changes',
+      role: 'assistant',
+      parts: [
+        {
+          type: 'dynamic-tool',
+          toolName: 'agent_show_progress',
+          toolCallId: 'progress-one',
+          state: 'output-available',
+          input: { title: '实现' },
+          output: 'Progress shown.'
+        },
+        { type: 'reasoning', text: 'wrote the file', state: 'done' },
+        {
+          type: 'data-git-snapshot',
+          data: {
+            files: [{ additions: 2, deletions: 0, patch: '@@ -0,0 +1 @@\n+change', path: 'file.ts' }]
+          }
+        }
+      ]
+    } as UIMessage
+
+    await render({ messages: [response], recentStart: 0, live: true })
+
+    const props = captured.props as VirtuosoProps
+    expect(props.computeItemKey(0)).toBe('history-with-changes-activity-history')
+    expect(props.itemContent(0).props.className).not.toContain('[contain:layout_paint_style]')
+  })
+
   it('keeps existing fragment keys stable when output continues after a change', async () => {
     const snapshot = {
       type: 'data-git-snapshot',

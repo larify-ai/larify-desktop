@@ -1151,10 +1151,23 @@ function ActiveAssistantMessageList({
             message?.role === 'assistant' && previousMessage?.role === 'assistant'
           const followsActivityHistory = previousItem?.kind === 'activity-history'
           const joinsNext = message?.role === 'assistant' && nextMessage?.role === 'assistant'
+          // 变更卡片内的 hover 预览是 absolute 向上溢出（bottom-full）的元素；若外壳带
+          // `contain: paint`，预览会被裁剪（用户报"变更卡片显示不全"）。卡片可能出现在三种
+          // item 形态里：独立 changes、与其他内容合并的 message-group、以及处理过程聚合卡的
+          // trailing。故只要本外壳内含有变更卡片，就整体去掉 contain，避免预览被裁。
+          const hasChangesCard =
+            listItem !== undefined &&
+            (listItem.kind === 'changes' ||
+              (listItem.kind === 'message-group' &&
+                listItem.items.some((groupItem) => groupItem.kind === 'changes')) ||
+              (listItem.kind === 'activity-history' &&
+                (listItem.trailing ?? []).some(
+                  (trailingItem) => trailingItem.kind === 'changes'
+                )))
           return message ? (
             <div
               ref={index === totalCount - 1 ? followGrowingList : undefined}
-              className={`mx-auto w-full max-w-4xl min-w-0 px-6 ${listItem.kind === 'changes' ? '' : '[contain:layout_paint_style]'} ${joinsPrevious ? (listItem.kind === 'changes' ? 'pt-4' : followsActivityHistory ? 'pt-3' : 'pt-0') : 'pt-3'} ${joinsNext ? 'pb-0' : index === totalCount - 1 ? 'pb-30' : 'pb-3'}`}
+              className={`mx-auto w-full max-w-4xl min-w-0 px-6 ${hasChangesCard ? '' : '[contain:layout_paint_style]'} ${joinsPrevious ? (listItem.kind === 'changes' ? 'pt-4' : followsActivityHistory ? 'pt-3' : 'pt-0') : 'pt-3'} ${joinsNext ? 'pb-0' : index === totalCount - 1 ? 'pb-30' : 'pb-3'}`}
               data-message-index={index}
               data-message-layout-shell
             >

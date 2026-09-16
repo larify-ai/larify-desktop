@@ -169,13 +169,20 @@ export function buildAssistantRenderItems(
   const directTextStartIndex = Math.max(lastStepStartIndex, lastStepActivityIndex)
   // 递归子任务的全部文本都是过程（产出落在 task.md），不突出成"最终答案"。
   const nested = (message.metadata as { nested?: unknown } | undefined)?.nested === true
-  // 调度了子任务的轮次（调用了 agent_schedule_task）其末尾文本是**调度前的过渡叙述**，
-  // 该任务的最终答复会出现在子任务轮（乃至「回主链」轮）之后。若把这种过渡文本当最终答复
-  // 渲染，它会排在子任务轮的 ask_user 之前，用户看到「ask_user 前面还有一条回复」——
-  // 即任务未结束却先给了结论。故调度轮的全部文本一律归入过程（不渲染 final-text）。
-  const scheduledChild = message.parts.some(
+  // 调度了子任务、且该调度是**本轮最后动作**（其后没有任何文本）时，本轮末尾没有实质答复——
+  // 该任务的最终答复会出现在子任务轮（乃至「回主链」轮）之后，不应把调度前的过渡叙述当
+  // 最终答复渲染（否则会排在子任务轮的 ask_user 之前，用户看到"ask_user 前还有一条回复"）。
+  //
+  // 但**不能**只要含 `agent_schedule_task` 就过滤：**回主链轮**（子任务完成后回到主链）里
+  // `agent_schedule_task` 之后还会有模型的**汇总文本**（如"已完成…## 执行结果"），那正是用户
+  // 要看的最终答复，必须渲染。故只有"最后一个 agent_schedule_task 之后不再有任何可见文本"时
+  // 才判为纯调度轮（不渲染 final-text）。
+  const lastScheduleIndex = message.parts.findLastIndex(
     (part) => isToolUIPart(part) && getToolName(part) === 'agent_schedule_task'
   )
+  const scheduledChild =
+    lastScheduleIndex >= 0 &&
+    !message.parts.some((part, index) => index > lastScheduleIndex && hasVisibleTextPart(part))
   const canRenderFinalText = !interrupted && !streaming && !nested && !scheduledChild
   const trailingTextParts = canRenderFinalText
     ? message.parts.flatMap((part, index) =>

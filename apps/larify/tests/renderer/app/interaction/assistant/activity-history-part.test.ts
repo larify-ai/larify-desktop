@@ -171,6 +171,45 @@ describe('activity history part summary duration', () => {
     }
   })
 
+  it('uses the largest accumulated duration across sections (return-to-main-chain round)', async () => {
+    // 复现：多段聚合时取 sections.at(-1) 的 totalProcessingMs 会取到**排在后位**的 nested 段的旧值。
+    // 真机实测：主链段 totalProcessingMs=168075（最终），nested 段=146444（中间值但排在后面）
+    // → 旧实现显示 2分27秒（146444），少算回主链轮的 21.6 秒。修复：取最大值。
+    try {
+      await act(async () =>
+        root.render(
+          createElement(ActivityHistoryPart, {
+            sections: [
+              section(
+                assistant('main', {
+                  startedAt: 1_000,
+                  completedAt: 170_000,
+                  totalProcessingMs: 168_075
+                }),
+                '主链'
+              ),
+              section(
+                assistant('child', {
+                  startedAt: 2_000,
+                  completedAt: 146_000,
+                  totalProcessingMs: 146_444
+                }),
+                '子任务'
+              )
+            ],
+            initialOpen: true,
+            active: true
+          })
+        )
+      )
+
+      // 168075ms → ceil = 169s → 2分49秒（而非取末段的 146444 → 2分27秒）。
+      expect(container.textContent).toContain('已完成 · 处理了 2分钟 49秒')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('shows a bare waiting label when no duration has been recorded yet', async () => {
     // waiting 且尚无 totalProcessingMs/completedAt（首轮尚未结束）：无 durationPart，只显示「等待回答」。
     vi.useFakeTimers()

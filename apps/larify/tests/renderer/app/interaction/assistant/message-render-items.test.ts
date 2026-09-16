@@ -854,9 +854,7 @@ describe('assistant message render items', () => {
     expect(buildAssistantRenderItems(longError, false)[0].summary).toBe(
       `已中断 · ${'x'.repeat(160)} · 处理了 8秒`
     )
-    expect(buildAssistantRenderItems(whitespaceError, false)[0].summary).toBe(
-      '已中断 · 处理了 8秒'
-    )
+    expect(buildAssistantRenderItems(whitespaceError, false)[0].summary).toBe('已中断 · 处理了 8秒')
   })
 
   it('shows a legacy stream error as interrupted without timing metadata', () => {
@@ -911,7 +909,12 @@ describe('assistant message render items', () => {
   it('keeps the interrupted status while using an accumulated duration', () => {
     const aborted = {
       ...message({ type: 'text', text: 'partial' }),
-      metadata: { startedAt: 1_000, completedAt: 9_000, outcome: 'aborted', totalProcessingMs: 8_000 }
+      metadata: {
+        startedAt: 1_000,
+        completedAt: 9_000,
+        outcome: 'aborted',
+        totalProcessingMs: 8_000
+      }
     } as UIMessage
 
     const items = buildAssistantRenderItems(aborted, false)
@@ -943,5 +946,48 @@ describe('assistant message render items', () => {
       'activity-group',
       'final-text'
     ])
+  })
+
+  it('does not expose a final answer for a pure scheduling round', () => {
+    // 调度轮：末尾就是 agent_schedule_task，其后无任何文本 → 不把调度前的过渡叙述
+    // 当最终答复（否则会排在子任务轮的 ask_user 之前，用户看到"ask_user 前还有回复"）。
+    const scheduled = {
+      ...message(
+        tool('1', 'Read source'),
+        { type: 'text', text: '现在调度这个根任务。' },
+        tool('2', '调度根任务', 'output-available', 'agent_schedule_task')
+      ),
+      metadata: { startedAt: 1_000, completedAt: 2_000 }
+    } as UIMessage
+
+    const items = buildAssistantRenderItems(scheduled, false)
+
+    expect(items.some((item) => item.kind === 'final-text')).toBe(false)
+    expect(items[0].children?.map((item) => item.kind)).toEqual([
+      'tool-group',
+      'intermediate-text',
+      'tool-group'
+    ])
+  })
+
+  it('exposes a final answer on the return-to-main-chain round after a schedule', () => {
+    // 回主链轮：消息里既有早先的 agent_schedule_task，又在它**之后**产出了汇总文本
+    // （如"已完成…## 执行结果"）→ 该汇总必须作为 final-text 渲染给用户。
+    const returned = {
+      ...message(
+        { type: 'text', text: '现在调度这个根任务。' },
+        tool('1', '调度根任务', 'output-available', 'agent_schedule_task'),
+        { type: 'step-start' },
+        tool('2', '读取 task.md', 'output-available', 'fs_read'),
+        { type: 'step-start' },
+        tool('3', '列出目录', 'output-available', 'fs_list'),
+        { type: 'text', text: '已完成，汇总如下：## 执行结果' }
+      ),
+      metadata: { startedAt: 1_000, completedAt: 2_000 }
+    } as UIMessage
+
+    const items = buildAssistantRenderItems(returned, false)
+
+    expect(items.at(-1)).toEqual(expect.objectContaining({ kind: 'final-text', partIndexes: [6] }))
   })
 })

@@ -75,8 +75,27 @@ export function ActivityHistoryPart({
       ? `已中断 · ${lastMetadata.error.trim().slice(0, 160)}`
       : '已中断'
   const startedAt = metadata(sections[0]?.message).startedAt
-  const completedAt = metadata(sections.at(-1)?.message).completedAt
-  const totalProcessingMs = metadata(sections.at(-1)?.message).totalProcessingMs
+  // 取**最大** completedAt / totalProcessingMs，而非 sections.at(-1) 的值：
+  // totalProcessingMs 逐轮累加，最终值一定最大；而 sections 的顺序是**消息顺序**，
+  // 不是完成顺序——「回主链轮」的产物会合并回主链 assistant（同 UI 身份），
+  // 排在它后面的 nested 段（子任务轮）携带的是**更早**的中间值。取 at(-1) 会少算
+  // 回主链轮的耗时（真机实测：168075 被 146444 覆盖，少 21.6 秒）。
+  const completedAt = sections.reduce<number | undefined>((max, { message }) => {
+    const value = metadata(message).completedAt
+    return typeof value === 'number' && Number.isFinite(value)
+      ? max === undefined || value > max
+        ? value
+        : max
+      : max
+  }, undefined)
+  const totalProcessingMs = sections.reduce<number | undefined>((max, { message }) => {
+    const value = metadata(message).totalProcessingMs
+    return typeof value === 'number' && Number.isFinite(value)
+      ? max === undefined || value > max
+        ? value
+        : max
+      : max
+  }, undefined)
   const hasTotalProcessingMs =
     typeof totalProcessingMs === 'number' && Number.isFinite(totalProcessingMs)
   const baseProcessingMs = hasTotalProcessingMs ? totalProcessingMs : 0

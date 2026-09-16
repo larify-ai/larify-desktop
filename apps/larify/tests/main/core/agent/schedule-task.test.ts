@@ -1,6 +1,6 @@
 import type { UIMessage } from 'ai'
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -128,6 +128,42 @@ describe('Agent scheduled tasks', () => {
     expect(nestInputs[0]).not.toContain(second)
     // run1 主任务调度 → run2 首个任务的独立上下文（不调度）→ run3 回主链（不调度）→ 结束。
     expect(runs).toBe(3)
+  })
+
+  it('appends the return-to-parent clause to the nest prompt when the parent task.md exists', async () => {
+    // 目录约定 `<tasks>/<A>/<B>/task.md` 的父是 `<tasks>/<A>/task.md`。父存在时，nest 判据
+    // 末尾附「完成后调 agent_schedule_task(父)」——即子任务完成后**回父**。
+    const rootDir = join(taskRoot, 'parent-test')
+    const parentTask = join(rootDir, 'task.md')
+    const childTask = join(rootDir, 'child', 'task.md')
+    mkdirSync(rootDir, { recursive: true })
+    writeFileSync(parentTask, '---\nname: p\nstatus: in_progress\n---\n')
+
+    const nestInputs: string[] = []
+    let runs = 0
+    mocks.run.mockImplementation(async (_s, request) => {
+      runs++
+      if (runs === 1) {
+        const context = request.options.toolsContext.agent_schedule_task as {
+          scheduleTask: (path: string) => void
+        }
+        context.scheduleTask(childTask)
+        return undefined
+      }
+      if (request.message) nestInputs.push(request.message.parts.at(-1)!.text)
+      return undefined
+    })
+    const sink = { chunk: vi.fn(), error: vi.fn(), end: vi.fn() }
+    const agent = new Agent(sessions as never, pluginHost as never)
+
+    agent.send({ sessionId: 'session', message, cwd: 'cwd' }, sink)
+
+    await vi.waitFor(() => expect(sink.end).toHaveBeenCalledOnce())
+    expect(nestInputs.length).toBeGreaterThan(0)
+    // 子任务判据里给出父任务路径（回父指示）。
+    expect(nestInputs[0]).toContain(childTask)
+    expect(nestInputs[0]).toContain(parentTask)
+    expect(nestInputs[0]).toContain('parent task')
   })
 
   it('stops the recursion after cancellation', async () => {

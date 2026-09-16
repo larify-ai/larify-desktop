@@ -64,8 +64,11 @@ export function AssistantChat({
       // 20fps→10fps，流式观感几乎无差。
       throttle: 100
     })
-  const running = status === 'submitted' || status === 'streaming'
   const attentionState = sessionAttentionState(status, messages)
+  // 停在 ask_user 等待回答时，与「正在 streaming」完全等价：底部 Composer 的发送按钮不可点、
+  // 也不能从底部开新轮（新消息会被主进程当成新任务，旧问题卡悬挂成"同时等两个回答"）。
+  // 直接借用 attentionState 判定，无需给 Composer 增加任何新参数。
+  const running = status === 'submitted' || status === 'streaming' || attentionState === 'waiting'
   const reportAttentionState = useSessionAttentionReport()
   const started = messages.length > 0
   const history = useMemo(() => inputHistory(messages), [messages])
@@ -101,6 +104,20 @@ export function AssistantChat({
           return current
         }
         const next = [...current]
+        // 取消不等于"只剩本次这段时间"：这条消息此前可能已累积了 totalProcessingMs
+        // （多轮/嵌套轮会逐轮累加）。若此处只改写 startedAt/completedAt，摘要会退化成
+        // 「取消时刻 − 本次 run 起点」，把先前累计的时长**冲掉**——正是"运行很久、一取消时间就变少"。
+        // 故：保留原有 startedAt，并把 totalProcessingMs 累加为「既有累计 + 本次 run 增量」。
+        const priorTotal =
+          typeof metadata.totalProcessingMs === 'number' &&
+          Number.isFinite(metadata.totalProcessingMs)
+            ? metadata.totalProcessingMs
+            : undefined
+        const runStart =
+          currentRunStartedAt ??
+          (typeof metadata.startedAt === 'number' ? metadata.startedAt : completedAt)
+        const totalProcessingMs =
+          priorTotal !== undefined ? priorTotal + Math.max(0, completedAt - runStart) : undefined
         next[index] = {
           ...message,
           metadata: {
@@ -109,8 +126,9 @@ export function AssistantChat({
               typeof metadata.startedAt === 'number' &&
               (currentRunStartedAt === undefined || metadata.startedAt >= currentRunStartedAt)
                 ? metadata.startedAt
-                : (runStartedAt.current ?? completedAt),
+                : runStart,
             completedAt,
+            ...(totalProcessingMs !== undefined ? { totalProcessingMs } : {}),
             outcome: 'aborted'
           }
         }
@@ -138,11 +156,7 @@ export function AssistantChat({
   return (
     <div className="flex h-full min-w-0 flex-col">
       {error ? (
-        <div
-          data-agent-error
-          className="mx-auto w-full max-w-4xl px-6 pt-3"
-          role="alert"
-        >
+        <div data-agent-error className="mx-auto w-full max-w-4xl px-6 pt-3" role="alert">
           <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
             Agent 运行出错：{error.message}
           </div>

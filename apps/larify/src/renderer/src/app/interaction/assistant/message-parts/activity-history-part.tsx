@@ -150,6 +150,10 @@ export function ActivityHistoryPart({
             // 默认（无标题）阶段：来自"未调 show_progress 的轮次"汇总。它没有阶段名，
             // 若仍渲染内层折叠头会显示无意义的占位标题，故直接内联渲染其内容。
             const contentOnly = section.title === ''
+            // waiting（ask_user 暂停、等待回答）只让**最后一个**阶段默认展开——那是用户当前
+            // 要回应的阶段。若把整卡级的 waiting 施加到每个 section，ask_user 一出现会让此前
+            // 所有已折叠阶段（defaultOpen 由 false 变 true）被 useStickyOpen 强制展开。
+            const waitingHere = waiting && index === sections.length - 1
             return (
               <ActivityGroupPart
                 key={`${section.message.id}-${index}`}
@@ -157,9 +161,9 @@ export function ActivityHistoryPart({
                 item={{
                   ...section.item,
                   summary: section.title,
-                  // waiting（ask_user 暂停、等待回答）时处理未结束，进度组应展开让用户看到
-                  // 进度（而非只折叠成标题行），不应只在 streaming 时展开。
-                  defaultOpen: streaming || waiting
+                  // waiting 时处理未结束，最后那个进度组应展开让用户看到进度（而非只折叠成标题行），
+                  // 不应只在 streaming 时展开。
+                  defaultOpen: streaming || waitingHere
                 }}
                 message={section.message}
                 streaming={section.streaming}

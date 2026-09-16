@@ -91,10 +91,7 @@ function toolTitle(
   return getToolName(part)
 }
 
-function isPendingAskUser(
-  part: UIMessage['parts'][number],
-  superseded = false
-): boolean {
+function isPendingAskUser(part: UIMessage['parts'][number], superseded = false): boolean {
   return (
     !superseded &&
     isToolUIPart(part) &&
@@ -172,11 +169,18 @@ export function buildAssistantRenderItems(
   const directTextStartIndex = Math.max(lastStepStartIndex, lastStepActivityIndex)
   // 递归子任务的全部文本都是过程（产出落在 task.md），不突出成"最终答案"。
   const nested = (message.metadata as { nested?: unknown } | undefined)?.nested === true
-  const canRenderFinalText = !interrupted && !streaming && !nested
+  // 调度了子任务的轮次（调用了 agent_schedule_task）其末尾文本是**调度前的过渡叙述**，
+  // 该任务的最终答复会出现在子任务轮（乃至「回主链」轮）之后。若把这种过渡文本当最终答复
+  // 渲染，它会排在子任务轮的 ask_user 之前，用户看到「ask_user 前面还有一条回复」——
+  // 即任务未结束却先给了结论。故调度轮的全部文本一律归入过程（不渲染 final-text）。
+  const scheduledChild = message.parts.some(
+    (part) => isToolUIPart(part) && getToolName(part) === 'agent_schedule_task'
+  )
+  const canRenderFinalText = !interrupted && !streaming && !nested && !scheduledChild
   const trailingTextParts = canRenderFinalText
     ? message.parts.flatMap((part, index) =>
-      part.type === 'text' && index > directTextStartIndex ? [{ index, text: part.text }] : []
-    )
+        part.type === 'text' && index > directTextStartIndex ? [{ index, text: part.text }] : []
+      )
     : []
   const firstVisibleFinalTextIndex = trailingTextParts.find(({ text }) => text.trim())?.index
   const items: AssistantRenderItem[] = []
@@ -263,15 +267,15 @@ export function buildAssistantRenderItems(
     if (activityItems.length === 0) {
       return isFiniteNumber(startedAt)
         ? [
-          {
-            kind: 'status',
-            partIndexes: [],
-            summary: processingSummary,
-            defaultOpen: false,
-            startedAt
-          },
-          ...items
-        ]
+            {
+              kind: 'status',
+              partIndexes: [],
+              summary: processingSummary,
+              defaultOpen: false,
+              startedAt
+            },
+            ...items
+          ]
         : items
     }
     return [
@@ -292,14 +296,14 @@ export function buildAssistantRenderItems(
   if (activityItems.length === 0) {
     return hasValidDuration(metadata) || interrupted
       ? [
-        {
-          kind: 'status',
-          partIndexes: [],
-          summary: completedSummary(metadata, waitingForAnswer),
-          defaultOpen: false
-        },
-        ...items
-      ]
+          {
+            kind: 'status',
+            partIndexes: [],
+            summary: completedSummary(metadata, waitingForAnswer),
+            defaultOpen: false
+          },
+          ...items
+        ]
       : items
   }
 

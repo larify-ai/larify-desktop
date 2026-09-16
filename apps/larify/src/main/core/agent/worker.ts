@@ -88,17 +88,23 @@ export class AgentWorker {
         const snapshot = activeReview.finish()
         if (!snapshot) return
         const chunk = reviewChunk(snapshot)
-        const existingIndex = response.parts.findIndex(
+        // 变更卡片挂在**主链 assistant** 上：子任务轮（nested）的落库身份是那条 UI 私有的
+        // `-nested` 行，若把快照写在其上，主链消息（卡片只渲染它）就永远看不到变更——这正是
+        // 「调度任务后变更卡片不更新」的成因。因此子任务轮改写到主链那条（即它的 UI 锚点：
+        // 主链轮不改 start，故 `lastAssistant` 拿到的就是主链 assistant），使其变更回流到卡片。
+        const target = input.nested
+          ? (this.sessions.lastAssistant(input.sessionId, 'after') ?? response)
+          : response
+        const existingIndex = target.parts.findIndex(
           (part) => part.type === 'data-git-snapshot' && part.id === 'review'
         )
         if (existingIndex >= 0) {
-          response.parts[existingIndex] = chunk as (typeof response.parts)[number]
+          target.parts[existingIndex] = chunk as (typeof target.parts)[number]
         } else {
-          response.parts.push(chunk as (typeof response.parts)[number])
+          target.parts.push(chunk as (typeof target.parts)[number])
         }
-        // response 已是**落库身份**（persist 返回：nested 轮次为「增量 + 新 id」那条），
-        // 直接按同 id 原地替换快照 part 即可，不会污染主链行。
-        this.sessions.saveMessages(input.sessionId, [response])
+        // target 已是**落库身份**，直接按同 id 原地替换快照 part 即可。
+        this.sessions.saveMessages(input.sessionId, [target])
       }
       let handoff: string | undefined
       const toolsContext = Object.fromEntries(
@@ -221,6 +227,10 @@ export class AgentWorker {
         response = await runOnce(message)
         settle(response)
       }
+      // 照常结束流：`ask_user` 是客户端工具，AI SDK 侧本轮到此为止；用户回答会经
+      // `addToolOutput` 再次 `agent:send`。上下文（nested / 已累计时长）由 agent.ts 在
+      // 收到回答时从"上一条 assistant"的 metadata 恢复，无需让流在此保持开启
+      // （保持开启会让 UI 永远停在"运行中"，进程重启后彻底卡死）。
       if (!controller.signal.aborted && scheduled === undefined) this.finish(() => this.sink.end())
       return { scheduled, totalProcessingMs }
     } catch (error) {

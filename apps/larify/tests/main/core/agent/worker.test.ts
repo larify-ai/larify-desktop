@@ -39,12 +39,16 @@ const input = {
   } as never
 }
 
-function createWorker(track?: SessionTrack): {
+function createWorker(
+  track?: SessionTrack,
+  mainAssistant?: UIMessage
+): {
   worker: AgentWorker
   sessions: {
     loadMessages: ReturnType<typeof vi.fn<() => UIMessage[]>>
     saveMessages: ReturnType<typeof vi.fn>
     saveStart: ReturnType<typeof vi.fn>
+    lastAssistant: ReturnType<typeof vi.fn>
   }
   sink: {
     chunk: ReturnType<typeof vi.fn>
@@ -58,7 +62,9 @@ function createWorker(track?: SessionTrack): {
   const sessions = {
     loadMessages: vi.fn<() => UIMessage[]>(() => []),
     saveMessages: vi.fn(),
-    saveStart: vi.fn()
+    saveStart: vi.fn(),
+    // 子任务轮的快照写回目标取自「主链 assistant」（见 worker.saveReview）。
+    lastAssistant: vi.fn(() => mainAssistant)
   }
   const pluginHost = { refreshPlugins: vi.fn(async () => undefined) }
   return {
@@ -266,17 +272,17 @@ describe('AgentWorker', () => {
     expect(sink.end).toHaveBeenCalledOnce()
   })
 
-  it('re-saves the review snapshot under the (already stored) response identity for a child task', async () => {
-    // nested 标记与「增量 + 新 id」的换算已在 persist 层完成（runStoredAgentSession 返回值即
-    // 落库身份）。worker 的变更快照回写只需**按同一身份**原地替换快照，不能再自行改写 id/parts
-    // ——否则会把快照写到主链 anchor 行上或丢失增量。这里 persist 被 mock：模拟其返回的落库身份
-    // （nested、id 带 -nested 后缀），断言 worker 原样回写、并保留 nested 标记。
+  it('routes a child-task snapshot back to the main-chain assistant', async () => {
+    // 子任务轮（nested）的落库身份是那条 UI 私有的 `-nested` 行；其变更必须回流到**主链
+    // assistant**（卡片只渲染主链消息）——否则「调度任务后变更卡片不更新」。worker 用
+    // sessions.lastAssistant(sessionId,'after') 取主链身份作为写回目标。
     const stored: UIMessage = {
       id: 'child-assistant-nested',
       role: 'assistant',
       metadata: { nested: true },
       parts: []
     }
+    const mainAssistant: UIMessage = { id: 'main-assistant', role: 'assistant', parts: [] }
     mocks.run.mockImplementation(async () => stored)
     const { sink } = createWorker()
     const track = createTrack(workspace, sink)
@@ -287,16 +293,19 @@ describe('AgentWorker', () => {
       deletions: 0,
       binary: false
     })
-    const { worker, sessions } = createWorker(track)
+    const { worker, sessions } = createWorker(track, mainAssistant)
 
     await worker.run({ ...input, nested: true })
 
-    const lastSaved = sessions.saveMessages.mock.calls.at(-1)?.[1]?.[0] as UIMessage
-    expect(lastSaved.id).toBe('child-assistant-nested')
-    expect(lastSaved.metadata).toMatchObject({ nested: true })
-    expect(lastSaved.parts).toContainEqual(
-      expect.objectContaining({ type: 'data-git-snapshot', id: 'review' })
+    const saved = sessions.saveMessages.mock.calls.map((call) => call[1][0] as UIMessage)
+    expect(saved).toContainEqual(
+      expect.objectContaining({
+        id: 'main-assistant',
+        parts: [expect.objectContaining({ type: 'data-git-snapshot', id: 'review' })]
+      })
     )
+    // 绝不把子任务轮的快照写在其自己的 `-nested` 行上（那是卡片看不到的那条）。
+    expect(saved.find((message) => message.id === 'child-assistant-nested')).toBeUndefined()
   })
 
   it('does not tag a top-level response as nested when re-saving the review snapshot', async () => {

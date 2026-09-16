@@ -239,6 +239,46 @@ describe('AssistantChat', () => {
     expect(mocks.reportAttentionState).toHaveBeenLastCalledWith('session', 'idle')
   })
 
+  it('treats a waiting ask user question like streaming for the message list', async () => {
+    // 等待回答时底部 Composer 与「正在 streaming」等价：消息列表按 live 处理，
+    // Composer 也按 streaming 禁用发送（其判据只读 status，故这里断言 live）。
+    mocks.useChat.mockReturnValue({
+      addToolOutput: mocks.addToolOutput,
+      messages: [
+        {
+          id: 'assistant',
+          role: 'assistant',
+          parts: [
+            {
+              type: 'dynamic-tool',
+              toolName: 'agent_ask_user',
+              toolCallId: 'call',
+              state: 'input-available',
+              input: {}
+            }
+          ]
+        }
+      ],
+      sendMessage: mocks.sendMessage,
+      setMessages: mocks.setMessages,
+      status: 'ready',
+      stop: mocks.stop
+    })
+    await act(async () =>
+      root?.render(
+        createElement(AssistantChat, {
+          chat: { id: 'session' } as never,
+          cwd: '',
+          onCwdChange: vi.fn(),
+          onHeadingChange: vi.fn()
+        })
+      )
+    )
+    expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ live: true }))
+    // status 必须原样透传：Composer 靠它渲染「停止」图标与禁用发送。
+    expect(mocks.composer.mock.lastCall?.[0].status).toBe('ready')
+  })
+
   it('does not overwrite terminal message metadata when stop races with completion', async () => {
     await act(async () =>
       root?.render(
@@ -303,6 +343,45 @@ describe('AssistantChat', () => {
       completedAt: 12_000,
       outcome: 'aborted'
     })
+  })
+
+  it('keeps the accumulated duration when the user cancels a long-running task', async () => {
+    // 回归：用户报告「运行了很久，一取消时间就变少」。旧实现只改写 startedAt/completedAt，
+    // 摘要退化为「取消时刻 − 本次 run 起点」，把先前累计的 totalProcessingMs 冲掉。
+    // 修复后：保留既有累计，并把本次 run 的增量累加上去。
+    vi.useFakeTimers()
+    vi.setSystemTime(10_000)
+    await act(async () =>
+      root?.render(
+        createElement(AssistantChat, {
+          chat: { id: 'session' } as never,
+          cwd: '',
+          onCwdChange: vi.fn(),
+          onHeadingChange: vi.fn()
+        })
+      )
+    )
+
+    const composer = mocks.composer.mock.calls.at(-1)?.[0]
+    // 本次 run 起点 10_000；这条消息此前已累计了 600_000ms（10分钟）。
+    act(() => composer.onSubmit({ text: 'long task', files: [] }))
+    vi.setSystemTime(70_000) // 本次 run 又跑了 60秒
+    composer.onStop()
+    const update = mocks.setMessages.mock.calls.at(-1)?.[0] as (current: UIMessage[]) => UIMessage[]
+    const running: UIMessage[] = [
+      { id: 'user', role: 'user', parts: [{ type: 'text', text: 'long task' }] },
+      {
+        id: 'assistant',
+        role: 'assistant',
+        metadata: { startedAt: 1_000, completedAt: 601_000, totalProcessingMs: 600_000 },
+        parts: [{ type: 'text', text: 'work in progress' }]
+      }
+    ]
+
+    const aborted = update(running)[1]
+    expect(aborted.metadata).toMatchObject({ outcome: 'aborted', completedAt: 70_000 })
+    // 600_000（既有累计）+ 60_000（本次 run 增量）= 660_000，而不是退化成 60_000。
+    expect((aborted.metadata as { totalProcessingMs?: number }).totalProcessingMs).toBe(660_000)
   })
 
   it('does not mark the previous response as aborted before the new response starts', async () => {

@@ -233,7 +233,11 @@ function computeItemsForMessage(
     ]
   }
   const changes = summarizeMessageChanges(message)
-  const contentItems: MessageContentListItem[] = buildAssistantRenderItems(message, streaming, superseded)
+  const contentItems: MessageContentListItem[] = buildAssistantRenderItems(
+    message,
+    streaming,
+    superseded
+  )
     .map((renderItem) => withoutInternalStageParts(renderItem, message))
     .filter((renderItem) => renderItem.partIndexes.length > 0 || renderItem.kind === 'status')
     .map((renderItem) => ({
@@ -434,6 +438,12 @@ function activityHistoryRun(
     }
     cursor += 1
   }
+  // 变更卡片固定排到最后：它是「本次产出的结果」，应排在所有交互元素（含等待回答的
+  // ask_user）之后。在**收集阶段**一次性稳定排序，而不是渲染时新建数组重排——后者会让
+  // 流式输出期间数组引用/顺序频繁变化，卡片位置持续跳动。
+  trailing.sort(
+    (left, right) => (left.kind === 'changes' ? 1 : 0) - (right.kind === 'changes' ? 1 : 0)
+  )
   if (activeTitle !== undefined || pending.length > 0) {
     if (
       live &&
@@ -1097,7 +1107,7 @@ function ActiveAssistantMessageList({
               scrollElement.current === element &&
               element.scrollTop <= scrollTop &&
               element.scrollHeight - element.clientHeight - element.scrollTop >=
-              leaveBottomThreshold
+                leaveBottomThreshold
             if (!resizingMessage.current && scrollMode.current !== 'reading' && leftBottom) {
               scrollMode.current = 'reading'
               releaseAnchor()
@@ -1161,9 +1171,7 @@ function ActiveAssistantMessageList({
               (listItem.kind === 'message-group' &&
                 listItem.items.some((groupItem) => groupItem.kind === 'changes')) ||
               (listItem.kind === 'activity-history' &&
-                (listItem.trailing ?? []).some(
-                  (trailingItem) => trailingItem.kind === 'changes'
-                )))
+                (listItem.trailing ?? []).some((trailingItem) => trailingItem.kind === 'changes')))
           return message ? (
             <div
               ref={index === totalCount - 1 ? followGrowingList : undefined}

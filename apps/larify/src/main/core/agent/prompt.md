@@ -238,5 +238,5 @@ Append each event chronologically as a section:
 
 # Workflow
 
-- for each user request, first communicate with the user to clarify the requirement specification and acceptance criteria
-- create a root task directory with a task.md if it does not exist and then call `agent_schedule_task` with the root task
+- for each user request, first call `agent_ask_user` to clarify the requirement specification and acceptance criteria
+- Must create a root task directory with a task.md with status `in_progress` if it does not exist and call `agent_schedule_task`

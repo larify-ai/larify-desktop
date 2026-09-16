@@ -210,6 +210,37 @@ describe('activity history part summary duration', () => {
     }
   })
 
+  it('freezes the duration while waiting for an answer, even if the section is still marked streaming', async () => {
+    // ask_user 是客户端工具：其所在轮的流早已结束，但渲染层把「等待回答」也算进 live/running，
+    // 使 section.streaming 仍为 true。此时若按 streaming 走实时墙钟，等待期间计时会一直增长。
+    // 修复：waiting 优先 → 用已记录的累计时长定格。
+    vi.useFakeTimers()
+    vi.setSystemTime(10_000_000)
+    const metadata = {
+      startedAt: 1_000_000,
+      completedAt: 1_002_523,
+      totalProcessingMs: 2_523
+    }
+    try {
+      await act(async () =>
+        root.render(
+          createElement(ActivityHistoryPart, {
+            sections: [section(assistant('a', metadata), '确认需求', true)], // streaming=true
+            waiting: true,
+            initialOpen: true,
+            active: true
+          })
+        )
+      )
+
+      // 定格为 2523ms → 3秒；不得因墙钟涨到小时级。
+      expect(container.textContent).toContain('等待回答 · 处理了 3秒')
+      expect(container.textContent).not.toContain('小时')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('shows a bare waiting label when no duration has been recorded yet', async () => {
     // waiting 且尚无 totalProcessingMs/completedAt（首轮尚未结束）：无 durationPart，只显示「等待回答」。
     vi.useFakeTimers()

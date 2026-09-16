@@ -116,17 +116,22 @@ export function ActivityHistoryPart({
   // 使一个已完成/已中断的卡时长随挂钟持续增长、甚至显示"小时"级，与折叠态显示的累计时长不一致。
   // `active` 只代表"会话是否可见"，不代表任务在跑，故不能作为判据。
   const streaming = sections.some(({ streaming }) => streaming)
-  const summary = streaming ? (
-    typeof startedAt === 'number' && Number.isFinite(startedAt) ? (
-      <LiveProcessingDuration startedAt={startedAt} baseMs={baseProcessingMs} active={active} />
-    ) : (
-      '处理过程'
-    )
-  ) : waiting ? (
+  // waiting（停在 ask_user 等待回答）**优先于** streaming：ask_user 是**客户端工具**，
+  // 其所在轮的流早已结束（`status` 非 streaming），但渲染层把「等待回答」也算进 `live`/
+  // `running`（用于禁用 Composer、禁止开新轮）。若此处仍按 streaming 走 LiveProcessingDuration
+  // （实时墙钟 = baseMs + now - startedAt），等待期间计时会**一直增长**。故 waiting 时一律用
+  // 已记录的累计时长定格（durationPart），让计时暂停。
+  const summary = waiting ? (
     durationPart ? (
       `等待回答 · ${durationPart}`
     ) : (
       '等待回答'
+    )
+  ) : streaming ? (
+    typeof startedAt === 'number' && Number.isFinite(startedAt) ? (
+      <LiveProcessingDuration startedAt={startedAt} baseMs={baseProcessingMs} active={active} />
+    ) : (
+      '处理过程'
     )
   ) : durationPart ? (
     `${aborted ? interruptedSummary : '已完成'} · ${durationPart}`

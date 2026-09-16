@@ -2,7 +2,8 @@ import { z } from 'zod'
 import { defineTool } from '../../../main/core/plugin/protocol'
 
 export const scheduleTaskTool = defineTool({
-  description: 'Must schedule a task serially with requirement specification and acceptance criteria.',
+  description:
+    'Must schedule a task serially with requirement specification and acceptance criteria.',
   metadata: { eager: true, icon: 'list-todo' },
   inputSchema: z
     .object({
@@ -12,6 +13,6 @@ export const scheduleTaskTool = defineTool({
   execute: ({ taskPath }, context) => {
     if (!context.scheduleTask) throw new Error('Scheduling is unavailable.')
     context.scheduleTask(taskPath)
-    return 'Task completed.'
+    return 'Task completed. Please read details in the task.md file.'
   }
 })

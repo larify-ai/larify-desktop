@@ -1,8 +1,7 @@
 import type { UIMessage } from 'ai'
 import { randomUUID } from 'node:crypto'
-import { dirname } from 'node:path'
 import type { Disposable } from '@shared/infra/disposable'
-import { larifyPath, larifyWorkspacePath } from '../../utils/app-paths'
+import { larifyWorkspacePath } from '../../utils/app-paths'
 import type { AgentModelConfig } from '../model/config'
 import type { PluginHost } from '../plugin/host'
 import { pluginDiscovery } from '../plugin/plugin-discovery'
@@ -17,16 +16,25 @@ import { AgentWorker, type AgentSink, type SessionTrack } from './worker'
 export type { AgentSink } from './worker'
 
 /**
- * 顶层任务：task.md 直接位于任务根目录下（`<taskDirectory>/<name>/task.md`）。
- * 首次进入顶层任务、以及子任务完成后「回父」重新调度顶层任务，都走主链上下文（nested=false）；
- * 更深的子任务走独立上下文（nested=true）。这是区分「下探子任务」与「回到主任务」的依据，
- * 否则「回父」会被误当作又一层子任务而下探、永不终止。
+ * 判定「上一条 assistant 是否正停在 agent_ask_user 等待回答」。ask_user 是客户端工具
+ * （无 execute），其回答经 `addToolOutput` 再次 `agent:send`；服务端据此识别"这是续写"
+ * 而非新一轮提问，从而保留原轮的上下文（nested / 已累计时长）。
  */
-function isTopLevelTaskFile(taskFile: string): boolean {
-  // 模型给出的 taskPath 可能用正斜杠，larifyPath 用平台分隔符（Windows 为反斜杠）；
-  // 统一分隔符并忽略大小写后再比较，避免顶层任务被误判为子任务而下探不止。
-  const normalize = (value: string): string => value.replaceAll('\\', '/').toLowerCase()
-  return normalize(dirname(dirname(taskFile))) === normalize(larifyPath('tasks'))
+function awaitUserAnswer(sessions: SessionStore, sessionId: string): boolean {
+  // 必须用 lastMessage（**不过滤 nested**）：ask_user 常出现在**子任务轮**（nested）里，
+  // 而 lastAssistant 会把 nested 消息排除掉——用它判定会漏掉子任务轮的 ask_user，
+  // 于是"调度→子任务轮问用户→没停→继续回主链"，用户回答时流程已跑偏（消息末尾是 nest 判据）。
+  const last = sessions.lastMessage(sessionId)
+  if (!last || last.role !== 'assistant') return false
+  const parts = last.parts ?? []
+  const lastStep = parts.findLastIndex((part) => part.type === 'step-start')
+  return parts
+    .slice(lastStep + 1)
+    .some(
+      (part) =>
+        (part as { type?: string }).type === 'tool-agent_ask_user' &&
+        (part as { state?: string }).state === 'input-available'
+    )
 }
 
 export interface AgentInput {
@@ -125,19 +133,37 @@ export class Agent implements Disposable {
   ): Promise<void> {
     let worker = firstWorker
     let runtime = firstRuntime
-    // 每轮的消息：undefined = 在主链上续跑（不新增消息）。首轮是用户消息。
+    // 每轮的消息：主链轮是用户消息（首轮）或不新增消息（回主链）；独立上下文轮是本任务的 nest 判据。
     let message: UIMessage | undefined = request.message
+    // 当前是否在主链：主链轮（用户可感知的会话线）为 false，独立上下文轮为 true。
+    // 首轮在主链；「回主链」= 重置回这个初始状态（nested=false、message=undefined）。
     let nested = false
-    // 递归各轮是独立上下文，各轮 totalProcessingMs 彼此独立——在编排层累加，回填到最后一轮。
+    // 各轮是独立上下文，totalProcessingMs 彼此独立——在编排层累加，回填到最后一轮。
     let baseProcessingMs = 0
-    // 递归模型：
-    // - 某轮调度了**顶层任务**（首次进入，或子任务完成后「回父」）→ 下一轮在主链上续跑
-    //   （nested=false、message=undefined，从主链末尾那条 `agent_schedule_task` 之后继续）。
-    // - 某轮调度了**更深的子任务** → 下一轮下探（nested=true，独立上下文，只喂该 task.md 判据）。
-    // - 某轮没再调度 → 结束。
-    // 是否已经"回到主链"过一次。已在主链上却又调度顶层任务 = 原地打转，必须终止，
-    // 否则会无限循环（实测：反复调度同一顶层任务可跑满 50+ 轮仍不停）。
-    let resumed = false
+    // 「等待用户回答」的续写恢复：ask_user 是**客户端工具**（无 execute），其回答经
+    // `addToolOutput` → 又一次 `agent:send` 送达。渲染层只发回答（没有新 user 文本），
+    // 服务端若当作全新一轮，就会 nested=false、base=0 —— 于是子任务轮的续写被误当成
+    // 「主链轮」且时长从零重算。这里从**上一条 assistant 自身**恢复上下文（nested 与已累计
+    // 时长都写在其 metadata 上），无需任何额外持久化：
+    const resumedFlag = awaitUserAnswer(this.sessions, request.sessionId)
+    const resumed = request.message.role === 'assistant' && resumedFlag
+    if (resumed) {
+      // 同样用 lastMessage：ask_user 所在的轮次可能是 nested，其 metadata 才是要恢复的
+      // nested / totalProcessingMs 来源。
+      const previous = this.sessions.lastMessage(request.sessionId)
+      // 仅恢复**上下文归属与已累计时长**；`message` 必须保留——用户的回答（tool-output）
+      // 要作为新消息喂给模型，才能与上一轮的 ask_user(tool-call) 配对；置空会触发
+      // 「Tool result is missing for tool call」。
+      nested = (previous?.metadata as Record<string, unknown> | undefined)?.nested === true
+      const total = (previous?.metadata as Record<string, unknown> | undefined)?.totalProcessingMs
+      if (typeof total === 'number' && Number.isFinite(total)) baseProcessingMs = total
+    }
+    // 编排模型（唯一规则，不区分任务层级）：
+    // - 某轮**调度了** task.md(X) → 下一轮在 **X 自己的独立上下文**里跑（nested=true、喂 nest 判据）。
+    //   不论是下探子任务，还是子任务「回父」再调度父任务，都走这里。
+    // - 某轮**没调度** → 该任务跑完：若已在**主链**则结束；否则**回主链**（nested=false、
+    //   message=undefined，即回到与首轮相同的状态）——"调度 → 独立上下文跑 → 没调度则回主链"
+    //   这一循环，由模型在判据里用 `agent_schedule_task` 驱动，直到主链轮也不调度才真正结束。
     for (;;) {
       // cancel() 会中止本信号；据此在轮次间停止继续递归。
       // 必须显式结束流：在**轮次之间**取消时（例如编排层正 await refreshPlugins），
@@ -151,23 +177,18 @@ export class Agent implements Disposable {
       const result = await worker.run({ ...request, message, runtime, nested, baseProcessingMs })
       if (result.totalProcessingMs !== undefined) baseProcessingMs = result.totalProcessingMs
       const taskFile = result.scheduled
-      if (taskFile === undefined) return
-      if (isTopLevelTaskFile(taskFile)) {
-        // 已在主链上（上一次就是回主链续跑）却又调度顶层任务 → 原地打转，终止。
-        // 该轮已调度过任务、worker 未自行 end，故这里显式结束流，避免 UI 卡在"运行中"。
-        if (resumed) {
-          sink.end()
-          return
-        }
-        // 回到主任务：在主链上续跑（不新增消息）。
-        resumed = true
+      if (taskFile === undefined) {
+        // 没调度 → 该任务跑完：已在主链 → 结束；否则回主链（回到与首轮相同的初始状态）。
+        // 本轮停在「等待用户回答」(agent_ask_user 仍为等待态)：**暂停**，不回主链、不结束。
+        // ask_user 是客户端工具，用户回答经 addToolOutput 再次 send() 续写；此处若继续
+        // （尤其 nested 轮会"回主链"），回答就会被当成新轮次，上下文与时长都被重置。
+        if (awaitUserAnswer(this.sessions, request.sessionId)) return
+        if (!nested) return
         nested = false
         message = undefined
       } else {
-        // 下探子任务会重置"已回主链"标记（下一层可能再回主链一次）。
-        resumed = false
-        // 下探子任务：独立上下文，只喂本轮 nest 判据（compaction：UI 不把它当用户气泡渲染；
-        // nested：模型输入隔离）。
+        // 调度了 → 下一轮独立上下文，只喂该 task.md 的 nest 判据
+        // （compaction：UI 不把它当用户气泡渲染；nested：模型输入隔离）。
         nested = true
         message = {
           id: randomUUID(),

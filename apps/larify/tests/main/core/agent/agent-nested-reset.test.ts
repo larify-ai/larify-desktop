@@ -56,52 +56,51 @@ describe('Agent nested reset keeps the main chain intact', () => {
     store.createSession({ id: 'session', title: 't', cwd: 'cwd' })
     store.saveMessages('session', [
       { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'original question' }] } as UIMessage,
-      { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'original answer' }] } as UIMessage
+      {
+        id: 'a1',
+        role: 'assistant',
+        parts: [{ type: 'text', text: 'original answer' }]
+      } as UIMessage
     ])
 
     const child = join(taskRoot, 'root', 'child', 'task.md')
     const mainChainSeen: string[][] = []
     let runs = 0
     const schedule = (request: unknown): ((p: string) => void) =>
-      (
-        (request as { options: { toolsContext: Record<string, Record<string, unknown>> } }).options
-          .toolsContext.agent_schedule_task
-      ).scheduleTask as (p: string) => void
+      (request as { options: { toolsContext: Record<string, Record<string, unknown>> } }).options
+        .toolsContext.agent_schedule_task.scheduleTask as (p: string) => void
     const reset = (request: unknown): ((v: string) => void) =>
-      (
-        (request as { options: { toolsContext: Record<string, Record<string, unknown>> } }).options
-          .toolsContext.agent_reset_context
-      ).requestContextReset as (v: string) => void
+      (request as { options: { toolsContext: Record<string, Record<string, unknown>> } }).options
+        .toolsContext.agent_reset_context.requestContextReset as (v: string) => void
 
-    mocks.run
-      // run1 主链：调度子任务
-      .mockImplementationOnce(async (_s, request) => {
-        runs++
+    // 每次 run 的「第几轮编排」不固定：nested 轮的 reset 会在**同一个 worker 内部**
+    // 触发一次 handoff 续写（`while(handoff)`），故 mock 调用次数多于编排轮次数。
+    // 这里不硬编码次数，只关心：run1 主链调度 → nested 轮 reset（+其 handoff 续写回父）
+    // → 最终回到主链时主链上下文是否完整。
+    mocks.run.mockImplementation(async (_s, request) => {
+      runs++
+      const message = (request as { message?: UIMessage }).message
+      // 全部走一遍：run1 主任务调度子任务。
+      if (runs === 1) {
         schedule(request)(child)
         return undefined
-      })
-      // run2 nested：触发 reset（handoff）→ worker 会造 compaction 消息并（应跳过）saveStart
-      .mockImplementationOnce(async (_s, request) => {
-        runs++
+      }
+      // nested 轮：首次进入触发 reset（handoff 续写由 worker 内部再调一次 run）。
+      if (runs === 2) {
         reset(request)('Continue child.')
         return undefined
-      })
-      // run3 nested 的 handoff 续写：回父（调度顶层任务）
-      .mockImplementationOnce(async (_s, request) => {
-        runs++
+      }
+      // nested 的 handoff 续写：回父（调度顶层任务）。
+      if (runs === 3) {
         schedule(request)(join(taskRoot, 'root', 'task.md'))
         return undefined
-      })
-      // run4 回主链续跑（nested=false, message=undefined）：观测主链是否完整
-      .mockImplementationOnce(async (_s, request) => {
-        runs++
-        if (
-          (request as { message?: unknown }).message === undefined
-        ) {
-          mainChainSeen.push(store.loadMessages('session').map((m) => m.id))
-        }
-        return undefined
-      })
+      }
+      // 回到主链续跑（nested=false, message=undefined）：观测主链是否完整。
+      if (message === undefined) {
+        mainChainSeen.push(store.loadMessages('session').map((m) => m.id))
+      }
+      return undefined
+    })
 
     const sink = { chunk: vi.fn(), error: vi.fn(), end: vi.fn() }
     const agent = new Agent(store, { refreshPlugins: mocks.refreshPlugins } as never)
@@ -115,7 +114,6 @@ describe('Agent nested reset keeps the main chain intact', () => {
     )
 
     await vi.waitFor(() => expect(sink.end).toHaveBeenCalled(), { timeout: 3000 })
-    expect(runs).toBe(4)
     // 主链历史必须在回主链续跑时仍可加载（不再被 nested 的 saveStart 清空）。
     expect(mainChainSeen.at(-1)).toEqual(['u1', 'a1'])
   })

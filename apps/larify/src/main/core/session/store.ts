@@ -113,6 +113,25 @@ export class SessionStore implements Disposable {
     return row ? (JSON.parse(row.value as string) as UIMessage) : undefined
   }
 
+  /**
+   * 会话的最后一条消息（**不过滤 nested**）。用于判定「是否停在等待用户回答」：
+   * `agent_ask_user` 可能出现在**子任务轮**（nested）里，而 lastAssistant 会过滤 nested，
+   * 用它判定会漏掉子任务轮的 ask_user，导致 ask_user 后编排层继续"回主链"而非暂停。
+   */
+  lastMessage(id: string): UIMessage | undefined {
+    const row = this.database
+      .prepare(
+        `SELECT messages.value FROM messages
+         JOIN sessions ON sessions.id = messages.session_id
+         WHERE messages.session_id = ?
+           AND messages.position >= COALESCE(sessions.start, -1)
+         ORDER BY messages.position DESC
+         LIMIT 1`
+      )
+      .get(id)
+    return row ? (JSON.parse(row.value as string) as UIMessage) : undefined
+  }
+
   loadVisibleMessages(id: string, offset = 0, limit = 50): UIMessage[] {
     const messages = this.database
       .prepare(

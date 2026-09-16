@@ -49,13 +49,19 @@ const input = { sessionId: 'session', message, cwd: 'cwd' }
 const sessions = {
   loadMessages: vi.fn(() => []),
   saveMessages: vi.fn(),
-  saveStart: vi.fn()
+  saveStart: vi.fn(),
+  // awaitUserAnswer / resumed 恢复都依赖 lastMessage（**不过滤 nested**）。
+  // 默认返回 undefined = 未停在 ask_user 等待态（普通轮次）。
+  lastMessage: vi.fn(() => undefined),
+  lastAssistant: vi.fn(() => undefined)
 }
 const pluginHost = { refreshPlugins: vi.fn(async () => undefined) }
 
 beforeEach(() => {
   vi.clearAllMocks()
   sessions.loadMessages.mockReturnValue([])
+  sessions.lastMessage.mockReturnValue(undefined)
+  sessions.lastAssistant.mockReturnValue(undefined)
   mocks.run.mockResolvedValue(undefined)
   mocks.runtime.mockReturnValue({ system: 'runtime', toolsContext: {} })
 })

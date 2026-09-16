@@ -45,9 +45,9 @@ function newStore(): SessionStore {
 }
 
 describe('Agent nested anchor', () => {
-  it('treats a top-level taskPath as top-level even when separators/casing differ', async () => {
-    // 顶层任务路径常被模型写成正斜杠（Windows 下 larifyPath 是反斜杠）或有大小写差异；
-    // 归一化比较后才能判为顶层、走「主链续跑」而非「下探」。
+  it('runs every scheduled task in its own independent context regardless of path separators/casing', async () => {
+    // 唯一规则：某轮调度了 task.md → 下一轮在该任务自己的独立上下文跑（nested=true、喂 nest 判据），
+    // 不再区分「顶层/子任务」（旧实现的 isTopLevelTaskFile 已移除）。路径分隔符/大小写差异不影响。
     const store = newStore()
     store.saveMessages('s', [
       { id: 'u', role: 'user', parts: [{ type: 'text', text: 'go' }] } as UIMessage,
@@ -73,8 +73,11 @@ describe('Agent nested anchor', () => {
     )
     await vi.waitFor(() => expect(sink.end).toHaveBeenCalled(), { timeout: 3000 })
 
-    // run1 主链；run2 判为顶层 → 主链续跑（nested=false、无新消息）。
-    expect(phases[1]).toEqual({ nested: false, hasMessage: false })
+    // run1 主链（用户消息）；run2 被调度任务的独立上下文（nested=true、有 nest 判据）；
+    // run3 回主链（不调度、无新消息）→ 结束。
+    expect(phases[0]).toEqual({ nested: false, hasMessage: true })
+    expect(phases[1]).toEqual({ nested: true, hasMessage: true })
+    expect(phases[2]).toEqual({ nested: false, hasMessage: false })
   })
 
   it('does not crash and passes no UI anchor when the session has no main-chain assistant yet', async () => {
@@ -98,7 +101,8 @@ describe('Agent nested anchor', () => {
     )
     await vi.waitFor(() => expect(sink.end).toHaveBeenCalled(), { timeout: 3000 })
 
-    expect(runs).toBe(2)
+    // run1 主链调度 → run2 子任务独立上下文（不调度）→ run3 回主链（不调度）→ 结束。
+    expect(runs).toBe(3)
     // nested 轮仍走独立上下文；因无锚点，uiOriginalMessages（第 5 参）为 undefined。
     expect(mocks.run.mock.calls[1][1].nested).toBe(true)
     expect(mocks.run.mock.calls[1][4]).toBeUndefined()

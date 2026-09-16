@@ -90,17 +90,17 @@ The following questions define how to inquire into any subject recursively at an
 ### Epistemic Inquiry
 
 - **Constraint**
-  - prerequisite: "what is its prerequisite, and why this prerequisite rather than another?"
-  - dependent: "what depends on it, and why this dependent rather than another?"
+  - prerequisite: "what is its prerequisite, and why this prerequisite rather than another? e.g., which tasks must be completed after before the current task, and why these prerequisites rather than others?"
+  - dependent: "what depends on it, and why this dependent rather than another? e.g., which tasks must be completed after the current task, and why these dependents rather than others?"
 - **Composition**
-  - decompose: "what does it decompose into, and why this decomposition rather than another?"   
-  - compose: "what does it compose into, and why this composition rather than another?"
+  - decompose: "what does it decompose into, and why this decomposition rather than another? e.g., which tasks must be decomposed into the current task, and why these decompositions rather than others?"  
+  - compose: "what does it compose into, and why this composition rather than another? e.g., which tasks must be composed into the current task, and why these compositions rather than others?"
 - **Causation**
-  - cause: "what causes it, and why this cause rather than another?"
-  - effect: "what does it affect, and why this effect rather than another?"
+  - cause: "what causes it, and why this cause rather than another? e.g., which tasks would cause the current task, and why these causes rather than others?"
+  - effect: "what does it affect, and why this effect rather than another? e.g., which tasks would the current task affect, and why these effects rather than others?"
 - **Abstraction**
-  - generalize: "what does it generalize into, and why this generalization rather than another?"
-  - specialize: "what does it specialize into, and why this specialization rather than another?"
+  - generalize: "what does it generalize into, and why this generalization rather than another? e.g., which tasks would generalize the current task, and why these generalizations rather than others?"
+  - specialize: "what does it specialize into, and why this specialization rather than another? e.g., which tasks would specialize the current task, and why these specializations rather than others?"
 
 ### Practical Inquiry
 
@@ -113,21 +113,6 @@ The following questions define how to inquire into any subject recursively at an
 - **Cost / Risk**
   - reduce: "what cost or risk does it reduce, and why this reduction rather than another?"
   - increase: "what cost or risk does it increase, and why this increase rather than another?"
-
-### Example
-
-- **Constraint**
-  - prerequisite: "which tasks must be completed before the current task, and why these prerequisites rather than others?"
-  - dependent: "which tasks must be completed after the current task, and why these dependents rather than others?"
-- **Composition**
-  - decompose: "which tasks must be decomposed into the current task, and why these decompositions rather than others?"
-  - compose: "which tasks must be composed into the current task, and why these compositions rather than others?"
-- **Causation**
-  - cause: "which tasks would cause the current task, and why these causes rather than others?"
-  - effect: "which tasks would the current task affect, and why these effects rather than others?"
-- **Abstraction**
-  - generalize: "which tasks would generalize the current task, and why these generalizations rather than others?"
-  - specialize: "which tasks would specialize the current task, and why these specializations rather than others?"
 
 ### Principles
 
@@ -212,7 +197,7 @@ Organize and commit progress recursively into single-concern tasks following sep
 ---
 name: <human-readable task title>
 description: <brief description of the task>
-status: <in_progress|completed>
+status: in_progress
 ---
 ```
 
@@ -238,5 +223,6 @@ Append each event chronologically as a section:
 
 # Workflow
 
-- for each user request, first call `agent_ask_user` to clarify the requirement specification and acceptance criteria
-- Must create a root task directory with a task.md with status `in_progress` if it does not exist and call `agent_schedule_task`
+- Must call `agent_ask_user` to clarify the requirement specification and acceptance criteria
+- Must create a root task directory with a task.md with status `in_progress` if it does not exist
+- Must call `agent_schedule_task` with the root task.md path rather than completing it directly

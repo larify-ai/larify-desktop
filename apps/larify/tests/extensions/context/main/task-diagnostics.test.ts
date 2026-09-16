@@ -13,7 +13,7 @@ function createRoot(): string {
   return root
 }
 
-function taskMarkdown(status = 'in_progress'): string {
+function taskMarkdown(status = 'pending'): string {
   return `---\nname: 任务标题\ndescription: 任务描述\nstatus: ${status}\n---\n\n# 目标\n`
 }
 
@@ -59,7 +59,7 @@ describe('task diagnostics', () => {
   it('reports missing name and description', async () => {
     const root = createRoot()
     const file = join(root, 'task.md')
-    writeFileSync(file, '---\nstatus: in_progress\n---')
+    writeFileSync(file, '---\nstatus: pending\n---')
 
     const result = await createTaskDiagnosticsProvider(root).provide(file)
 
@@ -72,7 +72,7 @@ describe('task diagnostics', () => {
   it('reports empty or non-string metadata fields', async () => {
     const root = createRoot()
     const file = join(root, 'task.md')
-    writeFileSync(file, '---\nname: " "\ndescription: 42\nstatus: in_progress\n---')
+    writeFileSync(file, '---\nname: " "\ndescription: 42\nstatus: pending\n---')
 
     const result = await createTaskDiagnosticsProvider(root).provide(file)
 
@@ -82,7 +82,7 @@ describe('task diagnostics', () => {
     ])
   })
 
-  it.each(['foo', 'done', 'pending', ''] as const)(
+  it.each(['foo', 'done', 'in_progress', ''] as const)(
     'rejects invalid status `%s`',
     async (status) => {
       const root = createRoot()
@@ -92,7 +92,7 @@ describe('task diagnostics', () => {
       const result = await createTaskDiagnosticsProvider(root).provide(file)
 
       expect(result.diagnostics.map(({ message }) => message)).toEqual([
-        'Frontmatter field "status" must be one of: in_progress | completed.'
+        'Frontmatter field "status" must be one of: pending | completed.'
       ])
     }
   )
@@ -105,7 +105,7 @@ describe('task diagnostics', () => {
     const result = await createTaskDiagnosticsProvider(root).provide(file)
 
     expect(result.diagnostics.map(({ message }) => message)).toEqual([
-      'Frontmatter field "status" must be one of: in_progress | completed.'
+      'Frontmatter field "status" must be one of: pending | completed.'
     ])
   })
 

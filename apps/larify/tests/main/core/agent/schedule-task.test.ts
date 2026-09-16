@@ -137,7 +137,7 @@ describe('Agent scheduled tasks', () => {
     const parentTask = join(rootDir, 'task.md')
     const childTask = join(rootDir, 'child', 'task.md')
     mkdirSync(rootDir, { recursive: true })
-    writeFileSync(parentTask, '---\nname: p\nstatus: in_progress\n---\n')
+    writeFileSync(parentTask, '---\nname: p\nstatus: pending\n---\n')
 
     const nestInputs: string[] = []
     let runs = 0

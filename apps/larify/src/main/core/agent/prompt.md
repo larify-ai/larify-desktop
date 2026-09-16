@@ -197,7 +197,7 @@ Organize and commit progress recursively into single-concern tasks following sep
 ---
 name: <human-readable task title>
 description: <brief description of the task>
-status: in_progress
+status: pending
 ---
 ```
 
@@ -217,12 +217,13 @@ Append each event chronologically as a section:
 
 ### Principles
 
-- Derive top-down, it means call `agent_schedule_task` with a scheduled task.md to complete a subtask first.
-- Reduce bottom-up, it means call `agent_schedule_task` with parent task.md after all subtasks are completed.
+- Derive top-down, reduce bottom-up.
 - Apply separation of concerns recursively until reaching atomicity.
 
 # Workflow
 
-- Must call `agent_ask_user` to clarify the requirement specification and acceptance criteria
-- Must create a root task directory with a task.md with status `in_progress` if it does not exist
-- Must call `agent_schedule_task` with the root task.md path rather than completing it directly
+## Initialization
+
+- First must call `agent_ask_user` to clarify the requirement specification and acceptance criteria
+- Then must create a root task directory with a task.md with status `pending` if it does not exist
+- Finally must call `agent_schedule_task` with the root task.md path to start from the root task

@@ -7,7 +7,8 @@ import type { FileDiagnosticsProvider } from '../../fs/main/diagnostics'
 import { diagnostic, requiredFieldDiagnostics } from './diagnostics'
 import { isWithin } from './files'
 
-const TASK_STATUSES = ['in_progress', 'completed'] as const
+// 任务状态只有两个：pending（待办）与 completed（已完成）。历史值 `in_progress` 已弃用。
+const TASK_STATUSES = ['pending', 'completed'] as const
 
 export function createTaskDiagnosticsProvider(root: string): FileDiagnosticsProvider {
   return {

@@ -1,7 +1,5 @@
 import type { UIMessage } from 'ai'
 import { randomUUID } from 'node:crypto'
-import { existsSync } from 'node:fs'
-import { dirname, join } from 'node:path'
 import type { Disposable } from '@shared/infra/disposable'
 import { larifyWorkspacePath } from '../../utils/app-paths'
 import type { AgentModelConfig } from '../model/config'
@@ -191,21 +189,13 @@ export class Agent implements Disposable {
       } else {
         // 调度了 → 下一轮独立上下文，只喂该 task.md 的 nest 判据
         // （compaction：UI 不把它当用户气泡渲染；nested：模型输入隔离）。
+        // 判据极简（只说"完成哪个 task.md"）；如何完成/何时回父统一由系统提示词的 Workflow 指导。
         nested = true
-        // 父任务 task.md（上一层的 task.md）：存在时判据末尾会附「完成后调
-        // agent_schedule_task(父)」的收尾指示，即**子任务完成后回父**。目录约定
-        // `<tasks>/<A>/<B>/task.md` 的父是 `<tasks>/<A>/task.md`。
-        // 顶层任务（`<tasks>/<A>/task.md`）的父是 `<tasks>/task.md`——它不存在，
-        // 此时不附 parentClause（否则会把模型引向调度一个不存在的父任务）。
-        const parentTask = join(dirname(dirname(taskFile)), 'task.md')
-        const hasParent = existsSync(parentTask)
         message = {
           id: randomUUID(),
           role: 'user',
           metadata: { nested: true, compaction: true },
-          parts: [
-            { type: 'text', text: buildNestPrompt(taskFile, hasParent ? parentTask : undefined) }
-          ]
+          parts: [{ type: 'text', text: buildNestPrompt(taskFile) }]
         }
       }
       // 准备下一轮：刷新磁盘插件（增量 diff，让新上下文/续写立即可见新增/修改/删除的 MCP server）、

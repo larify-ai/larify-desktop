@@ -29,15 +29,19 @@ export function decodeUrlComponent(value: string): string {
   }
 }
 
-function parseFileLink(href: string, fileUrl = false): FileLink {
+function parseFileLink(href: string): FileLink {
   const hashIndex = href.indexOf('#')
   const pathAndQuery = hashIndex < 0 ? href : href.slice(0, hashIndex)
   const rawHash = hashIndex < 0 ? '' : href.slice(hashIndex + 1)
   const queryIndex = pathAndQuery.indexOf('?')
   const rawTarget = queryIndex < 0 ? pathAndQuery : pathAndQuery.slice(0, queryIndex)
+  // 一律解码：`rewriteDriveHrefs` 会把盘符裸路径改写成 `file:///<encodeURI>`，中文等非 ASCII
+  // 会被百分号编码（`功能` → `%E5%8A%9F...`）。若 file URL 分支不解码，打开器拿到的
+  // `link.target` 就带着 `%E5%8A%9F` 去 stat，命中不存在的文件（ENOENT）→ 中文路径点不开。
+  // `file:` 前缀由下游 fileUrlToPath 再按 URL 解析（其 pathname 亦会解码），此处保留前缀即可。
   return {
     kind: 'file',
-    target: fileUrl ? rawTarget : decodeUrlComponent(rawTarget),
+    target: decodeUrlComponent(rawTarget),
     ...(rawHash ? { hash: decodeUrlComponent(rawHash) } : {})
   }
 }
@@ -55,7 +59,7 @@ export function parseWorkspaceLink(href: string): WorkspaceLink | null {
     case 'https':
       return { kind: 'url', url: href }
     case 'file':
-      return URL.canParse(href) ? parseFileLink(href, true) : null
+      return URL.canParse(href) ? parseFileLink(href) : null
     case undefined:
       return parseFileLink(href)
     default:
@@ -69,6 +73,8 @@ export function pathFor(value: string): PathApi {
 }
 
 function fileUrlToPath(target: string): string {
+  // `new URL().pathname` 会把非 ASCII 重新百分号编码（`功能` → `%E5%8A%9F...`），必须再解码
+  // 一次才能得到真实文件路径；否则中文文件会以 `%E5%8A%9F` 去 stat，命中不存在的文件（ENOENT）。
   const url = new URL(target)
   let path = decodeUrlComponent(url.pathname)
   if (/^\/[a-z]:[\\/]/i.test(path)) path = path.slice(1)

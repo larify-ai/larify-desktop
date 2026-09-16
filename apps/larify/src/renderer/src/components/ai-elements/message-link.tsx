@@ -54,7 +54,10 @@ export function MessageLink({
         id={rest.id}
         onClick={(event) => {
           event.preventDefault()
-          onOpenLink?.({ kind: 'file', target })
+          // 必须传 parseWorkspaceLink **解码后**的 link.target：原始 href 里的中文等
+          // 非 ASCII 已被 Markdown 渲染器做百分号编码（如 `功能` → `%E5%8A%9F...`），
+          // 若直接把原始 href 当路径去 stat 会命中不存在的文件（ENOENT），链接点不开。
+          onOpenLink?.({ kind: 'file', target: link.target })
         }}
         tabIndex={rest.tabIndex}
         title={rest.title}

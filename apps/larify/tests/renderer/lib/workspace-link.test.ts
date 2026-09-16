@@ -47,6 +47,18 @@ describe('workspace link', () => {
     })
   })
 
+  it('decodes a percent-encoded Chinese filename in a drive file URL', () => {
+    // 回归：`workspace-markdown-plugins` 的 `rewriteDriveHrefs` 会把盘符链接改写成
+    // `file:///<encodeURI>`，中文被编码成 `%E5%8A%9F...`。`new URL().pathname` 又会把中文
+    // 重新编码，故 fileUrlToPath 必须再 decode 一次；否则打开器拿 `%E5%8A%9F` 去 stat 会
+    // 报 ENOENT（用户反馈：回复里的中文路径链接点击不能跳转）。
+    const href =
+      'file:///D:/Workspace/context-os/docs/context-os-%E5%8A%9F%E8%83%BD%E8%B0%83%E7%A0%94%E6%8A%A5%E5%91%8A.md'
+    expect(resolveWorkspaceLink('D:/Workspace/context-os', href)).toEqual({
+      path: 'D:\\Workspace\\context-os\\docs\\context-os-功能调研报告.md'
+    })
+  })
+
   it('keeps POSIX file URLs POSIX without a workspace base', () => {
     expect(resolveWorkspaceLink('', 'file:///tmp/notes.md')).toEqual({ path: '/tmp/notes.md' })
   })

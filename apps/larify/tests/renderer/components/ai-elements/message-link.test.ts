@@ -132,7 +132,9 @@ describe('MessageLink', () => {
     })
   })
 
-  it('renders a Markdown-encoded Windows path as a file button', async () => {
+  it('decodes a Markdown-encoded Windows path before handing it to the opener', async () => {
+    // 原始 href 里的 `%5C`（反斜杠）必须解码成 `\` 再交给打开器：未解码的路径去
+    // stat 会命中不存在的文件（ENOENT）而点不开。
     const onOpenLink = vi.fn()
     await act(async () => {
       root.render(
@@ -150,7 +152,25 @@ describe('MessageLink', () => {
     expect(container.querySelector('a')).toBeNull()
     expect(onOpenLink).toHaveBeenCalledExactlyOnceWith({
       kind: 'file',
-      target: 'D:%5CWorkspace%5Cproject%5Cpackage.json'
+      target: 'D:\\Workspace\\project\\package.json'
+    })
+  })
+
+  it('decodes percent-encoded non-ASCII paths (e.g. Chinese filenames)', async () => {
+    // 用户报告：回复里的中文路径链接点击报 ENOENT（stat 的是 `%E5%8A%9F...`）。Markdown 渲染器
+    // 会把中文文件名的 href 做百分号编码，打开器必须拿到解码后的真实路径。
+    const onOpenLink = vi.fn()
+    const encoded = 'D:/Workspace/context-os/docs/context-os-%E5%8A%9F%E8%83%BD%E8%B0%83%E7%A0%94%E6%8A%A5%E5%91%8A.md'
+    await act(async () => {
+      root.render(createElement(MessageLink, { href: encoded, onOpenLink }, '功能调研报告.md'))
+    })
+
+    const button = container.querySelector('button')!
+    await act(async () => button.click())
+
+    expect(onOpenLink).toHaveBeenCalledExactlyOnceWith({
+      kind: 'file',
+      target: 'D:/Workspace/context-os/docs/context-os-功能调研报告.md'
     })
   })
 

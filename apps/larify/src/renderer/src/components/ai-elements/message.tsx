@@ -332,10 +332,13 @@ const streamdownTranslations = {
   mermaidFormatSvg: 'SVG',
   openExternalLink: '打开外部链接',
   openLink: '打开链接',
+  resetView: '重置视图',
   tableFormatCsv: 'CSV',
   tableFormatMarkdown: 'Markdown',
   tableFormatTsv: 'TSV',
-  viewFullscreen: '全屏查看'
+  viewFullscreen: '全屏查看',
+  zoomIn: '放大',
+  zoomOut: '缩小'
 } satisfies StreamdownTranslations
 
 let codeHighlighterPreloadScheduled = false

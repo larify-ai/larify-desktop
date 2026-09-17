@@ -307,6 +307,47 @@ describe('message sanitizer', () => {
     expect(await toModelMessages([])).toEqual([])
   })
 
+  it('prefixes a user message marked with workflowPrefix, without touching its stored text', async () => {
+    const marked: UIMessage = {
+      id: 'user-1',
+      role: 'user',
+      metadata: { workflowPrefix: true },
+      parts: [{ type: 'text', text: '调研这个代码库' }]
+    }
+
+    const modelMessages = await toModelMessages([marked])
+
+    expect(modelMessages).toEqual([
+      { role: 'user', content: [{ type: 'text', text: '/follow_workflow 调研这个代码库' }] }
+    ])
+    // 不改动入参（落库 text 仍为原文）。
+    expect(marked.parts[0]).toEqual({ type: 'text', text: '调研这个代码库' })
+  })
+
+  it('does not prefix unmarked users or internal (nested/compaction) users', async () => {
+    const plain = {
+      id: 'user-1',
+      role: 'user',
+      parts: [{ type: 'text', text: 'plain' }]
+    } as UIMessage
+    const nested = {
+      id: 'user-2',
+      role: 'user',
+      metadata: { nested: true },
+      parts: [{ type: 'text', text: 'nest prompt' }]
+    } as UIMessage
+    const compaction = {
+      id: 'user-3',
+      role: 'user',
+      metadata: { compaction: true },
+      parts: [{ type: 'text', text: '# Handoff' }]
+    } as UIMessage
+
+    const modelMessages = await toModelMessages([plain, nested, compaction])
+
+    expect(JSON.stringify(modelMessages)).not.toContain('/follow_workflow')
+  })
+
   it('converts attachments to paths only for model input', async () => {
     const message: UIMessage = {
       id: 'user-1',

@@ -58,14 +58,13 @@ beforeEach(() => {
 })
 
 describe('Agent scheduled tasks', () => {
-  it('runs nested independent contexts per scheduled task and returns to the main chain when none is scheduled', async () => {
+  it('runs nested independent contexts per scheduled task and ends when none is scheduled', async () => {
     // 唯一规则（无层级概念）：某轮调度了 task.md(X) → 下一轮在 X 的独立上下文跑（nested=true，
-    // 喂 nest 判据）；没调度 → 已在主链则结束，否则「回主链」（nested=false、message=undefined）。
+    // 喂 nest 判据）；没调度 → 该任务跑完，整条链结束（**不再有「回主链轮」**）。
     // run1 主任务调度 top        → run2 独立上下文(top)
     // run2 调度 child            → run3 独立上下文(child)
     // run3 调度 top（回父）       → run4 独立上下文(top)
-    // run4 不再调度              → 回主链
-    // run5 回主链、不再调度       → 结束。
+    // run4 不再调度              → 结束。
     const top = `${taskRoot.replaceAll('\\', '/')}/root/task.md`
     const child = join(taskRoot, 'root', 'child', 'task.md')
     const phases: Array<{ nested?: boolean; hasMessage: boolean }> = []
@@ -87,14 +86,13 @@ describe('Agent scheduled tasks', () => {
     agent.send({ sessionId: 'session', message, cwd: 'cwd' }, sink)
 
     await vi.waitFor(() => expect(sink.end).toHaveBeenCalledOnce())
-    expect(runs).toBe(5)
-    // run1 主任务（用户消息）；run2~4 每个被调度任务都在自己的独立上下文（有 nest 判据）；
-    // run5 回主链（不再调度，无新消息）→ 结束。
+    expect(runs).toBe(4)
+    // run1 主任务（用户消息）；run2~4 每个被调度任务都在自己的独立上下文（有 nest 判据），
+    // 最后一轮不再调度即结束。
     expect(phases[0]).toEqual({ nested: false, hasMessage: true })
     expect(phases[1]).toEqual({ nested: true, hasMessage: true })
     expect(phases[2]).toEqual({ nested: true, hasMessage: true })
     expect(phases[3]).toEqual({ nested: true, hasMessage: true })
-    expect(phases[4]).toEqual({ nested: false, hasMessage: false })
   })
 
   it('honors only the first task when the model schedules more than one in a turn', async () => {
@@ -126,8 +124,8 @@ describe('Agent scheduled tasks', () => {
     expect(nestInputs).toHaveLength(1)
     expect(nestInputs[0]).toContain(first)
     expect(nestInputs[0]).not.toContain(second)
-    // run1 主任务调度 → run2 首个任务的独立上下文（不调度）→ run3 回主链（不调度）→ 结束。
-    expect(runs).toBe(3)
+    // run1 主任务调度 → run2 首个任务的独立上下文（不调度）→ 结束。
+    expect(runs).toBe(2)
   })
 
   it('stops the recursion after cancellation', async () => {
@@ -284,12 +282,56 @@ describe('Agent scheduled tasks', () => {
       }
     )
 
-    // run1 主任务调度子任务 → run2 子任务独立上下文（不再调度）→ run3 回主链（不再调度）→ 结束。
+    // run1 主任务调度子任务 → run2 子任务独立上下文（不再调度）→ 结束。
     // baseProcessingMs 逐轮累加并回填到最后一轮。
-    await vi.waitFor(() => expect(runs).toBe(3))
+    await vi.waitFor(() => expect(runs).toBe(2))
     expect(bases[0]).toBe(0)
     expect(bases[1]).toBe(1000)
-    expect(bases[2]).toBe(2000)
+  })
+
+  it('delivers the nested round’s final text before ending (regression)', async () => {
+    // 回归（真实缺陷）：子任务轮**未调度**（例如被 maxOutputTokens 截断 finish=length）时，
+    // 编排层曾「回主链」再跑一轮去产出汇总——但那一轮会把子任务已做完的事重做一遍
+    // （它的模型输入过滤了 nested，看不到子任务干了什么），最后还多问一次用户。
+    // 现在：子任务轮跑完即结束，其 final text 就是用户要看的结论。
+    // 断言：只有 2 轮（主链 + 子任务），且子任务轮的文本能送达渲染端。
+    const child = join(taskRoot, 'root', 'child', 'task.md')
+    const phases: Array<{ nested?: boolean; hasMessage: boolean }> = []
+    let runs = 0
+    mocks.run.mockImplementation(async (_s, request) => {
+      runs++
+      phases.push({ nested: request.nested, hasMessage: request.message !== undefined })
+      if (runs === 1) {
+        const context = request.options.toolsContext.agent_schedule_task as {
+          scheduleTask: (path: string) => void
+        }
+        context.scheduleTask(child)
+      }
+      request.onChunk({
+        type: 'text-delta',
+        id: `t${runs}`,
+        delta: runs === 2 ? 'FINAL SUMMARY' : `main work ${runs}`
+      } as never)
+      return undefined
+    })
+    const sink = { chunk: vi.fn(), error: vi.fn(), end: vi.fn() }
+    const agent = new Agent(sessions as never, pluginHost as never)
+
+    agent.send({ sessionId: 'session', message, cwd: 'cwd' }, sink)
+
+    await vi.waitFor(() => expect(sink.end).toHaveBeenCalledOnce())
+    expect(runs).toBe(2)
+    expect(phases).toEqual([
+      { nested: false, hasMessage: true },
+      { nested: true, hasMessage: true }
+    ])
+    // 子任务轮的结论必须送达渲染端。
+    const texts = sink.chunk.mock.calls
+      .map(([chunk]) => chunk)
+      .filter((chunk) => chunk?.type === 'text-delta')
+      .map((chunk) => (chunk as { delta?: string }).delta)
+    expect(texts).toContain('FINAL SUMMARY')
+    expect(sink.error).not.toHaveBeenCalled()
   })
 
   it('does not end the stream while a task is scheduled', async () => {
@@ -315,8 +357,8 @@ describe('Agent scheduled tasks', () => {
     agent.send({ sessionId: 'session', message, cwd: 'cwd' }, sink)
 
     await vi.waitFor(() => expect(sink.end).toHaveBeenCalledOnce())
-    // run1 主任务调度 → run2 子任务独立上下文（不调度）→ run3 回主链（不调度）→ 结束。
-    expect(runs).toBe(3)
+    // run1 主任务调度 → run2 子任务独立上下文（不调度）→ 结束。
+    expect(runs).toBe(2)
     expect(ended).toBe(true)
   })
 

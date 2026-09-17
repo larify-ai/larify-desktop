@@ -23,6 +23,12 @@ const message = (id: string, role: 'user' | 'assistant', text: string): UIMessag
   parts: [{ type: 'text', text }]
 })
 
+// 主链上用户的真实输入落库时会带上 `workflowPrefix` 标记（送模型时才拼前缀，text 保持原文）。
+const userMessage = (id = 'user', text = 'hello'): UIMessage => ({
+  ...message(id, 'user', text),
+  metadata: { workflowPrefix: true }
+})
+
 afterEach(async () => {
   vi.clearAllMocks()
   await Promise.all(directories.splice(0).map((path) => rm(path, { recursive: true })))
@@ -39,7 +45,7 @@ describe('runStoredAgentSession persistence', () => {
     const directory = await mkdtemp(join(tmpdir(), 'larify-agent-persist-'))
     directories.push(directory)
     const database = join(directory, 'sessions.db')
-    const user = message('user', 'user', 'hello')
+    const user = userMessage()
     const step: UIMessage = {
       id: 'assistant',
       role: 'assistant',
@@ -134,7 +140,7 @@ describe('runStoredAgentSession persistence', () => {
 
   it('uses persisted ordering and does not duplicate a retried request', async () => {
     const store = await createStore()
-    const user = message('user', 'user', 'hello')
+    const user = userMessage()
     const firstResponse = message('assistant-1', 'assistant', 'first')
     const secondResponse = message('assistant-2', 'assistant', 'second')
     mocks.run
@@ -162,9 +168,77 @@ describe('runStoredAgentSession persistence', () => {
     store.dispose()
   })
 
+  it('writes a nested ask_user continuation back into the same row (no duplicate, no new id)', async () => {
+    // 回归：子任务轮（nested）里 ask_user 提问后，用户回答经 addToolOutput 再次 send()。
+    // 该轮必须**写回原来那条嵌套行**（原地替换），而非新建一条 —— 否则 UI 会多出一条
+    // （实测：`#3192` 提问 + `#3193` 回答并列，用户看到"重复"）。
+    // 关键：渲染层传来的 message 是**主链 assistant** 的快照（不含嵌套行身份），
+    // 故必须由 agent.ts 下传 previousStored。
+    const store = await createStore()
+    const anchor: UIMessage = {
+      id: 'main',
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'main work' }]
+    }
+    const nestedRow: UIMessage = {
+      id: 'main-nested-aaaa',
+      role: 'assistant',
+      metadata: { nested: true, totalProcessingMs: 100 },
+      parts: [
+        { type: 'text', text: 'nested question' },
+        { type: 'tool-agent_ask_user', toolCallId: 'call-1', state: 'input-available', input: {} }
+      ]
+    }
+    store.createSession({ cwd: '/workspace', id: 'session', title: 'Session' })
+    store.saveMessages('session', [anchor, nestedRow])
+
+    // 回答续写：渲染层发来的是含 tool-output 的**主链 assistant**（id 与主链相同）。
+    const answer: UIMessage = {
+      ...anchor,
+      parts: [...anchor.parts, { type: 'text', text: 'answer' }]
+    }
+    const continued: UIMessage = {
+      id: nestedRow.id,
+      role: 'assistant',
+      parts: [
+        ...nestedRow.parts,
+        {
+          type: 'tool-agent_ask_user',
+          toolCallId: 'call-1',
+          state: 'output-available',
+          output: 'ok'
+        },
+        { type: 'text', text: 'done' }
+      ]
+    }
+    mocks.run.mockImplementation(async (messages, _options, _onChunk, onMessage) => {
+      expect(messages).toEqual([answer])
+      onMessage(continued)
+      return [continued]
+    })
+
+    await runStoredAgentSession(store, {
+      sessionId: 'session',
+      cwd: '/workspace',
+      message: answer,
+      nested: true,
+      previousStored: nestedRow,
+      options: {} as never
+    })
+
+    const rows = store.loadVisibleMessages('session')
+    // 仍未新增行：主链 assistant + 那条嵌套行，共 2 条。
+    expect(rows.map((row) => row.id)).toEqual(['main', 'main-nested-aaaa'])
+    const stored = rows.find((row) => row.id === 'main-nested-aaaa') as UIMessage
+    // 原地替换：只存增量、保留 nested 标记、保留总时长。
+    expect(stored.metadata).toMatchObject({ nested: true })
+    expect(stored.parts).toEqual(continued.parts.slice(nestedRow.parts.length))
+    store.dispose()
+  })
+
   it('keeps the request when execution fails', async () => {
     const store = await createStore()
-    const user = message('user', 'user', 'hello')
+    const user = userMessage()
     mocks.run.mockRejectedValue(new Error('failed'))
 
     await expect(

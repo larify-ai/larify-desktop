@@ -23,7 +23,7 @@ export type { AgentSink } from './worker'
 function awaitUserAnswer(sessions: SessionStore, sessionId: string): boolean {
   // 必须用 lastMessage（**不过滤 nested**）：ask_user 常出现在**子任务轮**（nested）里，
   // 而 lastAssistant 会把 nested 消息排除掉——用它判定会漏掉子任务轮的 ask_user，
-  // 于是"调度→子任务轮问用户→没停→继续回主链"，用户回答时流程已跑偏（消息末尾是 nest 判据）。
+  // 于是"调度→子任务轮问用户→没停→继续跑下一轮"，用户回答时流程已跑偏（消息末尾是 nest 判据）。
   const last = sessions.lastMessage(sessionId)
   if (!last || last.role !== 'assistant') return false
   const parts = last.parts ?? []
@@ -68,7 +68,8 @@ export class Agent implements Disposable {
     this.activeSinks.set(input.sessionId, sink)
     const cancellation = new AbortController()
     this.cancellations.set(input.sessionId, cancellation)
-    // 多轮共享同一 sink，但每轮跑完（未再调度）都会各自 end——必须是同一个流只终结一次。
+    // 多轮共享同一 sink；`end` 只由编排层在**整条链真正结束**时发一次（worker 不自行 end——
+    // 它只负责一轮，无从知道本轮之后是否还有被调度的任务）。这里保证幂等。
     let terminated = false
     const streamSink: AgentSink = {
       chunk: (chunk) => sink.chunk(chunk),
@@ -133,10 +134,11 @@ export class Agent implements Disposable {
   ): Promise<void> {
     let worker = firstWorker
     let runtime = firstRuntime
-    // 每轮的消息：主链轮是用户消息（首轮）或不新增消息（回主链）；独立上下文轮是本任务的 nest 判据。
+    // 每轮的消息：首轮是用户消息；被调度任务的轮次是该任务的 nest 判据；
+    // ask_user 回答续写时是渲染层送来的 tool-output（assistant）。
     let message: UIMessage | undefined = request.message
-    // 当前是否在主链：主链轮（用户可感知的会话线）为 false，独立上下文轮为 true。
-    // 首轮在主链；「回主链」= 重置回这个初始状态（nested=false、message=undefined）。
+    // 本轮是否用**独立上下文**：为真时模型输入只有本轮 `message`（不加载主链历史），
+    // 使各任务上下文互相隔离。被调度任务的轮次为真；主链轮与 ask_user 续写按其来源决定。
     let nested = false
     // 各轮是独立上下文，totalProcessingMs 彼此独立——在编排层累加，回填到最后一轮。
     let baseProcessingMs = 0
@@ -147,10 +149,15 @@ export class Agent implements Disposable {
     // 时长都写在其 metadata 上），无需任何额外持久化：
     const resumedFlag = awaitUserAnswer(this.sessions, request.sessionId)
     const resumed = request.message.role === 'assistant' && resumedFlag
+    // 续写要**写回上一轮那条 assistant**（原地替换），故把它的落库身份一路下传到 persist。
+    // 只有这里知道"上一轮的落库身份"：渲染层传来的 message 是**主链 assistant** 的快照
+    // （嵌套行在 UI 上合并进主链消息），既不含嵌套行 id、也推不出增量切片基准。
+    let previousStored: UIMessage | undefined
     if (resumed) {
       // 同样用 lastMessage：ask_user 所在的轮次可能是 nested，其 metadata 才是要恢复的
       // nested / totalProcessingMs 来源。
       const previous = this.sessions.lastMessage(request.sessionId)
+      previousStored = previous
       // 仅恢复**上下文归属与已累计时长**；`message` 必须保留——用户的回答（tool-output）
       // 要作为新消息喂给模型，才能与上一轮的 ask_user(tool-call) 配对；置空会触发
       // 「Tool result is missing for tool call」。
@@ -160,10 +167,10 @@ export class Agent implements Disposable {
     }
     // 编排模型（唯一规则，不区分任务层级）：
     // - 某轮**调度了** task.md(X) → 下一轮在 **X 自己的独立上下文**里跑（nested=true、喂 nest 判据）。
-    //   不论是下探子任务，还是子任务「回父」再调度父任务，都走这里。
-    // - 某轮**没调度** → 该任务跑完：若已在**主链**则结束；否则**回主链**（nested=false、
-    //   message=undefined，即回到与首轮相同的状态）——"调度 → 独立上下文跑 → 没调度则回主链"
-    //   这一循环，由模型在判据里用 `agent_schedule_task` 驱动，直到主链轮也不调度才真正结束。
+    //   下探子任务、子任务「回父」再调度父任务（多层嵌套），都走这里——故嵌套层数不受限。
+    // - 某轮**没调度** → 该任务跑完，**整条链结束**（不再额外驱动一轮）。
+    // 即："调度 → 独立上下文跑" 这一循环由模型在判据里用 `agent_schedule_task` 驱动，
+    // 直到某轮不再调度为止。
     for (;;) {
       // cancel() 会中止本信号；据此在轮次间停止继续递归。
       // 必须显式结束流：在**轮次之间**取消时（例如编排层正 await refreshPlugins），
@@ -174,33 +181,49 @@ export class Agent implements Disposable {
         sink.end()
         return
       }
-      const result = await worker.run({ ...request, message, runtime, nested, baseProcessingMs })
+      const result = await worker.run({
+        ...request,
+        message,
+        runtime,
+        nested,
+        baseProcessingMs,
+        previousStored
+      })
+      // 续写只对**本轮**生效：续写完成后就是普通轮次，锚点回到正常取值。
+      previousStored = undefined
       if (result.totalProcessingMs !== undefined) baseProcessingMs = result.totalProcessingMs
+      // 本轮停在「等待用户回答」(agent_ask_user 仍为等待态)：**暂停**，不结束流。
+      // ask_user 是客户端工具，用户回答经 addToolOutput 再次 send() 续写；此处若结束，
+      // 回答就会被当成新轮次，上下文与时长都被重置。
+      // **必须优先于 `scheduled` 判定**：模型可能在同一响应里既提问又调度（例如先问用户
+      // "是否开始"，同时把任务挂上）。若因有调度就继续跑下一轮，那个提问会被绕过——用户
+      // 回答时流程已跑到别处，回答被当作新一轮主链续写（实测：`#3203` 遗留一张"等待回答"
+      // 的卡片，用户回答后又跑了一整轮主链）。
+      // 注意（本循环的**三个 return 分支都必须 end 流**：signal.aborted / 等待回答 / 未调度）：
+      // worker 不自行 end，故**流的唯一正常结束点在这里**。漏掉任一分支都会让会话停在"运行中"。
+      if (awaitUserAnswer(this.sessions, request.sessionId)) {
+        sink.end()
+        return
+      }
       const taskFile = result.scheduled
       if (taskFile === undefined) {
-        // 没调度 → 该任务跑完：已在主链 → 结束；否则回主链（回到与首轮相同的初始状态）。
-        // 本轮停在「等待用户回答」(agent_ask_user 仍为等待态)：**暂停**，不回主链、不结束。
-        // ask_user 是客户端工具，用户回答经 addToolOutput 再次 send() 续写；此处若继续
-        // （尤其 nested 轮会"回主链"），回答就会被当成新轮次，上下文与时长都被重置。
-        if (awaitUserAnswer(this.sessions, request.sessionId)) return
-        if (!nested) return
-        nested = false
-        message = undefined
-      } else {
-        // 调度了 → 下一轮独立上下文，只喂该 task.md 的 nest 判据
-        // （compaction：UI 不把它当用户气泡渲染；nested：模型输入隔离）。
-        // 判据极简（只说"完成哪个 task.md"）；如何完成/何时回父统一由系统提示词的 Workflow 指导。
-        nested = true
-        message = {
-          id: randomUUID(),
-          role: 'user',
-          metadata: { nested: true, compaction: true },
-          parts: [{ type: 'text', text: buildNestPrompt(taskFile) }]
-        }
+        // 没调度 → 该任务跑完，整条链结束（不再额外跑一轮「回主链」）。
+        sink.end()
+        return
+      }
+      // 调度了 → 下一轮独立上下文，只喂该 task.md 的 nest 判据
+      // （compaction：UI 不把它当用户气泡渲染；nested：模型输入隔离）。
+      // 判据极简（只说"完成哪个 task.md"）；如何完成/何时回父统一由系统提示词的 Workflow 指导。
+      nested = true
+      message = {
+        id: randomUUID(),
+        role: 'user',
+        metadata: { nested: true, compaction: true },
+        parts: [{ type: 'text', text: buildNestPrompt(taskFile) }]
       }
       // 准备下一轮：刷新磁盘插件（增量 diff，让新上下文/续写立即可见新增/修改/删除的 MCP server）、
-      // 重建 runtime、清读状态。每轮新建 worker：worker 在自己那一轮未调度任务时会 finish()
-      // （closed=true），同一 worker 无法再跑下一轮。跨轮复用 track（文件变更延续）。
+      // 重建 runtime、清读状态。每轮新建 worker：worker 在自己那一轮不再自行 end 流（见 worker.ts），
+      // 故同一 worker 不再受 closed 限制前，这里按轮重建以保证每轮状态干净。跨轮复用 track（文件变更延续）。
       await this.pluginHost.refreshPlugins(pluginDiscovery.discover())
       runtime = createAgentRuntime(request, this.pluginHost)
       clearReadState(request.sessionId)

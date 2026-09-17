@@ -923,17 +923,40 @@ describe('assistant message render items', () => {
     expect(items[0].summary).toBe('已中断 · 处理了 8秒')
   })
 
-  it('does not expose a final answer for a recursive child task', () => {
-    // 子任务的文本全部是过程（产出落在 task.md），不应突出成"最终答案"。
+  it('exposes a final answer on a recursive child task (it is where the chain ends)', () => {
+    // 链在**子任务轮**结束（不再有「回主链轮」），故子任务轮的收尾文本就是用户要看的答复，
+    // 必须渲染成 final-text；中间的过渡叙述不会被误当结论（directTextStartIndex 已限定）。
     const nested = {
-      ...message(tool('1', 'Read source'), { type: 'text', text: '子任务过程文字' }),
+      ...message(tool('1', 'Read source'), { type: 'text', text: '子任务结论' }),
       metadata: { nested: true, startedAt: 1_000, completedAt: 2_000 }
     } as UIMessage
 
     const items = buildAssistantRenderItems(nested, false)
 
-    expect(items.map((item) => item.kind)).toEqual(['activity-group'])
-    expect(items[0].children?.map((item) => item.kind)).toEqual(['tool-group', 'intermediate-text'])
+    expect(items.map((item) => item.kind)).toEqual(['activity-group', 'final-text'])
+  })
+
+  it('treats only the trailing text of a nested round as its final answer', () => {
+    // 嵌套轮的中间叙述（后面还有工具调用）仍是过程，只有末尾那段收尾文本是答复。
+    const nested = {
+      ...message(
+        tool('1', 'Read source'),
+        { type: 'text', text: '现在开始创建文件。' },
+        { type: 'step-start' },
+        tool('2', '写入文件', 'output-available', 'fs_write'),
+        { type: 'text', text: '## 任务完成\n已创建三个文件。' }
+      ),
+      metadata: { nested: true, startedAt: 1_000, completedAt: 2_000 }
+    } as UIMessage
+
+    const items = buildAssistantRenderItems(nested, false)
+
+    expect(items.at(-1)).toEqual(expect.objectContaining({ kind: 'final-text', partIndexes: [4] }))
+    expect(items[0].children?.map((item) => item.kind)).toEqual([
+      'tool-group',
+      'intermediate-text',
+      'tool-group'
+    ])
   })
 
   it('still exposes a final answer for a normal assistant message', () => {

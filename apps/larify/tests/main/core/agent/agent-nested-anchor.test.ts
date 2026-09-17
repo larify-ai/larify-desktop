@@ -73,11 +73,9 @@ describe('Agent nested anchor', () => {
     )
     await vi.waitFor(() => expect(sink.end).toHaveBeenCalled(), { timeout: 3000 })
 
-    // run1 主链（用户消息）；run2 被调度任务的独立上下文（nested=true、有 nest 判据）；
-    // run3 回主链（不调度、无新消息）→ 结束。
+    // run1 主链（用户消息）；run2 被调度任务的独立上下文（nested=true、有 nest 判据）→ 结束。
     expect(phases[0]).toEqual({ nested: false, hasMessage: true })
     expect(phases[1]).toEqual({ nested: true, hasMessage: true })
-    expect(phases[2]).toEqual({ nested: false, hasMessage: false })
   })
 
   it('does not crash and passes no UI anchor when the session has no main-chain assistant yet', async () => {
@@ -101,8 +99,8 @@ describe('Agent nested anchor', () => {
     )
     await vi.waitFor(() => expect(sink.end).toHaveBeenCalled(), { timeout: 3000 })
 
-    // run1 主链调度 → run2 子任务独立上下文（不调度）→ run3 回主链（不调度）→ 结束。
-    expect(runs).toBe(3)
+    // run1 主链调度 → run2 子任务独立上下文（不调度）→ 结束。
+    expect(runs).toBe(2)
     // nested 轮仍走独立上下文；因无锚点，uiOriginalMessages（第 5 参）为 undefined。
     expect(mocks.run.mock.calls[1][1].nested).toBe(true)
     expect(mocks.run.mock.calls[1][4]).toBeUndefined()

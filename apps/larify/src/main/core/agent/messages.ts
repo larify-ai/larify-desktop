@@ -74,9 +74,28 @@ export async function prepareMessages(messages: UIMessage[]): Promise<UIMessage[
   return valid
 }
 
+/**
+ * 给带 `metadata.workflowPrefix` 标记的用户消息的首个文本片段前拼上工作流前缀。
+ * 该标记由 persist 在**落库用户输入**时打上并持久化（text 保持原文，故 UI/标题/搜索天然
+ * 看不到前缀）；前缀由标记**确定性**拼出，每次请求送出的文本一致，不破坏 prompt 缓存。
+ */
+function withWorkflowPrefix(message: UIMessage): UIMessage {
+  if (message.role !== 'user') return message
+  const metadata = message.metadata as Record<string, unknown> | undefined
+  if (metadata?.workflowPrefix !== true) return message
+  const partIndex = message.parts.findIndex((part) => part.type === 'text')
+  if (partIndex < 0) return message
+  const part = message.parts[partIndex] as { type: 'text'; text: string }
+  const parts = [...message.parts]
+  parts[partIndex] = { ...part, text: `/follow_workflow ${part.text}` }
+  return { ...message, parts }
+}
+
 export function toModelMessages(
   messages: UIMessage[],
   tools: ToolSet = {}
 ): Promise<ModelMessage[]> {
-  return convertToModelMessages(messages.map(replaceFilesWithPaths), { tools })
+  return convertToModelMessages(messages.map(withWorkflowPrefix).map(replaceFilesWithPaths), {
+    tools
+  })
 }

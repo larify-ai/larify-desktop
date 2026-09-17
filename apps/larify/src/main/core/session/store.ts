@@ -116,7 +116,7 @@ export class SessionStore implements Disposable {
   /**
    * 会话的最后一条消息（**不过滤 nested**）。用于判定「是否停在等待用户回答」：
    * `agent_ask_user` 可能出现在**子任务轮**（nested）里，而 lastAssistant 会过滤 nested，
-   * 用它判定会漏掉子任务轮的 ask_user，导致 ask_user 后编排层继续"回主链"而非暂停。
+   * 用它判定会漏掉子任务轮的 ask_user，导致 ask_user 后编排层不暂停、继续跑下一轮。
    */
   lastMessage(id: string): UIMessage | undefined {
     const row = this.database

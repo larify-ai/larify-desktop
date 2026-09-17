@@ -108,6 +108,10 @@ export function runAgent(
     ...streamOptions,
     model: wrappedModel,
     messages,
+    // DeepSeek 的 `max_tokens` 官方默认仅 4096，长任务（如一次写几十个文件）会中途被
+    // 截断（finishReason=length），导致该轮的最终答复丢失。这里显式设为模型上限（384K），
+    // 让长输出不被过早切断；输入与输出共享 1M 上下文，若输入很大则由服务端按余量收敛。
+    maxOutputTokens: 384 * 1024,
     maxRetries: 0,
     // 流级恢复：内容已流出后（mid-stream）收到错误时，只重跑失败的模型 step，
     // 保留已完成的历史 steps、工具调用与工具结果（不重放已完成工作）。

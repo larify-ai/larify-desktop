@@ -31,6 +31,11 @@ const user: UIMessage = {
   role: 'user',
   parts: [{ type: 'text', text: 'hello' }]
 }
+// 主链上用户的真实输入在落库时会带上 `workflowPrefix` 标记（送模型时才拼前缀，text 保持原文）。
+const userStored: UIMessage = {
+  ...user,
+  metadata: { workflowPrefix: true }
+}
 const assistant: UIMessage = {
   id: 'assistant',
   role: 'assistant',
@@ -69,7 +74,14 @@ describe('runStoredAgentSession', () => {
       options: {} as never
     })
 
-    expect(mocks.save).toHaveBeenNthCalledWith(1, sessions, 'session', 'cwd', [user], undefined)
+    expect(mocks.save).toHaveBeenNthCalledWith(
+      1,
+      sessions,
+      'session',
+      'cwd',
+      [userStored],
+      undefined
+    )
     expect(sessions.loadMessages).toHaveBeenCalledWith('session')
     expect(mocks.save.mock.invocationCallOrder[0]).toBeLessThan(
       sessions.loadMessages.mock.invocationCallOrder[0]
@@ -152,18 +164,126 @@ describe('runStoredAgentSession', () => {
     })
 
     // 落库：id 换新、parts 仅增量、带 nested 标记。
+    // id 形如 `main-nested-<uuid>`：**每轮唯一**，避免多轮嵌套（回父/重入/续写）因
+    // `ON CONFLICT(session_id,id) DO UPDATE` 互相覆盖（实测判据行堆到 18+ 条、assistant 仅 1 条）。
     const stored = sessions.saveMessages.mock.calls.at(-1)?.[1]?.[0] as UIMessage
-    expect(stored.id).toBe('main-nested')
+    expect(stored.id).toMatch(/^main-nested-.+/)
     expect(stored.metadata).toMatchObject({ nested: true })
     expect(stored.parts).toEqual([{ type: 'text', text: 'child delta' }])
     // 返回值即落库身份（供 worker 快照回写复用）。
-    expect(result?.id).toBe('main-nested')
+    expect(result?.id).toBe(stored.id)
     // 绝不按 anchor 的 id 回写（否则覆盖主链行）。
     for (const [, messages] of sessions.saveMessages.mock.calls) {
       for (const m of messages as UIMessage[]) {
         if (m.role === 'assistant') expect(m.id).not.toBe('main')
       }
     }
+  })
+
+  it('gives each nested round a distinct id so successive rounds never clobber each other', async () => {
+    // 回归：anchor（主链 assistant）在整段嵌套期间不变，故 `value.id` 每轮相同。
+    // 若落库 id 固定为 `${id}-nested`，第二轮会覆盖第一轮 —— 表现为「判据行不断累积、
+    // assistant 只有最后一条」。这里连续跑两轮嵌套，断言两轮落库 id 不同。
+    const anchor: UIMessage = {
+      id: 'main',
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'main work' }]
+    }
+    const sessions = {
+      hasSession: vi.fn(() => true),
+      loadMessages: vi.fn(() => [anchor]),
+      lastAssistant: vi.fn(() => anchor),
+      renameSession: vi.fn(),
+      saveMessages: vi.fn()
+    }
+    const runRound = async (delta: string): Promise<string> => {
+      const merged: UIMessage = {
+        id: 'main',
+        role: 'assistant',
+        parts: [...anchor.parts, { type: 'text', text: delta }]
+      }
+      mocks.run.mockImplementation(async (_m, _o, _c, onMessage) => {
+        onMessage(merged)
+        return [merged]
+      })
+      await runStoredAgentSession(sessions as never, {
+        sessionId: 'session',
+        cwd: 'cwd',
+        message: { id: `nest-${delta}`, role: 'user', parts: [{ type: 'text', text: delta }] },
+        nested: true,
+        options: {} as never
+      })
+      return (sessions.saveMessages.mock.calls.at(-1)?.[1]?.[0] as UIMessage).id
+    }
+
+    const first = await runRound('round one')
+    const second = await runRound('round two')
+    expect(first).not.toBe(second)
+    expect(first).toMatch(/^main-nested-.+/)
+    expect(second).toMatch(/^main-nested-.+/)
+  })
+
+  it('never marks an assistant continuation as nested (would clobber the main-chain row)', async () => {
+    // 回归：子任务轮（nested）内发生 ask_user → 用户回答经 addToolOutput 再次 send()，
+    // 该 message 的 role=assistant 且 **id 与主链 assistant 相同**（渲染层把 tool-output
+    // 追加到当前 assistant）。若 tag 给它也打 nested，saveSessionMessages 会以
+    // `ON CONFLICT(session_id,id) DO UPDATE` 用 `{id: 主链 id, nested:true}` **覆盖主链行**；
+    // loadMessages 会过滤 nested → 重启（从 DB 重载）后主链消息消失 → 对话错乱。
+    const mainAssistant: UIMessage = {
+      id: 'main',
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'work' }]
+    }
+    mocks.run.mockResolvedValue([mainAssistant])
+    const sessions = {
+      hasSession: vi.fn(() => true),
+      loadMessages: vi.fn(() => [mainAssistant]),
+      lastAssistant: vi.fn(() => undefined),
+      renameSession: vi.fn(),
+      saveMessages: vi.fn()
+    }
+
+    await runStoredAgentSession(sessions as never, {
+      sessionId: 'session',
+      cwd: 'cwd',
+      message: mainAssistant,
+      nested: true,
+      options: {} as never
+    })
+
+    // assistant 续写消息原样落库：id 不变、**不带 nested**。
+    expect(mocks.save).toHaveBeenCalledWith(sessions, 'session', 'cwd', [mainAssistant], undefined)
+  })
+
+  it('still marks an internal nested user prompt as nested', async () => {
+    // 对照：递归子任务的内部输入（nest 判据 / compaction handoff）是 user 消息，
+    // 必须打 nested 标记——它才是「不进主链上下文」的那条。
+    const nestPrompt: UIMessage = {
+      id: 'nest',
+      role: 'user',
+      metadata: { compaction: true },
+      parts: [{ type: 'text', text: 'task.md path + workflow' }]
+    }
+    mocks.run.mockResolvedValue([])
+    const sessions = {
+      hasSession: vi.fn(() => true),
+      loadMessages: vi.fn(() => []),
+      lastAssistant: vi.fn(() => undefined),
+      renameSession: vi.fn(),
+      saveMessages: vi.fn()
+    }
+
+    await runStoredAgentSession(sessions as never, {
+      sessionId: 'session',
+      cwd: 'cwd',
+      message: nestPrompt,
+      nested: true,
+      options: {} as never
+    })
+
+    const stored = mocks.save.mock.calls[0][3][0] as UIMessage
+    expect(stored.id).toBe('nest')
+    expect(stored.metadata).toMatchObject({ nested: true, compaction: true })
   })
 
   it('feeds the top level the stored main-chain history', async () => {
@@ -330,7 +450,7 @@ describe('runStoredAgentSession', () => {
     ).rejects.toThrow('stream failed')
 
     expect(mocks.save).toHaveBeenCalledOnce()
-    expect(mocks.save).toHaveBeenCalledWith(sessions, 'session', 'cwd', [user], undefined)
+    expect(mocks.save).toHaveBeenCalledWith(sessions, 'session', 'cwd', [userStored], undefined)
     expect(sessions.saveMessages).not.toHaveBeenCalled()
   })
 

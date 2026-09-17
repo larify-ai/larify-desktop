@@ -48,7 +48,8 @@ beforeEach(() => {
 
 /**
  * 回归：嵌套子任务的 reset 续写不得移动主链游标 `sessions.start`。
- * 若移动，之后「回主链续跑」时 loadMessages 只剩子任务之后的残片——主链上下文被清空。
+ * 若移动，主链上下文会被截断——`loadMessages` 只剩子任务之后的残片。
+ * 断言方式：直接检查 store（不再依赖「回主链轮」—— 该轮已移除：没调度即结束整条链）。
  */
 describe('Agent nested reset keeps the main chain intact', () => {
   it('preserves the main-chain context after a child round resets its context', async () => {
@@ -64,7 +65,6 @@ describe('Agent nested reset keeps the main chain intact', () => {
     ])
 
     const child = join(taskRoot, 'root', 'child', 'task.md')
-    const mainChainSeen: string[][] = []
     let runs = 0
     const schedule = (request: unknown): ((p: string) => void) =>
       (request as { options: { toolsContext: Record<string, Record<string, unknown>> } }).options
@@ -79,8 +79,7 @@ describe('Agent nested reset keeps the main chain intact', () => {
     // → 最终回到主链时主链上下文是否完整。
     mocks.run.mockImplementation(async (_s, request) => {
       runs++
-      const message = (request as { message?: UIMessage }).message
-      // 全部走一遍：run1 主任务调度子任务。
+      // run1 主任务调度子任务。
       if (runs === 1) {
         schedule(request)(child)
         return undefined
@@ -94,10 +93,6 @@ describe('Agent nested reset keeps the main chain intact', () => {
       if (runs === 3) {
         schedule(request)(join(taskRoot, 'root', 'task.md'))
         return undefined
-      }
-      // 回到主链续跑（nested=false, message=undefined）：观测主链是否完整。
-      if (message === undefined) {
-        mainChainSeen.push(store.loadMessages('session').map((m) => m.id))
       }
       return undefined
     })
@@ -114,7 +109,7 @@ describe('Agent nested reset keeps the main chain intact', () => {
     )
 
     await vi.waitFor(() => expect(sink.end).toHaveBeenCalled(), { timeout: 3000 })
-    // 主链历史必须在回主链续跑时仍可加载（不再被 nested 的 saveStart 清空）。
-    expect(mainChainSeen.at(-1)).toEqual(['u1', 'a1'])
+    // 主链历史必须完整（nested 的 reset 未移动 sessions.start 游标 → 未被截断）。
+    expect(store.loadMessages('session').map((m) => m.id)).toEqual(['u1', 'a1'])
   })
 })

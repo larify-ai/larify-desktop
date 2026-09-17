@@ -217,7 +217,10 @@ describe('AgentWorker', () => {
     await running
   })
 
-  it('forwards chunks and ends after successful execution', async () => {
+  it('forwards chunks and leaves the stream open after successful execution', async () => {
+    // worker 只跑一轮，**不自行 end 流**：本轮之后编排层可能还要跑被调度的任务。
+    // 提前 end 会让渲染端关闭流，把后续轮次的 chunk（含最终答复）全部丢弃。
+    // 流的唯一正常结束点在编排层 runScheduledTasks。见 agent.ts。
     const chunk = { type: 'finish' } as UIMessageChunk
     mocks.run.mockImplementation(async (_sessions, request) => {
       request.onChunk(chunk)
@@ -228,7 +231,7 @@ describe('AgentWorker', () => {
     await worker.run(input)
 
     expect(sink.chunk).toHaveBeenCalledWith(chunk)
-    expect(sink.end).toHaveBeenCalledOnce()
+    expect(sink.end).not.toHaveBeenCalled()
     expect(sink.error).not.toHaveBeenCalled()
   })
 
@@ -269,7 +272,8 @@ describe('AgentWorker', () => {
       ]
     })
     expect(sessions.saveStart).toHaveBeenCalledWith('session', nextMessage)
-    expect(sink.end).toHaveBeenCalledOnce()
+    // 同上：worker 不再自行 end 流，结束由编排层统一负责。
+    expect(sink.end).not.toHaveBeenCalled()
   })
 
   it('routes a child-task snapshot back to the main-chain assistant', async () => {
@@ -334,7 +338,7 @@ describe('AgentWorker', () => {
   it('marks the reset handoff as nested during a child task without moving the main-chain start', async () => {
     // 子任务（nested）的 reset 续写：handoff 消息仍打 nested 标记（UI 可见、不进主链上下文）。
     // 但**绝不能**调用 saveStart：`sessions.start` 是主链上下文游标，子任务把它推到自己的位置后，
-    // 之后「回主链续跑」时 loadMessages 只会返回子任务之后的残片——主链上下文被清空（实测返回 []）。
+    // 之后 loadMessages 只会返回子任务之后的残片——主链上下文被截断（实测返回 []）。
     const runtime = {
       toolsContext: {
         agent_reset_context: { sessionId: 'session', cwd: '/workspace' }
@@ -668,6 +672,7 @@ describe('AgentWorker', () => {
     await worker.run(input)
 
     expect(mocks.run).toHaveBeenCalledOnce()
-    expect(sink.end).toHaveBeenCalledOnce()
+    // 跑完即 closed（第二轮直接跳过），但仍不由 worker 结束流。
+    expect(sink.end).not.toHaveBeenCalled()
   })
 })

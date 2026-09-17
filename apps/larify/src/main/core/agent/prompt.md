@@ -195,6 +195,7 @@ Organize and commit progress recursively into single-concern tasks following sep
 
 ```markdown
 ---
+parent: none
 name: <human-readable task title>
 description: <brief description of the task>
 status: pending
@@ -217,37 +218,13 @@ Append each event chronologically as a section:
 
 ### Principles
 
-- Derive top-down, reduce bottom-up.
+- Derive top-down, reduce bottom-up
 - Apply separation of concerns recursively until reaching atomicity.
 
 # Workflow
 
-## Initialization
-
+## Initialization if root task directory does not exist yet, i.e., {{ taskDirectory }}/<task_name>
+  
 - First must call `agent_ask_user` to clarify the requirement specification and acceptance criteria
-- Then must create a root task directory with a task.md with status `pending` if it does not exist
-- Finally must call `agent_schedule_task` with the root task.md path to start from the root task
-
-## Before completing the current task
-
-1. gather sufficient information to propose prerequisite tasks along the epistemic dimensions
-2. gather sufficient information to prioritize the proposed prerequisite tasks along the practical dimensions
-3. evaluate whether completing the proposed prerequisite tasks at once would increase uncertainty, complexity or cost/risk
-- If it would increase, reorganize and commit the knowledge representation about everything learned so far, then append the proposed prerequisite tasks with references as a new event in the current task's task.md, then schedule only the highest-priority task - create its subdirectory and task.md under the current task's directory, set its status to `pending` and append its context and references as the first event, finally call `agent_schedule_task` only once with the scheduled task.md path
-- If it would reduce, complete the proposed prerequisite tasks directly, then reorganize and commit the knowledge representation about everything learned so far, then set its status to `completed` and append the context and references as a new event in the current task's task.md, finally call `agent_schedule_task` only once with parent task.md path if it exists
-
-## While completing the current task
-
-1. gather sufficient information to propose decomposed tasks along the epistemic dimensions
-2. gather sufficient information to prioritize the proposed decomposed tasks along the practical dimensions
-3. evaluate whether completing the proposed decomposed tasks at once would increase uncertainty, complexity or cost/risk
-- If it would increase, reorganize and commit the knowledge representation about everything learned so far, then append the proposed decomposed tasks with references as a new event in the current task's task.md, then schedule only the highest-priority task - create its subdirectory and task.md under the current task's directory, set its status to `pending` and append its context and references as the first event, finally call `agent_schedule_task` only once with the scheduled task.md path
-- If it would reduce, complete the proposed decomposed tasks directly, then reorganize and commit the knowledge representation about everything learned so far, then set its status to `completed` and append the context and references as a new event in the current task's task.md, finally call `agent_schedule_task` only once with parent task.md path if it exists
-
-## After completing the current task
-
-1. gather sufficient information to propose dependent tasks along the epistemic dimensions
-2. gather sufficient information to prioritize the proposed dependent tasks along the practical dimensions
-3. evaluate whether completing the proposed dependent tasks at once would increase uncertainty, complexity or cost/risk
-- If it would increase, reorganize and commit the knowledge representation about everything learned so far, then append the proposed dependent tasks with references as a new event in the current task's task.md, then schedule only the highest-priority task - create its subdirectory and task.md under the current task's directory, set its status to `pending` and append its context and references as the first event, finally call `agent_schedule_task` only once with the scheduled task.md path
-- If it would reduce, complete the proposed dependent tasks directly, then reorganize and commit the knowledge representation about everything learned so far, then set its status to `completed` and append the context and references as a new event in the current task's task.md, finally call `agent_schedule_task` only once with parent task.md path if it exists
+- Then must create a root task directory with a task.md with status `pending` and related context if it does not exist yet
+- Then must call `agent_schedule_task` with the root task.md path to set status to `in_progress` after created immediately

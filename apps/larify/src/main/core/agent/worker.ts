@@ -16,7 +16,7 @@ const scheduleTaskTool = 'agent_schedule_task'
 export interface AgentWorkerInput {
   sessionId: string
   cwd: string
-  /** 本轮新增的用户消息；undefined = 在主链上续跑（子任务链结束后回到主任务）。 */
+  /** 本轮的输入消息：首轮是用户消息，被调度任务的轮次是 nest 判据，ask_user 续写是回答。 */
   message?: UIMessage
   runtime: AgentOptions
   /** 复用本次会话模型配置（携带 apiKey 时标题生成同样直连官方）。 */
@@ -25,6 +25,8 @@ export interface AgentWorkerInput {
   nested?: boolean
   /** 递归前几轮已累计的处理时长（ms）。 */
   baseProcessingMs?: number
+  /** 上一轮 assistant 的落库身份（ask_user 回答续写时由 agent.ts 下传，用于原地替换）。 */
+  previousStored?: UIMessage
 }
 
 /** 一轮的产出：被调度的任务路径（一轮至多一个），以及该轮（含传入基数）的累计处理时长。 */
@@ -138,7 +140,13 @@ export class AgentWorker {
       }
       const reviewToolCalls = new Set<string>()
       const originalStopWhen = input.runtime.stopWhen
-      const runOnce = (message: UIMessage | undefined): Promise<UIMessage | undefined> =>
+      // `previousStored`（要写回的那条既有 assistant）**由调用方显式给出**，不由 message 反推：
+      // 只有 ask_user 回答续写（外部 `agent:send` 送来回答，应写回原行）才需要它；
+      // reset_context 的进程内续写是新的一轮（应新建行），故调用时不传。
+      const runOnce = (
+        message: UIMessage | undefined,
+        previousStored?: UIMessage
+      ): Promise<UIMessage | undefined> =>
         runStoredAgentSession(this.sessions, {
           sessionId: input.sessionId,
           cwd: input.cwd,
@@ -146,6 +154,7 @@ export class AgentWorker {
           modelConfig: input.modelConfig,
           nested: input.nested,
           baseProcessingMs: input.baseProcessingMs,
+          previousStored,
           options: {
             ...input.runtime,
             toolsContext,
@@ -198,8 +207,10 @@ export class AgentWorker {
         const total = (value?.metadata as Record<string, unknown> | undefined)?.totalProcessingMs
         if (typeof total === 'number' && Number.isFinite(total)) totalProcessingMs = total
       }
-      let response = await runOnce(input.message)
+      // 首条输入可能携带「续写身份」（ask_user 回答要写回原行）。
+      let response = await runOnce(input.message, input.previousStored)
       settle(response)
+      // reset_context 的进程内续写：新的一轮，故不传续写身份。
       while (handoff) {
         if (controller.signal.aborted) return { scheduled, totalProcessingMs }
         const tagged: UIMessage = {
@@ -221,8 +232,7 @@ export class AgentWorker {
         // 只有主链轮次才移动 `sessions.start`（reset 的截断游标）：`start` 决定
         // `loadMessages` 的主链上下文边界。子任务（nested）走独立上下文（只喂本轮
         // nest prompt），不依赖 `start`；若在此也 saveStart，会把主链游标推到子任务的
-        // 位置，使之后「回主链续跑」时 loadMessages 只返回子任务之后的残片——**主链
-        // 上下文被清空**（实测 loadMessages 返回 []）。故 nested 时跳过。
+        // 位置，使主链上下文被截断成残片（实测 loadMessages 返回 []）。故 nested 时跳过。
         if (!input.nested) this.sessions.saveStart(input.sessionId, message)
         response = await runOnce(message)
         settle(response)
@@ -231,7 +241,12 @@ export class AgentWorker {
       // `addToolOutput` 再次 `agent:send`。上下文（nested / 已累计时长）由 agent.ts 在
       // 收到回答时从"上一条 assistant"的 metadata 恢复，无需让流在此保持开启
       // （保持开启会让 UI 永远停在"运行中"，进程重启后彻底卡死）。
-      if (!controller.signal.aborted && scheduled === undefined) this.finish(() => this.sink.end())
+      // 本轮正常跑完：**不在此结束流**。worker 只负责一轮，无从知道本轮之后编排层是否还有
+      // 被调度的任务要跑。若提前 sink.end()，渲染端 transport 会置 `finished=true` 并关闭
+      // ReadableStream，后续轮次的 chunk 会被全部丢弃（表现为「已完成 + 变更卡片，但没有回复文本」）。
+      // 故：正常结束只置 closed（不再写入），由编排层 `runScheduledTasks` 在整条链结束时统一 end。
+      // abort 时跳过：cancel() 已自行 end 过，此处再置 closed 会掩盖后续状态（保持与原语义一致）。
+      if (!controller.signal.aborted) this.finish(() => {})
       return { scheduled, totalProcessingMs }
     } catch (error) {
       // abort 是用户主动停止（cancel()），预期路径，不按错误留痕。

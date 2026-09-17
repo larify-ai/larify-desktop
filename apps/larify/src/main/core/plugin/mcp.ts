@@ -1,5 +1,4 @@
 import { net } from 'electron'
-import type { Tool } from 'ai'
 import {
   createMCPClient,
   type MCPClient,
@@ -36,10 +35,7 @@ export async function connectMcp(
 
       const toolSet = await client.tools()
       for (const [toolName, tool] of Object.entries(toolSet)) {
-        // `@ai-sdk/mcp` 的 `Tool` 与 `ai` 的类型标识不同（两者依赖的 AI SDK 大版本不一致），
-        // 结构上兼容（同为 `{ description?, inputSchema, execute? }`），故此处断言。
-        // 若未来二者对齐，可移除该断言。
-        ctx.registerTool(`${prefix}${toolName}`, tool as unknown as Tool)
+        ctx.registerTool(`${prefix}${toolName}`, tool)
       }
     } catch (error) {
       console.error(`[mcp] Failed to connect server "${serverName}":`, error)

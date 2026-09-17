@@ -218,13 +218,13 @@ Append each event chronologically as a section:
 
 ### Principles
 
-- Derive top-down, reduce bottom-up
+- Derive top-down, reduce bottom-up.
 - Apply separation of concerns recursively until reaching atomicity.
 
 # Workflow
 
-## Initialization if root task directory does not exist yet, i.e., {{ taskDirectory }}/<task_name>
+## Initialization if root task directory does not exist yet, i.e., {{ taskDirectory }}/<task_name>/task.md
   
-- First must call `agent_ask_user` to clarify the requirement specification and acceptance criteria
+- for each user request, must call `agent_ask_user` to clarify the requirement specification and acceptance criteria
 - Then must create a root task directory with a task.md with status `pending` and related context if it does not exist yet
 - Then must call `agent_schedule_task` with the root task.md path to set status to `in_progress` after created immediately

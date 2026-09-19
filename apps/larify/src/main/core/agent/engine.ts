@@ -109,9 +109,22 @@ export function runAgent(
     model: wrappedModel,
     messages,
     // DeepSeek 的 `max_tokens` 官方默认仅 4096，长任务（如一次写几十个文件）会中途被
-    // 截断（finishReason=length），导致该轮的最终答复丢失。这里显式设为模型上限（384K），
-    // 让长输出不被过早切断；输入与输出共享 1M 上下文，若输入很大则由服务端按余量收敛。
-    maxOutputTokens: 384 * 1024,
+    // 截断（finishReason=length），导致该轮的最终答复丢失，故显式设大。
+    //
+    // 但 `max_tokens` 是**预留额度**而非实际生成量，且**输入与输出共用同一个 1M 窗口**
+    // （官方文档：输入 token 和输出 token 的总长度受上下文长度限制）。请求发出时输出尚
+    // 未生成，服务端只能按「输入 + max_tokens」预估，超出即 400：
+    //   This model's maximum context length is 1048576 tokens. However, you requested
+    //   1048833 tokens (655617 in the messages, 393216 in the completion).
+    //
+    // 曾取模型上限 384 * 1024（=393216，与官方 `max_tokens` 上限一致），但那会把可用的
+    // 输入预算压到 1048576 − 393216 = 655360，而 rollover 阈值是 800000 —— 阈值落在安全
+    // 输入上限**之后**，于是「输入未达阈值、请求却已越界」：rollover 永不触发，服务端直接拒绝。
+    //
+    // 现取 200 * 1024（=204800）：安全输入上限抬到 1048576 − 204800 = 843776，高于 rollover
+    // 800000，守门重新落在红线之前。实测单轮最长输出约 91K token，200K 仍有充足余量。
+    // 不变量：`rollover + maxOutputTokens < limit`（见 model/config.ts 的 modelContextWindows）。
+    maxOutputTokens: 200 * 1024,
     maxRetries: 0,
     // 流级恢复：内容已流出后（mid-stream）收到错误时，只重跑失败的模型 step，
     // 保留已完成的历史 steps、工具调用与工具结果（不重放已完成工作）。

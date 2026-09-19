@@ -12,6 +12,6 @@ export const scheduleTaskTool = defineTool({
   execute: ({ taskPath }, context) => {
     if (!context.scheduleTask) throw new Error('Scheduling is unavailable.')
     context.scheduleTask(taskPath)
-    return 'Task completed. Please read details in the task.md file.'
+    return ''
   }
 })

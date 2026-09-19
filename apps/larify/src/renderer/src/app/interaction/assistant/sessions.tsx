@@ -8,6 +8,7 @@ import {
 } from './session-directory'
 import { loadMessagePage } from './session-messages'
 import { SessionAttentionContext, type SessionAttentionState } from './session-attention'
+import { playSessionStatusSound } from './status-sound'
 
 function createSession(cwd = ''): AssistantSessionState {
   return {
@@ -272,6 +273,10 @@ export function AssistantSessionsProvider({
             ? 'unread'
             : nextState
         if (previous === resolved) return current
+        // 提示音：状态真的落到 waiting/unread 时响一次。用收敛后的 `resolved`（而非
+        // `nextState`），才能覆盖「后台会话由 active 落到 unread」这条唯一产生「有新消息」
+        // 的路径；`previous === resolved` 的提前返回已滤掉同态重复上报，故不会连响。
+        playSessionStatusSound(resolved, previous)
         const next = new Map(current)
         if (resolved === 'idle') next.delete(id)
         else next.set(id, resolved)

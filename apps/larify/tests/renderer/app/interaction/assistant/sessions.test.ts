@@ -17,6 +17,11 @@ let root: Root
 let sessions: AssistantSessions
 let reportAttentionState: SessionAttentionReport
 const invoke = vi.fn()
+// 提示音是纯附加能力：把它换成 spy，断言 provider 只在真实跳变时调用它。
+const playSpy = vi.hoisted(() => vi.fn<(state: string, previous?: string) => boolean>())
+vi.mock('../../../../../src/renderer/src/app/interaction/assistant/status-sound', () => ({
+  playSessionStatusSound: playSpy
+}))
 
 function Probe(): null {
   const value = useAssistantSessions()
@@ -30,6 +35,8 @@ function Probe(): null {
 
 beforeEach(async () => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true
+  // spy 是模块级单例，必须每个用例清零，否则被上一个用例的调用污染。
+  playSpy.mockReset()
   invoke.mockReset()
   invoke.mockResolvedValue([])
   Object.defineProperty(window, 'bridge', {
@@ -40,7 +47,9 @@ beforeEach(async () => {
   await act(async () => {
     root.render(createElement(AssistantSessionsProvider, null, createElement(Probe)))
   })
+  playSpy.mockClear()
 })
+
 
 afterEach(() => {
   act(() => root.unmount())
@@ -108,6 +117,36 @@ describe('AssistantSessionsProvider', () => {
       expect(sessions.attentionState(backgroundId)).toBe('idle')
     }
   )
+
+  it('passes every resolved transition to the sound module (which decides)', async () => {
+    const id = sessions.activeId
+
+    // 接入点只负责把「收敛后的状态 + 之前的状态」如实传下去，判定在 status-sound 内。
+    await act(async () => reportAttentionState(id, 'active'))
+    expect(playSpy).toHaveBeenLastCalledWith('active', 'idle')
+
+    await act(async () => reportAttentionState(id, 'waiting'))
+    expect(playSpy).toHaveBeenLastCalledWith('waiting', 'active')
+
+    // 同态重复上报仍会到达（函数内部据此静音），但 Map 不会为之变化。
+    await act(async () => reportAttentionState(id, 'waiting'))
+    expect(sessions.attentionState(id)).toBe('waiting')
+
+    // 前台落到 idle。
+    await act(async () => reportAttentionState(id, 'idle'))
+    expect(playSpy).toHaveBeenLastCalledWith('idle', 'waiting')
+    expect(sessions.attentionState(id)).toBe('idle')
+
+    // 后台会话 active → idle ⇒ 收敛为 unread：这才是「有新消息」的唯一来源。
+    await act(async () => {
+      sessions.setPersisted(id)
+      sessions.create()
+      reportAttentionState(id, 'active')
+    })
+    await act(async () => reportAttentionState(id, 'idle'))
+    expect(sessions.attentionState(id)).toBe('unread')
+    expect(playSpy).toHaveBeenLastCalledWith('unread', 'active')
+  })
 
   it('keeps the current session active or waiting without creating unread state', async () => {
     const id = sessions.activeId

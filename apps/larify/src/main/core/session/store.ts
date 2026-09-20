@@ -132,6 +132,40 @@ export class SessionStore implements Disposable {
     return row ? (JSON.parse(row.value as string) as UIMessage) : undefined
   }
 
+  /**
+   * 按 `agent_ask_user` 的 `toolCallId` 定位承载它的那条消息（**不过滤 nested**）。
+   *
+   * 用途：ask_user 是客户端工具，用户回答经 `addToolOutput` 再次 `agent:send`；渲染层送来的
+   * 消息**自带**被回答的 `toolCallId`。用它**精确**找到「谁在等这次回答」，从而拿到权威的
+   * `metadata.nested` / `totalProcessingMs` / 落库身份——不必再用「最近一条消息 + position」
+   * 去**倒推**（主链与嵌套链交错写入时，倒推会错位）。
+   *
+   * 范围含 nested，且**不受 `sessions.start` 游标影响**（等待态可能在游标之前）。
+   */
+  findMessageByAskUserCallId(id: string, toolCallId: string): UIMessage | undefined {
+    const rows = this.database
+      .prepare(
+        `SELECT messages.value FROM messages
+         JOIN sessions ON sessions.id = messages.session_id
+         WHERE messages.session_id = ?
+           AND json_extract(messages.value, '$.role') = 'assistant'
+         ORDER BY messages.position DESC`
+      )
+      .all(id)
+    for (const row of rows) {
+      const message = JSON.parse(row.value as string) as UIMessage
+      const matched = message.parts?.some((part) => {
+        const tool = part as { type?: string; toolCallId?: string }
+        return (
+          (tool.type === 'tool-agent_ask_user' || tool.type === 'dynamic-tool') &&
+          tool.toolCallId === toolCallId
+        )
+      })
+      if (matched) return message
+    }
+    return undefined
+  }
+
   loadVisibleMessages(id: string, offset = 0, limit = 50): UIMessage[] {
     const messages = this.database
       .prepare(

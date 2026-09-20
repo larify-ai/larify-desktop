@@ -53,9 +53,7 @@ const sessions = {
   // awaitUserAnswer / resumed 恢复都依赖 lastMessage（**不过滤 nested**）。
   // 默认返回 undefined = 未停在 ask_user 等待态（普通轮次）。
   lastMessage: vi.fn(() => undefined),
-  lastAssistant: vi.fn(() => undefined),
-  // resumed 归属恢复会按送来的 ask_user.toolCallId 精确回溯承载者；默认找不到 → 走旧判据。
-  findMessageByAskUserCallId: vi.fn(() => undefined)
+  lastAssistant: vi.fn(() => undefined)
 }
 const pluginHost = { refreshPlugins: vi.fn(async () => undefined) }
 

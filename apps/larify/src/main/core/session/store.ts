@@ -132,6 +132,37 @@ export class SessionStore implements Disposable {
     return row ? (JSON.parse(row.value as string) as UIMessage) : undefined
   }
 
+  /**
+   * 定位「正在等待某个 `agent_ask_user` 回答」的那条 assistant 消息（含 nested、不受游标影响）。
+   *
+   * 依据：用户提交回答走 `addToolOutput(toolCallId, output)`，渲染层随后经 `agent:send` 送来
+   * 一条**自描述**的 assistant 消息（含被回答的 `toolCallId`）。此时**库里**承载该 ask_user 的行
+   * 其 part 仍是 `input-available`（回答尚未落库）——据此联立「`toolCallId` 命中」+「库内仍是等待态」，
+   * 即可**唯一**命中「谁在等这次回答」，无需再靠「最近一条消息 + position」倒推（交错写入时会错位）。
+   *
+   * 为什么必须限定 `role='assistant'` 且 `state='input-available'`：
+   * - `role`：user 行（如 compaction handoff）会把上游 parts 原样拼进来，可能含同名 ask_user（实测有）；
+   * - `state`：同一 toolCallId 在历史里可能已出现多次，只有「仍等待」的那条才是本次的承载者
+   *   （实测全库无「同一 toolCallId 多行 input-available」，故唯一）。
+   *
+   * 用 SQL `json_each` 直接过滤，只读出命中的那一行（避免拉全表在 JS 里 parse）。
+   */
+  findMessageByAskUserCallId(id: string, toolCallId: string): UIMessage | undefined {
+    const row = this.database
+      .prepare(
+        `SELECT m.value FROM messages m, json_each(m.value, '$.parts') p
+         WHERE m.session_id = ?
+           AND json_extract(m.value, '$.role') = 'assistant'
+           AND json_extract(p.value, '$.type') IN ('tool-agent_ask_user', 'dynamic-tool')
+           AND json_extract(p.value, '$.toolCallId') = ?
+           AND json_extract(p.value, '$.state') = 'input-available'
+         ORDER BY m.position DESC
+         LIMIT 1`
+      )
+      .get(id, toolCallId)
+    return row ? (JSON.parse(row.value as string) as UIMessage) : undefined
+  }
+
   loadVisibleMessages(id: string, offset = 0, limit = 50): UIMessage[] {
     const messages = this.database
       .prepare(

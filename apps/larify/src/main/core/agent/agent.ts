@@ -37,34 +37,6 @@ function awaitUserAnswer(sessions: SessionStore, sessionId: string): boolean {
     )
 }
 
-/**
- * 从**渲染层送来的消息本身**读出「本次 send 是对哪个 `agent_ask_user` 的回答」。
- *
- * ask_user 是客户端工具（无 execute）；用户提交回答走 `addToolOutput(toolCallId, output)`，
- * 它把回答写进当前 assistant 的 ask_user part（state → `output-available`/`output-error`/
- * `output-denied`），随后 `makeRequest` 把这条消息经 `agent:send` 发来。
- *
- * 因此**这条消息自带被回答的 `toolCallId`**——用它去精确回溯「谁在等这次回答」，
- * 不必再用「最近一条消息 + position」倒推（主链与嵌套链交错时倒推会错位）。
- *
- * 只认「assistant 且含一个**已终态**的 ask_user」：纯文本提问 / 普通续写不会被误判。
- */
-function answeredAskUserCallId(message: UIMessage): string | undefined {
-  if (message.role !== 'assistant') return undefined
-  const answered = (message.parts ?? []).find((part) => {
-    const tool = part as { type?: string; toolCallId?: string; state?: string }
-    const isAskUser = tool.type === 'tool-agent_ask_user' || tool.type === 'dynamic-tool'
-    return (
-      isAskUser &&
-      typeof tool.toolCallId === 'string' &&
-      (tool.state === 'output-available' ||
-        tool.state === 'output-error' ||
-        tool.state === 'output-denied')
-    )
-  }) as { toolCallId?: string } | undefined
-  return answered?.toolCallId
-}
-
 export interface AgentInput {
   sessionId: string
   cwd?: string
@@ -173,30 +145,18 @@ export class Agent implements Disposable {
     // 「等待用户回答」的续写恢复：ask_user 是**客户端工具**（无 execute），其回答经
     // `addToolOutput` → 又一次 `agent:send` 送达。渲染层只发回答（没有新 user 文本），
     // 服务端若当作全新一轮，就会 nested=false、base=0 —— 于是子任务轮的续写被误当成
-    // 「主链轮」且时长从零重算。
-    //
-    // **精确回溯（不走位置推断）**：渲染层送来的消息**自带**被回答的 `ask_user.toolCallId`，
-    // 用它定位承载该 ask_user 的那条消息（主链行 / 嵌套行都行），从它取权威的
-    // nested / totalProcessingMs / 落库身份。
-    // 为什么不用 `lastMessage()`：`lastMessage` = 「最近写进来的一条」，在「主链与嵌套链交错
-    // 写入」时（子任务 ask_user 之后又写入 nest 判据/主链轮）会错位——`awaitUserAnswer` 看到
-    // 末条不是 assistant（或不是那条 waiting）⇒ `resumed=false` ⇒ 子任务轮续写越权读整条主链。
-    const askUserCallId = answeredAskUserCallId(request.message)
-    const resumedOwner =
-      askUserCallId !== undefined
-        ? this.sessions.findMessageByAskUserCallId(request.sessionId, askUserCallId)
-        : undefined
-    // 兜底（历史数据/异常）：回退到原「最近一条」判据，行为与修复前一致。
-    const resumed =
-      resumedOwner !== undefined ||
-      (request.message.role === 'assistant' && awaitUserAnswer(this.sessions, request.sessionId))
+    // 「主链轮」且时长从零重算。这里从**上一条 assistant 自身**恢复上下文（nested 与已累计
+    // 时长都写在其 metadata 上），无需任何额外持久化：
+    const resumedFlag = awaitUserAnswer(this.sessions, request.sessionId)
+    const resumed = request.message.role === 'assistant' && resumedFlag
     // 续写要**写回上一轮那条 assistant**（原地替换），故把它的落库身份一路下传到 persist。
     // 只有这里知道"上一轮的落库身份"：渲染层传来的 message 是**主链 assistant** 的快照
     // （嵌套行在 UI 上合并进主链消息），既不含嵌套行 id、也推不出增量切片基准。
     let previousStored: UIMessage | undefined
     if (resumed) {
-      // 优先用精确回溯到的承载者；找不到才退回 lastMessage（兜底）。
-      const previous = resumedOwner ?? this.sessions.lastMessage(request.sessionId)
+      // 同样用 lastMessage：ask_user 所在的轮次可能是 nested，其 metadata 才是要恢复的
+      // nested / totalProcessingMs 来源。
+      const previous = this.sessions.lastMessage(request.sessionId)
       previousStored = previous
       // 仅恢复**上下文归属与已累计时长**；`message` 必须保留——用户的回答（tool-output）
       // 要作为新消息喂给模型，才能与上一轮的 ask_user(tool-call) 配对；置空会触发

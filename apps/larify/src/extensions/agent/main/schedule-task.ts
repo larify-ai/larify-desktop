@@ -12,6 +12,6 @@ export const scheduleTaskTool = defineTool({
   execute: ({ taskPath }, context) => {
     if (!context.scheduleTask) throw new Error('Scheduling is unavailable.')
     context.scheduleTask(taskPath)
-    return ''
+    return 'If you want to continue the scheduled task, please must call the agent_schedule_task tool again with the task.md path after editing it.'
   }
 })

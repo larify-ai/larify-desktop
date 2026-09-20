@@ -1,12 +1,23 @@
 import { readFile, stat } from 'node:fs/promises'
 import { basename, extname, resolve } from 'node:path'
 import { fileTypeFromBuffer } from 'file-type'
+import { imageSize } from 'image-size'
 import { z } from 'zod'
 import { imageCapableModelIds, type ModelId } from '../../../main/core/model/config'
 import { saveAttachmentBytes } from '../../../main/core/attachment/store'
 import { defineTool } from '../../../main/core/plugin/protocol'
 
 const MAX_IMAGE_BYTES = 32 * 1024 * 1024
+/**
+ * DeepSeek rejects any image whose width or height exceeds 8192 px, and drops
+ * the per-side limit to 4096 px when a request carries 15 or more images. An
+ * image that slips past this gate is replayed from history on every later
+ * request, so a single oversized screenshot permanently fails the session.
+ * These bounds mirror the official `read_image` admission limits
+ * (maxImageDimension / maxImagePixels).
+ */
+const MAX_IMAGE_DIMENSION = 8192
+const MAX_IMAGE_PIXELS = 64_000_000
 const imageMediaTypes: ReadonlyMap<string, string> = new Map([
   ['.png', 'image/png'],
   ['.jpg', 'image/jpeg'],
@@ -61,6 +72,18 @@ export const readImageTool = defineTool({
     if (detected.mime !== mediaType) {
       throw new Error(
         `Cannot read image: the ${extension} extension declares ${mediaType}, but the file contains ${detected.mime}.`
+      )
+    }
+
+    const size = imageSize(data)
+    if (size.width > MAX_IMAGE_DIMENSION || size.height > MAX_IMAGE_DIMENSION) {
+      throw new Error(
+        `Cannot read image: "${target}" is ${size.width}x${size.height} px, and at least one side exceeds the ${MAX_IMAGE_DIMENSION}px limit. Downscale the image and read the smaller copy.`
+      )
+    }
+    if (size.width * size.height > MAX_IMAGE_PIXELS) {
+      throw new Error(
+        `Cannot read image: "${target}" is ${size.width}x${size.height} px, exceeding the ${MAX_IMAGE_PIXELS}-pixel limit. Downscale the image and read the smaller copy.`
       )
     }
 

@@ -3,7 +3,7 @@ import { defineTool } from '../../../main/core/plugin/protocol'
 
 export const resetContextTool = defineTool({
   description: 'Reset the model context and continue from the handoff',
-  metadata: { eager: true, icon: 'repeat' },
+  metadata: { eager: false, icon: 'repeat' },
   inputSchema: z
     .object({
       handoff: z

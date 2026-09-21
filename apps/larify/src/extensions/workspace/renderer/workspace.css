@@ -117,10 +117,6 @@
   visibility: hidden !important;
 }
 
-.workspace-file-preview[data-diff-mode='unified'] .original.diffOverviewRuler {
-  visibility: hidden !important;
-}
-
 .workspace-file-preview .monaco-diff-editor .gutter-delete,
 .workspace-file-preview .monaco-diff-editor .gutter-insert {
   display: none;

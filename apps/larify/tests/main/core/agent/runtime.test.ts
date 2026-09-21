@@ -121,13 +121,11 @@ describe('createAgentRuntime', () => {
 
     expect(runtime.stopWhen).toBeTypeOf('function')
     expect(runtime.prepareStep).toBeTypeOf('function')
+    // 守门判据读的是「本次将发的 messages 的预估输入」，**不是**上一步的 usage：
+    // 因此要触发，必须让**本次 messages 本身**足够大（这里远超 rollover 阈值 500K）。
     const prepared = await runtime.prepareStep?.({
-      messages: [{ role: 'user', content: 'Work on the task.' }],
-      steps: [
-        {
-          usage: { inputTokens: Number.MAX_SAFE_INTEGER, outputTokens: 0, totalTokens: 0 }
-        }
-      ]
+      messages: [{ role: 'user', content: 'x'.repeat(2_000_000) }],
+      steps: []
     } as never)
     expect(prepared?.messages?.at(-1)).toEqual({
       role: 'user',

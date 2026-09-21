@@ -127,4 +127,104 @@ describe('task diagnostics', () => {
 
     expect(result.diagnostics).toEqual([])
   })
+
+  it('warns when a completed task has an unfinished child task', async () => {
+    const root = createRoot()
+    const file = join(root, 'task.md')
+    const child = join(root, 'child')
+    mkdirSync(child)
+    writeFileSync(file, taskMarkdown('completed'))
+    writeFileSync(join(child, 'task.md'), taskMarkdown('pending'))
+
+    const result = await createTaskDiagnosticsProvider(root).provide(file)
+
+    expect(result.diagnostics.map(({ message }) => message)).toEqual([
+      'Task cannot be completed while subtasks are pending: child.'
+    ])
+  })
+
+  it('warns naming each of several unfinished subtasks', async () => {
+    const root = createRoot()
+    const file = join(root, 'task.md')
+    writeFileSync(file, taskMarkdown('completed'))
+    for (const [name, status] of [
+      ['done', 'completed'],
+      ['wip', 'pending'],
+      ['other', 'in_progress']
+    ] as const) {
+      mkdirSync(join(root, name))
+      writeFileSync(join(root, name, 'task.md'), taskMarkdown(status))
+    }
+
+    const result = await createTaskDiagnosticsProvider(root).provide(file)
+
+    expect(result.diagnostics.map(({ message }) => message)).toEqual([
+      'Task cannot be completed while subtasks are pending: other, wip.'
+    ])
+  })
+
+  it('warns when a child task.md has no recognizable status', async () => {
+    const root = createRoot()
+    const file = join(root, 'task.md')
+    const child = join(root, 'child')
+    mkdirSync(child)
+    writeFileSync(file, taskMarkdown('completed'))
+    writeFileSync(join(child, 'task.md'), '---\nname: 子任务\ndescription: 描述\n---')
+
+    const result = await createTaskDiagnosticsProvider(root).provide(file)
+
+    expect(result.diagnostics.map(({ message }) => message)).toEqual([
+      'Task cannot be completed while subtasks are pending: child.'
+    ])
+  })
+
+  it('accepts a completed task whose children are all completed', async () => {
+    const root = createRoot()
+    const file = join(root, 'task.md')
+    writeFileSync(file, taskMarkdown('completed'))
+    for (const name of ['a', 'b']) {
+      mkdirSync(join(root, name))
+      writeFileSync(join(root, name, 'task.md'), taskMarkdown('completed'))
+    }
+
+    const result = await createTaskDiagnosticsProvider(root).provide(file)
+
+    expect(result.diagnostics).toEqual([])
+  })
+
+  it('does not warn for a completed task without children', async () => {
+    const root = createRoot()
+    const file = join(root, 'task.md')
+    writeFileSync(file, taskMarkdown('completed'))
+
+    const result = await createTaskDiagnosticsProvider(root).provide(file)
+
+    expect(result.diagnostics).toEqual([])
+  })
+
+  it('does not warn for a pending task with unfinished children', async () => {
+    const root = createRoot()
+    const file = join(root, 'task.md')
+    const child = join(root, 'child')
+    mkdirSync(child)
+    writeFileSync(file, taskMarkdown('pending'))
+    writeFileSync(join(child, 'task.md'), taskMarkdown('pending'))
+
+    const result = await createTaskDiagnosticsProvider(root).provide(file)
+
+    expect(result.diagnostics).toEqual([])
+  })
+
+  it('ignores child files that are not task.md', async () => {
+    const root = createRoot()
+    const file = join(root, 'task.md')
+    const child = join(root, 'child')
+    mkdirSync(child)
+    writeFileSync(file, taskMarkdown('completed'))
+    writeFileSync(join(child, 'notes.md'), '# notes')
+
+    const result = await createTaskDiagnosticsProvider(root).provide(file)
+
+    expect(result.diagnostics).toEqual([])
+  })
 })

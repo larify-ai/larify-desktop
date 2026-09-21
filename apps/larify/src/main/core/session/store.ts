@@ -159,6 +159,13 @@ export class SessionStore implements Disposable {
     return row ? (JSON.parse(row.value as string) as UIMessage) : undefined
   }
 
+  /** 当前主链上下文游标 `start`（未设过则为 -1）。诊断/测试用，不参与业务判定。 */
+  startPosition(id: string): number {
+    const row = this.database.prepare('SELECT start FROM sessions WHERE id = ?').get(id)
+    const value = (row as { start?: number | null } | undefined)?.start
+    return typeof value === 'number' ? value : -1
+  }
+
   /**
    * 定位「正在等待该 `ask_user` 回答」的上下文：返回承载行 `owner`，并在它是**嵌套行**时
    * **顺带取回本轮的 nest 判据**（`owner` 的前一条 user 行；实测 nested 行与其判据 100% 紧邻）。

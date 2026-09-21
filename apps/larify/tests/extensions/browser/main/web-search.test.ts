@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   buildBingSearchUrl,
   buildParseSearchPageScript,
+  buildSettleExpression,
   executeWebSearch,
   normalizeWhitespace,
   parseSearchPage,
@@ -11,6 +12,7 @@ import {
 } from '../../../../src/extensions/browser/main/web-search'
 import type { BrowserService } from '../../../../src/extensions/browser/main/browser-service'
 import type { BrowserTab } from '../../../../src/extensions/browser/main/tab'
+import { WaitTimeoutError } from '../../../../src/extensions/browser/main/waits'
 
 const selectors = {
   result: '#b_results > li.b_algo',
@@ -18,6 +20,50 @@ const selectors = {
   link: 'h2 a[href], a[href]:has(> h2)',
   snippet: '.b_caption p, p.b_algoSlug, p.b_lineclamp2, p.b_lineclamp3',
   nextPage: 'a.sb_pagN[href]'
+}
+
+// The settle criterion is a plain expression evaluated by tab.waitForStable. The
+// executeWebSearch tests run it against a real jsdom document held in `currentDocument`.
+let currentDocument: Document | undefined
+function evaluateSettle(selectorsArg: typeof selectors): unknown {
+  vi.stubGlobal('document', currentDocument)
+  try {
+    return eval(buildSettleExpression(selectorsArg))
+  } finally {
+    vi.unstubAllGlobals()
+  }
+}
+
+// `waitForStable` is REQUIRED on a real BrowserTab, so every double must provide it. Tests that
+// only exercise the parse path stub it to a no-op resolve: `readSearchResults` falls back to the
+// single read ONLY on a settle timeout, so a bare resolve is the honest "already settled" double.
+function settledTab(tab: Partial<BrowserTab> = {}): Partial<BrowserTab> {
+  return {
+    waitForNavigation: vi.fn(async () => undefined),
+    waitForStable: vi.fn(async () => [1, 'settled']) as unknown as BrowserTab['waitForStable'],
+    evalJs: vi.fn(async (script: string) => eval(script)),
+    ...tab
+  }
+}
+
+// A fake tab whose waitForStable resolves only once the *current* jsdom document
+// satisfies the criterion — so the test can install the "hydrated" DOM just before.
+function settleTab(tab: {
+  waitForStable: (expression: string, options?: unknown, signal?: AbortSignal) => Promise<unknown>
+}): Partial<BrowserTab> {
+  return settledTab({
+    evalJs: vi.fn(async (script: string) => eval(script)),
+    waitForStable: tab.waitForStable as BrowserTab['waitForStable']
+  })
+}
+
+/** A tab whose settle wait times out — the ONLY failure that falls back to a single read. */
+function timingOutTab(): Partial<BrowserTab> {
+  return settledTab({
+    waitForStable: vi.fn(async () => {
+      throw new WaitTimeoutError('wait_for_stable timed out after 10s')
+    }) as unknown as BrowserTab['waitForStable']
+  })
 }
 
 function serviceWithTemporaryTab(tab: Partial<BrowserTab>): BrowserService {
@@ -255,7 +301,7 @@ describe('web search', () => {
 
     // Simulate the real temporary tab: evalJs really evaluates the injected search script.
     const evalJs = vi.fn(async (script: string) => eval(script))
-    const service = serviceWithTemporaryTab({ waitForNavigation: vi.fn(async () => undefined), evalJs })
+    const service = serviceWithTemporaryTab(settledTab({ evalJs }))
 
     await expect(
       executeWebSearch(
@@ -278,9 +324,9 @@ describe('web search', () => {
   })
 
   it('returns one page and continuation metadata without navigating again', async () => {
-    const tab = {
-      waitForNavigation: vi.fn(async () => undefined),
-      navigateAndWait: vi.fn(),
+    const navigateAndWait = vi.fn()
+    const tab = settledTab({
+      navigateAndWait,
       evalJs: vi.fn(async () => ({
         results: [
           { title: 'One', url: 'https://one.example' },
@@ -288,7 +334,7 @@ describe('web search', () => {
         ],
         nextPageUrl: 'https://www.bing.com/search?q=test&first=10&FPIG=abc'
       }))
-    }
+    })
     const service = serviceWithTemporaryTab(tab)
 
     await expect(
@@ -310,17 +356,18 @@ describe('web search', () => {
       'https://www.bing.com/search?q=test+query',
       expect.any(Function)
     )
-    expect(tab.navigateAndWait).not.toHaveBeenCalled()
+    expect(navigateAndWait).not.toHaveBeenCalled()
   })
 
   it('loads a returned page URL directly', async () => {
     const pageUrl = 'https://www.bing.com/search?q=test&first=10'
-    const service = serviceWithTemporaryTab({
-      waitForNavigation: vi.fn(async () => undefined),
-      evalJs: vi.fn(async () => ({
-        results: [{ title: 'One', url: 'https://one.example' }]
-      }))
-    })
+    const service = serviceWithTemporaryTab(
+      settledTab({
+        evalJs: vi.fn(async () => ({
+          results: [{ title: 'One', url: 'https://one.example' }]
+        }))
+      })
+    )
 
     await expect(
       executeWebSearch(
@@ -339,12 +386,13 @@ describe('web search', () => {
   })
 
   it('propagates parsing failures from the temporary tab', async () => {
-    const service = serviceWithTemporaryTab({
-      waitForNavigation: vi.fn(async () => undefined),
-      evalJs: vi.fn(async () => {
-        throw new Error('parse failed')
+    const service = serviceWithTemporaryTab(
+      settledTab({
+        evalJs: vi.fn(async () => {
+          throw new Error('parse failed')
+        })
       })
-    })
+    )
 
     await expect(
       executeWebSearch(
@@ -356,10 +404,9 @@ describe('web search', () => {
   })
 
   it('rejects a page with no parseable results', async () => {
-    const service = serviceWithTemporaryTab({
-      waitForNavigation: vi.fn(async () => undefined),
-      evalJs: vi.fn(async () => ({ results: [] }))
-    })
+    const service = serviceWithTemporaryTab(
+      settledTab({ evalJs: vi.fn(async () => ({ results: [] })) })
+    )
 
     await expect(
       executeWebSearch(
@@ -400,5 +447,169 @@ describe('web search', () => {
       )
     ).rejects.toThrow('Web search was cancelled.')
     expect(service.withTemporaryTab).not.toHaveBeenCalled()
+  })
+
+  describe('settle criterion', () => {
+    const build = (body: string): Document => {
+      const dom = new JSDOM(`<body><ol id="b_results">${body}</ol></body>`, {
+        url: 'https://www.bing.com/search?q=test'
+      })
+      return dom.window.document
+    }
+
+    it('returns null while only the empty placeholder is present (0 parseable results)', () => {
+      // Bing hydrates a `li.b_algo` with no `h2` before the real results land.
+      currentDocument = build(
+        '<li class="b_algo"><div class="b_caption"><p>Loading…</p></div></li>'
+      )
+      expect(evaluateSettle(selectors)).toBeNull()
+      currentDocument = build('')
+      expect(evaluateSettle(selectors)).toBeNull()
+    })
+
+    it('returns [parsedCount, firstTitle] once results are parseable', () => {
+      currentDocument = build(
+        '<li class="b_algo"><h2><a href="https://a.example">Alpha</a></h2></li>' +
+          '<li class="b_algo"><h2><a href="https://b.example">Beta</a></h2></li>' +
+          '<li class="b_algo"><h2>No link</h2></li>'
+      )
+      // The third item is not parseable (no href), so parsedCount is 2 and the first
+      // title is Alpha.
+      expect(evaluateSettle(selectors)).toEqual([2, 'Alpha'])
+    })
+
+    it('ignores snippet-only changes and only tracks count + first title', () => {
+      currentDocument = build(
+        '<li class="b_algo"><h2><a href="https://a.example">Alpha</a></h2><p class="b_lineclamp2">one</p></li>'
+      )
+      const before = evaluateSettle(selectors)
+      currentDocument = build(
+        '<li class="b_algo"><h2><a href="https://a.example">Alpha</a></h2><p class="b_lineclamp2">two</p></li>'
+      )
+      expect(evaluateSettle(selectors)).toEqual(before)
+    })
+  })
+
+  describe('hydration-safe execution', () => {
+    it('waits for the results to settle before parsing', async () => {
+      const hydrated = new JSDOM(
+        `<body><ol id="b_results">
+          <li class="b_algo"><h2><a href="https://example.com/docs">Example Docs</a></h2></li>
+        </ol></body>`,
+        { url: 'https://www.bing.com/search?q=test' }
+      ).window.document
+      const waitForStable = vi.fn(async () => {
+        // The settle wait only resolves once the hydrated DOM is in place.
+        vi.stubGlobal('document', hydrated)
+        return [1, 'Example Docs']
+      })
+      const tab = settleTab({ waitForStable })
+      const service = serviceWithTemporaryTab(tab)
+
+      const response = await executeWebSearch(
+        service,
+        { query: 'test', selectors },
+        { sessionId: 'session-1', cwd: 'D:\\Workspace' }
+      )
+
+      expect(response.results).toEqual([{ title: 'Example Docs', url: 'https://example.com/docs' }])
+      expect(waitForStable).toHaveBeenCalledWith(
+        expect.stringContaining('querySelectorAll'),
+        { pollMs: 100, stableTimes: 2, timeoutMs: 10_000 },
+        undefined
+      )
+      vi.unstubAllGlobals()
+    })
+
+    it('falls back to a single read once the settle wait times out', async () => {
+      const dom = new JSDOM(
+        `<body><ol id="b_results">
+          <li class="b_algo"><h2><a href="https://example.com/docs">Late Result</a></h2></li>
+        </ol></body>`,
+        { url: 'https://www.bing.com/search?q=test' }
+      )
+      vi.stubGlobal('document', dom.window.document)
+      const service = serviceWithTemporaryTab(
+        timingOutTab({
+          evalJs: vi.fn(async (script: string) => eval(script))
+        })
+      )
+
+      const response = await executeWebSearch(
+        service,
+        { query: 'test', selectors },
+        { sessionId: 'session-1', cwd: 'D:\\Workspace' }
+      )
+
+      expect(response.results).toEqual([{ title: 'Late Result', url: 'https://example.com/docs' }])
+      vi.unstubAllGlobals()
+    })
+
+    it('rejects when both settling and the fallback read find nothing', async () => {
+      vi.stubGlobal(
+        'document',
+        new JSDOM('<body></body>', { url: 'https://www.bing.com/' }).window.document
+      )
+      const service = serviceWithTemporaryTab(
+        timingOutTab({ evalJs: vi.fn(async () => ({ results: [] })) })
+      )
+
+      await expect(
+        executeWebSearch(
+          service,
+          { query: 'test', selectors },
+          { sessionId: 'session-1', cwd: 'D:\\Workspace' }
+        )
+      ).rejects.toThrow('The page returned no parseable search results.')
+      vi.unstubAllGlobals()
+    })
+
+    it('propagates a NON-timeout settle failure instead of masking it as empty results', async () => {
+      // A closed tab (or a broken selector) is a real failure: reporting "no parseable search
+      // results" would hide the cause entirely. Only a settle timeout may fall back.
+      const service = serviceWithTemporaryTab(
+        settledTab({
+          evalJs: vi.fn(async () => ({ results: [] })),
+          waitForStable: vi.fn(async () => {
+            throw new Error('tab was closed')
+          }) as unknown as BrowserTab['waitForStable']
+        })
+      )
+
+      await expect(
+        executeWebSearch(
+          service,
+          { query: 'test', selectors },
+          { sessionId: 'session-1', cwd: 'D:\\Workspace' }
+        )
+      ).rejects.toThrow('tab was closed')
+    })
+
+    it('rethrows when cancelled during the settle wait instead of falling back', async () => {
+      vi.stubGlobal(
+        'document',
+        new JSDOM('<body></body>', { url: 'https://www.bing.com/' }).window.document
+      )
+      const controller = new AbortController()
+      const waitForStable = vi.fn(async () => {
+        controller.abort()
+        throw new Error('operation aborted')
+      })
+      const service = serviceWithTemporaryTab(settleTab({ waitForStable }))
+
+      await expect(
+        executeWebSearch(
+          service,
+          { query: 'test', selectors },
+          { sessionId: 'session-1', cwd: 'D:\\Workspace', signal: controller.signal }
+        )
+      ).rejects.toThrow('Web search was cancelled.')
+      expect(waitForStable).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(Object),
+        controller.signal
+      )
+      vi.unstubAllGlobals()
+    })
   })
 })

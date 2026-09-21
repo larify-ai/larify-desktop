@@ -623,7 +623,7 @@ export class BrowserTab {
     return res.result?.value
   }
 
-  async snapshot(opts: CaptureOptions = {}): Promise<string> {
+  async snapshot(opts: CaptureOptions = {}, signal?: AbortSignal): Promise<string> {
     await this.ready()
     const url = this.webContents.getURL()
     if (!url || url === "about:blank") {
@@ -635,6 +635,7 @@ export class BrowserTab {
       this.nextRef,
       opts,
       this.frames.asMap(),
+      signal,
     )
     this.nextRef = nextRef
     return text
@@ -938,6 +939,14 @@ export class BrowserTab {
     signal?: AbortSignal
   ): Promise<void> {
     await waits.waitForSelector(this.cdpSend, selector, state, timeoutMs, signal)
+  }
+
+  async waitForStable(
+    expression: string,
+    options?: waits.StableOptions,
+    signal?: AbortSignal
+  ): Promise<unknown> {
+    return waits.waitForStable(this.cdpSend, expression, options, signal)
   }
 
   async waitForText(text: string, timeoutMs?: number): Promise<void> {

@@ -1,6 +1,7 @@
 import { resolveAxSession, scanCursor, type CdpSend } from './snapshotCapture'
 import { buildSnapshot, type AXNode, type RefEntry } from './snapshot'
 import { boxModelCenter } from './input'
+import { isSelectorParseError, isTimeoutError, waitForFunction } from './waits'
 
 export type RefMap = Map<string, RefEntry>
 export type IframeSessions = Map<string, string>
@@ -27,6 +28,44 @@ function findElementExpr(selector: string): string {
     return `document.evaluate(${xp}, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue`
   }
   return `document.querySelector(${JSON.stringify(selector)})`
+}
+
+/**
+ * A boolean expression that is true once `selector` matches an element, using the SAME selector
+ * semantics as `findElementExpr` above (CSS via `querySelector`, `xpath=` via `document.evaluate`).
+ * `waits.selectorExpr` only emits `!!document.querySelector(...)`, which throws a SyntaxError for
+ * `xpath=` selectors, so the wait must stay xpath-aware to match the read. See
+ * memory/larify-desktop/refresolve-wait-scope-decision.md.
+ */
+function elementPresentExpr(selector: string): string {
+  if (selector.startsWith('xpath=')) {
+    const xp = JSON.stringify(selector.slice(6))
+    return `document.evaluate(${xp}, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue != null`
+  }
+  return `!!document.querySelector(${JSON.stringify(selector)})`
+}
+
+const SELECTOR_WAIT_TIMEOUT_MS = 5000
+
+/**
+ * Waits (bounded) until `selector` is attached before the single read in the `{selector}` branches.
+ * The element may be rendered by client-side JS after load; reading once would misjudge it as
+ * "not found". A timeout only means the element never showed up in time, so it is swallowed and
+ * the caller falls back to its original single read (preserving the error text/semantics). Any
+ * other error still propagates. See memory/larify-desktop/dom-query-race-family.md.
+ *
+ * A malformed selector is the one error that must NOT propagate from here: the probe evaluates the
+ * same selector as the read, so Chromium raises its raw `SyntaxError` during the wait, and letting
+ * it through would replace the model-facing `selector '…' is invalid` with that raw text. It is
+ * therefore swallowed too, so the read below classifies it as `is invalid` exactly as it did
+ * before the wait existed.
+ */
+async function waitForElement(send: CdpSend, selector: string): Promise<void> {
+  try {
+    await waitForFunction(send, elementPresentExpr(selector), SELECTOR_WAIT_TIMEOUT_MS)
+  } catch (error) {
+    if (!isTimeoutError(error) && !isSelectorParseError(error)) throw error
+  }
 }
 
 interface BoxModelResult {
@@ -189,6 +228,7 @@ export async function resolveRefToBox(
     await checkInterception(send, fresh, selectorOrRef, x, y, sessionId)
     return { x, y, frameId: entry.frameId, sessionId }
   }
+  await waitForElement(send, selectorOrRef)
   const js = `(() => {
     const el = ${findElementExpr(selectorOrRef)};
     if (!el) return null;
@@ -238,6 +278,7 @@ export async function resolveRefToObjectId(
     if (!objectId) throw new Error(`could not resolve node for ref @${refId}`)
     return { objectId, frameId: entry.frameId, sessionId }
   }
+  await waitForElement(send, selectorOrRef)
   const res = (await send('Runtime.evaluate', {
     expression: findElementExpr(selectorOrRef),
     returnByValue: false

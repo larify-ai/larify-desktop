@@ -1,7 +1,8 @@
 import { z } from 'zod'
 import { defineTool, type Tool, type ToolRunContext } from '../../../main/core/plugin/protocol'
 import type { BrowserService } from './browser-service'
-import { waitForOperationOrAbort } from './waits'
+import type { BrowserTab } from './tab'
+import { isTimeoutError, waitForOperationOrAbort } from './waits'
 
 export interface WebSearchResult {
   title: string
@@ -117,6 +118,70 @@ export function buildParseSearchPageScript(selectors: WebSearchSelectors): strin
   })()`
 }
 
+// Tunables measured on the live Bing search page — see
+// memory/larify-desktop/bing-hydration-window.md. Results do not exist before ~900ms
+// in a cold session, and Bing renders a 1-item empty placeholder (h2 missing → parsed
+// as 0 results) before the real 10 results land. A throttled cold session can stretch
+// the tail to ~6.4s, hence the 10s ceiling.
+const SEARCH_RESULT_TIMEOUT_MS = 10_000
+const SEARCH_SETTLE_POLL_MS = 100
+const SEARCH_SETTLE_TIMES = 2
+
+/**
+ * Settle criterion: the page has >= 1 *parseable* result and the shape
+ * `[count, ...titles]` stayed identical across consecutive samples. `null` while the
+ * page is not yet meaningful (container absent, or only the empty placeholder is present
+ * → parsedCount 0). Kept self-contained: it is serialized into the page.
+ */
+export function buildSettleExpression(selectors: WebSearchSelectors): string {
+  const sels = JSON.stringify({
+    result: selectors.result,
+    title: selectors.title,
+    link: selectors.link
+  })
+  return `(() => {
+    const sels = ${sels}
+    const normalize = (value) => (value == null ? '' : String(value)).replace(/\\s+/g, ' ').trim()
+    const items = Array.from(document.querySelectorAll(sels.result))
+    const shape = [0]
+    let parsed = 0
+    for (const item of items) {
+      const title = normalize(item.querySelector(sels.title)?.textContent)
+      const href = item.querySelector(sels.link)?.href
+      if (!title || !href) continue
+      if (parsed === 0) shape.push(title)
+      parsed += 1
+    }
+    if (parsed === 0) return null
+    shape[0] = parsed
+    return shape
+  })()`
+}
+
+async function readSearchResults(
+  tab: BrowserTab,
+  selectors: WebSearchSelectors,
+  signal?: AbortSignal
+): Promise<WebSearchResponse | undefined> {
+  try {
+    await tab.waitForStable(
+      buildSettleExpression(selectors),
+      {
+        pollMs: SEARCH_SETTLE_POLL_MS,
+        stableTimes: SEARCH_SETTLE_TIMES,
+        timeoutMs: SEARCH_RESULT_TIMEOUT_MS
+      },
+      signal
+    )
+  } catch (error) {
+    // Only a settle TIMEOUT falls back to reading the page as-is (letting the empty-result check
+    // below decide). A cancel, a closed tab or a broken selector is a real failure and must
+    // propagate unchanged: swallowing it would report a misleading "no parseable search results".
+    if (!isTimeoutError(error)) throw error
+  }
+  return (await tab.evalJs(buildParseSearchPageScript(selectors))) as WebSearchResponse | undefined
+}
+
 export async function executeWebSearch(
   service: BrowserService,
   input: z.infer<typeof webSearchInputSchema>,
@@ -128,11 +193,15 @@ export async function executeWebSearch(
   return service.withTemporaryTab(ctx.sessionId, url, async (tab) => {
     await waitForOperationOrAbort(tab.waitForNavigation(), ctx.signal, 'Web search was cancelled.')
 
-    const parsed = (await waitForOperationOrAbort(
-      tab.evalJs(buildParseSearchPageScript(input.selectors)),
+    // The search page hydrates results on the client. Parsing right after load races with
+    // that hydration (cold sessions parse a 0-result placeholder and throw). Wait for the
+    // result container, then for the parsed shape to settle. A timeout falls back to the
+    // previous behaviour: read the DOM once and let the empty-result check below decide.
+    const parsed = await waitForOperationOrAbort(
+      readSearchResults(tab, input.selectors, ctx.signal),
       ctx.signal,
       'Web search was cancelled.'
-    )) as WebSearchResponse | undefined
+    )
 
     if (!parsed || parsed.results.length === 0) {
       throw new Error('The page returned no parseable search results.')

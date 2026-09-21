@@ -11,6 +11,9 @@ import {
   type LinkTarget
 } from './snapshot'
 import { randomUUID } from 'node:crypto'
+import { isSelectorParseError, isTimeoutError, waitForSelector } from './waits'
+
+const SELECTOR_WAIT_TIMEOUT_MS = 5000
 
 export type CdpSend = (method: string, params?: object, sessionId?: string) => Promise<unknown>
 
@@ -35,8 +38,26 @@ function collectBackendIds(node: DomNode | undefined, ids: Set<number>): void {
   if (node.contentDocument) collectBackendIds(node.contentDocument, ids)
 }
 
-async function resolveSelectorIds(send: CdpSend, selector: string): Promise<Set<number>> {
+async function resolveSelectorIds(
+  send: CdpSend,
+  selector: string,
+  signal?: AbortSignal
+): Promise<Set<number>> {
   const ids = new Set<number>()
+  // The element may be rendered by client-side JS after the document is loaded, so wait for it
+  // to be attached before the single read below. See memory/larify-desktop/snapshot-selector-race.md.
+  try {
+    await waitForSelector(send, selector, 'attached', SELECTOR_WAIT_TIMEOUT_MS, signal)
+  } catch (error) {
+    // A timeout only means the element never showed up in time; fall back to the original single
+    // read so the error text and semantics stay unchanged. Terminal errors still propagate.
+    //
+    // A malformed selector is swallowed for the same reason: the attached probe evaluates the same
+    // selector as the read, so Chromium raises its raw `SyntaxError` while waiting, and letting it
+    // through would replace the model-facing `selector '…' is invalid` with that raw text. The read
+    // below still classifies it, exactly as it did before the wait existed.
+    if (!isTimeoutError(error) && !isSelectorParseError(error)) throw error
+  }
   const evalRes = (await send('Runtime.evaluate', {
     expression: `document.querySelector(${JSON.stringify(selector)})`,
     returnByValue: false
@@ -307,11 +328,14 @@ export async function captureSnapshot(
   refMap: Map<string, RefEntry>,
   startRef: number,
   opts: CaptureOptions,
-  iframeSessions?: Map<string, string>
+  iframeSessions?: Map<string, string>,
+  signal?: AbortSignal
 ): Promise<{ text: string; nextRef: number }> {
   await send('DOM.enable')
   await send('Accessibility.enable')
-  const selectorIds = opts.selector ? await resolveSelectorIds(send, opts.selector) : undefined
+  const selectorIds = opts.selector
+    ? await resolveSelectorIds(send, opts.selector, signal)
+    : undefined
   let nextRef = startRef
 
   const frame = async (frameId: string | undefined, recurse: boolean): Promise<string> => {

@@ -281,7 +281,7 @@ export function createBrowserTools(service: BrowserService): Record<string, Tool
         execute: async (args, ctx) => {
           const { id, includeUrls, ...options } = args
           return withTab(service, ctx.sessionId, id, async (tab) =>
-            spill(await tab.snapshot({ ...options, urls: includeUrls })),
+            spill(await tab.snapshot({ ...options, urls: includeUrls }, ctx.signal)),
           )
         },
       }),

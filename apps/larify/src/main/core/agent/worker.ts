@@ -146,8 +146,9 @@ export class AgentWorker {
       const reviewToolCalls = new Set<string>()
       const originalStopWhen = input.runtime.stopWhen
       // `previousStored`（要写回的那条既有 assistant）**由调用方显式给出**，不由 message 反推：
-      // 只有 ask_user 回答续写（外部 `agent:send` 送来回答，应写回原行）才需要它；
-      // reset_context 的进程内续写是新的一轮（应新建行），故调用时不传。
+      // - ask_user 回答续写（外部 `agent:send` 送来回答）：由 `agent.ts` 从锚点下传 ⇒ 写回原行。
+      // - reset_context 的进程内续写：传**本轮的判据**（见 `while (handoff)` 内说明）⇒ 本轮
+      //   落库换新 id（`toStored` 的重定向），从而落在 `sessions.start` 之后、可被续写。
       const runOnce = (
         message: UIMessage | undefined,
         previousStored?: UIMessage
@@ -219,15 +220,44 @@ export class AgentWorker {
       // reset_context 的进程内续写：新的一轮，故不传续写身份。
       while (handoff) {
         if (controller.signal.aborted) return { scheduled, totalProcessingMs }
+        // reset 续写轮的输入 = **本轮的「用户输入」+ 交接摘要**（parts=2），而非复刻任意前序内容。
+        //
+        // `agent_reset_context.handoff` 按工具契约就是「交接摘要」（`Markdown handoff document
+        // with related files linked`）——摘要**自足**：它已把「已改文件 / 下一步」写成文本。
+        // 保留「本轮的用户输入」是为了让判据行仍带**任务语境**（与真实库 15 条历史正常判据行一致：
+        // 形态恒为 `[上一轮输入文本, '# Handoff\n\n<摘要>']`，parts=2）。
+        //
+        // ⚠️ 只取 **`role === 'user'` 的 `input.message.parts`**，绝不无条件复刻 `input.message`：
+        // `input.message` 在**不同轮次语义不同**，无非复刻会出错：
+        // - 首轮 / nest 判据轮：`agent.ts` 用 `buildNestPrompt` 造的 1-part 判据 ⇒ 正确保留。
+        // - **续写（ask_user 回答）轮：`input.message` 是渲染层 `addToolOutput` 回传的整条
+        //   assistant 快照（数百 parts）** ⇒ 若复刻，就把整条 assistant 正文写进一条 **user** 行，
+        //   产出「role=user 却载 assistant 正文」的**嵌合行**，并随快照规模线性放大。
+        //   真实会话 `8b152a1c` 的 `#6702/#6704/#6706/#6708`（419/461 parts）即此。
+        //   ⇒ 这同时是「同一 toolCallId 出现在 4 条 user 行 ⇒ 调度次数虚高」的来源。
+        //   故此处用 `input.message.role === 'user'` 把它**排除**（assistant 快照不带入）。
+        const carriedParts =
+          input.message?.role === 'user' ? (input.message.parts ?? []) : []
         const tagged: UIMessage = {
           id: randomUUID(),
           role: 'user',
           metadata: { compaction: true },
-          parts: [
-            ...(input.message?.parts ?? []),
-            { type: 'text', text: `# Handoff\n\n${handoff}` }
-          ]
+          parts: [...carriedParts, { type: 'text', text: `# Handoff\n\n${handoff}` }]
         }
+        // 本轮判据同时是**续写轮的 `previousStored`**：reset 续写是新的一轮（worker 只跑一轮），
+        // 其落库身份必须由调用方显式给出，不能由 SDK 从 `message` 反推。
+        //
+        // 理由：`runStoredAgentSession` 用 `originalMessages = [...messages, continuationOf]`
+        // 并入 reset 前那条 assistant 以复用其 id（AI SDK 据此把产出并进那条 UI 消息，时长连续）。
+        // 而 `messages` = `loadMessages()`（`position >= sessions.start`）+ 本轮判据；主链轮里
+        // `messages` **恒以一个 user 结尾**，于是 AI SDK 的 `handleUIMessageStreamFinish` 会把
+        // `continuationOf.id`（reset 前的旧 assistant）当作**流内 start chunk 的 messageId**，
+        // 整个 `state.message`（含全部增量）都挂在那条 id 上 —— 而它已被 `saveStart` 甩到
+        // `start` 之前。若不重定向，本轮的新产出（最后一个 `agent_schedule_task` /
+        // `agent_ask_user`）就**永远落不进 `loadMessages()` 可见的范围**（同既有缺陷
+        // `ask-user-reanswer-after-reset` 的形态，只是触发在**流内 start 注入**这一层）。
+        // 显式传入后 `previousStored.id !== continuationOf.id` ⇒ `toStored` 的重定向生效，
+        // UI 侧 `originalMessages` 不变（合并与时长语义不变），仅落库改到一个新 id。
         const message = input.nested ? markNested(tagged) : tagged
         handoff = undefined
         // reset_context 走进程内 handoff，不经过 Agent.send()，故此处显式刷新
@@ -240,7 +270,16 @@ export class AgentWorker {
         // nest prompt），不依赖 `start`；若在此也 saveStart，会把主链游标推到子任务的
         // 位置，使主链上下文被截断成残片（实测 loadMessages 返回 []）。故 nested 时跳过。
         if (!input.nested) this.sessions.saveStart(input.sessionId, message)
-        response = await runOnce(message)
+        // `previousStored` 只在**主链轮**传：其用途是「落库 id 重定向」——主链续写轮 `messages`
+        // 恒以 user 结尾，AI SDK 会把 reset 前那条旧 assistant 的 id 当作流内 start 的
+        // messageId，其产出会被甩到 `sessions.start` 之前。显式传入判据（id ≠ continuationOf.id）
+        // ⇒ `toStored` 重定向生效，产出落在 `start` 之后。
+        //
+        // ⚠️ **nested 轮不能传**：`toStored` 的 nested+锚点分支会**复用锚点 id** 落库
+        // （`markNested({...response, id: continuationAnchor.id})`），若把本轮 handoff 行当锚点
+        // 传入，续写产出将**覆盖 handoff 行本身**（handoff 行消失）。nested 轮不需要移动游标
+        // （`start` 不动），其落库已按「主链行为 id 基」正常新建行。
+        response = await runOnce(message, input.nested ? undefined : message)
         settle(response)
       }
       // 照常结束流：`ask_user` 是客户端工具，AI SDK 侧本轮到此为止；用户回答会经

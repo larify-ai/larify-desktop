@@ -257,23 +257,94 @@ describe('AgentWorker', () => {
     expect(pluginHost.refreshPlugins).toHaveBeenCalledTimes(1)
     expect(mocks.run).toHaveBeenCalledTimes(2)
     const nextMessage = mocks.run.mock.calls[1][1].message
+    // handoff 行 = **本轮的用户输入** + 交接摘要（parts=2，与真实库历史正常判据行一致）。
     expect(nextMessage).toMatchObject({
       role: 'user',
       metadata: { compaction: true },
       parts: [
-        {
-          type: 'text',
-          text: 'hello'
-        },
+        { type: 'text', text: 'hello' },
         {
           type: 'text',
           text: '# Handoff\n\nContinue from ~/.larify/tasks/demo/task.md.'
         }
       ]
     })
+    // 续写轮的落库身份＝本轮判据（`toStored` 据此把落库 id 重定向到 `start` 之后），
+    // 从而本轮的新产出（如最后一个 schedule_task / ask_user）仍可被 `loadMessages` 读到。
+    expect(mocks.run.mock.calls[1][1].previousStored).toBe(nextMessage)
     expect(sessions.saveStart).toHaveBeenCalledWith('session', nextMessage)
     // 同上：worker 不再自行 end 流，结束由编排层统一负责。
     expect(sink.end).not.toHaveBeenCalled()
+  })
+
+  it('does not copy the continuation-turn snapshot into the reset handoff (chimeric row)', async () => {
+    // 回归：真实会话 `8b152a1c` 的「嵌合行」（`role=user` 却载 419/461 parts 的 assistant 正文，
+    // `#6702/#6704/#6706/#6708`）。生产者＝本处判据曾用
+    // `parts: [...(input.message?.parts ?? []), text]` 复刻判据：
+    // **ask_user 续写轮**的 `input.message` 是渲染层 `addToolOutput` 回传的**整条 assistant 快照**
+    // （实测数百 parts），故被整段抄进一条 user 行。
+    // 修法：判据只带自己的文本（`handoff` 本身就是「交接摘要」，按工具契约自足）。
+    const snapshotParts = Array.from({ length: 12 }, (_, index) => ({
+      type: 'text' as const,
+      text: `assistant part ${index}`
+    }))
+    const runtime = {
+      toolsContext: {
+        agent_reset_context: { sessionId: 'session', cwd: '/workspace' }
+      }
+    } as never
+    mocks.run
+      .mockImplementationOnce(async (_sessions, request) => {
+        request.options.toolsContext.agent_reset_context.requestContextReset('# Handoff\n\nsummary')
+        return undefined
+      })
+      .mockResolvedValueOnce(undefined)
+    const { worker, sessions } = createWorker()
+
+    await worker.run({
+      ...input,
+      runtime,
+      message: { id: 'assistant-snapshot', role: 'assistant', parts: snapshotParts } as UIMessage
+    })
+
+    const nextMessage = mocks.run.mock.calls[1][1].message as UIMessage
+    expect(nextMessage.role).toBe('user')
+    expect(nextMessage.metadata).toMatchObject({ compaction: true })
+    // 只带判据文本：绝不内联 assistant 快照（旧行为会得到 12 + 1 = 13 个 parts）。
+    expect(nextMessage.parts).toEqual([
+      { type: 'text', text: '# Handoff\n\n# Handoff\n\nsummary' }
+    ])
+    expect(sessions.saveStart).toHaveBeenCalledWith('session', nextMessage)
+  })
+
+  it('does not grow the handoff when the reset is self-triggered again', async () => {
+    // 回归：连续 reset（判据轮里再 reset）曾让判据 **指数膨胀**（1 → 2 → 4 → 8 parts）：
+    // 第 n 轮的 `input.message` 就是第 n−1 轮的判据，复刻它即翻倍。
+    const runtime = {
+      toolsContext: {
+        agent_reset_context: { sessionId: 'session', cwd: '/workspace' }
+      }
+    } as never
+    mocks.run
+      .mockImplementationOnce(async (_sessions, request) => {
+        request.options.toolsContext.agent_reset_context.requestContextReset('first')
+        return undefined
+      })
+      .mockImplementationOnce(async (_sessions, request) => {
+        request.options.toolsContext.agent_reset_context.requestContextReset('second')
+        return undefined
+      })
+      .mockResolvedValueOnce(undefined)
+    const { worker } = createWorker()
+
+    await worker.run({ ...input, runtime })
+
+    const second = mocks.run.mock.calls[2][1].message as UIMessage
+    // 第二轮判据同样 = 本轮用户输入 + 摘要：**不累积**（不把上一轮判据整段复刻）。
+    expect(second.parts).toEqual([
+      { type: 'text', text: 'hello' },
+      { type: 'text', text: '# Handoff\n\nsecond' }
+    ])
   })
 
   it('routes a child-task snapshot back to the main-chain assistant', async () => {

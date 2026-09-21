@@ -431,7 +431,7 @@ html {
    下载在左、复制在右；右对齐由各外层容器控制；垂直居中；间距一致。 */
 .larify-message-markdown [data-streamdown="code-block-actions"],
 .larify-message-markdown [data-streamdown="mermaid-block-actions"],
-.larify-message-markdown [data-streamdown="table-wrapper"] > div:has(button) {
+.larify-message-markdown [data-streamdown="table-wrapper"] > div:has(button):not(:has(table)) {
   display: flex;
   align-items: center;
   gap: 0.25rem;
@@ -449,7 +449,7 @@ html {
   flex-direction: row;
 }
 
-.larify-message-markdown [data-streamdown="table-wrapper"] > div:has(button) {
+.larify-message-markdown [data-streamdown="table-wrapper"] > div:has(button):not(:has(table)) {
   flex-direction: row-reverse;
   justify-content: flex-start;
 }

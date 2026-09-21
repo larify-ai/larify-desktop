@@ -27,6 +27,11 @@ export interface AgentWorkerInput {
   baseProcessingMs?: number
   /** 上一轮 assistant 的落库身份（ask_user 回答续写时由 agent.ts 下传，用于原地替换）。 */
   previousStored?: UIMessage
+  /**
+   * ask_user 回答续写时，该**子任务轮**的 nest 判据（由 agent.ts 按 toolCallId 精确回溯下传）。
+   * 有值时，本轮模型输入 = `[判据, 回答]`（从该子任务轮继续），而非「只有回答」。
+   */
+  continuationPrompt?: UIMessage
 }
 
 /** 一轮的产出：被调度的任务路径（一轮至多一个），以及该轮（含传入基数）的累计处理时长。 */
@@ -155,6 +160,7 @@ export class AgentWorker {
           nested: input.nested,
           baseProcessingMs: input.baseProcessingMs,
           previousStored,
+          continuationPrompt: input.continuationPrompt,
           options: {
             ...input.runtime,
             toolsContext,

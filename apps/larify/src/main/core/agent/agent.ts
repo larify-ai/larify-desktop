@@ -37,6 +37,37 @@ function awaitUserAnswer(sessions: SessionStore, sessionId: string): boolean {
     )
 }
 
+/**
+ * 从**渲染层送来的消息**里读出「**已终态**的 `agent_ask_user`」的 `toolCallId` 列表。
+ *
+ * ask_user 是客户端工具（无 execute）；用户提交回答走 `addToolOutput(toolCallId, output)`，
+ * 它把回答写进**当前 assistant** 的 ask_user part（state → `output-available`/`output-error`/
+ * `output-denied`），随后 `makeRequest` 把这条消息经 `agent:send` 发来。
+ *
+ * 注意：一条 assistant 内可能有**多个**终态 ask_user（历史里早答过的 + 本次刚答的），
+ * 仅凭 state **无法**区分哪个是本次的。因此这里只返回**候选**；由调用方按
+ * 「**库内该 `toolCallId` 仍是 `input-available`**」逐个校验，取第一个命中者（见 `runScheduledTasks`）。
+ */
+function answeredAskUserCallIds(message: UIMessage): string[] {
+  if (message.role !== 'assistant') return []
+  const asks = (message.parts ?? []).filter((part) => {
+    const tool = part as { type?: string; toolName?: string }
+    return (
+      tool.type === 'tool-agent_ask_user' ||
+      (tool.type === 'dynamic-tool' && tool.toolName === 'agent_ask_user')
+    )
+  }) as Array<{ toolCallId?: string; state?: string }>
+  return asks
+    .filter(
+      (part) =>
+        typeof part.toolCallId === 'string' &&
+        (part.state === 'output-available' ||
+          part.state === 'output-error' ||
+          part.state === 'output-denied')
+    )
+    .map((part) => part.toolCallId as string)
+}
+
 export interface AgentInput {
   sessionId: string
   cwd?: string
@@ -145,18 +176,36 @@ export class Agent implements Disposable {
     // 「等待用户回答」的续写恢复：ask_user 是**客户端工具**（无 execute），其回答经
     // `addToolOutput` → 又一次 `agent:send` 送达。渲染层只发回答（没有新 user 文本），
     // 服务端若当作全新一轮，就会 nested=false、base=0 —— 于是子任务轮的续写被误当成
-    // 「主链轮」且时长从零重算。这里从**上一条 assistant 自身**恢复上下文（nested 与已累计
-    // 时长都写在其 metadata 上），无需任何额外持久化：
-    const resumedFlag = awaitUserAnswer(this.sessions, request.sessionId)
-    const resumed = request.message.role === 'assistant' && resumedFlag
+    // 「主链轮」且时长从零重算。
+    //
+    // **精确回溯（不走位置推断）**：渲染层送来的消息**自带**被回答的 `ask_user.toolCallId`；
+    // 以「**库内该 toolCallId 仍是 `input-available`**」为准逐个校验候选，命中者即
+    // 「谁在等这次回答」——它可能是主链行或嵌套行。之所以不用 `lastMessage()`（「最近写进来
+    // 的一条」）：主链与嵌套链交错写入时会错位（子任务 ask_user 之后又写入 nest 判据/主链轮），
+    // 导致子任务轮续写被误判为主链轮 ⇒ 越权读整条主链。
+    let askUserContext: { owner: UIMessage; prompt?: UIMessage } | undefined
+    for (const callId of answeredAskUserCallIds(request.message)) {
+      askUserContext = this.sessions.findAskUserContext(request.sessionId, callId)
+      if (askUserContext) break
+    }
+    const resumedOwner = askUserContext?.owner
+    // 子任务轮续写要「从该轮继续」：把该轮的 nest 判据一并带给模型（下传到 persist）。
+    // 与 previousStored 一样用 `let`：只对**本轮**生效。
+    let continuationPrompt = askUserContext?.prompt
+    // 判定本轮是否为「续写」。两路**互补**：
+    // ① 精确回溯命中（新）：`owner` 可能是**嵌套行**——此时 `lastMessage()` 未必是它，
+    //    旧判据会漏判；这正是本次修复点。
+    // ② 旧判据（兜底）：DB 末条停在等待态。用于「找不到承载者」（历史数据/异常）时保持原行为。
+    const resumed =
+      resumedOwner !== undefined ||
+      (request.message.role === 'assistant' && awaitUserAnswer(this.sessions, request.sessionId))
     // 续写要**写回上一轮那条 assistant**（原地替换），故把它的落库身份一路下传到 persist。
     // 只有这里知道"上一轮的落库身份"：渲染层传来的 message 是**主链 assistant** 的快照
     // （嵌套行在 UI 上合并进主链消息），既不含嵌套行 id、也推不出增量切片基准。
     let previousStored: UIMessage | undefined
     if (resumed) {
-      // 同样用 lastMessage：ask_user 所在的轮次可能是 nested，其 metadata 才是要恢复的
-      // nested / totalProcessingMs 来源。
-      const previous = this.sessions.lastMessage(request.sessionId)
+      // 优先用精确回溯到的承载者；找不到才退回 lastMessage（兜底）。
+      const previous = resumedOwner ?? this.sessions.lastMessage(request.sessionId)
       previousStored = previous
       // 仅恢复**上下文归属与已累计时长**；`message` 必须保留——用户的回答（tool-output）
       // 要作为新消息喂给模型，才能与上一轮的 ask_user(tool-call) 配对；置空会触发
@@ -187,10 +236,12 @@ export class Agent implements Disposable {
         runtime,
         nested,
         baseProcessingMs,
-        previousStored
+        previousStored,
+        continuationPrompt
       })
       // 续写只对**本轮**生效：续写完成后就是普通轮次，锚点回到正常取值。
       previousStored = undefined
+      continuationPrompt = undefined
       if (result.totalProcessingMs !== undefined) baseProcessingMs = result.totalProcessingMs
       // 本轮停在「等待用户回答」(agent_ask_user 仍为等待态)：**暂停**，不结束流。
       // ask_user 是客户端工具，用户回答经 addToolOutput 再次 send() 续写；此处若结束，

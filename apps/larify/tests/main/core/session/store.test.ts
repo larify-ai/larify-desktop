@@ -81,6 +81,38 @@ describe('SessionStore nested filtering', () => {
     expect(store.lastAssistant('session', 'after')?.id).toBe('main')
   })
 
+  it('returns the renderer-visible last assistant, including nested rows (UI anchor)', () => {
+    // nest 轮的 UI 身份锚点必须等于**渲染层此刻的末端 assistant**（渲染层把嵌套行也当普通
+    // assistant 持有）。与 lastAssistant('after')（过滤 nested ⇒ 恒返主链行）不同：
+    // 这里**不过滤 nested** ⇒ 「上一轮是嵌套轮」时返回那条 nested 行，锚点才不会错位。
+    const store = createStore()
+    store.createSession({ id: 'session', title: 't', cwd: 'cwd' })
+    const assistant = (id: string, nested = false): UIMessage => ({
+      id,
+      role: 'assistant',
+      metadata: nested ? { nested: true } : undefined,
+      parts: [{ type: 'text', text: id }]
+    })
+    store.saveMessages('session', [
+      user('u1', 'q'),
+      assistant('main'),
+      user('nest-1', 'nest prompt', true),
+      assistant('main-nested-aaaa', true)
+    ])
+
+    // 主链查询（过滤 nested）返回主链行。
+    expect(store.lastAssistant('session', 'after')?.id).toBe('main')
+    // UI 锚点（不过滤 nested）返回渲染层末端 —— 上一轮的嵌套行。
+    expect(store.lastVisibleAssistant('session')?.id).toBe('main-nested-aaaa')
+
+    // 再追加一轮嵌套后，锚点随之推进到最新一条（这正是「第二个嵌套轮起」不再重复的关键）。
+    store.saveMessages('session', [
+      user('nest-2', 'nest prompt 2', true),
+      assistant('main-nested-bbbb', true)
+    ])
+    expect(store.lastVisibleAssistant('session')?.id).toBe('main-nested-bbbb')
+  })
+
   it('keeps the main chain loadable after a child (nested) reset moves the start cursor', () => {
     // 回归：`sessions.start` 是主链上下文游标。若子任务（nested）的 reset 也用 saveStart 把游标
     // 推到子任务位置，之后 loadMessages（position >= start）就只剩子任务之后的残片——主链上下文

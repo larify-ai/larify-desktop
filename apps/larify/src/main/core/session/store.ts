@@ -114,6 +114,33 @@ export class SessionStore implements Disposable {
   }
 
   /**
+   * 会话里**最后一条可见 assistant**（**不过滤 nested**，`position >= start`）。
+   *
+   * 用于递归子任务轮次的 **UI 流式消息身份锚点**：渲染层把嵌套行也当普通 assistant 消息持有
+   * （nested 只影响模型输入与导航，不影响 live messages），故「渲染层此刻的末端 assistant」
+   * 就是这里的返回值。锚点必须与它**逐字相同**，AI SDK 才会走 `replaceMessage`（原地替换）；
+   * 否则客户端 `replaceLastMessage=false` → `pushMessage`（新建，并把锚点全部 parts 复制为基线）
+   * → **UI 整段内容重复**（实测：第二个及以后的嵌套轮）。
+   *
+   * 与 `lastAssistant(id,'after')` 的区别：后者带 `nested IS NOT 1` 过滤 ⇒ 恒返回主链行，
+   * 在「上一轮是嵌套轮」时与渲染层末端不一致 ⇒ 触发上述重复。
+   */
+  lastVisibleAssistant(id: string): UIMessage | undefined {
+    const row = this.database
+      .prepare(
+        `SELECT messages.value FROM messages
+         JOIN sessions ON sessions.id = messages.session_id
+         WHERE messages.session_id = ?
+           AND messages.position >= COALESCE(sessions.start, -1)
+           AND json_extract(messages.value, '$.role') = 'assistant'
+         ORDER BY messages.position DESC
+         LIMIT 1`
+      )
+      .get(id)
+    return row ? (JSON.parse(row.value as string) as UIMessage) : undefined
+  }
+
+  /**
    * 会话的最后一条消息（**不过滤 nested**）。用于判定「是否停在等待用户回答」：
    * `agent_ask_user` 可能出现在**子任务轮**（nested）里，而 lastAssistant 会过滤 nested，
    * 用它判定会漏掉子任务轮的 ask_user，导致 ask_user 后编排层不暂停、继续跑下一轮。
@@ -130,6 +157,51 @@ export class SessionStore implements Disposable {
       )
       .get(id)
     return row ? (JSON.parse(row.value as string) as UIMessage) : undefined
+  }
+
+  /**
+   * 定位「正在等待该 `ask_user` 回答」的上下文：返回承载行 `owner`，并在它是**嵌套行**时
+   * **顺带取回本轮的 nest 判据**（`owner` 的前一条 user 行；实测 nested 行与其判据 100% 紧邻）。
+   *
+   * 用途：用户回答经 `addToolOutput` → 新 `send()` 送达。此时应让模型**从该子任务轮继续**——
+   * 即输入 = `[nest 判据, 回答]`（而非现状的「只有回答」，也非「越权读整条主链」）。
+   * 判据定位靠「紧邻」这一实测事实；取不到就返回 `prompt: undefined`（调用方退回现状，行为不变）。
+   */
+  findAskUserContext(
+    id: string,
+    toolCallId: string
+  ): { owner: UIMessage; prompt?: UIMessage } | undefined {
+    // 一条自连接 SQL：同时取「承载行 owner」与其「前一条 prev」，避免两次查询。
+    const row = this.database
+      .prepare(
+        `SELECT m.value AS owner, prev.value AS prev
+         FROM messages m
+         JOIN json_each(m.value, '$.parts') p
+         LEFT JOIN messages prev
+           ON prev.session_id = m.session_id
+          AND prev.position = (SELECT MAX(p2.position) FROM messages p2
+                               WHERE p2.session_id = m.session_id AND p2.position < m.position)
+         WHERE m.session_id = ?
+           AND json_extract(m.value, '$.role') = 'assistant'
+           AND json_extract(p.value, '$.type') IN ('tool-agent_ask_user', 'dynamic-tool')
+           AND json_extract(p.value, '$.toolCallId') = ?
+           AND json_extract(p.value, '$.state') = 'input-available'
+         ORDER BY m.position DESC
+         LIMIT 1`
+      )
+      .get(id, toolCallId) as { owner: string; prev: string | null } | undefined
+    if (!row) return undefined
+    const owner = JSON.parse(row.owner) as UIMessage
+    // 仅当 owner 是**嵌套行**时，其前一条才是本轮的 nest 判据（实测 100% 紧邻）。
+    if ((owner.metadata as Record<string, unknown> | undefined)?.nested !== true || !row.prev) {
+      return { owner }
+    }
+    const candidate = JSON.parse(row.prev) as UIMessage
+    const meta = candidate.metadata as Record<string, unknown> | undefined
+    // 判据签名：user + nested + compaction（与编排层构造一致）；不匹配则视为无判据（兜底）。
+    const isNestPrompt =
+      candidate.role === 'user' && meta?.nested === true && meta?.compaction === true
+    return isNestPrompt ? { owner, prompt: candidate } : { owner }
   }
 
   loadVisibleMessages(id: string, offset = 0, limit = 50): UIMessage[] {

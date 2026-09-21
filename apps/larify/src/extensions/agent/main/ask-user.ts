@@ -6,7 +6,7 @@ export const askUserTool: Tool = {
   metadata: { eager: true, icon: 'message-square-text' },
   inputSchema: z
     .object({
-      message: z.string().min(1).describe('The message to communicate to the user'),
+      message: z.string().min(1).describe('The markdown message to communicate to the user'),
       options: z
         .array(
           z

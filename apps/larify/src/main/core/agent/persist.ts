@@ -64,6 +64,11 @@ export interface AgentRequest {
    * 由 `agent.ts` 在 `resumed` 分支从 `lastMessage()` 读出后下传，避免 persist 再查一次库。
    */
   previousStored?: UIMessage
+  /**
+   * ask_user 回答续写时，该**子任务轮**的 nest 判据（由 `agent.ts` 按 toolCallId 精确回溯下传）。
+   * 有值时，嵌套续写的模型输入 = `[判据, 回答]`——「从该子任务轮继续」，而不是「只有回答」。
+   */
+  continuationPrompt?: UIMessage
 }
 
 export async function runStoredAgentSession(
@@ -122,8 +127,16 @@ export async function runStoredAgentSession(
     : undefined
   // 递归子任务用全新上下文：只喂本轮 nest prompt，不带最上层与其它子任务的消息。
   // 跨层信息只经 task.md 传递（见 nest/prompt.md 生成的判据）。其余情况（主链续跑）加载主链历史。
+  //
+  // ask_user 回答续写（nested）例外：渲染层送来的 `message` 只是「回答」，不含任务背景。
+  // 若 `continuationPrompt`（该子任务轮的 nest 判据）可得，则本轮输入 = `[判据, 回答]`——
+  // 让模型**从该子任务轮继续**（判据恢复任务语境，回答是新增输入），而不是只看到孤立回答。
   const messages =
-    request.nested && message ? [message] : await prepareMessages(sessions.loadMessages(sessionId))
+    request.nested && message
+      ? request.continuationPrompt
+        ? [request.continuationPrompt, message]
+        : [message]
+      : await prepareMessages(sessions.loadMessages(sessionId))
 
   // reset_context 续写：模型输入末尾是 compaction user，AI SDK 据此判定新消息 → UI 多一条
   // 「已完成」。这里读截断前最后一条 assistant 并入 UI 消息身份判定（originalMessages 末尾
@@ -152,11 +165,16 @@ export async function runStoredAgentSession(
   //   主链消息），既不含嵌套行 id、也推不出增量切片基准。
   //   也不能退回 lastAssistant('after')：它过滤 nested → 只能拿到主链行 → 续写被当成新的一轮
   //   嵌套、落成新 id → UI 多出一条（实测：子任务轮 ask_user 回答后消息重复）。
-  // - **新一轮嵌套**（nest 判据）：取当前主链段最后一条 assistant 作 UI 锚点。
+  // - **新一轮嵌套**（nest 判据）：取**渲染层此刻的末端 assistant** 作 UI 锚点。
+  //   必须用 `lastVisibleAssistant`（**不过滤 nested**）：渲染层把嵌套行也当普通 assistant 持有，
+  //   故「上一轮是嵌套轮」时末端就是那条 `-nested-<uuid>` 行。若退回 `lastAssistant('after')`
+  //   （过滤 nested ⇒ 恒返回主链行），锚点 id 与渲染层末端不一致 ⇒ 客户端 `pushMessage`（新建）
+  //   并把锚点全部 parts 复制为基线 ⇒ **UI 整段内容重复**（实测：第二个及以后的嵌套轮；
+  //   首个嵌套轮因末端恰好还是主链行而看不出问题）。
   const continuationAnchor = request.nested ? request.previousStored : undefined
   const nestedAnchor =
     continuationAnchor ??
-    (request.nested && message ? sessions.lastAssistant(sessionId, 'after') : undefined)
+    (request.nested && message ? sessions.lastVisibleAssistant(sessionId) : undefined)
   const uiOriginalMessages = continuationOf
     ? [...messages, continuationOf]
     : nestedAnchor

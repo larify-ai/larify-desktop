@@ -39,7 +39,9 @@ const sessions = {
   // awaitUserAnswer（ask_user 等待判定）与 resumed 恢复都依赖 lastMessage。
   // 默认 undefined = 未停在等待态（调度链测试里无 ask_user）。
   lastMessage: vi.fn(() => undefined),
-  lastAssistant: vi.fn(() => undefined)
+  lastAssistant: vi.fn(() => undefined),
+  // resumed 归属恢复会按送来的 ask_user.toolCallId 精确回溯承载者；默认找不到 → 走旧判据。
+  findAskUserContext: vi.fn(() => undefined)
 }
 const pluginHost = { refreshPlugins: mocks.refreshPlugins }
 

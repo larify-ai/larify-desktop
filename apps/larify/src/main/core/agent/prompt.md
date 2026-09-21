@@ -227,6 +227,6 @@ Append each event chronologically as a section:
 
 For each user request (with /follow_workflow prefix):
 
-- must call `agent_ask_user` to clarify the requirement specification and acceptance criteria after gathering sufficient information
+- must call `agent_ask_user` to clarify the requirement specification and acceptance criteria after gathering sufficient information to clarify the user's fuzzy intent
 - must create a new root task directory with a task.md with status `pending` and related context if it does not exist yet, i.e., {{ taskDirectory }}/<task_name>/task.md
 - must call `agent_schedule_task` again with the new root task.md path to set status to `in_progress` after created or edited again immediately to start from a new model context

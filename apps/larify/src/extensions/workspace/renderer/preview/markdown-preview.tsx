@@ -73,6 +73,7 @@ export function MarkdownPreview({
   return (
     <div className="workspace-markdown-preview h-full overflow-auto" ref={previewRef}>
       <MessageResponse
+        className="select-text"
         components={components}
         mode="static"
         rehypePlugins={previewRehypePlugins}

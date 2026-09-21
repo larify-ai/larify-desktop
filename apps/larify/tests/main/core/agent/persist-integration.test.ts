@@ -236,6 +236,96 @@ describe('runStoredAgentSession persistence', () => {
     store.dispose()
   })
 
+  it('keeps the nested id stable across many rounds (main-chain base, never chained)', async () => {
+    // 回归：会话 31b06fa6 实测嵌套行 id **每轮追加一个后缀**（`#6496→#6520`：60→588 字符）。
+    // 根因：`nestStoredMessage` 用 AI SDK 流响应 id（= UI 锚点 id = **上一轮那条嵌套行**）当 base
+    // ⇒ 每轮再挂一个 `-nested-<uuid>`。正解：id base 用**主链行**（`lastAssistant('after')`）。
+    // 全程模拟 AI SDK 的「复用锚点 id + parts 合并」返回。
+    const store = await createStore()
+    const mainAnchor: UIMessage = {
+      id: 'main',
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'main' }]
+    }
+    store.createSession({ cwd: '/workspace', id: 'session', title: 'Session' })
+    store.saveMessages('session', [mainAnchor])
+
+    let visible = mainAnchor
+    for (let round = 1; round <= 3; round += 1) {
+      const captured = visible
+      mocks.run.mockImplementationOnce(async () => [
+        {
+          ...captured,
+          parts: [...captured.parts, { type: 'text', text: `round ${round}` }]
+        } as UIMessage
+      ])
+      await runStoredAgentSession(store, {
+        sessionId: 'session',
+        cwd: '/workspace',
+        message: {
+          id: `nest-${round}`,
+          role: 'user',
+          metadata: { nested: true, compaction: true },
+          parts: [{ type: 'text', text: `task ${round}` }]
+        },
+        nested: true,
+        options: {} as never
+      })
+      visible = store.lastVisibleAssistant('session') as UIMessage
+    }
+
+    const nestedAssistants = store
+      .loadVisibleMessages('session')
+      .filter(
+        (row) =>
+          row.role === 'assistant' &&
+          (row.metadata as { nested?: boolean } | undefined)?.nested === true
+      )
+    expect(nestedAssistants.length).toBe(3)
+    for (const row of nestedAssistants) {
+      // id 恒为 `main-nested-<uuid>`：`-nested-` 只出现一次，绝不链式累积。
+      expect(row.id.split('-nested-').length - 1).toBe(1)
+      expect(row.id).toMatch(/^main-nested-.+/)
+    }
+    store.dispose()
+  })
+
+  it('never leaks a nested assistant into the main-chain context (even with no prior assistant row)', async () => {
+    // 回归：会话 31b06fa6 的 `#6518`（1543 parts / 3.75MB）**没有 nested 标记**，被 `loadMessages`
+    // 当成主链输入 ⇒ 下一轮上下文超限（输入 1,044,509 tokens）。
+    // 根因：`nestStoredMessage` 的 `if (!anchor) return tag(value)`——锚点取不到时 assistant
+    // 被**原样落库**（不标 nested、不切片）。这里模拟「nest 当轮即是会话第一条」的最坏路径。
+    const store = await createStore()
+    mocks.run.mockImplementationOnce(async () => [
+      {
+        id: 'whatever',
+        role: 'assistant',
+        parts: [{ type: 'text', text: 'huge nested output' }]
+      }
+    ])
+    await runStoredAgentSession(store, {
+      sessionId: 'session',
+      cwd: '/workspace',
+      message: {
+        id: 'nest',
+        role: 'user',
+        metadata: { nested: true, compaction: true },
+        parts: [{ type: 'text', text: 'task' }]
+      },
+      nested: true,
+      options: {} as never
+    })
+
+    // 嵌套轮 assistant 必须带 nested 标记，且**不进** `loadMessages`（主链输入）。
+    const visibleAssistant = store
+      .loadVisibleMessages('session')
+      .find((row) => row.role === 'assistant') as UIMessage
+    expect(visibleAssistant).toBeDefined()
+    expect(visibleAssistant.metadata).toMatchObject({ nested: true })
+    expect(store.loadMessages('session').some((row) => row.role === 'assistant')).toBe(false)
+    store.dispose()
+  })
+
   it('keeps the request when execution fails', async () => {
     const store = await createStore()
     const user = userMessage()

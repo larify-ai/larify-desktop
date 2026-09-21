@@ -17,28 +17,39 @@ export function markNested(value: UIMessage): UIMessage {
 }
 
 /**
- * 把「一轮的模型输出」换算为**应落库**的消息。
- * - 非嵌套（含主链）：原样（可选打 nested 标记由 tag 决定）。
- * - 嵌套轮次：其 `value.id` 是主链 anchor 的 id（UI 身份复用），且 `value.parts` = anchor.parts
- *   + 子轮增量。若按原值落库会用嵌套标记覆盖主链行，故这里**只取增量**并换新 id。
- * worker 的变更快照回写（saveReview）与 persist 的常规落库复用本函数，保证同一套语义。
+ * 把「嵌套轮的一轮模型输出」换算为**应落库**的独立行。
+ *
+ * 嵌套轮 AI SDK 返回的是**合并消息**：`value.parts` = 父轮已存行的 parts + 子轮增量，
+ * `value.id` = UI 身份锚点 id。若按原值落库会「用嵌套标记覆盖主链行」或「把整段累积写成一行」，
+ * 故这里**只取增量、并换一个独立的 `-nested-<uuid>` id**（不覆盖主链行、且各轮互不覆盖）。
+ *
+ * 两个基准**刻意分离**——它们的需求相反，混用会各自出错（会话 31b06fa6 实证）：
+ * - `sliceBase`（切片基准）＝ **父轮已存行**（UI 锚点，可能缺失/不可读）。`parts.slice(base.length)`
+ *   得子轮增量；`sliceBase` 为 `undefined` 时视为「非嵌套轮」，直接交给 `tag`（原样落库）。
+ * - `idBase`（id 基准）＝ **主链行**（稳定不变），故每轮 id 恒为 `主链id-nested-<uuid>`；
+ *   若误用「上一轮嵌套行」作基准，后缀会层层叠加（实测 id 从 60 涨到 588 字符）。
+ *
+ * 调用方（`toStored`）保证：**嵌套轮必传非空 `sliceBase`**（锚点缺失时用空基准），
+ * 因此嵌套轮的 assistant **恒** `markNested` + 切片，绝不原样泄漏进主链上下文
+ * （旧实现 `!anchor` 时原样返回 ⇒ 巨行无 `nested` 标记落库，见会话 31b06fa6 的 `#6518`）。
  */
 export function nestStoredMessage(
   value: UIMessage,
   tag: (value: UIMessage) => UIMessage,
-  anchor: UIMessage | undefined,
+  sliceBase: UIMessage | undefined,
+  idBase: UIMessage | undefined,
   suffix?: string
 ): UIMessage {
-  if (!anchor) return tag(value)
+  // 无切片基准 ⇒ 非嵌套轮：原样（仅可选打 nested 标记由 tag 决定）。
+  if (!sliceBase) return tag(value)
   return markNested({
     ...value,
-    // 后缀必须**每轮唯一**：`value.id` 由 AI SDK 复用主链 anchor 的 id（每轮相同），
-    // 若 id 固定为 `${value.id}-nested`，多轮嵌套（回父/重入/ask_user 续写）会因
-    // `ON CONFLICT(session_id,id) DO UPDATE` 互相覆盖——DB 只剩最后一轮，消息丢失
-    // （实测：判据行堆到 18+ 条，assistant 仅 1 条）。同一轮内多次 saveResponse 复用
-    // 同一 suffix，保证仍原地替换而非新增行。
-    id: suffix ? `${value.id}-nested-${suffix}` : `${value.id}-nested`,
-    parts: value.parts.slice(anchor.parts.length)
+    // 后缀**每轮唯一**：多轮嵌套会因 `ON CONFLICT(session_id,id) DO UPDATE` 互相覆盖
+    // （实测判据行堆到 18+ 条、assistant 仅 1 条）；同一轮内多次 saveResponse 复用同一 suffix
+    // 保证仍原地替换而非新增行。
+    id: `${idBase?.id ?? sliceBase.id}-nested-${suffix ?? 'x'}`,
+    // 只存「父轮已存行」之后的增量。
+    parts: value.parts.slice(sliceBase.parts.length)
   })
 }
 
@@ -175,6 +186,12 @@ export async function runStoredAgentSession(
   const nestedAnchor =
     continuationAnchor ??
     (request.nested && message ? sessions.lastVisibleAssistant(sessionId) : undefined)
+  // **落库 id 的基**：主链行（`lastAssistant('after')` 过滤 nested ⇒ 恒主链行）。它与 UI 锚点
+  // `nestedAnchor`（= 渲染层末端，可能是上一轮嵌套行）**刻意分离**：
+  // - UI 身份必须用 `nestedAnchor`，否则渲染端 `pushMessage` 新建 ⇒ UI 整段重复；
+  // - id 必须用**主链行**，否则每轮在上一轮嵌套 id 上再挂后缀 ⇒ id 无限累积
+  //   （实测会话 31b06fa6：`#6496→#6520` 从 60 涨到 588 字符）。
+  const idAnchor = request.nested ? sessions.lastAssistant(sessionId, 'after') : undefined
   const uiOriginalMessages = continuationOf
     ? [...messages, continuationOf]
     : nestedAnchor
@@ -195,17 +212,26 @@ export async function runStoredAgentSession(
    * 把「本轮模型输出」换算为**落库身份**：
    * - 续写到嵌套行：原地替换（复用其 id、只存增量、保留 nested）。
    * - 续写到主链行：**原样落库**（它是主链 UI 消息，切片/标 nested 都会破坏主链）。
-   * - 其余嵌套轮：增量 + 新 id（避免覆盖主链行）。
+   * - 其余嵌套轮：增量 + 以**主链行**为基的新 id（避免覆盖主链行、且 id 不累积）。
    * - 非嵌套轮：原样。
+   *
+   * 关键：嵌套轮的 `sliceBase` 即使取不到（`nestedAnchor=undefined`）也**不退回原样落库**——
+   * 用一个空基准代替，仍会 `markNested` + 切片（整段），从而**绝不泄漏进主链上下文**
+   * （旧实现 `!anchor` 时原样返回 ⇒ 巨行无 `nested` 标记落库，见会话 31b06fa6 的 `#6518`）。
    */
   const toStored = (response: UIMessage): UIMessage => {
-    if (!continuationAnchor) return nestStoredMessage(response, tag, nestedAnchor, nestedSuffix)
-    if (!isNestedRow(continuationAnchor)) return response
-    return markNested({
-      ...response,
-      id: continuationAnchor.id,
-      parts: response.parts.slice(continuationAnchor.parts.length)
-    })
+    if (!request.nested) return response
+    if (continuationAnchor) {
+      if (!isNestedRow(continuationAnchor)) return response
+      return markNested({
+        ...response,
+        id: continuationAnchor.id,
+        parts: response.parts.slice(continuationAnchor.parts.length)
+      })
+    }
+    // 新一轮嵌套：切片基准＝UI 锚点（缺则空基准⇒整段）；id 基＝主链行。
+    const sliceBase = nestedAnchor ?? { ...response, parts: [] }
+    return nestStoredMessage(response, tag, sliceBase, idAnchor, nestedSuffix)
   }
   const saveResponse = (response: UIMessage): void => {
     const stored = toStored(response)

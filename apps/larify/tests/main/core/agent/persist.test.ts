@@ -31,8 +31,9 @@ const user: UIMessage = {
   role: 'user',
   parts: [{ type: 'text', text: 'hello' }]
 }
-// 主链上用户的真实输入在落库时会带上 `workflowPrefix` 标记（送模型时才拼前缀，text 保持原文）。
-const userStored: UIMessage = {
+// 「计划模式」开启时，渲染层会在本轮用户消息上携带 `workflowPrefix` 标记（送模型时才拼前缀，
+// text 保持原文）。默认关闭 ⇒ 不带该标记。
+const userWithWorkflow: UIMessage = {
   ...user,
   metadata: { workflowPrefix: true }
 }
@@ -74,14 +75,8 @@ describe('runStoredAgentSession', () => {
       options: {} as never
     })
 
-    expect(mocks.save).toHaveBeenNthCalledWith(
-      1,
-      sessions,
-      'session',
-      'cwd',
-      [userStored],
-      undefined
-    )
+    // 默认关闭：不带 workflowPrefix 的用户输入**原样落库**（不加前缀）。
+    expect(mocks.save).toHaveBeenNthCalledWith(1, sessions, 'session', 'cwd', [user], undefined)
     expect(sessions.loadMessages).toHaveBeenCalledWith('session')
     expect(mocks.save.mock.invocationCallOrder[0]).toBeLessThan(
       sessions.loadMessages.mock.invocationCallOrder[0]
@@ -519,8 +514,35 @@ describe('runStoredAgentSession', () => {
     ).rejects.toThrow('stream failed')
 
     expect(mocks.save).toHaveBeenCalledOnce()
-    expect(mocks.save).toHaveBeenCalledWith(sessions, 'session', 'cwd', [userStored], undefined)
+    expect(mocks.save).toHaveBeenCalledWith(sessions, 'session', 'cwd', [user], undefined)
     expect(sessions.saveMessages).not.toHaveBeenCalled()
+  })
+
+  it('preserves the workflowPrefix marker on the user input when plan mode is on', async () => {
+    // 计划模式开启：渲染层在用户消息上带 `metadata.workflowPrefix: true` ⇒ 落库保留该标记
+    // （text 不变），由 `toModelMessages` 在送模型时拼前缀。
+    mocks.run.mockResolvedValue([user])
+    const sessions = {
+      hasSession: vi.fn(() => true),
+      loadMessages: vi.fn(() => [user]),
+      renameSession: vi.fn(),
+      saveMessages: vi.fn()
+    }
+
+    await runStoredAgentSession(sessions as never, {
+      sessionId: 'session',
+      cwd: 'cwd',
+      message: userWithWorkflow,
+      options: {} as never
+    })
+
+    expect(mocks.save).toHaveBeenCalledWith(
+      sessions,
+      'session',
+      'cwd',
+      [userWithWorkflow],
+      undefined
+    )
   })
 
   it('generates a title for the first non-trivial user message', async () => {

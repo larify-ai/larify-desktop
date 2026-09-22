@@ -102,7 +102,8 @@ describe('AssistantComposer', () => {
     })
 
     expect(onSubmit).toHaveBeenCalledOnce()
-    expect(onSubmit).toHaveBeenCalledWith({ text: 'hello', files: [] })
+    // 默认关闭计划模式：提交载荷固定携带 workflowPrefix=false（主进程据此不加前缀）。
+    expect(onSubmit).toHaveBeenCalledWith({ text: 'hello', files: [], workflowPrefix: false })
     expect(container.querySelector('textarea')!.value).toBe('')
 
     await act(async () => render({ status: 'error', onSubmit }))
@@ -113,6 +114,43 @@ describe('AssistantComposer', () => {
     expect(inputGroup?.parentElement?.className).not.toContain('border-0')
     await act(async () => submit())
     expect(onSubmit).toHaveBeenCalledTimes(2)
+  })
+
+  it('submits with workflowPrefix=true only after the plan-mode toggle is on (default off)', async () => {
+    reactEnvironment.IS_REACT_ACT_ENVIRONMENT = true
+    container = document.createElement('div')
+    document.body.append(container)
+    root = createRoot(container)
+    const onSubmit = vi.fn()
+
+    await act(async () => render({ onSubmit }))
+    const toggle = container.querySelector<HTMLButtonElement>('[aria-label="计划模式"]')!
+    // 默认关闭：计划模式开关呈未激活态。
+    expect(toggle.getAttribute('aria-pressed')).toBe('false')
+
+    // 打开计划模式后再提交 → workflowPrefix=true。
+    await act(async () => toggle.click())
+    expect(toggle.getAttribute('aria-pressed')).toBe('true')
+    await act(async () => input('实现这个功能'))
+    await act(async () => submit())
+    expect(onSubmit).toHaveBeenLastCalledWith({
+      text: '实现这个功能',
+      files: [],
+      workflowPrefix: true
+    })
+
+    // 关闭计划模式，并重置提交守卫（status 变化才复位）→ 后续提交回到默认（不加前缀）。
+    await act(async () => toggle.click())
+    await act(async () => render({ status: 'error', onSubmit }))
+    const toggleAfter = container.querySelector<HTMLButtonElement>('[aria-label="计划模式"]')!
+    expect(toggleAfter.getAttribute('aria-pressed')).toBe('false')
+    await act(async () => input('普通提问'))
+    await act(async () => submit())
+    expect(onSubmit).toHaveBeenLastCalledWith({
+      text: '普通提问',
+      files: [],
+      workflowPrefix: false
+    })
   })
 
   it('does not submit empty input', async () => {

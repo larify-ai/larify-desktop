@@ -76,6 +76,49 @@ export function extractAnsweredPart(message: UIMessage, toolCallId: string): UIM
 }
 
 /**
+ * 把「渲染层送来的、已终态的 ask_user part」**按 `toolCallId` 并入库内承载行**，作为 AI SDK 的
+ * UI 合并基线（`originalMessages`）。
+ *
+ * 为什么必须补：渲染层 `addToolOutput` 只把回答写进**渲染层快照**；库内承载行的该 part 仍是
+ * `input-available`。若直接拿库内行当基线，AI SDK 会以它的 parts 为基、只追加本轮增量 ⇒ 快照里
+ * 「已回答（`output-available`）」的状态**被丢弃** ⇒ 承载行该 part 恒停 `input-available`，下一轮
+ * 模型看不到「已答」而**再问一次**并追加新 ask ⇒ 同一行累积多个 `input-available`（用户感受
+ * 「反复问同一个问题」）。实锤会话 `da3ad8bb#6921`（10 个 ask_user、8 个未落回）。
+ *
+ * 为什么不能直接把快照当基线：快照 id 与承载行一致、但 parts 是**整个主链 + 嵌套内容 + 回答**
+ * 的合并视图，直接当基线会把子任务内容与回答注入主链行（越权污染主链，见 `locateCurrentRow`）。
+ * 故只**按 toolCallId 取一个 part 覆盖**，行身份与其余 parts 保持库内原样。
+ *
+ * 不变量：仅当该 toolCallId 在渲染层快照里已处于终态（output-available / output-error）时覆盖，
+ * 否则原样返回（不引入新失败路径）。
+ */
+export function withAnsweredTool(
+  stored: UIMessage | undefined,
+  from: UIMessage | undefined,
+  toolCallId: string | undefined
+): UIMessage | undefined {
+  if (!stored || !from || !toolCallId) return stored
+  const answered = (from.parts ?? []).find(
+    (part) =>
+      (part as { toolCallId?: string }).toolCallId === toolCallId &&
+      (part as { state?: string }).state !== undefined &&
+      (part as { state?: string }).state !== 'input-streaming' &&
+      (part as { state?: string }).state !== 'input-available'
+  )
+  if (!answered) return stored
+  const parts = stored.parts ?? []
+  if (!parts.some((part) => (part as { toolCallId?: string }).toolCallId === toolCallId)) {
+    return stored
+  }
+  return {
+    ...stored,
+    parts: parts.map((part) =>
+      (part as { toolCallId?: string }).toolCallId === toolCallId ? answered : part
+    )
+  }
+}
+
+/**
  * 一轮落库的产出：
  * - `stored` ＝ 本轮产出的落库身份（供上层读 `totalProcessingMs` 等）；
  * - `reviewRowId` ＝ 变更卡片该挂哪一行（见 `locateCurrentRow`，恒有值）；
@@ -114,25 +157,11 @@ export async function runStoredAgentSession(
     !sessions.hasSession(sessionId) &&
     text.length >= 6
 
-  // 用户不可见的工作流前缀：给**本轮用户新发的输入**打 `workflowPrefix` 标记并**落库保留**，
-  // 使每次请求送给模型的文本一致（不破坏 prompt 缓存）。`toModelMessages` 据此在送给模型时
-  // 拼上 `/agent_schedule_task `；text 保持原文，故 DB/UI/标题/搜索天然看不到前缀。
-  // 排除：递归子任务轮（nested）、ask_user 回答（role=assistant）、compaction 续写。
-  const isUserTurn =
-    !request.nested &&
-    message?.role === 'user' &&
-    (message.metadata as Record<string, unknown> | undefined)?.compaction !== true
-  const incoming: UIMessage | undefined =
-    isUserTurn && message
-      ? {
-          ...message,
-          metadata: {
-            ...(message.metadata as Record<string, unknown> | undefined),
-            workflowPrefix: true
-          }
-        }
-      : message
-
+  // 用户不可见的工作流前缀（「计划模式」）：渲染层仅在输入框打开计划模式开关时，才会在本轮用户消息上
+  // 携带 `metadata.workflowPrefix: true`（见 composer）。此处**如实落库**该标记（不再无条件打标），
+  // 使每次请求送给模型的文本一致（不破坏 prompt 缓存）。`toModelMessages` 据此在送给模型时拼上
+  // `/follow_workflow `；text 保持原文，故 DB/UI/标题/搜索天然看不到前缀。默认关闭 ⇒ 不加前缀。
+  //
   // 落库本轮输入消息（user 或 assistant 续写）；`undefined` 时不新增（防御性分支：
   // 编排层目前总会传入 message）。
   //
@@ -143,12 +172,12 @@ export async function runStoredAgentSession(
   // 续写要**重定向到它真正该写的那条行**（= 承载者 `previousStored`，见 `locateCurrentRow` 第 1 条）。
   // 主链续写时 `previousStored.id` 恒等于渲染层 id ⇒ 重定向为恒等操作，行为不变。
   const incomingRow = request.previousStored
-  const storedIncoming: UIMessage | undefined = incoming
-    ? incoming.role === 'assistant' && incomingRow
+  const storedIncoming: UIMessage | undefined = message
+    ? message.role === 'assistant' && incomingRow
       ? (incomingRow.metadata as Record<string, unknown> | undefined)?.nested === true
-        ? markNested({ ...incoming, id: incomingRow.id })
-        : { ...incoming, id: incomingRow.id }
-      : tag(incoming)
+        ? markNested({ ...message, id: incomingRow.id })
+        : { ...message, id: incomingRow.id }
+      : tag(message)
     : undefined
   if (storedIncoming) {
     saveSessionMessages(sessions, sessionId, cwd, [storedIncoming], request.title)
@@ -198,8 +227,14 @@ export async function runStoredAgentSession(
   const continuationAnchor = request.nested ? request.previousStored : undefined
   // UI 锚点 = 渲染端此刻的末端 assistant（`lastVisibleAssistant`，**不过滤 nested**）；续写时用
   // 渲染端下传的落库身份 `previousStored`（它与渲染端末端一致、且是「该写回的那行」）。
+  // ⚠️ 续写到嵌套行时，`continuationAnchor` 是**库内承载行**（其 ask_user part 仍 `input-available`），
+  // 而用户回答只在渲染层快照 `message` 里（已 `output-available`）。必须先把「刚被回答的那个 part」
+  // 按 `toolCallId` 并进基线，否则 AI SDK 以库内 parts 为基、只追加增量 ⇒ 回答被丢弃、该 part 恒停
+  // `input-available` ⇒ 下一轮重问（会话 `da3ad8bb#6921` 实测）。
   const nestedAnchor =
-    continuationAnchor ??
+    (continuationAnchor
+      ? withAnsweredTool(continuationAnchor, message, request.answeredToolCallId)
+      : undefined) ??
     (request.nested && message ? sessions.lastVisibleAssistant(sessionId) : undefined)
   const uiOriginalMessages = continuationOf
     ? [...messages, continuationOf]

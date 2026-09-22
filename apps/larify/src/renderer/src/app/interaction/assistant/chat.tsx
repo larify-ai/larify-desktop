@@ -181,7 +181,7 @@ export function AssistantChat({
         status={status}
         showWorkspace={!started}
         onCwdChange={onCwdChange}
-        onSubmit={({ text, files }) => {
+        onSubmit={({ text, files, workflowPrefix }) => {
           runStartedAt.current = Date.now()
           if (error) clearError()
           // 用户发送新消息后应强制滚到底部并开启流式跟随（与 submitToolOutput 一致）。
@@ -189,7 +189,13 @@ export function AssistantChat({
           // `scrollMode==='following'` 不成立、followOutput 返回 false，视图不会滚底，
           // 表现为"发送了消息却没自动滚到底部"。
           setFollowRequest((current) => current + 1)
-          void sendMessage({ text, files })
+          // 计划模式：仅当开关开启时给该轮用户消息打 `workflowPrefix` 标记，
+          // 主进程据此在送模型时拼 `/follow_workflow` 前缀（关闭则完全不加）。
+          void sendMessage({
+            text,
+            files,
+            metadata: workflowPrefix ? { workflowPrefix: true } : undefined
+          })
         }}
         onStop={() => void stopAndMarkAborted()}
       />

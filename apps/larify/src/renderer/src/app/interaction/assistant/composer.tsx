@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, type RefObject } from 'react'
 import type { ChatStatus } from 'ai'
-import { ArrowUpIcon, SquareIcon } from 'lucide-react'
+import { ArrowUpIcon, ListChecksIcon, SquareIcon } from 'lucide-react'
 import {
   PromptInput,
   PromptInputBody,
+  PromptInputButton,
   PromptInputFooter,
   PromptInputHeader,
   PromptInputSubmit,
@@ -24,13 +25,18 @@ import { ComposerMenu } from './composer-menu'
 import { WorkspaceSelector } from './workspace-selector'
 import { ModelSelector } from './model-selector'
 
+export interface AssistantComposerSubmit extends PromptInputMessage {
+  /** 计划模式：开启时给本轮输入拼 `/follow_workflow` 前缀（默认关闭、不持久化）。 */
+  workflowPrefix: boolean
+}
+
 interface AssistantComposerProps {
   cwd: string
   history: string[]
   status: ChatStatus
   showWorkspace: boolean
   onCwdChange: (cwd: string) => void
-  onSubmit: (message: PromptInputMessage) => void
+  onSubmit: (message: AssistantComposerSubmit) => void
   onStop: () => void
 }
 
@@ -59,15 +65,68 @@ function AttachmentList(): React.JSX.Element | null {
   )
 }
 
+/**
+ * 计划模式开关：行内「打勾清单图标 + 计划模式 + 滑动开关」，点击整行即切换。
+ * 开启后本轮用户输入才会拼 `/follow_workflow` 前缀。默认关闭、不持久化（纯内存态）。
+ *
+ * 尺寸/圆角/hover 与右侧 `ModelSelector` 对齐（同为 `Button size="sm"` 的 `h-7 gap-1 rounded-md
+ * px-2` + `hover:bg-accent`）；`PromptInputButton` 默认走 `InputGroupButton` 的 `sm`（`h-8 px-2.5`），
+ * 高度与内距都更大，故此处显式覆写，避免两个相邻控件 hover 框大小/圆角不一致。
+ */
+function PlanModeToggle({
+  value,
+  onChange
+}: {
+  value: boolean
+  onChange: (value: boolean) => void
+}): React.JSX.Element {
+  return (
+    <PromptInputButton
+      aria-label="计划模式"
+      aria-pressed={value}
+      role="switch"
+      className={
+        value
+          ? 'h-7 gap-1 rounded-md border border-transparent bg-transparent px-2 text-foreground has-[>svg]:px-2 hover:bg-accent hover:text-accent-foreground focus-visible:border-transparent focus-visible:ring-0'
+          : 'h-7 gap-1 rounded-md border border-transparent bg-transparent px-2 text-muted-foreground has-[>svg]:px-2 hover:bg-accent hover:text-accent-foreground focus-visible:border-transparent focus-visible:ring-0'
+      }
+      onClick={() => onChange(!value)}
+    >
+      <ListChecksIcon className="size-4" />
+      计划模式
+      <span
+        aria-hidden
+        className={
+          value
+            ? 'relative inline-flex h-4 w-7 shrink-0 items-center rounded-full bg-primary transition-colors'
+            : 'relative inline-flex h-4 w-7 shrink-0 items-center rounded-full bg-muted-foreground/30 transition-colors'
+        }
+      >
+        <span
+          className={
+            value
+              ? 'inline-block size-3 translate-x-3.5 rounded-full bg-primary-foreground transition-transform'
+              : 'inline-block size-3 translate-x-0.5 rounded-full bg-background transition-transform'
+          }
+        />
+      </span>
+    </PromptInputButton>
+  )
+}
+
 function ComposerFooter({
   inputRef,
   status,
   text,
+  planMode,
+  onPlanModeChange,
   onStop
 }: {
   inputRef: RefObject<HTMLDivElement | null>
   status: ChatStatus
   text: string
+  planMode: boolean
+  onPlanModeChange: (value: boolean) => void
   onStop: () => void
 }): React.JSX.Element {
   const attachments = usePromptInputAttachments()
@@ -77,6 +136,7 @@ function ComposerFooter({
     <PromptInputFooter className="justify-between">
       <PromptInputTools className="flex-1 overflow-hidden">
         <ComposerMenu inputRef={inputRef} />
+        <PlanModeToggle value={planMode} onChange={onPlanModeChange} />
       </PromptInputTools>
       <ModelSelector disabled={running} />
       <PromptInputSubmit
@@ -101,6 +161,7 @@ export function AssistantComposer({
   onStop
 }: AssistantComposerProps): React.JSX.Element {
   const [text, setText] = useState('')
+  const [planMode, setPlanMode] = useState(false)
   const inputRef = useRef<HTMLDivElement>(null)
   const submitting = useRef(false)
   const stopping = useRef(false)
@@ -121,7 +182,7 @@ export function AssistantComposer({
     submitting.current = true
     inputHistory.reset()
     setText('')
-    onSubmit({ text: value, files: message.files })
+    onSubmit({ text: value, files: message.files, workflowPrefix: planMode })
   }
 
   const stop = (): void => {
@@ -152,7 +213,14 @@ export function AssistantComposer({
               className="max-h-48 min-h-12 overflow-y-auto pl-3"
             />
           </PromptInputBody>
-          <ComposerFooter inputRef={inputRef} status={status} text={text} onStop={stop} />
+          <ComposerFooter
+            inputRef={inputRef}
+            status={status}
+            text={text}
+            planMode={planMode}
+            onPlanModeChange={setPlanMode}
+            onStop={stop}
+          />
         </PromptInput>
       </div>
     </div>

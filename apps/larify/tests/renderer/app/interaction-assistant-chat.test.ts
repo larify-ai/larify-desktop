@@ -120,9 +120,14 @@ describe('AssistantChat', () => {
     expect(onHeadingChange).toHaveBeenCalledWith({ cwd: '', title: 'first message' })
     expect(mocks.reportAttentionState).toHaveBeenCalledWith('session', 'active')
     vi.spyOn(Date, 'now').mockReturnValueOnce(500).mockReturnValue(2_000)
-    composer.onSubmit({ text: 'hello', files: [] })
+    // 默认关闭计划模式：不带 workflowPrefix 标记（metadata 不出现在送模型的消息上）。
+    composer.onSubmit({ text: 'hello', files: [], workflowPrefix: false })
     composer.onStop()
-    expect(mocks.sendMessage).toHaveBeenCalledWith({ text: 'hello', files: [] })
+    expect(mocks.sendMessage).toHaveBeenCalledWith({
+      text: 'hello',
+      files: [],
+      metadata: undefined
+    })
     expect(mocks.stop).toHaveBeenCalledOnce()
     expect(mocks.setMessages).toHaveBeenCalledOnce()
     const updateAfterStop = mocks.setMessages.mock.calls.at(-1)?.[0] as (
@@ -325,7 +330,7 @@ describe('AssistantChat', () => {
 
     const composer = mocks.composer.mock.calls.at(-1)?.[0]
     // 提交（设置本次 run 起点）后，最后一轮已正常完成。
-    act(() => composer.onSubmit({ text: 'task', files: [] }))
+    act(() => composer.onSubmit({ text: 'task', files: [], workflowPrefix: false }))
     vi.setSystemTime(12_000)
     composer.onStop()
     const update = mocks.setMessages.mock.calls.at(-1)?.[0] as (current: UIMessage[]) => UIMessage[]
@@ -364,7 +369,7 @@ describe('AssistantChat', () => {
 
     const composer = mocks.composer.mock.calls.at(-1)?.[0]
     // 本次 run 起点 10_000；这条消息此前已累计了 600_000ms（10分钟）。
-    act(() => composer.onSubmit({ text: 'long task', files: [] }))
+    act(() => composer.onSubmit({ text: 'long task', files: [], workflowPrefix: false }))
     vi.setSystemTime(70_000) // 本次 run 又跑了 60秒
     composer.onStop()
     const update = mocks.setMessages.mock.calls.at(-1)?.[0] as (current: UIMessage[]) => UIMessage[]
@@ -465,10 +470,14 @@ describe('AssistantChat', () => {
     )
 
     const composer = mocks.composer.mock.calls.at(-1)?.[0]
-    await act(async () => composer.onSubmit({ text: 'new question', files: [] }))
+    await act(async () => composer.onSubmit({ text: 'new question', files: [], workflowPrefix: false }))
 
     // 用户发送新消息后应强制滚到底部并开启流式跟随（scrollMode='following'）。
-    expect(mocks.sendMessage).toHaveBeenCalledWith({ text: 'new question', files: [] })
+    expect(mocks.sendMessage).toHaveBeenCalledWith({
+      text: 'new question',
+      files: [],
+      metadata: undefined
+    })
     expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ followRequest: 1 }))
   })
 
@@ -528,9 +537,13 @@ describe('AssistantChat', () => {
     expect(banner?.textContent).toContain('upstream timeout')
 
     const composer = mocks.composer.mock.calls[0][0]
-    composer.onSubmit({ text: 'hello', files: [] })
+    composer.onSubmit({ text: 'hello', files: [], workflowPrefix: false })
     expect(clearError).toHaveBeenCalledOnce()
-    expect(mocks.sendMessage).toHaveBeenCalledWith({ text: 'hello', files: [] })
+    expect(mocks.sendMessage).toHaveBeenCalledWith({
+      text: 'hello',
+      files: [],
+      metadata: undefined
+    })
   })
 
   it('does not create a heading for an empty session', async () => {

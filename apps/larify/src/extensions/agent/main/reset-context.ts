@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { defineTool } from '../../../main/core/plugin/protocol'
 
 export const resetContextTool = defineTool({
-  description: 'Reset the model context and continue from the handoff',
+  description: 'Reset the model context and continue from the handoff, only if the user requests call the tool',
   metadata: { eager: true, icon: 'repeat' },
   inputSchema: z
     .object({

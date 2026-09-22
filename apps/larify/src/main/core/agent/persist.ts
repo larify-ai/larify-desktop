@@ -16,41 +16,18 @@ export function markNested(value: UIMessage): UIMessage {
   }
 }
 
+/** 嵌套（递归子任务）assistant 行的落库 id 后缀，`nestedRowId` 是唯一生产者。 */
+export const NESTED_ID_SUFFIX = '-nested-'
+
 /**
- * 把「嵌套轮的一轮模型输出」换算为**应落库**的独立行。
+ * 嵌套行的落库 id：`<主链行 id>-nested-<suffix>`。
  *
- * 嵌套轮 AI SDK 返回的是**合并消息**：`value.parts` = 父轮已存行的 parts + 子轮增量，
- * `value.id` = UI 身份锚点 id。若按原值落库会「用嵌套标记覆盖主链行」或「把整段累积写成一行」，
- * 故这里**只取增量、并换一个独立的 `-nested-<uuid>` id**（不覆盖主链行、且各轮互不覆盖）。
- *
- * 两个基准**刻意分离**——它们的需求相反，混用会各自出错（会话 31b06fa6 实证）：
- * - `sliceBase`（切片基准）＝ **父轮已存行**（UI 锚点，可能缺失/不可读）。`parts.slice(base.length)`
- *   得子轮增量；`sliceBase` 为 `undefined` 时视为「非嵌套轮」，直接交给 `tag`（原样落库）。
- * - `idBase`（id 基准）＝ **主链行**（稳定不变），故每轮 id 恒为 `主链id-nested-<uuid>`；
- *   若误用「上一轮嵌套行」作基准，后缀会层层叠加（实测 id 从 60 涨到 588 字符）。
- *
- * 调用方（`toStored`）保证：**嵌套轮必传非空 `sliceBase`**（锚点缺失时用空基准），
- * 因此嵌套轮的 assistant **恒** `markNested` + 切片，绝不原样泄漏进主链上下文
- * （旧实现 `!anchor` 时原样返回 ⇒ 巨行无 `nested` 标记落库，见会话 31b06fa6 的 `#6518`）。
+ * - id 基必须取**主链行**（稳定不变）；若用「上一轮嵌套行」作基，后缀会层层叠加（实测 60→588 字符）。
+ * - suffix **每轮唯一**，否则多轮嵌套会因 `ON CONFLICT(session_id,id) DO UPDATE` 互相覆盖。
+ * - `nested` 标记与 id 后缀**同源**（都由 `locateCurrentRow` 的 `nestedRow` 决定），不另设推断处。
  */
-export function nestStoredMessage(
-  value: UIMessage,
-  tag: (value: UIMessage) => UIMessage,
-  sliceBase: UIMessage | undefined,
-  idBase: UIMessage | undefined,
-  suffix?: string
-): UIMessage {
-  // 无切片基准 ⇒ 非嵌套轮：原样（仅可选打 nested 标记由 tag 决定）。
-  if (!sliceBase) return tag(value)
-  return markNested({
-    ...value,
-    // 后缀**每轮唯一**：多轮嵌套会因 `ON CONFLICT(session_id,id) DO UPDATE` 互相覆盖
-    // （实测判据行堆到 18+ 条、assistant 仅 1 条）；同一轮内多次 saveResponse 复用同一 suffix
-    // 保证仍原地替换而非新增行。
-    id: `${idBase?.id ?? sliceBase.id}-nested-${suffix ?? 'x'}`,
-    // 只存「父轮已存行」之后的增量。
-    parts: value.parts.slice(sliceBase.parts.length)
-  })
+export function nestedRowId(idBase: UIMessage | undefined, suffix: string | undefined): string {
+  return `${idBase?.id ?? 'nested'}${NESTED_ID_SUFFIX}${suffix ?? 'x'}`
 }
 
 export interface AgentRequest {
@@ -70,22 +47,56 @@ export interface AgentRequest {
   baseProcessingMs?: number
   /**
    * 「上一轮那条 assistant」的落库身份（仅 ask_user 回答续写时传入）。续写要**写回同一条**
-   * （原地替换），而非新建——渲染层传来的 `message` 是**主链 assistant**的快照（nested 行在
-   * UI 上合并进主链消息），故它既不携带嵌套行的 id、也无法据此推算增量切片基准。
-   * 由 `agent.ts` 在 `resumed` 分支从 `lastMessage()` 读出后下传，避免 persist 再查一次库。
+   * （原地替换）而非新建——渲染层传来的 `message` 是**主链 assistant 快照**（嵌套行在 UI 上
+   * 合并进主链消息），既不含嵌套行 id、也无法据此定位落库行。由 `agent.ts` 下传以免再查库。
    */
   previousStored?: UIMessage
-  /**
-   * ask_user 回答续写时，该**子任务轮**的 nest 判据（由 `agent.ts` 按 toolCallId 精确回溯下传）。
-   * 有值时，嵌套续写的模型输入 = `[判据, 回答]`——「从该子任务轮继续」，而不是「只有回答」。
-   */
+  /** 续写的子任务轮的 nest 判据（仅「续写到嵌套行」时有）⇒ 嵌套续写输入 = `[判据, 回答]`。 */
   continuationPrompt?: UIMessage
+  /**
+   * 本轮刚被回答的 ask_user `toolCallId`（由 `agent.ts` 精确回溯后下传）。
+   *
+   * 用于从渲染层快照中**只抽取这个回答 part**，而不是把整条快照当输入——后者会让子任务续写
+   * 越权读整条主链（实测 `e2212cc1` ≈14.2 万 tokens）。未传时退回原行为（用整个 `message`）。
+   */
+  answeredToolCallId?: string
+}
+
+/**
+ * 从渲染层送来的 assistant 快照里**只抽取**「刚被回答的那个 ask_user part」。
+ *
+ * `addToolOutput(toolCallId, output)` 把回答写在**主链 assistant** 快照上（嵌套行在 UI 上合并
+ * 进主链消息），故快照 = 整条主链 + 回答。若整体当输入，子任务续写就越权读整条主链（见
+ * `answeredToolCallId` 说明）。这里按 `toolCallId` 只留这一个 part，使输入 = 判据 + 回答。
+ */
+export function extractAnsweredPart(message: UIMessage, toolCallId: string): UIMessage['parts'] {
+  return (message.parts ?? []).filter(
+    (part) => (part as { toolCallId?: string }).toolCallId === toolCallId
+  )
+}
+
+/**
+ * 一轮落库的产出：
+ * - `stored` ＝ 本轮产出的落库身份（供上层读 `totalProcessingMs` 等）；
+ * - `reviewRowId` ＝ 变更卡片该挂哪一行（见 `locateCurrentRow`，恒有值）；
+ * - `reviewRow` ＝ 该行**当前的落库内容基线**（卡片以它为底再追加/替换，见 `worker.saveReview`）。
+ *
+ * ⚠️ `reviewRow` 与 `stored` **不可混用**：嵌套轮二者是**两行**——`stored` 是嵌套行（带 `nested`
+ * 标记、parts 为含嵌套私货的完整快照），`reviewRow` 是**主链行**（无 `nested`、只含主链 parts）。
+ * 若用 `stored` 的内容配 `reviewRowId` 的 id 落库，会把「`nested` 标记 + 嵌套私货」写进主链行 ⇒
+ * 主链助手行被 `loadMessages`（`nested IS NOT 1`）过滤而**永久消失**（实测回归：主链上下文由
+ * `['u','main-anchor']` 变 `['u']`）。故两者必须成对、同源给出。
+ */
+export interface StoredRunResult {
+  stored: UIMessage
+  reviewRowId: string
+  reviewRow: UIMessage
 }
 
 export async function runStoredAgentSession(
   sessions: SessionStore,
   request: AgentRequest
-): Promise<UIMessage | undefined> {
+): Promise<StoredRunResult | undefined> {
   const { sessionId, cwd, message, options, onChunk, modelConfig } = request
   // 只对**内部 user 消息**（nest 判据 / compaction handoff）打 nested 标记：
   // 它们才是「不进主链上下文」的递归内部输入。
@@ -124,8 +135,23 @@ export async function runStoredAgentSession(
 
   // 落库本轮输入消息（user 或 assistant 续写）；`undefined` 时不新增（防御性分支：
   // 编排层目前总会传入 message）。
-  if (incoming) {
-    saveSessionMessages(sessions, sessionId, cwd, [tag(incoming)], request.title)
+  //
+  // ⚠️ assistant 续写（ask_user 回答）**不能按渲染层给的 id 落库**：渲染层 `addToolOutput` 把回答
+  // 写在**当前那条 UI assistant** 上，其 id 是**主链锚点 id**（AI SDK 复用），而其 parts 已把嵌套行
+  // 内容**合并进来**。按该 id 落库会 `ON CONFLICT(session_id,id) DO UPDATE` **覆盖主链行**，把子任务
+  // 内容+回答注入主链（实测：`main-anchor` N=2→5，`loadMessages` 因此越权读子任务）。故 assistant
+  // 续写要**重定向到它真正该写的那条行**（= 承载者 `previousStored`，见 `locateCurrentRow` 第 1 条）。
+  // 主链续写时 `previousStored.id` 恒等于渲染层 id ⇒ 重定向为恒等操作，行为不变。
+  const incomingRow = request.previousStored
+  const storedIncoming: UIMessage | undefined = incoming
+    ? incoming.role === 'assistant' && incomingRow
+      ? (incomingRow.metadata as Record<string, unknown> | undefined)?.nested === true
+        ? markNested({ ...incoming, id: incomingRow.id })
+        : { ...incoming, id: incomingRow.id }
+      : tag(incoming)
+    : undefined
+  if (storedIncoming) {
+    saveSessionMessages(sessions, sessionId, cwd, [storedIncoming], request.title)
   }
   const titleTask = shouldGenerateTitle
     ? generateSessionTitle(text, modelConfig)
@@ -136,17 +162,23 @@ export async function runStoredAgentSession(
         })
         .catch(() => {})
     : undefined
-  // 递归子任务用全新上下文：只喂本轮 nest prompt，不带最上层与其它子任务的消息。
-  // 跨层信息只经 task.md 传递（见 nest/prompt.md 生成的判据）。其余情况（主链续跑）加载主链历史。
+  // 递归子任务用全新上下文：只喂本轮 nest prompt，其余情况加载主链历史。
   //
-  // ask_user 回答续写（nested）例外：渲染层送来的 `message` 只是「回答」，不含任务背景。
-  // 若 `continuationPrompt`（该子任务轮的 nest 判据）可得，则本轮输入 = `[判据, 回答]`——
-  // 让模型**从该子任务轮继续**（判据恢复任务语境，回答是新增输入），而不是只看到孤立回答。
+  // 嵌套轮（nested）的输入 = `[本案判据?, 本轮输入]`：
+  // - 判据（`continuationPrompt`）只在「续写的是一行**嵌套行**」时才有（见 `findAskUserContext`）；
+  // - 本轮输入在 ask_user 续写时是**主链 assistant 快照**，需按 `answeredToolCallId` 只留回答 part，
+  //   否则子任务续写会越权读整条主链；抽不到就退回原行为（不引入新失败路径）。
+  const nestedInput = (): UIMessage[] => {
+    const raw = message as UIMessage
+    const answered = request.answeredToolCallId
+      ? extractAnsweredPart(raw, request.answeredToolCallId)
+      : []
+    const current = answered.length ? { ...raw, parts: answered } : raw
+    return request.continuationPrompt ? [request.continuationPrompt, current] : [current]
+  }
   const messages =
     request.nested && message
-      ? request.continuationPrompt
-        ? [request.continuationPrompt, message]
-        : [message]
+      ? nestedInput()
       : await prepareMessages(sessions.loadMessages(sessionId))
 
   // reset_context 续写：模型输入末尾是 compaction user，AI SDK 据此判定新消息 → UI 多一条
@@ -159,102 +191,104 @@ export async function runStoredAgentSession(
     lastMsg?.role === 'user' &&
     (lastMsg?.metadata as Record<string, unknown> | undefined)?.compaction === true
   const continuationOf = isCompaction ? sessions.lastAssistant(sessionId, 'before') : undefined
-  // UI 消息身份（originalMessages）与模型输入（messages）分离：
-  // - reset 续写：并入 reset 前 assistant，末尾是 assistant → AI SDK 复用其 id 合并成一条。
-  // - 递归子任务轮次：模型输入是独立上下文 [nest prompt]，但 UI 身份要挂在**主链最后一条
-  //   assistant** 上。否则渲染端 AI SDK 的 Chat 会为该轮新建一条 assistant 消息（messageId
-  //   与客户端已有的主链 assistant 不同 → replaceLastMessage 失败 → pushMessage），且新消息
-  //   以主链 assistant 的全部 parts 为起点再追加子轮 parts → **UI 出现重复的父轮阶段**。
-  //   传入 [lastMainAssistant]（末尾是 assistant）后，AI SDK 会给流内 start chunk 盖上该
-  //   assistant 的 id，渲染端据此复用并合并成一条。模型输入 messages 不变。
-  // 锚点（UI 身份 + 落库切片基准）取值，两条路径：
-  // - **续写**（ask_user 回答经 addToolOutput 再 send）：锚点是**上一轮那条 assistant 的落库身份**，
-  //   由 agent.ts 的 resumed 分支从 lastMessage 读出后下传（request.previousStored）。
-  //   它可能是**嵌套行**（`-nested-<suffix>`）→ 续写须原地替换该行（复用 id、只存增量、保留 nested）；
-  //   也可能是**主链行**（主链轮里的续写）→ 原样落库。
-  //   不能用 message 自身代替：渲染层传来的是**主链 assistant 的快照**（嵌套行在 UI 上合并进
-  //   主链消息），既不含嵌套行 id、也推不出增量切片基准。
-  //   也不能退回 lastAssistant('after')：它过滤 nested → 只能拿到主链行 → 续写被当成新的一轮
-  //   嵌套、落成新 id → UI 多出一条（实测：子任务轮 ask_user 回答后消息重复）。
-  // - **新一轮嵌套**（nest 判据）：取**渲染层此刻的末端 assistant** 作 UI 锚点。
-  //   必须用 `lastVisibleAssistant`（**不过滤 nested**）：渲染层把嵌套行也当普通 assistant 持有，
-  //   故「上一轮是嵌套轮」时末端就是那条 `-nested-<uuid>` 行。若退回 `lastAssistant('after')`
-  //   （过滤 nested ⇒ 恒返回主链行），锚点 id 与渲染层末端不一致 ⇒ 客户端 `pushMessage`（新建）
-  //   并把锚点全部 parts 复制为基线 ⇒ **UI 整段内容重复**（实测：第二个及以后的嵌套轮；
-  //   首个嵌套轮因末端恰好还是主链行而看不出问题）。
+  // UI 消息身份（`uiOriginalMessages`）与模型输入（`messages`）分离：AI SDK 靠「末条是 assistant
+  // 就复用其 id」把本轮产出合并进那条 UI 消息。故末条要挂到渲染端**已有的** assistant 上——
+  // 否则渲染端 replaceLastMessage 失败 ⇒ pushMessage 新建（并把锚点 parts 复制为基线）⇒ **UI 重复**。
+  // 取值：reset 续写用 reset 前那条（时长跨段连续）；嵌套轮用渲染端**此刻的末端**。
   const continuationAnchor = request.nested ? request.previousStored : undefined
+  // UI 锚点 = 渲染端此刻的末端 assistant（`lastVisibleAssistant`，**不过滤 nested**）；续写时用
+  // 渲染端下传的落库身份 `previousStored`（它与渲染端末端一致、且是「该写回的那行」）。
   const nestedAnchor =
     continuationAnchor ??
     (request.nested && message ? sessions.lastVisibleAssistant(sessionId) : undefined)
-  // **落库 id 的基**：主链行（`lastAssistant('after')` 过滤 nested ⇒ 恒主链行）。它与 UI 锚点
-  // `nestedAnchor`（= 渲染层末端，可能是上一轮嵌套行）**刻意分离**：
-  // - UI 身份必须用 `nestedAnchor`，否则渲染端 `pushMessage` 新建 ⇒ UI 整段重复；
-  // - id 必须用**主链行**，否则每轮在上一轮嵌套 id 上再挂后缀 ⇒ id 无限累积
-  //   （实测会话 31b06fa6：`#6496→#6520` 从 60 涨到 588 字符）。
-  const idAnchor = request.nested ? sessions.lastAssistant(sessionId, 'after') : undefined
   const uiOriginalMessages = continuationOf
     ? [...messages, continuationOf]
     : nestedAnchor
       ? [nestedAnchor]
       : undefined
-  // 统一的落库入口：把「模型输出」换算为**落库身份**（nested 轮次即「增量 + 新 id」那条）后入库，
-  // 并记下最近一次的身份——返回给 worker 的变更快照回写（saveReview）在同一身份上原地替换，
-  // 避免把快照写到主链 anchor 行上。
+  // 落库 id 的基**刻意取主链行**（`lastAssistant('after')` 过滤 nested ⇒ 恒主链行）：若用「上一轮
+  // 嵌套行」，每轮会再挂一个后缀 ⇒ id 无限累积（实测会话 31b06fa6：60 → 588 字符）。
+  const idAnchor = request.nested ? sessions.lastAssistant(sessionId, 'after') : undefined
   let latestStored: UIMessage | undefined
-  // 本次 nest 轮的落库 id 后缀：**每次 runStoredAgentSession 生成一次**，本轮内多次
-  // saveResponse（每个 step 结束时）复用同一值 → 原地替换；跨轮（回父/重入/续写）各自
-  // 不同 → 不再互相覆盖。续写轮不新建行，故无需后缀。
+  // 本轮嵌套行的落库 id 后缀：每次 runStoredAgentSession 生成一次（轮内多次 saveResponse 复用
+  // ⇒ 原地替换；跨轮各自不同 ⇒ 不互相覆盖）。续写轮不新建行，故无需后缀。
   const nestedSuffix = request.nested && !continuationAnchor ? randomUUID() : undefined
-  // 续写锚点是否为「嵌套行」（UI 私有的增量行）——决定续写落库时是否切片 + 保留 nested。
-  const isNestedRow = (value: UIMessage | undefined): boolean =>
-    (value?.metadata as Record<string, unknown> | undefined)?.nested === true
-  // reset 续写轮的**落库 id 重定向**：AI SDK 会把本轮消息 id 定成 `continuationOf.id`
-  // （`originalMessages` 末条是 assistant ⇒ 复用其 id），以便前端把产出**并进那条 UI 消息**
-  // （`handleUIMessageStreamFinish`）。但 `continuationOf` 已被 `saveStart` 甩到
-  // `sessions.start` **之前**——若原样落库，本轮产出的新 ask_user 也写进它，
-  // 而 `loadMessages`（只读 `position >= start`）永远读不到 ⇒ 模型每轮都像第一次一样重问、
-  // 用户的回答永远进不了模型（现场会话 91c9b81b：一次 reset 污染其后全部 4 轮）。
-  //
-  // 修法：**UI 身份与落库身份分离**（与嵌套行既有的 `idAnchor`/`nestedAnchor` 拆分同构）——
-  // `originalMessages` 照旧（UI 合并、时长连续都不变），仅把**落库**换成一个新 id，
-  // 使其落在 `start` 之后、成为新段里第一条可续写的 assistant 行。
+  // reset 续写轮的落库 id 重定向（见 `locateCurrentRow` 第 3 条路径）。
   const resetStoredId = isCompaction ? randomUUID() : undefined
+
   /**
-   * 把「本轮模型输出」换算为**落库身份**：
-   * - reset 续写轮（非 nested）：换新 id 落库（见上方说明），UI 身份不变。
-   * - 续写到嵌套行：原地替换（复用其 id、只存增量、保留 nested）。
-   * - 续写到主链行：**原样落库**（它是主链 UI 消息，切片/标 nested 都会破坏主链）。
-   * - 其余嵌套轮：增量 + 以**主链行**为基的新 id（避免覆盖主链行、且 id 不累积）。
-   * - 非嵌套轮：原样。
+   * **落库原语一：定位「本轮该写哪条行」**。返回 `id`（写进哪一行）、`nestedRow`（是否打
+   * `nested` 标记）、`reviewRowId`（变更卡片挂哪一行——卡片只渲染主链消息，故嵌套轮的卡片必须
+   * 回流到主链行）。四条路径（`*Anchor` 在非嵌套轮全为 undefined）：
    *
-   * 关键：嵌套轮的 `sliceBase` 即使取不到（`nestedAnchor=undefined`）也**不退回原样落库**——
-   * 用一个空基准代替，仍会 `markNested` + 切片（整段），从而**绝不泄漏进主链上下文**
-   * （旧实现 `!anchor` 时原样返回 ⇒ 巨行无 `nested` 标记落库，见会话 31b06fa6 的 `#6518`）。
+   * 1. **续写到既有行**（ask_user 回答续写）：原地替换 `previousStored`，保留其 id 与 nested 归属。
+   * 2. **新一轮嵌套**：新建 `主链id-nested-<uuid>` 行。
+   * 3. **reset 续写轮**：换成 `resetStoredId`。⚠️ **不可删**——reset 轮 `nested=false`，前两条
+   *    都不命中；若删掉，产出会被写回 `continuationOf.id`（已被 `saveStart` 甩到 `start` 之前）
+   *    ⇒ `loadMessages` 永远读不到 ⇒ 模型每轮重问（回归：`__reset-continuation-drop` 测试）。
+   *    背景：AI SDK 把 reset 轮 id 定成 `continuationOf.id`（为让前端并进那条 UI 消息），
+   *    `originalMessages`/UI 合并语义照旧，仅**落库**换 id 使其落在 `start` 之后可续写。
+   * 4. **主链轮**：原样落库。
    */
-  const toStored = (response: UIMessage): UIMessage => {
-    if (!request.nested) {
-      // reset 续写轮：只在**首次**落库时换 id；同一轮内多次 saveResponse 复用同一 id
-      // （原地更新，不产生多行）。
-      if (resetStoredId && response.id === continuationOf?.id) {
-        return { ...response, id: resetStoredId }
-      }
-      return response
-    }
-    if (continuationAnchor) {
-      if (!isNestedRow(continuationAnchor)) return response
-      return markNested({
-        ...response,
+  const locateCurrentRow = (
+    response: UIMessage
+  ): { id: string; nestedRow: boolean; reviewRowId: string; reviewRow: UIMessage } => {
+    if (request.nested && continuationAnchor) {
+      const nestedRow =
+        (continuationAnchor.metadata as Record<string, unknown> | undefined)?.nested === true
+      // 卡片目标：嵌套行的卡片回流到**主链行**（`idAnchor`）。其内容基线必须是**主链行本身**
+      // （无 nested、只含主链 parts），不能用嵌套行的 `stored`（否则把 nested 标记与嵌套私货
+      // 写进主链行、吞掉主链助手——见 `StoredRunResult` 警示）。恒等续写（主链行）时二者同一行。
+      const stored = appendToRow(response, { id: continuationAnchor.id, nestedRow })
+      return {
         id: continuationAnchor.id,
-        parts: response.parts.slice(continuationAnchor.parts.length)
-      })
+        nestedRow,
+        reviewRowId: nestedRow ? (idAnchor?.id ?? continuationAnchor.id) : continuationAnchor.id,
+        reviewRow: nestedRow ? (idAnchor ?? stored) : stored
+      }
     }
-    // 新一轮嵌套：切片基准＝UI 锚点（缺则空基准⇒整段）；id 基＝主链行。
-    const sliceBase = nestedAnchor ?? { ...response, parts: [] }
-    return nestStoredMessage(response, tag, sliceBase, idAnchor, nestedSuffix)
+    if (request.nested) {
+      const id = nestedRowId(idAnchor, nestedSuffix)
+      const stored = appendToRow(response, { id, nestedRow: true })
+      // 卡片回流到主链行；基线取主链行本身（取不到才退回嵌套行，保证 `reviewRowId` 与
+      // `reviewRow` 始终同源）。
+      return {
+        id,
+        nestedRow: true,
+        reviewRowId: idAnchor?.id ?? id,
+        reviewRow: idAnchor ?? stored
+      }
+    }
+    if (resetStoredId && response.id === continuationOf?.id) {
+      const stored = { ...response, id: resetStoredId }
+      return { id: resetStoredId, nestedRow: false, reviewRowId: resetStoredId, reviewRow: stored }
+    }
+    const stored = { ...response, id: response.id }
+    return { id: response.id, nestedRow: false, reviewRowId: response.id, reviewRow: stored }
   }
+  /**
+   * **落库原语二：把本轮输出写入定位到的行**——只做「换 id / 打 nested 标记」，**不切片**。
+   *
+   * 落库行 = 完整的模型输出快照（`response.parts`）。旧实现按 `parts.slice(父轮.parts.length)`
+   * 只存增量，但 AI SDK 对已有 part 是**按 toolCallId 原地改写**（`updateToolPart`），于是
+   * 「用户回答 ask_user」表现为同一 part 原地变 `output-available`；按长度切片恰好把它切掉
+   * ⇒ 已答问答配对永久消失（`#6843` 48→10 parts）。存完整快照即天然保留。嵌套行多存的 parts
+   * 只占磁盘：`loadMessages` 只读主链行，不进模型输入。
+   */
+  const appendToRow = (response: UIMessage, row: { id: string; nestedRow: boolean }): UIMessage => {
+    if (!row.nestedRow) return { ...response, id: row.id }
+    return markNested({ ...response, id: row.id })
+  }
+  // 变更卡片的落库目标行（`worker.saveReview` 用）：行 id 与其**内容基线**由原语一并给出，
+  // worker 不再自行推断（也就不会把嵌套行的内容写到主链行的 id 上）。
+  let reviewRowId = ''
+  let reviewRow: UIMessage | undefined
   const saveResponse = (response: UIMessage): void => {
-    const stored = toStored(response)
+    const row = locateCurrentRow(response)
+    const stored = appendToRow(response, row)
     latestStored = stored
+    reviewRowId = row.reviewRowId
+    reviewRow = row.reviewRow
     sessions.saveMessages(sessionId, [stored])
   }
   const finalMessages = await runAgentSession(
@@ -265,10 +299,11 @@ export async function runStoredAgentSession(
     uiOriginalMessages,
     request.baseProcessingMs
   )
-  // originalMessages（含 continuationOf）可能比 messages 长；AI SDK 在续写时把合并后的消息放
-  // 末尾，故取末尾 assistant，而非 slice(messages.length)（会把旧历史误当本轮新增）。
+  // originalMessages 可能比 messages 长，AI SDK 把合并后的消息放在末尾 ⇒ 取末尾 assistant。
   const finalResponse = finalMessages.at(-1)
   if (finalResponse?.role === 'assistant') saveResponse(finalResponse)
   await titleTask
-  return latestStored
+  return latestStored === undefined || reviewRow === undefined
+    ? undefined
+    : { stored: latestStored, reviewRowId, reviewRow }
 }

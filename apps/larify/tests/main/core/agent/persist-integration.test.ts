@@ -93,7 +93,7 @@ describe('runStoredAgentSession persistence', () => {
         message: user,
         options: {} as never
       })
-    ).resolves.toEqual(final)
+    ).resolves.toEqual({ stored: final, reviewRowId: final.id, reviewRow: final })
     expect(store.loadMessages('session')).toEqual([user, final])
     store.dispose()
 
@@ -174,6 +174,11 @@ describe('runStoredAgentSession persistence', () => {
     // （实测：`#3192` 提问 + `#3193` 回答并列，用户看到"重复"）。
     // 关键：渲染层传来的 message 是**主链 assistant** 的快照（不含嵌套行身份），
     // 故必须由 agent.ts 下传 previousStored。
+    //
+    // ⚠️ 落库行 = **完整模型输出快照**（不再按长度切片）：AI SDK 对已有 part 是**按
+    // toolCallId 原地改写**（`updateToolPart` 命中即不 push），故「用户回答」表现为原 part
+    // 就地变 `output-available`；旧实现 `slice(nestedRow.parts.length)` 恰好把它切掉
+    // （实测 `#6843` 48→10 parts，问答永久消失）。本用例据此断言**不变量**而非切片长度。
     const store = await createStore()
     const anchor: UIMessage = {
       id: 'main',
@@ -197,11 +202,12 @@ describe('runStoredAgentSession persistence', () => {
       ...anchor,
       parts: [...anchor.parts, { type: 'text', text: 'answer' }]
     }
+    // AI SDK 的真实返回：**同一 part 原地**变 `output-available`，之后才追加本轮增量。
     const continued: UIMessage = {
       id: nestedRow.id,
       role: 'assistant',
       parts: [
-        ...nestedRow.parts,
+        { type: 'text', text: 'nested question' },
         {
           type: 'tool-agent_ask_user',
           toolCallId: 'call-1',
@@ -230,16 +236,26 @@ describe('runStoredAgentSession persistence', () => {
     // 仍未新增行：主链 assistant + 那条嵌套行，共 2 条。
     expect(rows.map((row) => row.id)).toEqual(['main', 'main-nested-aaaa'])
     const stored = rows.find((row) => row.id === 'main-nested-aaaa') as UIMessage
-    // 原地替换：只存增量、保留 nested 标记、保留总时长。
+    // 原地替换：保留 nested 标记与总时长。
     expect(stored.metadata).toMatchObject({ nested: true })
-    expect(stored.parts).toEqual(continued.parts.slice(nestedRow.parts.length))
+    // **不变量**：落库行是完整快照 —— 已答的 ask_user 问答配对必须保留（旧切片会丢掉它）。
+    expect(stored.parts).toEqual(continued.parts)
+    expect(
+      stored.parts.some(
+        (part) =>
+          (part as { toolCallId?: string }).toolCallId === 'call-1' &&
+          (part as { state?: string }).state === 'output-available'
+      ),
+      '已答的 ask_user 问答配对必须保留'
+    ).toBe(true)
     store.dispose()
   })
 
   it('keeps the nested id stable across many rounds (main-chain base, never chained)', async () => {
     // 回归：会话 31b06fa6 实测嵌套行 id **每轮追加一个后缀**（`#6496→#6520`：60→588 字符）。
-    // 根因：`nestStoredMessage` 用 AI SDK 流响应 id（= UI 锚点 id = **上一轮那条嵌套行**）当 base
-    // ⇒ 每轮再挂一个 `-nested-<uuid>`。正解：id base 用**主链行**（`lastAssistant('after')`）。
+    // 根因：旧实现（`nestStoredMessage`，已删）用 AI SDK 流响应 id（= UI 锚点 id = **上一轮那条
+    // 嵌套行**）当 base ⇒ 每轮再挂一个 `-nested-<uuid>`。正解：id base 用**主链行**
+    // （`lastAssistant('after')`）。
     // 全程模拟 AI SDK 的「复用锚点 id + parts 合并」返回。
     const store = await createStore()
     const mainAnchor: UIMessage = {
@@ -293,8 +309,8 @@ describe('runStoredAgentSession persistence', () => {
   it('never leaks a nested assistant into the main-chain context (even with no prior assistant row)', async () => {
     // 回归：会话 31b06fa6 的 `#6518`（1543 parts / 3.75MB）**没有 nested 标记**，被 `loadMessages`
     // 当成主链输入 ⇒ 下一轮上下文超限（输入 1,044,509 tokens）。
-    // 根因：`nestStoredMessage` 的 `if (!anchor) return tag(value)`——锚点取不到时 assistant
-    // 被**原样落库**（不标 nested、不切片）。这里模拟「nest 当轮即是会话第一条」的最坏路径。
+    // 根因：旧实现（`nestStoredMessage`，已删）的 `if (!anchor) return tag(value)`——锚点取不到时
+    // assistant 被**原样落库**（不标 nested、不切片）。这里模拟「nest 当轮即是会话第一条」的最坏路径。
     const store = await createStore()
     mocks.run.mockImplementationOnce(async () => [
       {

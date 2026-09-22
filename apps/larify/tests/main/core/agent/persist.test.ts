@@ -90,7 +90,13 @@ describe('runStoredAgentSession', () => {
     expect(sessions.saveMessages).toHaveBeenNthCalledWith(1, 'session', [assistant])
     expect(sessions.saveMessages).toHaveBeenNthCalledWith(2, 'session', [finalAssistant])
     expect(mocks.save).toHaveBeenCalledOnce()
-    expect(result).toBe(finalAssistant)
+    // 返回值＝落库身份 + 卡片目标行（**行 id 与内容基线同源**，见 `StoredRunResult`）。
+    // 主链轮：目标行即本轮产出自身（含其全部 parts）。
+    expect(result).toEqual({
+      stored: finalAssistant,
+      reviewRowId: 'assistant',
+      reviewRow: finalAssistant
+    })
   })
 
   it('feeds a recursive child only its own prompt, ignoring stored history', async () => {
@@ -128,9 +134,9 @@ describe('runStoredAgentSession', () => {
     expect(mocks.run.mock.calls[0][4]).toEqual([mainAssistant])
   })
 
-  it('stores the nested round as a delta with its own id (never clobbering the main-chain assistant)', async () => {
+  it('stores the nested round with its own id and nested flag (never clobbering the main-chain assistant)', async () => {
     // UI 身份锚定主链 assistant 后，AI SDK 返回的是**合并消息**（id=anchor、parts=anchor+delta）。
-    // 必须换算为「增量 + 新 id」再落库，否则会用嵌套标记覆盖主链行。
+    // 必须换算为「新 id + nested 标记」再落库，否则会用嵌套标记覆盖主链行。
     const anchor: UIMessage = {
       id: 'main',
       role: 'assistant',
@@ -166,15 +172,21 @@ describe('runStoredAgentSession', () => {
       options: {} as never
     })
 
-    // 落库：id 换新、parts 仅增量、带 nested 标记。
+    // 落库：id 换新、带 nested 标记、**parts 保存完整输出快照**（收敛：不再切片，见 persist.ts）。
     // id 形如 `main-nested-<uuid>`：**每轮唯一**，避免多轮嵌套（回父/重入/续写）因
     // `ON CONFLICT(session_id,id) DO UPDATE` 互相覆盖（实测判据行堆到 18+ 条、assistant 仅 1 条）。
     const stored = sessions.saveMessages.mock.calls.at(-1)?.[1]?.[0] as UIMessage
     expect(stored.id).toMatch(/^main-nested-.+/)
     expect(stored.metadata).toMatchObject({ nested: true })
-    expect(stored.parts).toEqual([{ type: 'text', text: 'child delta' }])
-    // 返回值即落库身份（供 worker 快照回写复用）。
-    expect(result?.id).toBe(stored.id)
+    // 完整快照：不切片（切片会吞掉被 AI SDK 原地改写的 part，见 nested-continuation-keeps-ask-user）。
+    expect(stored.parts).toEqual(merged.parts)
+    // 返回值即落库身份（供 worker 快照回写复用），卡片挂主链行。
+    expect(result?.stored.id).toBe(stored.id)
+    expect(result?.reviewRowId).toBe('main')
+    // ★ 卡片内容基线必须是**主链行自身**（无 nested、不含嵌套私货）——而非嵌套行的 `stored`：
+    // 若二者混用，嵌套标记会被写进主链行、使主链助手被 `loadMessages` 过滤而消失。
+    expect(result?.reviewRow).toEqual(anchor)
+    expect((result?.reviewRow.metadata as { nested?: boolean } | undefined)?.nested).toBeUndefined()
     // 绝不按 anchor 的 id 回写（否则覆盖主链行）。
     for (const [, messages] of sessions.saveMessages.mock.calls) {
       for (const m of messages as UIMessage[]) {

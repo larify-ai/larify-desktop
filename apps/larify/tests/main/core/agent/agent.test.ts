@@ -46,6 +46,12 @@ const message: UIMessage = {
 
 const input = { sessionId: 'session', message, cwd: 'cwd' }
 
+/** `runStoredAgentSession` 的返回契约：落库身份 + 卡片目标行（id 与内容基线同源，见 persist.ts）。 */
+const stored = (value: UIMessage | undefined) =>
+  value === undefined
+    ? undefined
+    : { stored: value, reviewRowId: value.id, reviewRow: value }
+
 const sessions = {
   loadMessages: vi.fn(() => []),
   saveMessages: vi.fn(),
@@ -252,7 +258,7 @@ describe('Agent', () => {
         toolCallId: 'write-1',
         output: { kind: 'diff', path: join(workspace, 'existing.ts'), patch: '+old' }
       } as UIMessageChunk)
-      return { id: 'assistant', role: 'assistant', parts: [] } as UIMessage
+      return stored({ id: 'assistant', role: 'assistant', parts: [] })
     })
     // 第二轮（ask_user 回答后，同一任务续写）：只改 new.ts。
     mocks.run.mockImplementationOnce(async (_sessions, request) => {
@@ -274,7 +280,7 @@ describe('Agent', () => {
         toolCallId: 'write-2',
         output: { kind: 'diff', path: join(workspace, 'new.ts'), patch: '+new' }
       } as UIMessageChunk)
-      return { id: 'assistant', role: 'assistant', parts: [] } as UIMessage
+      return stored({ id: 'assistant', role: 'assistant', parts: [] })
     })
     mocks.runtime.mockReturnValue({
       system: 'runtime',
@@ -330,7 +336,7 @@ describe('Agent', () => {
         toolCallId: 'write-1',
         output: { kind: 'diff', path: join(workspace, 'existing.ts'), patch: '+old' }
       } as UIMessageChunk)
-      return { id: 'assistant', role: 'assistant', parts: [] } as UIMessage
+      return stored({ id: 'assistant', role: 'assistant', parts: [] })
     })
     // 第二轮：全新用户请求（新任务）→ 追踪器必须重置，不能再带出上一任务的文件。
     mocks.run.mockImplementationOnce(async (_sessions, request) => {
@@ -352,7 +358,7 @@ describe('Agent', () => {
         toolCallId: 'write-2',
         output: { kind: 'diff', path: otherPath, patch: '+other' }
       } as UIMessageChunk)
-      return { id: 'assistant-2', role: 'assistant', parts: [] } as UIMessage
+      return stored({ id: 'assistant-2', role: 'assistant', parts: [] })
     })
     mocks.runtime.mockReturnValue({
       system: 'runtime',
@@ -397,11 +403,11 @@ describe('Agent', () => {
         toolCallId: 'write-1',
         output: { kind: 'diff', path: join(workspace, 'existing.ts'), patch: '+old' }
       } as UIMessageChunk)
-      return { id: 'assistant', role: 'assistant', parts: [] } as UIMessage
+      return stored({ id: 'assistant', role: 'assistant', parts: [] })
     })
     // 第二轮：ask_user 续写，无任何文件变更。
-    mocks.run.mockImplementationOnce(
-      async () => ({ id: 'assistant', role: 'assistant', parts: [] }) as UIMessage
+    mocks.run.mockImplementationOnce(async () =>
+      stored({ id: 'assistant', role: 'assistant', parts: [] })
     )
     mocks.runtime.mockReturnValue({
       system: 'runtime',

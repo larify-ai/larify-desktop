@@ -184,13 +184,21 @@ export class Agent implements Disposable {
     // 的一条」）：主链与嵌套链交错写入时会错位（子任务 ask_user 之后又写入 nest 判据/主链轮），
     // 导致子任务轮续写被误判为主链轮 ⇒ 越权读整条主链。
     let askUserContext: { owner: UIMessage; prompt?: UIMessage } | undefined
+    // 命中「谁在等这次回答」的 toolCallId：下传给 persist，用于从渲染层快照里**只抽回答 part**
+    // （否则续写输入会把整条主链快照拖进来——实测 `e2212cc1` ≈14.2 万 tokens）。
+    let answeredToolCallId: string | undefined
     for (const callId of answeredAskUserCallIds(request.message)) {
       askUserContext = this.sessions.findAskUserContext(request.sessionId, callId)
-      if (askUserContext) break
+      if (askUserContext) {
+        answeredToolCallId = callId
+        break
+      }
     }
     const resumedOwner = askUserContext?.owner
-    // 子任务轮续写要「从该轮继续」：把该轮的 nest 判据一并带给模型（下传到 persist）。
-    // 与 previousStored 一样用 `let`：只对**本轮**生效。
+    // 以下三者都只对**本轮**生效（续写完成后即恢复常规取值），故用 `let` 并在每轮末清空：
+    // - `continuationPrompt`：该子任务轮的 nest 判据（「从该轮继续」而非只看孤立回答）；
+    // - `answeredToolCallId`：persist 据此从快照里只抽回答 part；
+    // - `previousStored`：要写回/重定向的那条既有 assistant（在 `if (resumed)` 里赋值）。
     let continuationPrompt = askUserContext?.prompt
     // 判定本轮是否为「续写」。两路**互补**：
     // ① 精确回溯命中（新）：`owner` 可能是**嵌套行**——此时 `lastMessage()` 未必是它，
@@ -237,11 +245,13 @@ export class Agent implements Disposable {
         nested,
         baseProcessingMs,
         previousStored,
-        continuationPrompt
+        continuationPrompt,
+        answeredToolCallId
       })
       // 续写只对**本轮**生效：续写完成后就是普通轮次，锚点回到正常取值。
       previousStored = undefined
       continuationPrompt = undefined
+      answeredToolCallId = undefined
       if (result.totalProcessingMs !== undefined) baseProcessingMs = result.totalProcessingMs
       // 本轮停在「等待用户回答」(agent_ask_user 仍为等待态)：**暂停**，不结束流。
       // ask_user 是客户端工具，用户回答经 addToolOutput 再次 send() 续写；此处若结束，

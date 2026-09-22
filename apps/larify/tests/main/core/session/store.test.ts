@@ -132,6 +132,31 @@ describe('SessionStore nested filtering', () => {
     expect(store.loadMessages('session')).toEqual([])
   })
 
+  it('is a dumb store: it writes exactly what it is given (no silent rewriting)', () => {
+    // `saveMessages` 是**哑存储**：不按 id 形状推断/补写任何元数据。
+    // 背景：曾试过在写入关口「id 带 -nested- ⇒ 补 nested:true」的全局兜底，但它会**静默改写**
+    // 真实数据里「主链 assistant 行却带 -nested- 后缀」的行（全库实测 10 条，含 `e2212cc1#6843`、
+    // `31b06fa6#6518`）——把主链行翻成嵌套行 ⇒ 从模型输入消失。故该不变量的**唯一来源**改为
+    // `persist.ts` 的 `appendToRow`（它同时决定 id 与 nested 标记，见 persist 的单测）。
+    const store = createStore()
+    store.createSession({ id: 'session', title: 't', cwd: 'cwd' })
+
+    // 带后缀但**无** nested 标记的 assistant 行：原样落库、原样读回（不补、不改）。
+    store.saveMessages('session', [
+      {
+        id: 'main-nested-aaaa',
+        role: 'assistant',
+        metadata: { totalProcessingMs: 1 },
+        parts: [{ type: 'text', text: 'main-chain reply' }]
+      } as UIMessage
+    ])
+    const row = store.loadVisibleMessages('session').find((m) => m.id === 'main-nested-aaaa')
+    expect(row?.metadata).toEqual({ totalProcessingMs: 1 })
+    // 因为没被补 nested，它仍是**主链行**：在模型输入里、也作为 id 基返回。
+    expect(store.loadMessages('session').map((m) => m.id)).toEqual(['main-nested-aaaa'])
+    expect(store.lastAssistant('session', 'after')?.id).toBe('main-nested-aaaa')
+  })
+
   it('excludes recursive child messages from the navigation index', () => {
     const store = createStore()
     store.createSession({ id: 'session', title: 't', cwd: 'cwd' })

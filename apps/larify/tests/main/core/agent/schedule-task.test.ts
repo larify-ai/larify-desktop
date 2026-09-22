@@ -267,11 +267,13 @@ describe('Agent scheduled tasks', () => {
         scheduleTask: (path: string) => void
       }
       if (runs === 1) context.scheduleTask(join(taskRoot, 'root', 'child', 'task.md'))
-      return {
+      // 返回落库身份 + 卡片目标行（`StoredRunResult`：行 id 与内容基线同源）。
+      const stored = {
         id: `assistant-${runs}`,
         role: 'assistant',
         metadata: { totalProcessingMs: runs * 1000 }
       } as UIMessage
+      return { stored, reviewRowId: stored.id, reviewRow: stored }
     })
     const agent = new Agent(sessions as never, pluginHost as never)
 

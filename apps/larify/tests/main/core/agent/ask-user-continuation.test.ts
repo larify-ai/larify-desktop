@@ -133,19 +133,20 @@ describe('ask_user 续写的上下文（子任务轮应续上「判据 + 回答�
     )
     await new Promise((r) => setTimeout(r, 40))
 
-    // 取子任务轮的嵌套行作为 owner，构造回答
-    const nestedRow = store
-      .loadVisibleMessages('session')
-      .find((m) => m.metadata?.nested === true && m.role === 'assistant') as UIMessage
-    expect(nestedRow, '应存在嵌套行').toBeDefined()
+    // ★ 真实渲染层形态：`addToolOutput` 把回答写在**当前 UI assistant** 上，其 id 是**主链锚点**
+    // （AI SDK 复用 `originalMessages` 末条 assistant 的 id），其 parts 已把嵌套行内容**合并进来**。
+    // 早期用例误用「嵌套行自身」当 message（id 恰好相同），就绕过了「主链锚点 id」这条真实路径，
+    // 使该守门对「越权读主链」假绿。这里按真实形态构造。
+    const mainRow = store.loadVisibleMessages('session').find((m) => m.id === 'main-anchor') as UIMessage
+    expect(mainRow, '应存在主链行').toBeDefined()
     const answer: UIMessage = {
-      ...nestedRow,
-      parts: nestedRow.parts.map((p) =>
-        (p as { type: string; toolCallId?: string }).type === 'tool-agent_ask_user' &&
-        (p as { toolCallId?: string }).toolCallId === 'ask-n'
-          ? ({ ...p, state: 'output-available', output: 'A' } as never)
-          : p
-      )
+      ...mainRow,
+      parts: [
+        ...mainRow.parts,
+        { type: 'step-start' },
+        { type: 'text', text: 'nested work' },
+        { type: 'tool-agent_ask_user', toolCallId: 'ask-n', state: 'output-available', input: {}, output: 'A' } as never
+      ]
     }
     const before = seen.length
     await agent.send({ sessionId: 'session', cwd: workspace, message: answer }, sink())

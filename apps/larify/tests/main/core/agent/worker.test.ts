@@ -18,6 +18,16 @@ vi.mock('../../../../src/main/core/agent/persist', () => ({
 import { AgentWorker, type SessionTrack } from '../../../../src/main/core/agent/worker'
 import { AgentReview, FileChangeTracker } from '../../../../src/main/core/agent/review'
 
+/**
+ * `runStoredAgentSession` 的返回契约：落库身份 + 卡片目标行（**行 id 与内容基线同源**，见 persist.ts）。
+ * 嵌套轮时 `reviewRow` 是**主链行**（无 `nested` 标记），必须与 `stored`（嵌套行）区分，
+ * 否则卡片回写会把 `nested` 标记写进主链行、吞掉主链助手（见 `StoredRunResult` 警示）。
+ */
+const stored = (value: UIMessage | undefined, reviewRow?: UIMessage) =>
+  value === undefined
+    ? undefined
+    : { stored: value, reviewRowId: (reviewRow ?? value).id, reviewRow: reviewRow ?? value }
+
 // Real workspace on disk: the change tracker reconciles tracked files against
 // the filesystem, so tool writes must actually land on disk in these tests.
 const workspace = mkdtempSync(join(tmpdir(), 'larify-worker-'))
@@ -269,8 +279,9 @@ describe('AgentWorker', () => {
         }
       ]
     })
-    // 续写轮的落库身份＝本轮判据（`toStored` 据此把落库 id 重定向到 `start` 之后），
-    // 从而本轮的新产出（如最后一个 schedule_task / ask_user）仍可被 `loadMessages` 读到。
+    // 续写轮的落库身份＝本轮判据（`locateCurrentRow` 的 reset 分支据此把落库 id 重定向到
+    // `start` 之后），从而本轮的新产出（如最后一个 schedule_task / ask_user）仍可被
+    // `loadMessages` 读到。
     expect(mocks.run.mock.calls[1][1].previousStored).toBe(nextMessage)
     expect(sessions.saveStart).toHaveBeenCalledWith('session', nextMessage)
     // 同上：worker 不再自行 end 流，结束由编排层统一负责。
@@ -311,9 +322,7 @@ describe('AgentWorker', () => {
     expect(nextMessage.role).toBe('user')
     expect(nextMessage.metadata).toMatchObject({ compaction: true })
     // 只带判据文本：绝不内联 assistant 快照（旧行为会得到 12 + 1 = 13 个 parts）。
-    expect(nextMessage.parts).toEqual([
-      { type: 'text', text: '# Handoff\n\n# Handoff\n\nsummary' }
-    ])
+    expect(nextMessage.parts).toEqual([{ type: 'text', text: '# Handoff\n\n# Handoff\n\nsummary' }])
     expect(sessions.saveStart).toHaveBeenCalledWith('session', nextMessage)
   })
 
@@ -349,16 +358,22 @@ describe('AgentWorker', () => {
 
   it('routes a child-task snapshot back to the main-chain assistant', async () => {
     // 子任务轮（nested）的落库身份是那条 UI 私有的 `-nested` 行；其变更必须回流到**主链
-    // assistant**（卡片只渲染主链消息）——否则「调度任务后变更卡片不更新」。worker 用
-    // sessions.lastAssistant(sessionId,'after') 取主链身份作为写回目标。
-    const stored: UIMessage = {
+    // assistant**（卡片只渲染主链消息）——否则「调度任务后变更卡片不更新」。目标行由
+    // persist 一并给出（`StoredRunResult.reviewRowId`），worker 不再自行取主链身份。
+    const childRow: UIMessage = {
       id: 'child-assistant-nested',
       role: 'assistant',
       metadata: { nested: true },
-      parts: []
+      parts: [{ type: 'text', text: 'child work' }]
     }
-    const mainAssistant: UIMessage = { id: 'main-assistant', role: 'assistant', parts: [] }
-    mocks.run.mockImplementation(async () => stored)
+    const mainAssistant: UIMessage = {
+      id: 'main-assistant',
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'main work' }]
+    }
+    // 子任务轮的落库身份是那条 `-nested` 行，但卡片目标行由其主链行给出
+    // （`reviewRowId` 与内容基线 `reviewRow` **同源**，均为主链行）。
+    mocks.run.mockImplementation(async () => stored(childRow, mainAssistant))
     const { sink } = createWorker()
     const track = createTrack(workspace, sink)
     track.review.update({
@@ -368,25 +383,33 @@ describe('AgentWorker', () => {
       deletions: 0,
       binary: false
     })
-    const { worker, sessions } = createWorker(track, mainAssistant)
+    // ⚠️ 让 `lastAssistant` 指向**另一条**行：若 worker 退回「自行用 lastAssistant 取行」的旧实现，
+    // 就会写到 `decoy-assistant` 而非 `main-assistant` ⇒ 本断言才会变红（否则两条路径恰好同结果、
+    // 测试无法区分新旧实现，等于没钉住这个契约）。
+    const decoy: UIMessage = { id: 'decoy-assistant', role: 'assistant', parts: [] }
+    const { worker, sessions } = createWorker(track, decoy)
 
     await worker.run({ ...input, nested: true })
 
     const saved = sessions.saveMessages.mock.calls.map((call) => call[1][0] as UIMessage)
-    expect(saved).toContainEqual(
-      expect.objectContaining({
-        id: 'main-assistant',
-        parts: [expect.objectContaining({ type: 'data-git-snapshot', id: 'review' })]
-      })
-    )
-    // 绝不把子任务轮的快照写在其自己的 `-nested` 行上（那是卡片看不到的那条）。
+    // 卡片只落主链行，且**保留主链行自身内容**（不含 child 的私有 parts、不带 nested 标记）。
+    expect(saved).toContainEqual({
+      id: 'main-assistant',
+      role: 'assistant',
+      parts: [
+        { type: 'text', text: 'main work' },
+        expect.objectContaining({ type: 'data-git-snapshot', id: 'review' })
+      ]
+    })
+    // 目标行**只能**来自 `reviewRowId`：既不是 `lastAssistant` 的 decoy，也不是 child 自身。
+    expect(saved.find((message) => message.id === 'decoy-assistant')).toBeUndefined()
     expect(saved.find((message) => message.id === 'child-assistant-nested')).toBeUndefined()
   })
 
   it('does not tag a top-level response as nested when re-saving the review snapshot', async () => {
     // 顶层轮次：persist 返回原身份，worker 回写不得添加 nested（否则会被 loadMessages 过滤）。
-    mocks.run.mockImplementation(
-      async () => ({ id: 'top-assistant', role: 'assistant', parts: [] }) as UIMessage
+    mocks.run.mockImplementation(async () =>
+      stored({ id: 'top-assistant', role: 'assistant', parts: [] })
     )
     const { sink } = createWorker()
     const track = createTrack(workspace, sink)
@@ -538,7 +561,7 @@ describe('AgentWorker', () => {
         toolCallId: 'write',
         output: { kind: 'diff', path: followPath, patch: '+new' }
       } as UIMessageChunk)
-      return { id: 'assistant', role: 'assistant', parts: [] } as UIMessage
+      return stored({ id: 'assistant', role: 'assistant', parts: [] })
     })
     const { sink } = createWorker()
     const track = createTrack(workspace, sink)
@@ -572,8 +595,8 @@ describe('AgentWorker', () => {
   it('persists the task snapshot when a continuation makes no changes', async () => {
     // 会话级 track 已含第一轮修改的文件；本轮（ask_user 回答后）没有任何文件变更。
     // 期望：最终保存的消息仍带快照 part（同一任务，不能因为本轮无改动而丢失）。
-    mocks.run.mockImplementation(
-      async () => ({ id: 'assistant', role: 'assistant', parts: [] }) as UIMessage
+    mocks.run.mockImplementation(async () =>
+      stored({ id: 'assistant', role: 'assistant', parts: [] })
     )
     const { sink } = createWorker()
     const track = createTrack('/workspace', sink)
@@ -619,7 +642,7 @@ describe('AgentWorker', () => {
           patch: '--- a/file.ts\n+++ b/file.ts\n@@ -0,0 +1 @@\n+change'
         }
       } as UIMessageChunk)
-      return response
+      return stored(response)
     })
     const { worker, sessions, sink } = createWorker()
 
@@ -668,7 +691,7 @@ describe('AgentWorker', () => {
       } as UIMessageChunk)
       // Deleted outside the tracked tools after the final tool output.
       rmSync(path)
-      return { id: 'assistant', role: 'assistant', parts: [] } as UIMessage
+      return stored({ id: 'assistant', role: 'assistant', parts: [] })
     })
     const { worker, sessions, sink } = createWorker()
 

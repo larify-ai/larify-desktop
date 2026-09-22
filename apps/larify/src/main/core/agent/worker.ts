@@ -4,7 +4,7 @@ import { clearReadState } from '../../../extensions/fs/main/state'
 import type { SessionStore } from '../session'
 import type { AgentModelConfig } from '../model/config'
 import type { AgentOptions } from './engine'
-import { markNested, runStoredAgentSession } from './persist'
+import { markNested, runStoredAgentSession, type StoredRunResult } from './persist'
 import { AgentReview, FileChangeTracker, reviewChunk } from './review'
 import type { PluginHost } from '../plugin/host'
 import { pluginDiscovery } from '../plugin/plugin-discovery'
@@ -32,6 +32,8 @@ export interface AgentWorkerInput {
    * 有值时，本轮模型输入 = `[判据, 回答]`（从该子任务轮继续），而非「只有回答」。
    */
   continuationPrompt?: UIMessage
+  /** 本轮刚被回答的 ask_user toolCallId：persist 据此从快照中**只抽回答 part**（避免越权读主链）。 */
+  answeredToolCallId?: string
 }
 
 /** 一轮的产出：被调度的任务路径（一轮至多一个），以及该轮（含传入基数）的累计处理时长。 */
@@ -86,7 +88,7 @@ export class AgentWorker {
       // runStoredAgentSession 的 onMessage 只保存流内消息（不含 review part），
       // 会覆盖掉上一轮已持久化的快照；这里把最新快照（同 id 原地替换）写回，
       // 保证"ask_user 前改的文件"在重载/切换会话后仍然可见。
-      const saveReview = (response: UIMessage): void => {
+      const saveReview = (result: StoredRunResult): void => {
         // Reconcile once more before persisting so a file deleted after the
         // last tool output still surfaces as a deletion in the final card.
         for (const tracked of fileChanges.syncResults()) {
@@ -95,13 +97,11 @@ export class AgentWorker {
         const snapshot = activeReview.finish()
         if (!snapshot) return
         const chunk = reviewChunk(snapshot)
-        // 变更卡片挂在**主链 assistant** 上：子任务轮（nested）的落库身份是那条 UI 私有的
-        // `-nested` 行，若把快照写在其上，主链消息（卡片只渲染它）就永远看不到变更——这正是
-        // 「调度任务后变更卡片不更新」的成因。因此子任务轮改写到主链那条（即它的 UI 锚点：
-        // 主链轮不改 start，故 `lastAssistant` 拿到的就是主链 assistant），使其变更回流到卡片。
-        const target = input.nested
-          ? (this.sessions.lastAssistant(input.sessionId, 'after') ?? response)
-          : response
+        // 变更卡片挂在**主链 assistant** 上（卡片只渲染主链消息）：目标行由 `persist` 的落库
+        // 原语一并给出——**行 id 与内容基线同源**（`reviewRowId` + `reviewRow`）。worker 不自选行，
+        // 更不能拿 `stored`（可能是带 `nested` 标记的嵌套行）的内容去配主链行的 id：那会把
+        // `nested` 标记与嵌套私货写进主链行，使主链助手行被 `loadMessages` 过滤而消失。
+        const target: UIMessage = { ...result.reviewRow, id: result.reviewRowId }
         const existingIndex = target.parts.findIndex(
           (part) => part.type === 'data-git-snapshot' && part.id === 'review'
         )
@@ -145,14 +145,14 @@ export class AgentWorker {
       }
       const reviewToolCalls = new Set<string>()
       const originalStopWhen = input.runtime.stopWhen
-      // `previousStored`（要写回的那条既有 assistant）**由调用方显式给出**，不由 message 反推：
+      // `previousStored`（要写回/重定向的那条既有 assistant）**由调用方显式给出**，不由 message 反推：
       // - ask_user 回答续写（外部 `agent:send` 送来回答）：由 `agent.ts` 从锚点下传 ⇒ 写回原行。
-      // - reset_context 的进程内续写：传**本轮的判据**（见 `while (handoff)` 内说明）⇒ 本轮
-      //   落库换新 id（`toStored` 的重定向），从而落在 `sessions.start` 之后、可被续写。
+      // - reset_context 的进程内续写：传**本轮的判据**（见 `while (handoff)` 内说明）⇒ 产出换新 id
+      //   落库（`locateCurrentRow` 的 reset 分支），从而落在 `sessions.start` 之后、可被续写。
       const runOnce = (
         message: UIMessage | undefined,
         previousStored?: UIMessage
-      ): Promise<UIMessage | undefined> =>
+      ): Promise<StoredRunResult | undefined> =>
         runStoredAgentSession(this.sessions, {
           sessionId: input.sessionId,
           cwd: input.cwd,
@@ -162,6 +162,7 @@ export class AgentWorker {
           baseProcessingMs: input.baseProcessingMs,
           previousStored,
           continuationPrompt: input.continuationPrompt,
+          answeredToolCallId: input.answeredToolCallId,
           options: {
             ...input.runtime,
             toolsContext,
@@ -209,9 +210,10 @@ export class AgentWorker {
           }
         })
       // 每轮结束后统一收尾：写回变更快照、累计处理时长。
-      const settle = (value: UIMessage | undefined): void => {
+      const settle = (value: StoredRunResult | undefined): void => {
         if (value) saveReview(value)
-        const total = (value?.metadata as Record<string, unknown> | undefined)?.totalProcessingMs
+        const total = (value?.stored.metadata as Record<string, unknown> | undefined)
+          ?.totalProcessingMs
         if (typeof total === 'number' && Number.isFinite(total)) totalProcessingMs = total
       }
       // 首条输入可能携带「续写身份」（ask_user 回答要写回原行）。
@@ -236,28 +238,13 @@ export class AgentWorker {
         //   真实会话 `8b152a1c` 的 `#6702/#6704/#6706/#6708`（419/461 parts）即此。
         //   ⇒ 这同时是「同一 toolCallId 出现在 4 条 user 行 ⇒ 调度次数虚高」的来源。
         //   故此处用 `input.message.role === 'user'` 把它**排除**（assistant 快照不带入）。
-        const carriedParts =
-          input.message?.role === 'user' ? (input.message.parts ?? []) : []
+        const carriedParts = input.message?.role === 'user' ? (input.message.parts ?? []) : []
         const tagged: UIMessage = {
           id: randomUUID(),
           role: 'user',
           metadata: { compaction: true },
           parts: [...carriedParts, { type: 'text', text: `# Handoff\n\n${handoff}` }]
         }
-        // 本轮判据同时是**续写轮的 `previousStored`**：reset 续写是新的一轮（worker 只跑一轮），
-        // 其落库身份必须由调用方显式给出，不能由 SDK 从 `message` 反推。
-        //
-        // 理由：`runStoredAgentSession` 用 `originalMessages = [...messages, continuationOf]`
-        // 并入 reset 前那条 assistant 以复用其 id（AI SDK 据此把产出并进那条 UI 消息，时长连续）。
-        // 而 `messages` = `loadMessages()`（`position >= sessions.start`）+ 本轮判据；主链轮里
-        // `messages` **恒以一个 user 结尾**，于是 AI SDK 的 `handleUIMessageStreamFinish` 会把
-        // `continuationOf.id`（reset 前的旧 assistant）当作**流内 start chunk 的 messageId**，
-        // 整个 `state.message`（含全部增量）都挂在那条 id 上 —— 而它已被 `saveStart` 甩到
-        // `start` 之前。若不重定向，本轮的新产出（最后一个 `agent_schedule_task` /
-        // `agent_ask_user`）就**永远落不进 `loadMessages()` 可见的范围**（同既有缺陷
-        // `ask-user-reanswer-after-reset` 的形态，只是触发在**流内 start 注入**这一层）。
-        // 显式传入后 `previousStored.id !== continuationOf.id` ⇒ `toStored` 的重定向生效，
-        // UI 侧 `originalMessages` 不变（合并与时长语义不变），仅落库改到一个新 id。
         const message = input.nested ? markNested(tagged) : tagged
         handoff = undefined
         // reset_context 走进程内 handoff，不经过 Agent.send()，故此处显式刷新
@@ -270,15 +257,9 @@ export class AgentWorker {
         // nest prompt），不依赖 `start`；若在此也 saveStart，会把主链游标推到子任务的
         // 位置，使主链上下文被截断成残片（实测 loadMessages 返回 []）。故 nested 时跳过。
         if (!input.nested) this.sessions.saveStart(input.sessionId, message)
-        // `previousStored` 只在**主链轮**传：其用途是「落库 id 重定向」——主链续写轮 `messages`
-        // 恒以 user 结尾，AI SDK 会把 reset 前那条旧 assistant 的 id 当作流内 start 的
-        // messageId，其产出会被甩到 `sessions.start` 之前。显式传入判据（id ≠ continuationOf.id）
-        // ⇒ `toStored` 重定向生效，产出落在 `start` 之后。
-        //
-        // ⚠️ **nested 轮不能传**：`toStored` 的 nested+锚点分支会**复用锚点 id** 落库
-        // （`markNested({...response, id: continuationAnchor.id})`），若把本轮 handoff 行当锚点
-        // 传入，续写产出将**覆盖 handoff 行本身**（handoff 行消失）。nested 轮不需要移动游标
-        // （`start` 不动），其落库已按「主链行为 id 基」正常新建行。
+        // `previousStored` **只在主链轮**传：reset 的产出会换一个新 id 落库（`locateCurrentRow`
+        // 的 reset 分支），从而落在 `start` 之后、可被下一轮续写。若在 nested 轮传，产出会原地
+        // 覆盖 handoff 判据行（而 nested 轮根本不移动 `start`，无此需求）。
         response = await runOnce(message, input.nested ? undefined : message)
         settle(response)
       }

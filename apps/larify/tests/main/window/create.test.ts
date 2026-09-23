@@ -11,6 +11,7 @@ const electron = vi.hoisted(() => ({
   setWindowOpenHandler: vi.fn(),
   webContentsSend: vi.fn(),
   windowOn: vi.fn(),
+  setApplicationMenu: vi.fn(),
   openExternal: vi.fn(() => Promise.resolve())
 }))
 
@@ -32,6 +33,7 @@ vi.mock('electron', () => ({
       loadURL: vi.fn(() => Promise.resolve())
     }
   }),
+  Menu: { setApplicationMenu: electron.setApplicationMenu },
   nativeTheme: { shouldUseDarkColors: true },
   shell: { openExternal: electron.openExternal },
   screen: {
@@ -57,6 +59,7 @@ beforeEach(() => {
   electron.setWindowOpenHandler.mockClear()
   electron.webContentsSend.mockClear()
   electron.windowOn.mockClear()
+  electron.setApplicationMenu.mockClear()
   electron.openExternal.mockClear()
 })
 
@@ -124,6 +127,12 @@ describe('createWindow', () => {
     expect(() =>
       isRendererNavigation('not a url', new URL('http://localhost:5175/'), '')
     ).not.toThrow()
+  })
+
+  it('removes the default application menu so reload accelerators cannot fire', () => {
+    createWindow()
+
+    expect(electron.setApplicationMenu).toHaveBeenCalledWith(null)
   })
 
   it('only attaches sandboxed browser guests in the browser partition', () => {

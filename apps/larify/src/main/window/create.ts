@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { BrowserWindow, nativeTheme, screen, shell } from 'electron'
+import { BrowserWindow, Menu, nativeTheme, screen, shell } from 'electron'
 import { is } from '@electron-toolkit/utils'
 import { BROWSER_PARTITION } from '../../extensions/browser/shared/types'
 import { resourcePath } from '../utils/app-paths'
@@ -76,6 +76,7 @@ export function createWindow(): BrowserWindow {
     webPreferences.webSecurity = true
     webPreferences.allowRunningInsecureContent = false
   })
+  Menu.setApplicationMenu(null)
   window.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('https://larify.ai/')) {
       void shell.openExternal(url)

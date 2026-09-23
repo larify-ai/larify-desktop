@@ -136,13 +136,21 @@ export interface StoredRunResult {
   reviewRow: UIMessage
 }
 
-/** `locateCurrentRow` 的产出：本轮该写的那条行（`stored`）及其 id/nested 归属与卡片目标行。 */
+/**
+ * `locateCurrentRow` 的产出：本轮该写的那条行（`stored`）及其 id/nested 归属与卡片目标行。
+ *
+ * `supersededId`：本轮**取代**掉的既有行 id（仅 reset 续写路径）。落库新行后应删除它——它承载的
+ * 内容已被 `stored` **完整包含**（见 `locateCurrentRow` 第 3 条），留着就会与 `stored` 同时渲染
+ * ⇒ 同一轮 progress 标题重复。作为**返回值显式给出**（而非跨调用的闭包状态），使"取代谁"与"写谁"
+ * 同源、无时序耦合。
+ */
 interface LocatedRow {
   stored: UIMessage
   id: string
   nestedRow: boolean
   reviewRowId: string
   reviewRow: UIMessage
+  supersededId?: string
 }
 
 export async function runStoredAgentSession(
@@ -317,7 +325,19 @@ export async function runStoredAgentSession(
     }
     if (resetStoredId && response.id === continuationOf?.id) {
       const stored = { ...response, id: resetStoredId }
-      return { stored, id: resetStoredId, nestedRow: false, reviewRowId: resetStoredId, reviewRow: stored }
+      // reset 续写**换新 id**（使其落在 `sessions.start` 之后、可被 `loadMessages` 读到），于是本轮
+      // 产出会**新建一行**，而 reset 前那条旧行（`continuationOf`）留在库里。旧行已被新行**完整包含**
+      // （AI SDK 以它为基线克隆全部 parts + 追加增量；实测旧行每个 part 都在新行里）且落在 `start`
+      // 之前 ⇒ 模型输入不需要它；但 `loadVisibleMessages` 会把两条**同时渲染** ⇒ 同一轮回复里的
+      // progress 标题各出现多遍（真实会话 `7a2df69b`）。故：**用新版本取代旧行**。
+      return {
+        stored,
+        id: resetStoredId,
+        nestedRow: false,
+        reviewRowId: resetStoredId,
+        reviewRow: stored,
+        supersededId: continuationOf.id
+      }
     }
     const stored = { ...response, id: response.id }
     return { stored, id: response.id, nestedRow: false, reviewRowId: response.id, reviewRow: stored }
@@ -350,6 +370,8 @@ export async function runStoredAgentSession(
     reviewRowId = row.reviewRowId
     reviewRow = row.reviewRow
     sessions.saveMessages(sessionId, [row.stored])
+    // reset 续写换新 id 落库后，用新版本**取代**旧行（其内容已被 `stored` 完整包含，见 `LocatedRow`）。
+    if (row.supersededId !== undefined) sessions.deleteBeforeStart(sessionId, row.supersededId)
   }
   const finalMessages = await runAgentSession(
     messages,

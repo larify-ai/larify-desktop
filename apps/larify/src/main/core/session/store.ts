@@ -313,6 +313,44 @@ export class SessionStore implements Disposable {
     })
   }
 
+  /**
+   * 删除会话里**位于压缩边界之前**（`position < sessions.start`，或尚未压缩时任意）的一条消息。
+   *
+   * 用途单一：reset 续写把产出**重定向到一条新行**（见 `persist.locateCurrentRow` 的 reset 分支），
+   * 被取代的旧行（`continuationOf`，由 `lastAssistant(id,'before')` 查出、恒在 `start` 之前）**已被
+   * 新行完整包含**（实测：旧行每个 part 都在新行里，缺失 0/42；差异仅为被原地更新的变更卡片），
+   * 模型输入不需要它。若留着，`loadVisibleMessages` 会把它与新行**同时渲染** ⇒ 同一轮回复里的
+   * progress 标题各出现多遍（真实会话 `7a2df69b`：`#7051 ⊂ #7053 ⊂ #7057`）。这里是**用新版本取代
+   * 旧版本**——同一条 UI 消息只应有一个存储版本，不是丢数据。
+   *
+   * 边界不变式：只删 `start` **之前**的行，故 `start` 游标（及 `position` 主键）**永不受影响**——
+   * 无需任何"删到边界就重置游标"的兜底（那类兜底掩盖的是调用错误）。若 `id` 命中边界行（`= start`）
+   * 或边界之后的行，说明调用方用错（`continuationOf` 只可能来自 `'before'` 查询）⇒ **fail-fast**。
+   * `id` 不存在时直接返回（幂等）。
+   */
+  deleteBeforeStart(sessionId: string, id: string): void {
+    transaction(this.database, () => {
+      const row = this.database
+        .prepare(
+          `SELECT messages.position AS position, sessions.start AS start
+           FROM messages JOIN sessions ON sessions.id = messages.session_id
+           WHERE messages.session_id = ? AND messages.id = ?`
+        )
+        .get(sessionId, id) as { position: number; start: number | null } | undefined
+      if (!row) return
+      // 只允许删除压缩边界之前的行（未压缩时 start 为 NULL ⇒ 无边界，任意行可删）。
+      if (row.start !== null && row.position >= row.start) {
+        throw new Error(
+          `deleteBeforeStart 只删压缩边界之前的行，但 id=${id} 的 position=${row.position} >= start=${row.start}`
+        )
+      }
+      this.database.prepare('DELETE FROM messages WHERE session_id = ? AND id = ?').run(sessionId, id)
+      this.database
+        .prepare('UPDATE sessions SET updated_at = ? WHERE id = ?')
+        .run(Date.now(), sessionId)
+    })
+  }
+
   saveStart(sessionId: string, message: UIMessage): void {
     transaction(this.database, () => {
       const current = this.database

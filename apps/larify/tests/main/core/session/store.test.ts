@@ -157,6 +157,39 @@ describe('SessionStore nested filtering', () => {
     expect(store.lastAssistant('session', 'after')?.id).toBe('main-nested-aaaa')
   })
 
+  it('deletes a row before the start cursor and leaves the cursor untouched', () => {
+    // reset 续写用新行取代旧行：旧行恒在 `start` 之前（由 lastAssistant('before') 查出）。
+    // 删除它不得移动 `start`，也不得影响可见/模型输入之外的任何行。
+    const store = createStore()
+    store.createSession({ id: 'session', title: 't', cwd: 'cwd' })
+    store.saveMessages('session', [user('u1', 'q'), user('a1', 'old answer')])
+    store.saveStart('session', user('cursor', 'reset'))
+    const startBefore = store.startPosition('session')
+
+    store.deleteBeforeStart('session', 'a1')
+
+    expect(store.loadVisibleMessages('session').map((m) => m.id)).toEqual(['u1'])
+    expect(store.startPosition('session')).toBe(startBefore)
+    // 幂等：再删一次不抛。
+    expect(() => store.deleteBeforeStart('session', 'a1')).not.toThrow()
+  })
+
+  it('refuses to delete the boundary row or a row after it (fail-fast, no silent cursor reset)', () => {
+    // 边界不变式：`continuationOf` 只可能来自 `'before'` 查询（position < start）。若调用方拿边界行
+    // 或边界之后的行来删，是编程错误 —— 必须显式失败，而不是静默清空 `start`（旧实现的「防御」）。
+    const store = createStore()
+    store.createSession({ id: 'session', title: 't', cwd: 'cwd' })
+    store.saveMessages('session', [user('u1', 'q')])
+    store.saveStart('session', user('cursor', 'reset'))
+    store.saveMessages('session', [user('after', 'post-reset')])
+
+    expect(() => store.deleteBeforeStart('session', 'cursor')).toThrow(/压缩边界之前/)
+    expect(() => store.deleteBeforeStart('session', 'after')).toThrow(/压缩边界之前/)
+    // `start` 未被这些失败调用改动。
+    expect(store.startPosition('session')).not.toBe(-1)
+    expect(store.loadVisibleMessages('session').map((m) => m.id)).toEqual(['u1', 'after'])
+  })
+
   it('excludes recursive child messages from the navigation index', () => {
     const store = createStore()
     store.createSession({ id: 'session', title: 't', cwd: 'cwd' })

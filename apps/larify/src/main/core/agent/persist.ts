@@ -136,6 +136,15 @@ export interface StoredRunResult {
   reviewRow: UIMessage
 }
 
+/** `locateCurrentRow` 的产出：本轮该写的那条行（`stored`）及其 id/nested 归属与卡片目标行。 */
+interface LocatedRow {
+  stored: UIMessage
+  id: string
+  nestedRow: boolean
+  reviewRowId: string
+  reviewRow: UIMessage
+}
+
 export async function runStoredAgentSession(
   sessions: SessionStore,
   request: AgentRequest
@@ -265,17 +274,16 @@ export async function runStoredAgentSession(
    *    `originalMessages`/UI 合并语义照旧，仅**落库**换 id 使其落在 `start` 之后可续写。
    * 4. **主链轮**：原样落库。
    */
-  const locateCurrentRow = (
-    response: UIMessage
-  ): { id: string; nestedRow: boolean; reviewRowId: string; reviewRow: UIMessage } => {
+  const locateCurrentRow = (response: UIMessage): LocatedRow => {
     if (request.nested && continuationAnchor) {
       const nestedRow =
         (continuationAnchor.metadata as Record<string, unknown> | undefined)?.nested === true
       // 卡片目标：嵌套行的卡片回流到**主链行**（`idAnchor`）。其内容基线必须是**主链行本身**
       // （无 nested、只含主链 parts），不能用嵌套行的 `stored`（否则把 nested 标记与嵌套私货
       // 写进主链行、吞掉主链助手——见 `StoredRunResult` 警示）。恒等续写（主链行）时二者同一行。
-      const stored = appendToRow(response, { id: continuationAnchor.id, nestedRow })
+      const stored = storedRow(response, { id: continuationAnchor.id, nestedRow })
       return {
+        stored,
         id: continuationAnchor.id,
         nestedRow,
         reviewRowId: nestedRow ? (idAnchor?.id ?? continuationAnchor.id) : continuationAnchor.id,
@@ -284,10 +292,23 @@ export async function runStoredAgentSession(
     }
     if (request.nested) {
       const id = nestedRowId(idAnchor, nestedSuffix)
-      const stored = appendToRow(response, { id, nestedRow: true })
+      // **只存本轮增量**：AI SDK 以 `nestedAnchor`（= 上一轮嵌套行）为基线克隆其全部 parts，
+      // 流式过程中只**追加**本轮新增（新建路径是纯追加，实测 response.parts 头部逐字节等于
+      // `nestedAnchor.parts`）⇒ 从基线长度起切即得本轮增量。
+      //
+      // 为何不重蹈旧 `parts.slice(父轮.parts.length)` 的坑：旧实现**无差别**切片，把「原地改写」
+      // 的 ask_user 回答也切掉（该 part 长度不变、内容变 ⇒ 切片恰好丢弃）。而 ask 回答走的是
+      // **续写路径**（第 1 条，`continuationAnchor` 分支，不切片）；本分支是「模型产出新轮」的
+      // 纯追加，切掉的恰是「基线里已有的旧 part」——它们已在上一轮的行里、本轮无需重复存。
+      //
+      // 不切会怎样：新行 = 基线全部 parts + 本轮增量 ⇒ 每轮复制一份历史（实测真实会话
+      // `825617b9` 子任务链 12 轮行体积 38K→333K tokens 单调膨胀）。`loadMessages` 只读主链行，
+      // 故只占磁盘、不进模型输入，但长任务会持续膨胀并最终逼近守门阈值。
+      const stored = storedRow(response, { id, nestedRow: true, sliceFrom: nestedAnchor })
       // 卡片回流到主链行；基线取主链行本身（取不到才退回嵌套行，保证 `reviewRowId` 与
       // `reviewRow` 始终同源）。
       return {
+        stored,
         id,
         nestedRow: true,
         reviewRowId: idAnchor?.id ?? id,
@@ -296,23 +317,28 @@ export async function runStoredAgentSession(
     }
     if (resetStoredId && response.id === continuationOf?.id) {
       const stored = { ...response, id: resetStoredId }
-      return { id: resetStoredId, nestedRow: false, reviewRowId: resetStoredId, reviewRow: stored }
+      return { stored, id: resetStoredId, nestedRow: false, reviewRowId: resetStoredId, reviewRow: stored }
     }
     const stored = { ...response, id: response.id }
-    return { id: response.id, nestedRow: false, reviewRowId: response.id, reviewRow: stored }
+    return { stored, id: response.id, nestedRow: false, reviewRowId: response.id, reviewRow: stored }
   }
   /**
-   * **落库原语二：把本轮输出写入定位到的行**——只做「换 id / 打 nested 标记」，**不切片**。
+   * **落库原语二：由「本轮模型输出 + 定位到的行」算出该行要落库的内容**——换 id、打 nested
+   * 标记，并按需**只取本轮增量**。
    *
-   * 落库行 = 完整的模型输出快照（`response.parts`）。旧实现按 `parts.slice(父轮.parts.length)`
-   * 只存增量，但 AI SDK 对已有 part 是**按 toolCallId 原地改写**（`updateToolPart`），于是
-   * 「用户回答 ask_user」表现为同一 part 原地变 `output-available`；按长度切片恰好把它切掉
-   * ⇒ 已答问答配对永久消失（`#6843` 48→10 parts）。存完整快照即天然保留。嵌套行多存的 parts
-   * 只占磁盘：`loadMessages` 只读主链行，不进模型输入。
+   * `sliceFrom` 指定「基线行」：给出时只存 `response.parts.slice(基线.parts.length)`（本轮增量）。
+   * 仅在**新建嵌套行**路径使用——那里模型输出是「基线克隆 + 纯追加」，切片安全；续写路径
+   * （`continuationAnchor`）**不传** `sliceFrom`，因 AI SDK 会对已有 part **按 toolCallId 原地
+   * 改写**（`updateToolPart`），「用户回答 ask_user」表现为同一 part 原地变 `output-available`，
+   * 按长度切片会把它切掉 ⇒ 问答配对永久消失（旧 bug，实测 `#6843` 48→10 parts）。
    */
-  const appendToRow = (response: UIMessage, row: { id: string; nestedRow: boolean }): UIMessage => {
-    if (!row.nestedRow) return { ...response, id: row.id }
-    return markNested({ ...response, id: row.id })
+  const storedRow = (
+    response: UIMessage,
+    row: { id: string; nestedRow: boolean; sliceFrom?: UIMessage }
+  ): UIMessage => {
+    const parts = row.sliceFrom ? response.parts.slice(row.sliceFrom.parts.length) : response.parts
+    const base = { ...response, parts, id: row.id }
+    return row.nestedRow ? markNested(base) : base
   }
   // 变更卡片的落库目标行（`worker.saveReview` 用）：行 id 与其**内容基线**由原语一并给出，
   // worker 不再自行推断（也就不会把嵌套行的内容写到主链行的 id 上）。
@@ -320,11 +346,10 @@ export async function runStoredAgentSession(
   let reviewRow: UIMessage | undefined
   const saveResponse = (response: UIMessage): void => {
     const row = locateCurrentRow(response)
-    const stored = appendToRow(response, row)
-    latestStored = stored
+    latestStored = row.stored
     reviewRowId = row.reviewRowId
     reviewRow = row.reviewRow
-    sessions.saveMessages(sessionId, [stored])
+    sessions.saveMessages(sessionId, [row.stored])
   }
   const finalMessages = await runAgentSession(
     messages,

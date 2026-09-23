@@ -167,14 +167,17 @@ describe('runStoredAgentSession', () => {
       options: {} as never
     })
 
-    // 落库：id 换新、带 nested 标记、**parts 保存完整输出快照**（收敛：不再切片，见 persist.ts）。
-    // id 形如 `main-nested-<uuid>`：**每轮唯一**，避免多轮嵌套（回父/重入/续写）因
-    // `ON CONFLICT(session_id,id) DO UPDATE` 互相覆盖（实测判据行堆到 18+ 条、assistant 仅 1 条）。
+    // 落库：id 换新、带 nested 标记、**只存本轮增量**（新建嵌套轮：基线是上一轮行，SDK 克隆其
+    // parts 后纯追加本轮新增 ⇒ 从基线长度起切即得增量）。id 形如 `main-nested-<uuid>`：**每轮唯一**，
+    // 避免多轮嵌套（回父/重入/续写）因 `ON CONFLICT(session_id,id) DO UPDATE` 互相覆盖。
     const stored = sessions.saveMessages.mock.calls.at(-1)?.[1]?.[0] as UIMessage
     expect(stored.id).toMatch(/^main-nested-.+/)
     expect(stored.metadata).toMatchObject({ nested: true })
-    // 完整快照：不切片（切片会吞掉被 AI SDK 原地改写的 part，见 nested-continuation-keeps-ask-user）。
-    expect(stored.parts).toEqual(merged.parts)
+    // ⚠️ 只存增量（= `merged` 去掉基线 `anchor.parts`）：否则每轮复制一份历史，长子任务链行体积
+    // 单调膨胀（真实会话 `825617b9` 12 轮 38K→333K tokens）。此切片**仅用于新建嵌套轮**——该路径
+    // 是纯追加；**续写路径不切片**（否则会吞掉 AI SDK 原地改写的 ask_user 回答，见
+    // nested-continuation-keeps-ask-user 与 withAnsweredTool）。
+    expect(stored.parts).toEqual([{ type: 'text', text: 'child delta' }])
     // 返回值即落库身份（供 worker 快照回写复用），卡片挂主链行。
     expect(result?.stored.id).toBe(stored.id)
     expect(result?.reviewRowId).toBe('main')

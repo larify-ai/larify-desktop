@@ -12,8 +12,13 @@ import { runStoredAgentSession } from '../../../../src/main/core/agent/persist'
 import { SessionStore } from '../../../../src/main/core/session'
 
 /**
- * 复核隔离：嵌套续写轮的**模型输入**不得携带整条主链（只应含 [nest 判据, 回答 part]）。
- * 并在多轮下确认输入体积不随时间膨胀。
+ * 复核隔离：嵌套续写轮的**模型输入**不得携带整条主链。
+ *
+ * 输入形态 = `[nest 判据, 承载行自己的运行记录, 回答 part]`（2026-09 起；此前为
+ * `[判据, 回答 part]` —— 那会把该嵌套轮已跑过的历史丢掉，致模型从 workflow 起点重跑，
+ * 见 `memory/larify-desktop/ask-user-replays-nest-prompt-restarts-workflow.md`）。
+ *
+ * 关键不变量：**隔离**（不含主链）+ **体积与主链规模无关**（只与本嵌套轮自身规模成正比）。
  */
 describe('嵌套续写模型输入的隔离', () => {
   const sessionId = 's-iso'
@@ -81,7 +86,7 @@ describe('嵌套续写模型输入的隔离', () => {
   const rowById = (id: string): UIMessage | undefined =>
     store.loadVisibleMessages(sessionId).find((m) => m.id === id)
 
-  it('嵌套续写输入只含 [判据, 回答]，不含主链内容，且三轮不膨胀', async () => {
+  it('嵌套续写输入 = [判据, 承载行运行记录, 回答]：不含主链内容，且体积与主链规模无关', async () => {
     // 主链含一段「机密」文本（若被越权带入嵌套轮，断言会红）
     store.saveMessages(sessionId, [
       {
@@ -130,10 +135,18 @@ describe('嵌套续写模型输入的隔离', () => {
     }
 
     console.log('[captured chars per round] =', captured.map((c) => c.chars))
-    // 每轮输入都不得含主链机密内容（modelCapturing 内部有断言）；且体积稳定（无膨胀）
+    // **语义已更新（2026-09）**：续写输入从「只含 `[判据, 回答]`」改为
+    // 「`[判据, 承载行自己的运行记录, 回答]`」——让模型**从该嵌套轮断点继续**，
+    // 而非按判据重跑整条 workflow（原行为见
+    // `memory/larify-desktop/ask-user-replays-nest-prompt-restarts-workflow.md`）。
+    //
+    // 仍必须守的不变量：
+    // ① 每轮输入都**不得**含主链内容（`modelCapturing` 内部已有断言）——隔离不破；
+    // ② 体积**与主链规模无关**（主链塞 200×『主链机密内容-』也不该让输入变大），
+    //    只与本嵌套轮自身规模成正比。
     const sizes = captured.map((c) => c.chars)
     expect(sizes.length).toBe(3)
-    expect(Math.max(...sizes) - Math.min(...sizes)).toBeLessThan(400)
     expect(Math.max(...sizes)).toBeLessThan(2000)
+    expect(captured.every((c) => c.chars < 2000)).toBe(true)
   })
 })

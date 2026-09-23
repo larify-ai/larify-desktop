@@ -20,6 +20,28 @@ export function markNested(value: UIMessage): UIMessage {
 export const NESTED_ID_SUFFIX = '-nested-'
 
 /**
+ * 去掉承载行里**所有未完成（`input-available`）的工具 part**，只留已完成的历史。
+ *
+ * 承载行是「历次 `saveResponse` 的累积快照」，会残留未完成的 tool part：本轮的等待态 `ask_user`
+ * （由回答 part 顶替）、旧缺陷堆积的多个等待 ask（真实 `da3ad8bb#6921` 有 8 个）、以及任何
+ * 执行中/被打断的工具。它们进 prompt 会变成「有 `tool-call` 无 `tool-result`」⇒ AI SDK 报
+ * `Tool result(s) missing for tool call(s) …` 并**中断整个流**（见 `nested-continuation-dirty-data.test.ts`
+ * 的 10 种形态矩阵）。已终态（`output-*`）保留 —— 它们是本嵌套轮历史的一部分。
+ */
+export function stripUnfinishedTools(parts: UIMessage['parts']): UIMessage['parts'] {
+  return parts.filter((part) => {
+    const p = part as { type?: string; state?: string }
+    return !(p.type?.startsWith('tool-') && p.state === 'input-available')
+  })
+}
+
+/** 两个 part 是否同一个工具调用（同非空 `toolCallId`）。 */
+const sameCall = (a: UIMessage['parts'][number], b: UIMessage['parts'][number]): boolean => {
+  const id = (b as { toolCallId?: string }).toolCallId
+  return id !== undefined && (a as { toolCallId?: string }).toolCallId === id
+}
+
+/**
  * 嵌套行的落库 id：`<主链行 id>-nested-<suffix>`。
  *
  * - id 基必须取**主链行**（稳定不变）；若用「上一轮嵌套行」作基，后缀会层层叠加（实测 60→588 字符）。
@@ -208,18 +230,39 @@ export async function runStoredAgentSession(
         })
         .catch(() => {})
     : undefined
-  // 递归子任务用全新上下文：只喂本轮 nest prompt，其余情况加载主链历史。
+  // 递归子任务用全新上下文（只喂本轮 nest prompt），其余情况加载主链历史。
+  // 嵌套轮的输入 = `[本案判据?, 本轮输入]`，而**本轮输入**按来源分三种：
+  // ① 新建嵌套轮（判据轮）/ ③ 无回答 ⇒ 原样 `message`；
+  // ② **ask_user 续写到嵌套行** ⇒ `[判据, 承载行的运行记录, 回答]`。
   //
-  // 嵌套轮（nested）的输入 = `[本案判据?, 本轮输入]`：
-  // - 判据（`continuationPrompt`）只在「续写的是一行**嵌套行**」时才有（见 `findAskUserContext`）；
-  // - 本轮输入在 ask_user 续写时是**主链 assistant 快照**，需按 `answeredToolCallId` 只留回答 part，
-  //   否则子任务续写会越权读整条主链；抽不到就退回原行为（不引入新失败路径）。
+  // ② 是本次修复点：旧行为只喂 `[判据, 回答]`，把承载行跑过的内容全丢了；而判据第 1 步就是
+  // 「读 task.md、按 workflow 执行」⇒ 模型从起点**重跑**（实测 `c9ea2e13#7215` 全库 25 例）。
+  // 数据源**必须是承载行**（主链之外 ⇒ 不越权；其 parts 是合法 step 序列，可直接喂 AI SDK）。
+  const carried = request.nested ? request.previousStored : undefined
+  const isNestedCarrier =
+    carried !== undefined &&
+    (carried.metadata as Record<string, unknown> | undefined)?.nested === true
+  const answered =
+    message && request.answeredToolCallId
+      ? extractAnsweredPart(message, request.answeredToolCallId)
+      : []
   const nestedInput = (): UIMessage[] => {
     const raw = message as UIMessage
-    const answered = request.answeredToolCallId
-      ? extractAnsweredPart(raw, request.answeredToolCallId)
-      : []
-    const current = answered.length ? { ...raw, parts: answered } : raw
+    // ② 续写到嵌套承载行：`[承载行运行记录（去掉等待态的 ask_user）, 回答]`。
+    // **不做截断**：承载行是「本嵌套轮的真实运行记录」，截它即丢历史（正是本修复要治的病）；
+    // 且实测最坏情况（最长嵌套行 151 万字符 ⇒ ≈62 万 estTokens）**远低于模型可用输入上限**
+    // （84 万）⇒ 请求仍能发出，只是会越过守门阈值 ⇒ 由通用守门（`prepareStep`）插提示让模型
+    // reset —— 那正是守门的设计用途，无需在此另设预算。
+    // 历史 = 承载行的运行记录（清掉未完成 part，否则会「有 call 无 result」而中断流）。
+    // 拼接 = 历史 + 本轮回答（历史里已有同 toolCallId 时不重复追加）。
+    const history = stripUnfinishedTools(carried?.parts ?? [])
+    const parts =
+      isNestedCarrier && answered.length
+        ? [...history, ...answered.filter((a) => !history.some((h) => sameCall(h, a)))]
+        : answered.length
+          ? answered
+          : raw.parts
+    const current: UIMessage = { ...raw, parts }
     return request.continuationPrompt ? [request.continuationPrompt, current] : [current]
   }
   const messages =

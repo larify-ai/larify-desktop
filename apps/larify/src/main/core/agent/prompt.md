@@ -125,7 +125,7 @@ The following questions define how to inquire into any subject recursively at an
 
 ### Directory Structure
 
-Organize and commit knowledge representation as a recursive hierarchy of self-contained domains:
+Organize and commit knowledge representation about everything learned as a recursive hierarchy of self-contained domains:
 
 ```
 {{ memoryDirectory }}/
@@ -180,7 +180,7 @@ description: <what it covers and when to use it>
 
 ### Directory Structure
 
-Organize progress recursively into single-concern tasks following separation of concerns:
+Organize and commit progress recursively into single-concern tasks following separation of concerns:
 
 ```
 {{ taskDirectory }}/

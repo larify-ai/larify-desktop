@@ -1,7 +1,8 @@
 import type { ModelMessage, PrepareStepFunction, ToolSet } from 'ai'
 import { estimateTokens } from './token-estimate'
 
-export const contextRolloverPrompt = 'Because the accumulated context becomes too large, first update the task progress and knowledge representation to help prevent context loss, finally call `agent_get_tool_schemas` with `{"tool_names":["agent_reset_context"]}` to read its schema, then call `agent_reset_context` with a Markdown handoff linking to the related files to reset the model context and continue from the handoff'
+export const contextRolloverPrompt =
+  'Because the accumulated context becomes too large, first update the task progress and knowledge representation to help prevent context loss, finally call `agent_get_tool_schemas` with `{"tool_names":["agent_reset_context"]}` to read its schema, then call `agent_reset_context` with a Markdown handoff linking to the related files to reset the model context and continue from the handoff'
 
 function includesRolloverPrompt(messages: ModelMessage[]): boolean {
   return messages.some((message) => {

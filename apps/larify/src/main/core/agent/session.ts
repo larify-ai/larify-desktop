@@ -41,23 +41,26 @@ export async function runAgentSession(
   // sessions.start 截断、不含 reset 前 assistant，从它找会丢失旧段。故用 uiOriginalMessages 作累加
   // 基数来源，使合并成一条后的总时长 = 旧段累计 + 本段新增。
   // 遇 compaction（metadata.compaction=true）跳过；遇真实用户消息中断（新一轮问题，重置计时）。
-  const previousTotalProcessingMs = baseProcessingMs > 0 ? baseProcessingMs : (() => {
-    const source = uiOriginalMessages ?? messages
-    for (let i = source.length - 1; i >= 0; i--) {
-      const msg = source[i]
-      if (msg.role === 'user') {
-        const meta = msg.metadata as Record<string, unknown> | undefined
-        if (meta?.compaction !== true) return 0
-        continue
-      }
-      if (msg.role === 'assistant') {
-        const total = (msg.metadata as Record<string, unknown> | undefined)?.totalProcessingMs
-        if (typeof total === 'number' && Number.isFinite(total)) return total
-        return 0
-      }
-    }
-    return 0
-  })()
+  const previousTotalProcessingMs =
+    baseProcessingMs > 0
+      ? baseProcessingMs
+      : (() => {
+          const source = uiOriginalMessages ?? messages
+          for (let i = source.length - 1; i >= 0; i--) {
+            const msg = source[i]
+            if (msg.role === 'user') {
+              const meta = msg.metadata as Record<string, unknown> | undefined
+              if (meta?.compaction !== true) return 0
+              continue
+            }
+            if (msg.role === 'assistant') {
+              const total = (msg.metadata as Record<string, unknown> | undefined)?.totalProcessingMs
+              if (typeof total === 'number' && Number.isFinite(total)) return total
+              return 0
+            }
+          }
+          return 0
+        })()
   const agentStream = runAgent(await toModelMessages(messages, options.tools), options)
   let finalMessages = messages
   const errorMetadata = (

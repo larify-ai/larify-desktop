@@ -418,6 +418,63 @@ describe('interaction assistant transport', () => {
     )
   })
 
+  it('passes no UI target id for a new question (last message is a user)', async () => {
+    // 新提问（末条是刚发的 user）⇒ `uiTargetId` 必须是 `undefined`（新建一条），
+    // **不能**取「最后一条 assistant」，否则新回复会被并进上一轮的回复。
+    const bridge = createBridge(async (channel) => {
+      if (channel === 'agent:send') bridge.emit('agent:end:session-1')
+    })
+    vi.stubGlobal('window', { bridge, dispatchEvent: vi.fn() })
+
+    await readAll(
+      await createIpcTransport(
+        () => 'C:/workspace',
+        () => defaultModelConfig
+      ).sendMessages({
+        chatId: 'session-1',
+        messageId: undefined,
+        messages: [
+          { id: 'message-1', role: 'assistant', parts: [{ type: 'text', text: 'reply' }] },
+          { id: 'message-2', role: 'user', parts: [{ type: 'text', text: 'next question' }] }
+        ],
+        trigger: 'submit-message'
+      })
+    )
+
+    expect(bridge.invoke).toHaveBeenCalledWith(
+      'agent:send',
+      expect.objectContaining({ uiTargetId: undefined })
+    )
+  })
+
+  it('passes the last assistant id as the UI target id for a continuation', async () => {
+    // 续写（末条是 assistant，如 ask_user 回答）⇒ 下传它的 id ⇒ 主进程据此全链复用同一 UI id。
+    const bridge = createBridge(async (channel) => {
+      if (channel === 'agent:send') bridge.emit('agent:end:session-1')
+    })
+    vi.stubGlobal('window', { bridge, dispatchEvent: vi.fn() })
+
+    await readAll(
+      await createIpcTransport(
+        () => 'C:/workspace',
+        () => defaultModelConfig
+      ).sendMessages({
+        chatId: 'session-1',
+        messageId: undefined,
+        messages: [
+          { id: 'message-1', role: 'user', parts: [{ type: 'text', text: 'ask' }] },
+          { id: 'assistant-x', role: 'assistant', parts: [{ type: 'text', text: 'reply' }] }
+        ],
+        trigger: 'submit-message'
+      })
+    )
+
+    expect(bridge.invoke).toHaveBeenCalledWith(
+      'agent:send',
+      expect.objectContaining({ uiTargetId: 'assistant-x' })
+    )
+  })
+
   it('treats a whitespace-only stored key as unconfigured', async () => {
     const bridge = createBridge(async (channel) => {
       if (channel === 'agent:send') bridge.emit('agent:end:session-1')

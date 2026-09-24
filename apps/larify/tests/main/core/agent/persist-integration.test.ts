@@ -93,7 +93,12 @@ describe('runStoredAgentSession persistence', () => {
         message: user,
         options: {} as never
       })
-    ).resolves.toEqual({ stored: final, reviewRowId: final.id, reviewRow: final })
+    ).resolves.toEqual({
+      stored: final,
+      reviewRowId: final.id,
+      reviewRow: final,
+      uiMessageId: final.id
+    })
     expect(store.loadMessages('session')).toEqual([user, final])
     store.dispose()
 

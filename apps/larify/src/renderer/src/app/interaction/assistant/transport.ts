@@ -114,6 +114,13 @@ export function createIpcTransport(
     async sendMessages({ chatId, messages, abortSignal }) {
       const message = messages.at(-1)
       if (!message) throw new Error('A message is required.')
+      // 「本轮输出该并进哪条 UI 消息」由**渲染端**（唯一知道自己末端的人）显式指定，主进程不再
+      // 从数据库反推（反推必错：reset 换库 id、nest 用主链 id ⇒ 猜错就 push 出副本 ⇒ UI 重复）。
+      //
+      // ⚠️ 只有「末条是 assistant」才给 id（＝本轮要并入它，如 ask_user 回答续写）；末条是刚发的
+      // user（新提问）⇒ `undefined` ⇒ 新建一条。**不能**取「最后一条 assistant」——新提问末条是
+      // user，若取其前面那条 assistant，会把**新回复并进上一轮的回复**。
+      const uiTargetId = message.role === 'assistant' ? message.id : undefined
       const cwd = getCwd()
       const modelConfig = withOwnApiKey(getModelConfig())
 
@@ -130,7 +137,8 @@ export function createIpcTransport(
             sessionId: chatId,
             message: saved,
             cwd,
-            modelConfig
+            modelConfig,
+            uiTargetId
           })
           if (onSaved)
             void Promise.resolve()

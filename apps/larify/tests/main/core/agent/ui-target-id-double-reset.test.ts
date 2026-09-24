@@ -1,0 +1,142 @@
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import type { UIMessage } from 'ai'
+import { MockLanguageModelV4 } from 'ai/test'
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+const workspace = mkdtempSync(join(tmpdir(), 'uitarget-double-reset-'))
+afterAll(() => rmSync(workspace, { recursive: true, force: true }))
+
+import { SessionStore } from '../../../../src/main/core/session/store'
+
+/**
+ * 端到端守门：**同一会话内连续两次主链 reset**（全链复用同一 `uiTargetId`）。
+ *
+ * 回归背景：`locateCurrentRow` 的 reset 分支旧判据是 `response.id === continuationOf?.id`。
+ * 解 A 后 `uiOriginalMessages` 末条是渲染端权威的 `uiTargetId` ⇒ AI SDK 令 `response.id = uiTargetId`。
+ * **首次 reset** 时 `uiTargetId` 恰 = `continuationOf.id`（渲染端末端就是 reset 前那条）故能命中；
+ * **第二次 reset** 时 `continuationOf` 已是**上一轮 reset 新行**，而 `uiTargetId` 仍是渲染端那条**旧 id**
+ * ⇒ 二者不等 ⇒ 旧判据落空 ⇒ 产出写回 `response.id`（其库内行**已被上一轮 `deleteBeforeStart` 删掉**）
+ * ⇒ 该轮 reset 行与上一轮 reset 行**同时可见** ⇒ **同一轮 UI 重复复发**（DB 型）。
+ *
+ * 修法：reset 轮的唯一可靠标志是 `resetStoredId`（由 `isCompaction` 决定，与 id 来源无关）。
+ * 本测试锁死「连续两次 reset 后，可见 assistant 行恒为 1 条」。
+ */
+const text = (v: string): UIMessage['parts'][number] => ({ type: 'text', text: v })
+
+const streamOf = (n: number, prefix: string): MockLanguageModelV4 =>
+  new MockLanguageModelV4({
+    doStream: async () => ({
+      stream: new ReadableStream({
+        start(controller) {
+          controller.enqueue({ type: 'stream-start', warnings: [] })
+          for (let i = 0; i < n; i++) {
+            controller.enqueue({ type: 'text-start', id: `${prefix}t${i}` })
+            controller.enqueue({ type: 'text-delta', id: `${prefix}t${i}`, delta: `内容${i}` })
+            controller.enqueue({ type: 'text-end', id: `${prefix}t${i}` })
+          }
+          controller.enqueue({
+            type: 'finish',
+            finishReason: 'stop',
+            usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 }
+          })
+          controller.close()
+        }
+      })
+    })
+  })
+
+describe('解 A 守门：连续两次 reset 不产生重复可见行', () => {
+  const sessionId = 's-double-reset'
+  let store: SessionStore
+  const open: SessionStore[] = []
+  const sent: { id?: string; parts: number }[] = []
+  let spy: ReturnType<typeof vi.spyOn>
+
+  beforeEach(async () => {
+    store = new SessionStore(join(workspace, `m-${Math.random().toString(36).slice(2)}.db`))
+    open.push(store)
+    store.createSession({ cwd: workspace, id: sessionId, title: 't' })
+    sent.length = 0
+    const sessionMod = await import('../../../../src/main/core/agent/session')
+    spy = vi.spyOn(sessionMod, 'runAgentSession')
+    spy.mockImplementation(async (_m, _o, _c, saveResponse, uiOriginalMessages) => {
+      const anchor = uiOriginalMessages?.at(-1)
+      sent.push({ id: anchor?.id, parts: anchor?.parts.length ?? -1 })
+      // 模拟 AI SDK：以 anchor 为基线克隆其 parts + 追加 2 个新 part。
+      const resp: UIMessage = {
+        id: anchor?.id ?? `gen-${sent.length}`,
+        role: 'assistant',
+        parts: [...(anchor?.parts ?? []), { type: 'text', text: 'δ1' }, { type: 'text', text: 'δ2' }]
+      }
+      saveResponse?.(resp)
+      return [resp]
+    })
+  })
+  afterEach(() => {
+    spy?.mockRestore()
+    for (const s of open.splice(0)) s.dispose()
+  })
+
+  it('新提问 → reset → reset：可见 assistant 行恒为 1 条，且模型输入可读到最新产出', async () => {
+    const { runStoredAgentSession } = await import('../../../../src/main/core/agent/persist')
+
+    // 轮1：新提问 ⇒ 渲染端新建 G。
+    const r1 = await runStoredAgentSession(store, {
+      sessionId,
+      cwd: workspace,
+      options: { model: streamOf(2, 'r1') } as never,
+      message: { id: 'u1', role: 'user', parts: [text('问')] } as UIMessage
+    })
+    const G = r1!.uiMessageId
+
+    // 轮2：第一次 reset。
+    const comp1: UIMessage = {
+      id: 'c1',
+      role: 'user',
+      metadata: { compaction: true },
+      parts: [text('问'), text('# H1')]
+    }
+    store.saveStart(sessionId, comp1)
+    const r2 = await runStoredAgentSession(store, {
+      sessionId,
+      cwd: workspace,
+      uiTargetId: G,
+      options: { model: streamOf(2, 'r2') } as never,
+      message: comp1,
+      previousStored: comp1
+    })
+    expect(r2!.stored.id).not.toBe(G) // 换新行落库
+
+    // 轮3：第二次 reset（★ 回归点：旧判据在此落空 ⇒ 写回已被删的 G ⇒ 两行同时可见）。
+    const comp2: UIMessage = {
+      id: 'c2',
+      role: 'user',
+      metadata: { compaction: true },
+      parts: [text('问'), text('# H2')]
+    }
+    store.saveStart(sessionId, comp2)
+    const r3 = await runStoredAgentSession(store, {
+      sessionId,
+      cwd: workspace,
+      uiTargetId: G,
+      options: { model: streamOf(2, 'r3') } as never,
+      message: comp2,
+      previousStored: comp2
+    })
+    // 每次都换新行（不复用渲染端旧 id、也不复用上一轮 reset 行）。
+    expect(r3!.stored.id).not.toBe(G)
+    expect(r3!.stored.id).not.toBe(r2!.stored.id)
+    // UI 身份仍恒为渲染端权威的 G（渲染端恒 replace）。
+    expect(r2!.uiMessageId).toBe(G)
+    expect(r3!.uiMessageId).toBe(G)
+
+    // ★ 可见 assistant 行**只有 1 条**（无重复）。
+    const assistants = store.loadVisibleMessages(sessionId).filter((m) => m.role === 'assistant')
+    expect(assistants.map((m) => m.id)).toEqual([r3!.stored.id])
+    // 模型输入能读到最新产出（落在 start 之后）。
+    const input = store.loadMessages(sessionId)
+    expect(input.at(-1)?.id).toBe(r3!.stored.id)
+  })
+})

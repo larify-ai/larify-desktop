@@ -73,6 +73,12 @@ export interface AgentInput {
   cwd?: string
   message: UIMessage
   modelConfig?: AgentModelConfig
+  /**
+   * 渲染端指定的「本轮输出应并入的 UI 消息 id」（= 渲染端此刻的末端 assistant id；新提问轮为
+   * `undefined`）。主进程整条链（含被调度任务的 nest 轮、reset 内部轮）复用它，使「本轮该并进
+   * 哪条 UI 消息」只有一个权威（渲染端），不再从数据库反推 ⇒ 消除 UI 重复（详见 `persist.ts`）。
+   */
+  uiTargetId?: string
 }
 
 export class Agent implements Disposable {
@@ -157,7 +163,13 @@ export class Agent implements Disposable {
 
   private async runScheduledTasks(
     firstWorker: AgentWorker,
-    request: { sessionId: string; cwd: string; message: UIMessage; modelConfig?: AgentModelConfig },
+    request: {
+      sessionId: string
+      cwd: string
+      message: UIMessage
+      modelConfig?: AgentModelConfig
+      uiTargetId?: string
+    },
     firstRuntime: AgentOptions,
     track: SessionTrack,
     sink: AgentSink,
@@ -165,6 +177,9 @@ export class Agent implements Disposable {
   ): Promise<void> {
     let worker = firstWorker
     let runtime = firstRuntime
+    // 渲染端指定的 UI 目标 id：本轮及后续被调度任务轮（nest）**全链复用同一个**。`send()` 传入，
+    // 新提问轮为 `undefined`；首轮跑完后由 worker 回报「本轮实际发给渲染层的 id」补齐（见下）。
+    let uiTargetId = request.uiTargetId
     // 每轮的消息：首轮是用户消息；被调度任务的轮次是该任务的 nest 判据；
     // ask_user 回答续写时是渲染层送来的 tool-output（assistant）。
     let message: UIMessage | undefined = request.message
@@ -246,13 +261,17 @@ export class Agent implements Disposable {
         baseProcessingMs,
         previousStored,
         continuationPrompt,
-        answeredToolCallId
+        answeredToolCallId,
+        uiTargetId
       })
       // 续写只对**本轮**生效：续写完成后就是普通轮次，锚点回到正常取值。
       previousStored = undefined
       continuationPrompt = undefined
       answeredToolCallId = undefined
       if (result.totalProcessingMs !== undefined) baseProcessingMs = result.totalProcessingMs
+      // 记住「本轮实际发给渲染层的 UI id」：新提问轮为 `undefined` 时，用它给后续被调度任务轮
+      // （nest）当 `uiTargetId` ⇒ 主链 + 子任务共用的仍是**同一条 UI 消息**，全链恒 replace。
+      if (result.uiMessageId !== undefined) uiTargetId = result.uiMessageId
       // 本轮停在「等待用户回答」(agent_ask_user 仍为等待态)：**暂停**，不结束流。
       // ask_user 是客户端工具，用户回答经 addToolOutput 再次 send() 续写；此处若结束，
       // 回答就会被当成新轮次，上下文与时长都被重置。

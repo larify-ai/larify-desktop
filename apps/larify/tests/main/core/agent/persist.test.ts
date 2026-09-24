@@ -85,12 +85,14 @@ describe('runStoredAgentSession', () => {
     expect(sessions.saveMessages).toHaveBeenNthCalledWith(1, 'session', [assistant])
     expect(sessions.saveMessages).toHaveBeenNthCalledWith(2, 'session', [finalAssistant])
     expect(mocks.save).toHaveBeenCalledOnce()
-    // 返回值＝落库身份 + 卡片目标行（**行 id 与内容基线同源**，见 `StoredRunResult`）。
+    // 返回值＝落库身份 + 卡片目标行（**行 id 与内容基线同源**，见 `StoredRunResult`）
+    // + 本轮实际发给渲染层的 UI id（`uiMessageId`；无 `uiTargetId` 时 = 末条产出 id）。
     // 主链轮：目标行即本轮产出自身（含其全部 parts）。
     expect(result).toEqual({
       stored: finalAssistant,
       reviewRowId: 'assistant',
-      reviewRow: finalAssistant
+      reviewRow: finalAssistant,
+      uiMessageId: 'assistant'
     })
   })
 
@@ -403,6 +405,217 @@ describe('runStoredAgentSession', () => {
     expect(mocks.run.mock.calls[0][0]).toEqual([user, mainAssistant])
     // 不生成标题。
     expect(mocks.title).not.toHaveBeenCalled()
+  })
+
+  it('★ 不变式：下传 uiTargetId 时，发给渲染层的 UI 底座末条 id 恒等于它（替换 DB 反推）', async () => {
+    // 解 A 的核心：`uiTargetId` 是 UI 身份的唯一权威。有它就不再从 DB 反推（`lastVisibleAssistant`
+    // 也不该被调用）——这正是「消除猜 ⇒ 消除副本」。
+    const storedRow: UIMessage = {
+      id: 'target-id',
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'carried' }]
+    }
+    mocks.run.mockResolvedValue([storedRow])
+    const sessions = {
+      hasSession: vi.fn(() => true),
+      loadMessages: vi.fn(() => [storedRow]),
+      findMessageById: vi.fn(() => storedRow),
+      lastAssistant: vi.fn(() => undefined),
+      lastVisibleAssistant: vi.fn(() => undefined),
+      renameSession: vi.fn(),
+      saveMessages: vi.fn()
+    }
+
+    const result = await runStoredAgentSession(sessions as never, {
+      sessionId: 'session',
+      cwd: 'cwd',
+      message: { id: 'answer', role: 'assistant', parts: [] } as UIMessage,
+      uiTargetId: 'target-id',
+      options: {} as never
+    })
+
+    expect(sessions.findMessageById).toHaveBeenCalledWith('session', 'target-id')
+    const uiOriginalMessages = mocks.run.mock.calls[0][4] as UIMessage[]
+    expect(uiOriginalMessages).toHaveLength(1)
+    expect(uiOriginalMessages.at(-1)?.role).toBe('assistant')
+    expect(uiOriginalMessages.at(-1)?.id).toBe('target-id')
+    // ★ 回报的 uiMessageId 就是它 —— 供本轮的 nest/reset 内部轮复用。
+    expect(result?.uiMessageId).toBe('target-id')
+    // 有权威 id 时**不再**从 DB 反推 UI 锚点。
+    expect(sessions.lastVisibleAssistant).not.toHaveBeenCalled()
+  })
+
+  it('★ 不变式：reset 续写 + uiTargetId ⇒ UI 底座末条是该 id（而非 DB 的 reset 前 assistant）', async () => {
+    // reset 续写：模型输入末尾是 compaction user；UI 底座 = 模型输入 + uiTarget ⇒ 末条 assistant 的
+    // id = uiTargetId ⇒ 渲染端 replaceLastMessage 必真、不新建（消除 reset 型重复）。
+    const compactionUser: UIMessage = {
+      id: 'compaction',
+      role: 'user',
+      metadata: { compaction: true },
+      parts: [{ type: 'text', text: '# Handoff\nContinue.' }]
+    }
+    const dbAnchor: UIMessage = {
+      id: 'db-anchor',
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'prior' }]
+    }
+    mocks.prepare.mockResolvedValue([compactionUser])
+    // AI SDK 返回「模型输入 + 合并后的 assistant」——末条 assistant 是产出。
+    mocks.run.mockResolvedValue([
+      compactionUser,
+      { id: 'ui-authority', role: 'assistant', parts: [{ type: 'text', text: 'continued' }] }
+    ])
+    const sessions = {
+      hasSession: vi.fn(() => true),
+      loadMessages: vi.fn(() => [compactionUser]),
+      findMessageById: vi.fn(() => undefined),
+      lastAssistant: vi.fn(() => dbAnchor),
+      // 兜底：库里也查不到渲染端那条（reset 会把旧行删掉）⇒ 退化为「库内末端 assistant」的 parts，
+      // **但 id 恒取 `uiTargetId`**（见 persist 的 `uiOriginalMessages` 构造）。
+      lastVisibleAssistant: vi.fn(() => undefined),
+      deleteBeforeStart: vi.fn(),
+      renameSession: vi.fn(),
+      saveMessages: vi.fn()
+    }
+
+    const result = await runStoredAgentSession(sessions as never, {
+      sessionId: 'session',
+      cwd: 'cwd',
+      message: user,
+      uiTargetId: 'ui-authority',
+      options: {} as never
+    })
+
+    const uiOriginalMessages = mocks.run.mock.calls[0][4] as UIMessage[]
+    // ★ UI 底座末条 id **恒等于渲染端权威的 `uiTargetId`**（而非 DB 的 reset 前 assistant `dbAnchor`）。
+    expect(uiOriginalMessages.at(-1)?.id).toBe('ui-authority')
+    expect(result?.uiMessageId).toBe('ui-authority')
+  })
+
+  it('★ 不变式：嵌套轮 + uiTargetId ⇒ 不再调 lastVisibleAssistant 反推（有权威 id 时纯浪费）', async () => {
+    // 简化守门：`uiTargetId` 是唯一权威 ⇒ 有它时**不该**再查 `lastVisibleAssistant`（DB 反推）。
+    // 该不变式此前只覆盖**非嵌套轮**；本用例补上 `nested: true` 这一真正会走反推的分支。
+    const uiTarget: UIMessage = {
+      id: 'G',
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'authority' }]
+    }
+    const merged: UIMessage = {
+      id: 'G',
+      role: 'assistant',
+      parts: [...uiTarget.parts, { type: 'text', text: 'delta' }]
+    }
+    mocks.run.mockImplementation(async (_m, _o, _c, onMessage) => {
+      onMessage(merged)
+      return [merged]
+    })
+    const sessions = {
+      hasSession: vi.fn(() => true),
+      loadMessages: vi.fn(() => []),
+      findMessageById: vi.fn(() => uiTarget),
+      lastAssistant: vi.fn(() => uiTarget),
+      lastVisibleAssistant: vi.fn(() => uiTarget),
+      renameSession: vi.fn(),
+      saveMessages: vi.fn()
+    }
+
+    await runStoredAgentSession(sessions as never, {
+      sessionId: 'session',
+      cwd: 'cwd',
+      message: { id: 'nest', role: 'user', parts: [{ type: 'text', text: 'nest prompt' }] },
+      nested: true,
+      uiTargetId: 'G',
+      options: {} as never
+    })
+
+    // ★ 有权威 id ⇒ 不再从 DB 反推 UI 锚点（否则每次嵌套轮都白查一次）。
+    expect(sessions.lastVisibleAssistant).not.toHaveBeenCalled()
+    // 且 UI 底座末条 id 恒 = uiTargetId。
+    expect((mocks.run.mock.calls[0][4] as UIMessage[]).at(-1)?.id).toBe('G')
+  })
+
+  it('★ 不变式：新建嵌套行 + uiTargetId ⇒ 切片基准 = AI SDK 流式基线（uiTarget），而非 DB lastVisibleAssistant', async () => {
+    // Red 复现：解 A 给出 uiTargetId 后，AI SDK 的流式基线（uiOriginalMessages.at(-1) = uiTarget）
+    // 与落库切片基准（曾用 DB 的 nestedAnchor = lastVisibleAssistant）**不同源**。多轮嵌套链里二者
+    // 长度不同（uiTarget = 主链行，nestedAnchor = 上一嵌套行）⇒ 按 nestedAnchor 切会**丢本轮输出**
+    // （实测：应存 5 parts，实存 2）。此处令二者长度不同（uiTarget 2 parts / DB 5 parts），断言按前者切。
+    const uiTarget: UIMessage = {
+      id: 'G',
+      role: 'assistant',
+      parts: [
+        { type: 'text', text: 'a' },
+        { type: 'text', text: 'b' }
+      ]
+    }
+    const dbEnd: UIMessage = {
+      id: 'G-nested-u1',
+      role: 'assistant',
+      metadata: { nested: true },
+      parts: Array.from({ length: 5 }, (_, i) => ({ type: 'text', text: `n${i}` }))
+    }
+    // 模型输出 = AI SDK 以 uiTarget(2) 为基线 + 本轮增量 5 ⇒ 共 7 parts。
+    const merged: UIMessage = {
+      id: 'G',
+      role: 'assistant',
+      parts: Array.from({ length: 7 }, (_, i) => ({ type: 'text', text: `x${i}` }))
+    }
+    mocks.run.mockImplementation(async (_m, _o, _c, onMessage) => {
+      onMessage(merged)
+      return [merged]
+    })
+    const sessions = {
+      hasSession: vi.fn(() => true),
+      loadMessages: vi.fn(() => []),
+      findMessageById: vi.fn(() => uiTarget), // uiTarget 2 parts
+      lastAssistant: vi.fn(() => uiTarget),
+      lastVisibleAssistant: vi.fn(() => dbEnd), // DB 末端 5 parts（≠ uiTarget）
+      renameSession: vi.fn(),
+      saveMessages: vi.fn()
+    }
+
+    await runStoredAgentSession(sessions as never, {
+      sessionId: 'session',
+      cwd: 'cwd',
+      message: { id: 'nest', role: 'user', parts: [{ type: 'text', text: 'nest prompt' }] },
+      nested: true,
+      uiTargetId: 'G',
+      options: {} as never
+    })
+
+    const stored = sessions.saveMessages.mock.calls.at(-1)?.[1]?.[0] as UIMessage
+    // 正确增量 = 7 − 2（按流式基线 uiTarget 切）= 5；若按 DB lastVisibleAssistant(5) 切则得 2（丢 3）。
+    expect(stored.parts).toHaveLength(5)
+    expect(stored.parts).toEqual(Array.from({ length: 5 }, (_, i) => ({ type: 'text', text: `x${2 + i}` })))
+  })
+
+  it('缺省（无 uiTargetId）⇒ 逐字节回退现行为（向后兼容）', async () => {
+    // 不传 `uiTargetId`（首轮无末端 / 旧渲染端）⇒ 完全走原路径：嵌套轮用 `lastVisibleAssistant`。
+    const anchor: UIMessage = {
+      id: 'main',
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'main' }]
+    }
+    mocks.run.mockResolvedValue([anchor])
+    const sessions = {
+      hasSession: vi.fn(() => true),
+      loadMessages: vi.fn(() => [anchor]),
+      lastAssistant: vi.fn(() => anchor),
+      lastVisibleAssistant: vi.fn(() => anchor),
+      renameSession: vi.fn(),
+      saveMessages: vi.fn()
+    }
+
+    await runStoredAgentSession(sessions as never, {
+      sessionId: 'session',
+      cwd: 'cwd',
+      message: { id: 'nest', role: 'user', parts: [{ type: 'text', text: 'nest' }] },
+      nested: true,
+      options: {} as never
+    })
+
+    // 无 uiTargetId ⇒ 仍走 lastVisibleAssistant 反推（现行为原样保留）。
+    expect(sessions.lastVisibleAssistant).toHaveBeenCalledWith('session')
+    expect(mocks.run.mock.calls[0][4]).toEqual([anchor])
   })
 
   it('uses the main-chain assistant as the UI anchor for a nested reset continuation', async () => {

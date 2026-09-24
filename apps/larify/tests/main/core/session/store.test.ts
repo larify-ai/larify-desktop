@@ -190,6 +190,25 @@ describe('SessionStore nested filtering', () => {
     expect(store.loadVisibleMessages('session').map((m) => m.id)).toEqual(['u1', 'after'])
   })
 
+  it('finds a message by id even when it sits before the start cursor (UI identity ≠ start cursor)', () => {
+    // ★ 回归守门：`findMessageById` 用于把**渲染端下传的 `uiTargetId`**（= 渲染端持有的那条 UI 消息）
+    // 换成库里那行的 parts。**reset 会把 `start` 推过该 UI 消息**（它必然落在 `start` 之前）⇒ 若该方法
+    // 带 `position >= start` 过滤就会查不到 ⇒ 退化到 `previousStored`（id/role 都不对）⇒ 流 id ≠ 渲染端
+    // 末端 ⇒ **reset 型重复复发**（实测：`uiTargetId=G` 却发出 `c1`）。
+    // UI 身份（渲染端持有的消息）与模型上下文的 `start` 游标**无关** ⇒ 该方法**不能**过滤 start。
+    const store = createStore()
+    store.createSession({ id: 'session', title: 't', cwd: 'cwd' })
+    store.saveMessages('session', [user('u1', 'q'), { id: 'G', role: 'assistant', parts: [{ type: 'text', text: 'reply' }] } as UIMessage])
+    // 推 start 到 G 之后（复刻 reset）。
+    store.saveStart('session', user('cursor', 'reset'))
+    expect(store.startPosition('session')).toBeGreaterThan(0)
+
+    // G 落在 start 之前，但仍必须能被按 id 查到。
+    expect(store.findMessageById('session', 'G')?.id).toBe('G')
+    // 不存在的 id 返回 undefined（调用方据此退回）。
+    expect(store.findMessageById('session', 'nope')).toBeUndefined()
+  })
+
   it('excludes recursive child messages from the navigation index', () => {
     const store = createStore()
     store.createSession({ id: 'session', title: 't', cwd: 'cwd' })

@@ -141,6 +141,33 @@ export class SessionStore implements Disposable {
   }
 
   /**
+   * 按 id 精确查一条消息（**不过滤 nested，也**不过滤 `position >= start`**）。用于把
+   * **渲染端下传的 `uiTargetId`** 换成「库里那行的 parts」——UI 身份用渲染端给的 id，parts 仍取
+   * 原行以保时长累加基数与 AI SDK 合并基线（见 `persist.runStoredAgentSession`）。
+   *
+   * ⚠️ **绝不能带 `position >= start` 过滤**：`uiTargetId` 是「渲染端此刻持有的那条 UI 消息的 id」，
+   * 它与「模型上下文的 `start` 游标」**无关**。**reset 恰恰会把 `start` 推过该 UI 消息**（并
+   * `deleteBeforeStart` 删掉被取代的旧行）⇒ 该行必然落在 `start` 之前。若带过滤就会查不到 ⇒
+   * 退化到 `previousStored`（其 id/role 都不对）⇒ 流 id ≠ 渲染端末端 ⇒ **reset 型重复复发**
+   * （实测：`uiTargetId=G` 却发出 `c1`）。
+   *
+   * 查不到（首轮 / id 尚未落库）时返回 `undefined`，调用方据退回。
+   */
+  findMessageById(id: string, messageId: string): UIMessage | undefined {
+    const row = this.database
+      .prepare(
+        `SELECT messages.value FROM messages
+         JOIN sessions ON sessions.id = messages.session_id
+         WHERE messages.session_id = ?
+           AND messages.id = ?
+         ORDER BY messages.position DESC
+         LIMIT 1`
+      )
+      .get(id, messageId)
+    return row ? (JSON.parse(row.value as string) as UIMessage) : undefined
+  }
+
+  /**
    * 会话的最后一条消息（**不过滤 nested**）。用于判定「是否停在等待用户回答」：
    * `agent_ask_user` 可能出现在**子任务轮**（nested）里，而 lastAssistant 会过滤 nested，
    * 用它判定会漏掉子任务轮的 ask_user，导致 ask_user 后编排层不暂停、继续跑下一轮。
@@ -344,7 +371,9 @@ export class SessionStore implements Disposable {
           `deleteBeforeStart 只删压缩边界之前的行，但 id=${id} 的 position=${row.position} >= start=${row.start}`
         )
       }
-      this.database.prepare('DELETE FROM messages WHERE session_id = ? AND id = ?').run(sessionId, id)
+      this.database
+        .prepare('DELETE FROM messages WHERE session_id = ? AND id = ?')
+        .run(sessionId, id)
       this.database
         .prepare('UPDATE sessions SET updated_at = ? WHERE id = ?')
         .run(Date.now(), sessionId)

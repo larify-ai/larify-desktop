@@ -34,12 +34,22 @@ export interface AgentWorkerInput {
   continuationPrompt?: UIMessage
   /** 本轮刚被回答的 ask_user toolCallId：persist 据此从快照中**只抽回答 part**（避免越权读主链）。 */
   answeredToolCallId?: string
+  /**
+   * 渲染端指定的「本轮输出应并入的 UI 消息 id」（见 `persist.AgentRequest.uiTargetId`）。
+   * 本轮及其派生的 reset 内部轮（`while (handoff)`）**复用同一个**，使同一条 UI 消息全链恒 replace。
+   */
+  uiTargetId?: string
 }
 
 /** 一轮的产出：被调度的任务路径（一轮至多一个），以及该轮（含传入基数）的累计处理时长。 */
 export interface AgentRunResult {
   scheduled?: string
   totalProcessingMs?: number
+  /**
+   * 本轮**实际发给渲染层的 UI 消息 id**（见 `StoredRunResult.uiMessageId`）。编排层把它用作
+   * 后续**被调度任务轮**（nest）的 `uiTargetId` ⇒ 同一轮派生的所有内部轮全链复用同一 UI 身份。
+   */
+  uiMessageId?: string
 }
 
 export interface SessionTrack {
@@ -75,6 +85,8 @@ export class AgentWorker {
     // （模型在同一响应里并行调了多次），只取首个、忽略其余。
     let scheduled: string | undefined
     let totalProcessingMs: number | undefined
+    // 本轮（含 reset 内部轮）实际发给渲染层的 UI 消息 id：回报给编排层，供其派生的 nest 轮复用。
+    let uiMessageId: string | undefined
     try {
       // ask_user 回答/reset_context 都是同一任务的续写：追踪器由 Agent 按会话持有，
       // 跨 worker 复用（track?.review/track?.tracker），不会因为新 worker 而丢文件。
@@ -151,7 +163,8 @@ export class AgentWorker {
       //   落库（`locateCurrentRow` 的 reset 分支），从而落在 `sessions.start` 之后、可被续写。
       const runOnce = (
         message: UIMessage | undefined,
-        previousStored?: UIMessage
+        previousStored?: UIMessage,
+        uiTargetId?: string
       ): Promise<StoredRunResult | undefined> =>
         runStoredAgentSession(this.sessions, {
           sessionId: input.sessionId,
@@ -163,6 +176,7 @@ export class AgentWorker {
           previousStored,
           continuationPrompt: input.continuationPrompt,
           answeredToolCallId: input.answeredToolCallId,
+          uiTargetId,
           options: {
             ...input.runtime,
             toolsContext,
@@ -215,13 +229,19 @@ export class AgentWorker {
         const total = (value?.stored.metadata as Record<string, unknown> | undefined)
           ?.totalProcessingMs
         if (typeof total === 'number' && Number.isFinite(total)) totalProcessingMs = total
+        if (value?.uiMessageId !== undefined) uiMessageId = value.uiMessageId
       }
       // 首条输入可能携带「续写身份」（ask_user 回答要写回原行）。
-      let response = await runOnce(input.message, input.previousStored)
+      // UI 目标 id：优先用渲染端下传的 `input.uiTargetId`；**新提问轮**（无下传）在首轮跑完后
+      // 用回报的 `uiMessageId`（= AI SDK 自生成的新 id）**作为后续内部轮的 UI 目标**——否则
+      // 本轮派生的 reset 内部轮会退回「无 uiTargetId ⇒ 从 DB 猜」，又可能 push 出副本。
+      let uiTargetId = input.uiTargetId
+      let response = await runOnce(input.message, input.previousStored, uiTargetId)
       settle(response)
+      uiTargetId = response?.uiMessageId ?? uiTargetId
       // reset_context 的进程内续写：新的一轮，故不传续写身份。
       while (handoff) {
-        if (controller.signal.aborted) return { scheduled, totalProcessingMs }
+        if (controller.signal.aborted) return { scheduled, totalProcessingMs, uiMessageId }
         // reset 续写轮的输入 = **本轮的「用户输入」+ 交接摘要**（parts=2），而非复刻任意前序内容。
         //
         // `agent_reset_context.handoff` 按工具契约就是「交接摘要」（`Markdown handoff document
@@ -260,8 +280,10 @@ export class AgentWorker {
         // `previousStored` **只在主链轮**传：reset 的产出会换一个新 id 落库（`locateCurrentRow`
         // 的 reset 分支），从而落在 `start` 之后、可被下一轮续写。若在 nested 轮传，产出会原地
         // 覆盖 handoff 判据行（而 nested 轮根本不移动 `start`，无此需求）。
-        response = await runOnce(message, input.nested ? undefined : message)
+        // UI 目标 id **全链复用**（含本 reset 内部轮）：同一条 UI 消息的连续产出必须恒 replace。
+        response = await runOnce(message, input.nested ? undefined : message, uiTargetId)
         settle(response)
+        uiTargetId = response?.uiMessageId ?? uiTargetId
       }
       // 照常结束流：`ask_user` 是客户端工具，AI SDK 侧本轮到此为止；用户回答会经
       // `addToolOutput` 再次 `agent:send`。上下文（nested / 已累计时长）由 agent.ts 在
@@ -273,7 +295,7 @@ export class AgentWorker {
       // 故：正常结束只置 closed（不再写入），由编排层 `runScheduledTasks` 在整条链结束时统一 end。
       // abort 时跳过：cancel() 已自行 end 过，此处再置 closed 会掩盖后续状态（保持与原语义一致）。
       if (!controller.signal.aborted) this.finish(() => {})
-      return { scheduled, totalProcessingMs }
+      return { scheduled, totalProcessingMs, uiMessageId }
     } catch (error) {
       // abort 是用户主动停止（cancel()），预期路径，不按错误留痕。
       // 主进程留痕：agent 运行级错误（非流内部，如工具执行/持久化失败）。
@@ -281,7 +303,7 @@ export class AgentWorker {
         console.error('[agent] run failed:', error)
         this.finish(() => this.sink.error(error))
       }
-      return { scheduled, totalProcessingMs }
+      return { scheduled, totalProcessingMs, uiMessageId }
     } finally {
       if (this.controller === controller) this.controller = undefined
     }

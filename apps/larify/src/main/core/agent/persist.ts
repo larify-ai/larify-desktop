@@ -82,6 +82,20 @@ export interface AgentRequest {
    * 越权读整条主链（实测 `e2212cc1` ≈14.2 万 tokens）。未传时退回原行为（用整个 `message`）。
    */
   answeredToolCallId?: string
+  /**
+   * **渲染端指定的「本轮输出应并入的 UI 消息 id」**（= 渲染端此刻的末端 assistant id）。
+   *
+   * 这是「UI 身份」的**唯一权威**：主进程据此设 `uiOriginalMessages`，使 AI SDK 的流 id 恒等于它，
+   * 渲染端 `replaceLastMessage`（`流id === 自己的 lastMessage.id`）**必然成立** ⇒ 永远原地替换、
+   * **物理上不可能新增副本**（消除「主进程猜渲染端末端 id」这一根因）。
+   *
+   * - 新提问轮：末条是 user ⇒ 渲染端给 `undefined` ⇒ 新建（AI SDK 自生成新 id）。
+   * - ask_user 续写轮：`previousStored`（UI 上合并进的那条）的 id；因嵌套行在 UI 上合并进主链，
+   *   该 id = **主链 id**，故主链续写与嵌套续写拿到的是同一个 id ⇒ 一致的 replace。
+   * - **不传**（首轮无末端 / 旧渲染端）：完全回退现行为（`continuationOf`/`nestedAnchor` 反推）⇒
+   *   向后兼容、可灰度。
+   */
+  uiTargetId?: string
 }
 
 /**
@@ -144,18 +158,25 @@ export function withAnsweredTool(
  * 一轮落库的产出：
  * - `stored` ＝ 本轮产出的落库身份（供上层读 `totalProcessingMs` 等）；
  * - `reviewRowId` ＝ 变更卡片该挂哪一行（见 `locateCurrentRow`，恒有值）；
- * - `reviewRow` ＝ 该行**当前的落库内容基线**（卡片以它为底再追加/替换，见 `worker.saveReview`）。
+ * - `reviewRow` ＝ 该行**当前的落库内容基线**（卡片以它为底再追加/替换，见 `worker.saveReview`）；
+ * - `uiMessageId` ＝ **本轮实际发给渲染层的 UI 消息 id**（= AI SDK 流里那条消息的 id）。
  *
  * ⚠️ `reviewRow` 与 `stored` **不可混用**：嵌套轮二者是**两行**——`stored` 是嵌套行（带 `nested`
  * 标记、parts 为含嵌套私货的完整快照），`reviewRow` 是**主链行**（无 `nested`、只含主链 parts）。
  * 若用 `stored` 的内容配 `reviewRowId` 的 id 落库，会把「`nested` 标记 + 嵌套私货」写进主链行 ⇒
  * 主链助手行被 `loadMessages`（`nested IS NOT 1`）过滤而**永久消失**（实测回归：主链上下文由
  * `['u','main-anchor']` 变 `['u']`）。故两者必须成对、同源给出。
+ *
+ * ⚠️ `uiMessageId` 与 `stored.id` **也可能不同**（reset 续写：落库换 `resetStoredId`、UI 仍是
+ * `continuationOf.id`）——前者是「发给渲染层的身份」，后者是「写进库的身份」，两者解耦。
+ * 用途：**新提问轮**由渲染端给 `undefined`，但该轮派生的 nest/reset 内部轮必须复用「本轮实际
+ * 发给渲染层的 id」（= `uiMessageId`），否则那些内部轮退回「无 uiTargetId ⇒ 从 DB 猜」。
  */
 export interface StoredRunResult {
   stored: UIMessage
   reviewRowId: string
   reviewRow: UIMessage
+  uiMessageId: string
 }
 
 /**
@@ -285,22 +306,62 @@ export async function runStoredAgentSession(
   // 否则渲染端 replaceLastMessage 失败 ⇒ pushMessage 新建（并把锚点 parts 复制为基线）⇒ **UI 重复**。
   // 取值：reset 续写用 reset 前那条（时长跨段连续）；嵌套轮用渲染端**此刻的末端**。
   const continuationAnchor = request.nested ? request.previousStored : undefined
-  // UI 锚点 = 渲染端此刻的末端 assistant（`lastVisibleAssistant`，**不过滤 nested**）；续写时用
-  // 渲染端下传的落库身份 `previousStored`（它与渲染端末端一致、且是「该写回的那行」）。
-  // ⚠️ 续写到嵌套行时，`continuationAnchor` 是**库内承载行**（其 ask_user part 仍 `input-available`），
-  // 而用户回答只在渲染层快照 `message` 里（已 `output-available`）。必须先把「刚被回答的那个 part」
-  // 按 `toolCallId` 并进基线，否则 AI SDK 以库内 parts 为基、只追加增量 ⇒ 回答被丢弃、该 part 恒停
-  // `input-available` ⇒ 下一轮重问（会话 `da3ad8bb#6921` 实测）。
-  const nestedAnchor =
-    (continuationAnchor
-      ? withAnsweredTool(continuationAnchor, message, request.answeredToolCallId)
-      : undefined) ??
-    (request.nested && message ? sessions.lastVisibleAssistant(sessionId) : undefined)
-  const uiOriginalMessages = continuationOf
-    ? [...messages, continuationOf]
-    : nestedAnchor
-      ? [nestedAnchor]
-      : undefined
+  // ★ UI 身份的唯一权威：渲染端下传的 `uiTargetId`（= 渲染端此刻的末端 assistant id）。
+  // 有它 ⇒ **不再**从 DB 反推（反推必错：reset 换库 id、nest 用主链 id ⇒ 猜错就 push 出副本）。
+  // **id 恒取 `uiTargetId`**；**parts 取库内最佳代理**以保**时长累加基数**与 **AI SDK 合并基线**
+  // （回答 part 的终态）：依次尝试 `findMessageById(uiTargetId)`（库里该 id 的行）→ `previousStored`
+  // （渲染端快照）→ `lastVisibleAssistant`（reset 已用 `deleteBeforeStart` 删掉该行时的库内末端）。
+  // 最后才退化成空 parts 占位（仅定 id）。**不可省 `lastVisibleAssistant` 那一档**——见其下注释。
+  //
+  // ⚠️ 续写到嵌套行时，库里那行的 ask_user part 仍 `input-available`，而用户回答只在渲染层快照
+  // `message` 里（已 `output-available`）。必须先把「刚被回答的那个 part」按 `toolCallId` 并进基线，
+  // 否则 AI SDK 以库内 parts 为基、只追加增量 ⇒ 回答被丢弃、该 part 恒停 `input-available`
+  // ⇒ 下一轮重问（会话 `da3ad8bb#6921` 实测）。故统一用 `withAnsweredTool` 补一下。
+  const uiTargetFromRenderer =
+    request.uiTargetId === undefined
+      ? undefined
+      : withAnsweredTool(
+          sessions.findMessageById(sessionId, request.uiTargetId) ??
+            request.previousStored ??
+            // ⚠️ **兜底不可省**：`findMessageById(uiTargetId)` 可能查不到——**reset 会用 `deleteBeforeStart`
+            // 删掉被取代的旧行**，而渲染端仍持有那个 id（reset 轮是 `replaceLastMessage` 原地替换，id 不变）。
+            // 此后本轮派生的 **nest 轮**复用同一 `uiTargetId` ⇒ 库里已无该行、又无 `previousStored`
+            // ⇒ 若只退化成「空 parts 占位」，AI SDK 会以**空基线**克隆消息（`createStreamingUIMessageState`）
+            // ⇒ 流出的 `state.message` 只含**本轮新增**、且 id 仍是渲染端那条 ⇒ 渲染端 `replaceLastMessage`
+            // **原地替换**、把渲染端那条的既有内容**清空**（live 态内容丢失；实测：底座 0 parts、流出仅本轮）。
+            // 故退化为「**库里此刻末端 assistant 的 parts**」（`lastVisibleAssistant`，不过滤 nested）——
+            // 它正是渲染端此刻看到的合并内容（内容正确），仅 id 被换成渲染端权威的 `uiTargetId`（身份正确）。
+            sessions.lastVisibleAssistant(sessionId),
+          message,
+          request.answeredToolCallId
+        )
+  // 有 `uiTargetId` ⇒ 一条权威：reset 续写挂到「模型输入 + uiTarget」（末尾 assistant ⇒ AI SDK 复用
+  // 其 id）；其余轮直接以 `uiTarget` 为 UI 底座。缺省（无 `uiTargetId`）⇒ 完全回退现行为：
+  // reset 续写用 reset 前那条（时长跨段连续）；嵌套轮用「渲染层此刻的末端 assistant」反推
+  // （`lastVisibleAssistant`，**不过滤 nested**）。
+  //
+  // ⚠️ 回退路径（`withAnsweredTool` + `lastVisibleAssistant` 查询）**只在无 `uiTargetId` 时才求值**
+  // ——有权威 id 时它是纯浪费（且 `lastVisibleAssistant` 的反推结果**不会被用到**）。
+  const uiOriginalMessages = ((): UIMessage[] | undefined => {
+    if (request.uiTargetId !== undefined) {
+      // **id 恒取渲染端权威的 `uiTargetId`**（决定渲染端 replace/push），**parts 取库内最佳代理**
+      // （决定 AI SDK 的合并基线 = 渲染端看到的内容）。二者来源可以不同：
+      // - 命中 `findMessageById` ⇒ id/parts 都正确；
+      // - 命中 `previousStored`（渲染端快照）⇒ id 换成 `uiTargetId`、parts 用快照；
+      // - 命中 `lastVisibleAssistant`（reset 删行的兜底）⇒ id 换成 `uiTargetId`、parts 用库内末端；
+      // - 全空（真无底座）⇒ 空 parts 占位（仅定 id）。
+      const uiTarget: UIMessage = uiTargetFromRenderer
+        ? { ...uiTargetFromRenderer, id: request.uiTargetId }
+        : { id: request.uiTargetId, role: 'assistant', parts: [] }
+      return continuationOf ? [...messages, uiTarget] : [uiTarget]
+    }
+    if (continuationOf) return [...messages, continuationOf]
+    if (!request.nested || !message) return undefined
+    const nestedAnchor =
+      withAnsweredTool(continuationAnchor, message, request.answeredToolCallId) ??
+      sessions.lastVisibleAssistant(sessionId)
+    return nestedAnchor ? [nestedAnchor] : undefined
+  })()
   // 落库 id 的基**刻意取主链行**（`lastAssistant('after')` 过滤 nested ⇒ 恒主链行）：若用「上一轮
   // 嵌套行」，每轮会再挂一个后缀 ⇒ id 无限累积（实测会话 31b06fa6：60 → 588 字符）。
   const idAnchor = request.nested ? sessions.lastAssistant(sessionId, 'after') : undefined
@@ -355,7 +416,17 @@ export async function runStoredAgentSession(
       // 不切会怎样：新行 = 基线全部 parts + 本轮增量 ⇒ 每轮复制一份历史（实测真实会话
       // `825617b9` 子任务链 12 轮行体积 38K→333K tokens 单调膨胀）。`loadMessages` 只读主链行，
       // 故只占磁盘、不进模型输入，但长任务会持续膨胀并最终逼近守门阈值。
-      const stored = storedRow(response, { id, nestedRow: true, sliceFrom: nestedAnchor })
+      //
+      // ⚠️ **切片基准必须 = AI SDK 的流式基线**（= `uiOriginalMessages.at(-1)`），否则切片长度取错：
+      // AI SDK 以 `uiOriginalMessages` 末条为基线克隆其全部 parts（见 `session.ts` 的
+      // `createUIMessageStream({ originalMessages })`）。有 `uiTargetId` 时基线是**渲染端权威**的
+      // `uiTarget`，而非 DB 反推的 `nestedAnchor`——多轮嵌套链里二者不同（`nestedAnchor` = 上一嵌套行,
+      // `uiTarget` = 主链行）⇒ 按 `nestedAnchor` 切会**丢掉本轮输出**（实测：应存 5 parts，实存 2）。
+      const stored = storedRow(response, {
+        id,
+        nestedRow: true,
+        sliceFrom: uiOriginalMessages?.at(-1)
+      })
       // 卡片回流到主链行；基线取主链行本身（取不到才退回嵌套行，保证 `reviewRowId` 与
       // `reviewRow` 始终同源）。
       return {
@@ -366,24 +437,40 @@ export async function runStoredAgentSession(
         reviewRow: idAnchor ?? stored
       }
     }
-    if (resetStoredId && response.id === continuationOf?.id) {
+    if (resetStoredId) {
       const stored = { ...response, id: resetStoredId }
       // reset 续写**换新 id**（使其落在 `sessions.start` 之后、可被 `loadMessages` 读到），于是本轮
       // 产出会**新建一行**，而 reset 前那条旧行（`continuationOf`）留在库里。旧行已被新行**完整包含**
       // （AI SDK 以它为基线克隆全部 parts + 追加增量；实测旧行每个 part 都在新行里）且落在 `start`
       // 之前 ⇒ 模型输入不需要它；但 `loadVisibleMessages` 会把两条**同时渲染** ⇒ 同一轮回复里的
       // progress 标题各出现多遍（真实会话 `7a2df69b`）。故：**用新版本取代旧行**。
+      //
+      // ⚠️ **判据不得依赖 `response.id === continuationOf?.id`**（旧写法）：解 A 后 `uiOriginalMessages`
+      // 末条是渲染端权威的 `uiTargetId`（见上），AI SDK 令 `response.id = uiTargetId`。**首次 reset 时
+      // `uiTargetId` 恰 = `continuationOf.id`**（渲染端末端就是 reset 前那条 assistant）故能命中；
+      // 但**第二次 reset 时**（同一会话内 reset 两次）`continuationOf` 是**上一轮 reset 新行**
+      // （`resetStoredId`），而 `uiTargetId` 仍是渲染端那条 **旧 id** ⇒ 二者不等 ⇒ 旧判据落空
+      // ⇒ 产出被写回 `response.id`（= 渲染端旧 id，其库内行**已被上一轮 `deleteBeforeStart` 删掉**）
+      // ⇒ **新行与上一轮 reset 行同时可见 ⇒ 同一轮 UI 重复复发**（实测：可见 assistant 行 2 条）。
+      // reset 轮的唯一可靠标志是 `resetStoredId`（由 `isCompaction` 决定）——与 id 来源无关。
+      // `continuationOf` 可能为空（首次 reset 前无 assistant）⇒ 此时无行可取代。
       return {
         stored,
         id: resetStoredId,
         nestedRow: false,
         reviewRowId: resetStoredId,
         reviewRow: stored,
-        supersededId: continuationOf.id
+        ...(continuationOf ? { supersededId: continuationOf.id } : {})
       }
     }
     const stored = { ...response, id: response.id }
-    return { stored, id: response.id, nestedRow: false, reviewRowId: response.id, reviewRow: stored }
+    return {
+      stored,
+      id: response.id,
+      nestedRow: false,
+      reviewRowId: response.id,
+      reviewRow: stored
+    }
   }
   /**
    * **落库原语二：由「本轮模型输出 + 定位到的行」算出该行要落库的内容**——换 id、打 nested
@@ -428,7 +515,16 @@ export async function runStoredAgentSession(
   const finalResponse = finalMessages.at(-1)
   if (finalResponse?.role === 'assistant') saveResponse(finalResponse)
   await titleTask
-  return latestStored === undefined || reviewRow === undefined
-    ? undefined
-    : { stored: latestStored, reviewRowId, reviewRow }
+  if (latestStored === undefined || reviewRow === undefined) return undefined
+  // 本轮**实际发给渲染层的 UI id**：
+  // - 有 `uiTargetId`（渲染端指定 / 本链内部轮复用）⇒ 就是它；
+  // - 否则（新提问轮）⇒ AI SDK 自生成的新 id，即 UI 底座的 id（无底座时取末条产出 id）。
+  // 供编排层在该轮派生的 nest/reset 内部轮**复用**（它们是同一条 UI 消息的连续产出）。
+  const uiMessageId =
+    request.uiTargetId ??
+    (uiOriginalMessages?.at(-1)?.role === 'assistant'
+      ? (uiOriginalMessages.at(-1) as UIMessage).id
+      : finalResponse?.id) ??
+    latestStored.id
+  return { stored: latestStored, reviewRowId, reviewRow, uiMessageId }
 }

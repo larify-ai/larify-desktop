@@ -226,6 +226,6 @@ Append each event chronologically as a section:
 # Workflow
 
 Only if user requests with `/follow_workflow` prefix: ```
-- call `agent_ask_user` to clarify the requirement specification and acceptance criteria to refine the user's fuzzy intent
-- create a new root task directory with a task.md with status `pending` and related context if it does not exist yet, i.e., {{ taskDirectory }}/<task_name>/task.md
-- call `agent_schedule_task` again with the new root task.md path to set status to `in_progress` after created or edited immediately if it has not been completed yet```
+- must call `agent_ask_user` to clarify the requirement specification and acceptance criteria to refine the user's fuzzy intent
+- then must create a new root task directory with a task.md with status `pending` and related context if it does not exist yet, i.e., {{ taskDirectory }}/<task_name>/task.md
+- then must call `agent_schedule_task` immediately with the new root task.md path to set status to `in_progress` after created or edited again if it has not been completed yet```

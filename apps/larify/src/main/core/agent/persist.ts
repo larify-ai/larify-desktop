@@ -362,6 +362,29 @@ export async function runStoredAgentSession(
       sessions.lastVisibleAssistant(sessionId)
     return nestedAnchor ? [nestedAnchor] : undefined
   })()
+  // ★ **续写嵌套行时的「重建」配方**（见 `storedRow` 的 `prepend`）：`parts = 承载行内容 ++ 流后新增`。
+  // 仅当**流式基线不是承载行本身**时才需要：有 `uiTargetId` 时基线是渲染端权威 id（嵌套续写 =
+  // **主链行**，因嵌套行在 UI 上合并进主链）⇒ 原样落 `response.parts` 会把主链前缀复制进来；无
+  // `uiTargetId` 时基线 = `nestedAnchor`（= 承载行）⇒ `response.parts` 本就是「承载行 + 增量」，
+  // 原样落库即正确（重建反而会把流内对承载行的原地改写切掉——见 `nested-continuation-keeps-ask-user`）。
+  //
+  // - `parts`：承载行**流前**的内容快照。承载行的回答 part（`output-available`）此刻只存在于渲染层
+  //   快照 `message` 里（库内仍是 `input-available`），故用 `withAnsweredTool` 按 `toolCallId` 并入。
+  // - `baselineLen`：`uiOriginalMessages` 末条（流式基线）的 parts 长度，**流前**采样。AI SDK 以该
+  //   消息为流式状态起点（本版本是 `structuredClone`，故基线对象未被改动；但流前采样对任何实现都成立）。
+  // 承载行是否是**嵌套行**（否则是主链续写）：决定路径 1 的 `nested` 标记与是否需重建。
+  const carrierIsNested =
+    (continuationAnchor?.metadata as Record<string, unknown> | undefined)?.nested === true
+  const prepend = ((): { parts: UIMessage['parts']; baselineLen: number } | undefined => {
+    if (!request.nested || !continuationAnchor || !carrierIsNested) return undefined
+    const baseline = uiOriginalMessages?.at(-1)
+    if (baseline?.id === continuationAnchor.id) return undefined
+    const merged = withAnsweredTool(continuationAnchor, message, request.answeredToolCallId)
+    return {
+      parts: (merged ?? continuationAnchor).parts ?? [],
+      baselineLen: baseline?.parts?.length ?? 0
+    }
+  })()
   // 落库 id 的基**刻意取主链行**（`lastAssistant('after')` 过滤 nested ⇒ 恒主链行）：若用「上一轮
   // 嵌套行」，每轮会再挂一个后缀 ⇒ id 无限累积（实测会话 31b06fa6：60 → 588 字符）。
   const idAnchor = request.nested ? sessions.lastAssistant(sessionId, 'after') : undefined
@@ -388,18 +411,28 @@ export async function runStoredAgentSession(
    */
   const locateCurrentRow = (response: UIMessage): LocatedRow => {
     if (request.nested && continuationAnchor) {
-      const nestedRow =
-        (continuationAnchor.metadata as Record<string, unknown> | undefined)?.nested === true
       // 卡片目标：嵌套行的卡片回流到**主链行**（`idAnchor`）。其内容基线必须是**主链行本身**
       // （无 nested、只含主链 parts），不能用嵌套行的 `stored`（否则把 nested 标记与嵌套私货
       // 写进主链行、吞掉主链助手——见 `StoredRunResult` 警示）。恒等续写（主链行）时二者同一行。
-      const stored = storedRow(response, { id: continuationAnchor.id, nestedRow })
+      //
+      // **内容重建（关键修复）**：续写嵌套行时，流式基线（`uiOriginalMessages.at(-1)`）是**主链行**
+      // （`uiTargetId` = 渲染端末端 = 主链 id，因嵌套行在 UI 上合并进主链）。若原样落 `response.parts`
+      // ⇒ 嵌套行 = 主链行全部 parts + 增量 = **每轮复制整条主链行**（实测真实会话 `a6159622`
+      // 的 13 条嵌套行、dev 复现会话 `710fc775#3414`）。故需重建（`prepend`，见其定义处）；
+      // 基线即承载行（无 `uiTargetId` 的回退路径）时 `prepend` 为 `undefined` ⇒ 原样落库。
+      const stored = storedRow(response, {
+        id: continuationAnchor.id,
+        nestedRow: carrierIsNested,
+        ...(prepend ? { prepend } : {})
+      })
       return {
         stored,
         id: continuationAnchor.id,
-        nestedRow,
-        reviewRowId: nestedRow ? (idAnchor?.id ?? continuationAnchor.id) : continuationAnchor.id,
-        reviewRow: nestedRow ? (idAnchor ?? stored) : stored
+        nestedRow: carrierIsNested,
+        reviewRowId: carrierIsNested
+          ? (idAnchor?.id ?? continuationAnchor.id)
+          : continuationAnchor.id,
+        reviewRow: carrierIsNested ? (idAnchor ?? stored) : stored
       }
     }
     if (request.nested) {
@@ -474,19 +507,32 @@ export async function runStoredAgentSession(
   }
   /**
    * **落库原语二：由「本轮模型输出 + 定位到的行」算出该行要落库的内容**——换 id、打 nested
-   * 标记，并按需**只取本轮增量**。
+   * 标记，并按需只取/重建 parts。三种 parts 来源：
    *
-   * `sliceFrom` 指定「基线行」：给出时只存 `response.parts.slice(基线.parts.length)`（本轮增量）。
-   * 仅在**新建嵌套行**路径使用——那里模型输出是「基线克隆 + 纯追加」，切片安全；续写路径
-   * （`continuationAnchor`）**不传** `sliceFrom`，因 AI SDK 会对已有 part **按 toolCallId 原地
-   * 改写**（`updateToolPart`），「用户回答 ask_user」表现为同一 part 原地变 `output-available`，
-   * 按长度切片会把它切掉 ⇒ 问答配对永久消失（旧 bug，实测 `#6843` 48→10 parts）。
+   * - **原样**（主链轮 / reset 续写）：`parts = response.parts`。
+   * - **切片**（新建嵌套轮）：传 `sliceFrom` ⇒ 只存 `response.parts.slice(基线长度)`（本轮增量）。
+   *   仅在此路径安全——那里模型输出是「基线克隆 + 纯追加」，切掉的是基线里已有的旧 part。
+   * - **重建**（续写嵌套行）：传 `prepend` ⇒ `parts = prepend ++ response.parts.slice(baselineLen)`
+   *   ＝「承载行自身内容（含刚被回答、原地改写的 ask）」+「本轮真正新增」。**不可用 `sliceFrom`**
+   *   ：续写路径的流式基线是**主链行**（`uiTargetId` = 渲染端末端），按它切片得到的「增量」其实
+   *   仍夹带主链前缀（旧缺陷：嵌套行 = 主链行 + 增量 = 复制）；而按承载行长度切又会把承载行里被
+   *   AI SDK `updateToolPart` **原地改写**的 ask 回答切掉（旧 bug，实测 `#6843` 48→10 parts）。
+   *   故续写一律「以承载行内容为前缀 + 追加流后新增的尾部」。
    */
   const storedRow = (
     response: UIMessage,
-    row: { id: string; nestedRow: boolean; sliceFrom?: UIMessage }
+    row: {
+      id: string
+      nestedRow: boolean
+      sliceFrom?: UIMessage
+      prepend?: { parts: UIMessage['parts']; baselineLen: number }
+    }
   ): UIMessage => {
-    const parts = row.sliceFrom ? response.parts.slice(row.sliceFrom.parts.length) : response.parts
+    const parts = row.prepend
+      ? [...row.prepend.parts, ...response.parts.slice(row.prepend.baselineLen)]
+      : row.sliceFrom
+        ? response.parts.slice(row.sliceFrom.parts.length)
+        : response.parts
     const base = { ...response, parts, id: row.id }
     return row.nestedRow ? markNested(base) : base
   }

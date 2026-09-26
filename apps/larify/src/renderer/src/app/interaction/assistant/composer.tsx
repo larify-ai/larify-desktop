@@ -136,7 +136,8 @@ function ComposerFooter({
     <PromptInputFooter className="justify-between">
       <PromptInputTools className="flex-1 overflow-hidden">
         <ComposerMenu inputRef={inputRef} />
-        <PlanModeToggle value={planMode} onChange={onPlanModeChange} />
+        {/* 计划模式入口暂时隐藏：取消下一行注释即可加回（组件与代码链均未改动）。 */}
+        {false && <PlanModeToggle value={planMode} onChange={onPlanModeChange} />}
       </PromptInputTools>
       <ModelSelector disabled={running} />
       <PromptInputSubmit

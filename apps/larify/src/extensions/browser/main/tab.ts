@@ -1059,8 +1059,14 @@ export class BrowserTab {
     const wc = this.webContents
     const emit = (): void => this.onChange?.()
     const syncUrl = (): void => {
-      this.currentUrl = wc.getURL()
-      this.pendingUrl = ""
+      const url = wc.getURL()
+      this.currentUrl = url
+      // A freshly attached (deferred) tab commits an initial `about:blank` navigation
+      // while a real navigation is still pending. Clearing `pendingUrl` there would
+      // wipe the target URL and make the address bar go blank until the real page
+      // commits. `currentUrl` is still updated because cross-origin detection relies
+      // on it; only the pending target is preserved across an `about:blank` commit.
+      if (url !== "about:blank") this.pendingUrl = ""
       emit()
     }
 

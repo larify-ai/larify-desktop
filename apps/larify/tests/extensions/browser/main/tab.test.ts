@@ -361,6 +361,38 @@ describe("BrowserTab", () => {
     expect(tab.state().loading).toBe(false)
   })
 
+  it("keeps showing the pending target when the view commits about:blank", async () => {
+    // 回归：create_tab(url) 会先创建 deferred tab（cdpReady 要等 webview 接入），
+    // 渲染层用 <webview src="about:blank"> 接入时会先提交一次 about:blank；
+    // 这次提交绝不能清空 pendingUrl，否则地址栏会变空、直到真实页面提交才恢复。
+    const tab = new BrowserTab(1, "p")
+    webContents(tab).deferLoad = true
+
+    expect(tab.navigate("https://example.com")).toBe(true)
+
+    // 目标尚未提交（当前文档是空/about:blank），地址栏此刻必须显示目标 URL
+    expect(tab.state().url).toBe("https://example.com")
+    expect(tab.state().loading).toBe(true)
+
+    // webview 接入后自带的 about:blank 提交，不得清空待导航目标
+    webContents(tab).url = "about:blank"
+    webContents(tab).emit("did-navigate", {}, "about:blank")
+
+    expect(tab.state().url).toBe("https://example.com")
+    expect(tab.state().loading).toBe(true)
+  })
+
+  it("clears the pending target once the real document commits", () => {
+    const tab = new BrowserTab(1, "p")
+    expect(tab.navigate("https://example.com")).toBe(true)
+    expect(tab.state().url).toBe("https://example.com")
+
+    webContents(tab).url = "https://example.com"
+    webContents(tab).emit("did-navigate", {}, "https://example.com")
+
+    expect(tab.state().url).toBe("https://example.com")
+  })
+
   it("does not navigate invalid address text", async () => {
     const tab = new BrowserTab(1, "p")
     expect(tab.navigate("not a url")).toBe(false)

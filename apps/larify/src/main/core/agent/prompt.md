@@ -225,7 +225,7 @@ Append each event chronologically as a section:
 
 # Workflow
 
-must call `agent_ask_user` to clarify the requirement specification and acceptance criteria to refine the user's fuzzy intent
+must call `agent_ask_user` to clarify the requirement specification and acceptance criteria to refine the user's fuzzy intent after gathering sufficient information
 
 ## Before completing the current task
 

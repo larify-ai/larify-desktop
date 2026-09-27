@@ -64,11 +64,17 @@ describe('解 A 守门：连续两次 reset 不产生重复可见行', () => {
     spy.mockImplementation(async (_m, _o, _c, saveResponse, uiOriginalMessages) => {
       const anchor = uiOriginalMessages?.at(-1)
       sent.push({ id: anchor?.id, parts: anchor?.parts.length ?? -1 })
-      // 模拟 AI SDK：以 anchor 为基线克隆其 parts + 追加 2 个新 part。
+      // 模拟 AI SDK：以 anchor 为基线克隆其 parts + 追加 2 个新 part（带轮次唯一标识，使各轮内容
+      // 不同 —— 这样切片后每行只含本轮增量，便于断言"内容互不相同"）。
+      const mark = `δ-${sent.length}`
       const resp: UIMessage = {
         id: anchor?.id ?? `gen-${sent.length}`,
         role: 'assistant',
-        parts: [...(anchor?.parts ?? []), { type: 'text', text: 'δ1' }, { type: 'text', text: 'δ2' }]
+        parts: [
+          ...(anchor?.parts ?? []),
+          { type: 'text', text: `${mark}a` },
+          { type: 'text', text: `${mark}b` }
+        ]
       }
       saveResponse?.(resp)
       return [resp]
@@ -132,9 +138,15 @@ describe('解 A 守门：连续两次 reset 不产生重复可见行', () => {
     expect(r2!.uiMessageId).toBe(G)
     expect(r3!.uiMessageId).toBe(G)
 
-    // ★ 可见 assistant 行**只有 1 条**（无重复）。
+    // ★ 可见 assistant 行 = 3 条（每轮一条），且**内容互不相同**（= 各轮增量，非重复副本）。
+    //   背景：reset 落库已改为「只存本轮增量」（见 persist.ts reset 分支）⇒ 不再有「新行完整包含旧行」
+    //   的超集链；旧行（历史）与新行（增量）同时可见 = **正常的多条回复**，非 UI 重复。
     const assistants = store.loadVisibleMessages(sessionId).filter((m) => m.role === 'assistant')
-    expect(assistants.map((m) => m.id)).toEqual([r3!.stored.id])
+    expect(assistants.map((m) => m.id)).toEqual([r1!.stored.id, r2!.stored.id, r3!.stored.id])
+    // 各轮**内容**互不相同（轮1 含 r1 的文本、轮2/3 各含本轮 δ）⇒ 不是超集副本。
+    const textOf = (m: UIMessage): string =>
+      m.parts.filter((p) => p.type === 'text').map((p) => (p as { text: string }).text).join('|')
+    expect(new Set(assistants.map(textOf)).size).toBe(3)
     // 模型输入能读到最新产出（落在 start 之后）。
     const input = store.loadMessages(sessionId)
     expect(input.at(-1)?.id).toBe(r3!.stored.id)

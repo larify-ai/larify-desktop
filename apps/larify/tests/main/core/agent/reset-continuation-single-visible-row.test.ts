@@ -141,12 +141,15 @@ describe('reset 续写：同一轮只应有一条可见 assistant 行', () => {
 
     expect(turns.length, '应只有 1 轮（1 个非 compaction 用户提问）').toBe(1)
     const assistants = turns[0].assistants
-    // ★ 核心断言：同一轮只应有一条可见 assistant 行（当前实现会得到 2 条 ⇒ 红）
-    expect(assistants.length, '同一轮出现了多条可见 assistant 行 ⇒ UI 会重复').toBe(1)
-
-    // 内容不丢：最终可见的那条应含全部标题 A,B,C,D
-    const finalTitles = spTitles(assistants[0])
-    expect(finalTitles).toEqual(expect.arrayContaining(['A', 'B', 'C', 'D']))
+    // ★ 回归修复后的语义：reset 落库**只存本轮增量** ⇒ 行数 = reset 前那条（历史）+ reset 后续写（增量）
+    //   = 2 条；二者**内容不同**（非「新行完整包含旧行」的超集副本）⇒ **不是 UI 重复**。
+    expect(assistants.length, 'reset 前历史行 + reset 后增量行').toBe(2)
+    // 内容不丢：两行合起来含全部标题 A,B,C,D（A,B 在历史行、C,D 在增量行）。
+    const allTitles = assistants.flatMap((a) => spTitles(a))
+    expect(allTitles).toEqual(expect.arrayContaining(['A', 'B', 'C', 'D']))
+    // ★ 无重复：两行内容不同（增量行不含历史行内容）。
+    expect(spTitles(assistants[0])).toEqual(['A', 'B'])
+    expect(spTitles(assistants[1])).toEqual(['C', 'D'])
   })
 
   it('连续两次 reset（复刻 d764fc88 的多行链）：最终仍只剩 1 行、无同名标题重复', async () => {
@@ -196,13 +199,16 @@ describe('reset 续写：同一轮只应有一条可见 assistant 行', () => {
       assistants.length,
       assistants.map((a) => `[${a.id.slice(0, 12)} sp=${spTitles(a).join(',')}]`).join(' ')
     )
-    expect(assistants.length, '连续 reset 后仍应只留 1 行').toBe(1)
-    // 同名标题不得重复
-    const titles = spTitles(assistants[0])
-    const counts = titles.reduce<Record<string, number>>((acc, t) => {
-      acc[t] = (acc[t] ?? 0) + 1
-      return acc
-    }, {})
-    expect(Object.values(counts).filter((c) => c > 1), '同名标题重复').toEqual([])
+    // ★ 回归修复后的语义：每轮只存增量 ⇒ 3 行（历史 A,B + 增量 C + 增量 D），内容各不相同。
+    expect(assistants.length, '历史行 + 两次 reset 增量行').toBe(3)
+    // 同名标题不得重复于**同一行**（每行各含自己的增量标题，无行内重复）。
+    for (const assistant of assistants) {
+      const titles = spTitles(assistant)
+      const counts = titles.reduce<Record<string, number>>((acc, t) => {
+        acc[t] = (acc[t] ?? 0) + 1
+        return acc
+      }, {})
+      expect(Object.values(counts).filter((c) => c > 1), '行内同名标题重复').toEqual([])
+    }
   })
 })

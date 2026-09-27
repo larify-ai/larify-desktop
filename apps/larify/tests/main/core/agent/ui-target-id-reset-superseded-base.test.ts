@@ -110,8 +110,9 @@ describe('解 A 守门：reset 取代旧行后，复用的 uiTargetId 底座不�
       previousStored: comp
     })
     expect(sent.at(-1)?.id).toBe(G)
-    // G 已被取代（库内删除）。
-    expect(store.findMessageById(sessionId, G)).toBeUndefined()
+    // ★ 回归修复后：**不再删除 G**（reset 落库改为「只存本轮增量」，新行不再包含旧行 ⇒ 删旧行
+    //   会丢历史）。故 G 仍在库 ⇒ `findMessageById(G)` 命中，nest 轮底座直接取 G（不再走兜底）。
+    expect(store.findMessageById(sessionId, G)).toBeDefined()
 
     // 轮3：reset 后 nest（复用 G）⇒ 底座 id 仍 = G，但 parts 必须**非空**。
     await runStoredAgentSession(store, {

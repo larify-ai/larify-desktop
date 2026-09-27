@@ -182,10 +182,9 @@ export interface StoredRunResult {
 /**
  * `locateCurrentRow` 的产出：本轮该写的那条行（`stored`）及其 id/nested 归属与卡片目标行。
  *
- * `supersededId`：本轮**取代**掉的既有行 id（仅 reset 续写路径）。落库新行后应删除它——它承载的
- * 内容已被 `stored` **完整包含**（见 `locateCurrentRow` 第 3 条），留着就会与 `stored` 同时渲染
- * ⇒ 同一轮 progress 标题重复。作为**返回值显式给出**（而非跨调用的闭包状态），使"取代谁"与"写谁"
- * 同源、无时序耦合。
+ * `supersededId`（**回归修复后不再产生**）：曾用于 reset 续写路径——那时新行 = 「旧行全量 + 增量」
+ * （超集），旧行被完整包含，落库后删之以免与新行同时渲染重复。**改为「只存增量」后新行不再包含
+ * 旧行 ⇒ 删旧行会丢历史 ⇒ 不再返回该字段**（`saveResponse` 里对它的消费保留为防御性死分支）。
  */
 interface LocatedRow {
   stored: UIMessage
@@ -193,6 +192,7 @@ interface LocatedRow {
   nestedRow: boolean
   reviewRowId: string
   reviewRow: UIMessage
+  /** @deprecated 回归修复后不再产生（见上）。保留字段与消费点以便回退/防御。 */
   supersededId?: string
 }
 
@@ -323,12 +323,14 @@ export async function runStoredAgentSession(
       : withAnsweredTool(
           sessions.findMessageById(sessionId, request.uiTargetId) ??
             request.previousStored ??
-            // ⚠️ **兜底不可省**：`findMessageById(uiTargetId)` 可能查不到——**reset 会用 `deleteBeforeStart`
-            // 删掉被取代的旧行**，而渲染端仍持有那个 id（reset 轮是 `replaceLastMessage` 原地替换，id 不变）。
-            // 此后本轮派生的 **nest 轮**复用同一 `uiTargetId` ⇒ 库里已无该行、又无 `previousStored`
-            // ⇒ 若只退化成「空 parts 占位」，AI SDK 会以**空基线**克隆消息（`createStreamingUIMessageState`）
+            // ⚠️ **兜底不可省**：`findMessageById(uiTargetId)` 可能查不到——渲染端可持有**库内不存在**
+            // 的 id（如从未落库 / 被清理 / 跨进程时序差），此时库里查无该行、又无 `previousStored`。
+            // 若只退化成「空 parts 占位」，AI SDK 会以**空基线**克隆消息（`createStreamingUIMessageState`）
             // ⇒ 流出的 `state.message` 只含**本轮新增**、且 id 仍是渲染端那条 ⇒ 渲染端 `replaceLastMessage`
             // **原地替换**、把渲染端那条的既有内容**清空**（live 态内容丢失；实测：底座 0 parts、流出仅本轮）。
+            // （此退化路径曾被 reset 的 `deleteBeforeStart` 频繁触发；该删除已随回归修复去掉，但**兜底仍需保留**
+            //  ——「查不到」还可由其它原因造成。动态探针实测：传库外 id ⇒ 基线退回 `lastVisibleAssistant`，
+            // 其 parts 数**可能 ≠ `continuationOf`**，故 reset 切片基准必须取本兜底结果而非 `continuationOf`。）
             // 故退化为「**库里此刻末端 assistant 的 parts**」（`lastVisibleAssistant`，不过滤 nested）——
             // 它正是渲染端此刻看到的合并内容（内容正确），仅 id 被换成渲染端权威的 `uiTargetId`（身份正确）。
             sessions.lastVisibleAssistant(sessionId),
@@ -471,12 +473,36 @@ export async function runStoredAgentSession(
       }
     }
     if (resetStoredId) {
-      const stored = { ...response, id: resetStoredId }
+      // **只存本轮增量**（回归修复）：AI SDK 以 `continuationOf`（reset 前那条）为 UI 基线克隆其
+      // 全部 parts + 追加增量 ⇒ `response.parts` = 全量 + 增量。但 reset 的语义是**压缩上下文**
+      // （`saveStart` 前移游标 `start`，旧内容不进 `loadMessages`）；若把「全量 + 增量」整份落库，
+      // 新行（在 `start` 之后）就成了「旧内容原封不动 + 增量」⇒ 主链**不缩反涨**、reset 白做。
+      // 实测：`984ddaf7` 每次 reset 后主链 est 57.7→70.5 万（全 > 守门阈值 50 万）⇒ 守门每轮触发
+      // reset ⇒ 死循环（回归点 `2210ec3`，它引入 UI 合并时把落库从 `slice` 改成了全量）。
+      // 故这里按基线长度切片 = 只保留本轮真正新增的部分（新行 = 增量 ⇒ 主链 = `start` 之后的
+      // handoff + 增量 = 小 ⇒ 压缩恢复）。
+      //
+      // ⚠️ **切片基准必须 = AI SDK 的流式基线**（= `uiOriginalMessages.at(-1)`，即 `persist` 交给
+      // `runAgentSession` 的 `originalMessages` 末条），**不能**用 `continuationOf`：
+      // - 标准流程下 `uiTarget = findMessageById(uiTargetId)` 与 `continuationOf` 是**同一行** ⇒ 等长；
+      // - 但**退化路径**（`uiTargetId` 在库中查不到、退回 `lastVisibleAssistant`）下 `uiTarget.parts`
+      //   可能**长于**（或短于）`continuationOf.parts`（探针实测：基线 2 parts vs `continuationOf` 1 part）
+      //   ⇒ 按 `continuationOf` 切会**切错长度**（残留旧 part 或丢增量）。
+      // 与「新建嵌套轮」的切片判据（`sliceFrom: uiOriginalMessages?.at(-1)`）**保持同一来源**。
+      // **无基线**（首轮无 `originalMessages`）时无基线可切 ⇒ 原样落库。
+      const resetBaseline = uiOriginalMessages?.at(-1)
+      const stored = resetBaseline
+        ? {
+            ...response,
+            id: resetStoredId,
+            parts: response.parts.slice(resetBaseline.parts.length)
+          }
+        : { ...response, id: resetStoredId }
       // reset 续写**换新 id**（使其落在 `sessions.start` 之后、可被 `loadMessages` 读到），于是本轮
-      // 产出会**新建一行**，而 reset 前那条旧行（`continuationOf`）留在库里。旧行已被新行**完整包含**
-      // （AI SDK 以它为基线克隆全部 parts + 追加增量；实测旧行每个 part 都在新行里）且落在 `start`
-      // 之前 ⇒ 模型输入不需要它；但 `loadVisibleMessages` 会把两条**同时渲染** ⇒ 同一轮回复里的
-      // progress 标题各出现多遍（真实会话 `7a2df69b`）。故：**用新版本取代旧行**。
+      // 产出会**新建一行**，而 reset 前那条旧行（`continuationOf`）留在库里。
+      // **切片后新行不再包含旧行**（旧行是历史、新行是本轮增量，二者内容不同）⇒ 旧行与新行同时
+      // 渲染**不再是"重复"**（是"历史 + 新内容"），故**不再删除旧行**。旧行落在 `start` 之前 ⇒
+      // 不进 `loadMessages`（模型输入小）、但仍被 `loadVisibleMessages` 保留作 UI 历史显示。
       //
       // ⚠️ **判据不得依赖 `response.id === continuationOf?.id`**（旧写法）：解 A 后 `uiOriginalMessages`
       // 末条是渲染端权威的 `uiTargetId`（见上），AI SDK 令 `response.id = uiTargetId`。**首次 reset 时
@@ -487,13 +513,17 @@ export async function runStoredAgentSession(
       // ⇒ **新行与上一轮 reset 行同时可见 ⇒ 同一轮 UI 重复复发**（实测：可见 assistant 行 2 条）。
       // reset 轮的唯一可靠标志是 `resetStoredId`（由 `isCompaction` 决定）——与 id 来源无关。
       // `continuationOf` 可能为空（首次 reset 前无 assistant）⇒ 此时无行可取代。
+      // ⚠️ **不再返回 `supersededId`**（回归修复的一部分）：`supersededId` 会触发
+      // `deleteBeforeStart` 删掉 reset 前的旧行，其前提是「新行**完整包含**旧行」（全量落库时成立）。
+      // 切片后新行只含增量、**不再包含旧行** ⇒ 删旧行就等于**永久丢失 reset 前的全部历史**
+      // （模型与 UI 都读不到）。故保留旧行：它落在 `start` 之前 ⇒ 不进 `loadMessages`；
+      // `loadVisibleMessages` 仍保留它作 UI 历史（旧行=历史、新行=本轮增量，内容不同 ⇒ 非"重复"）。
       return {
         stored,
         id: resetStoredId,
         nestedRow: false,
         reviewRowId: resetStoredId,
-        reviewRow: stored,
-        ...(continuationOf ? { supersededId: continuationOf.id } : {})
+        reviewRow: stored
       }
     }
     const stored = { ...response, id: response.id }

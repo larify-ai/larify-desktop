@@ -162,11 +162,11 @@ describe('解 A 端到端不变式：全链 UI 消息 id 恒一致（渲染端�
     //   `continuationOf.id`，故成立。若二者分歧 ⇒ 会落到「主链轮」分支、写回 `uiTargetId`。）
     expect(preReset?.id).toBe(G)
     expect(r4!.stored.id).not.toBe(G)
-    // reset 用新版本**取代**旧行：G 那条被 `deleteBeforeStart` 删除。
-    expect(store.findMessageById(sessionId, G)).toBeUndefined()
+    // ★ 回归修复后：reset 落库改为「只存本轮增量」⇒ 新行**不再包含**旧行 ⇒ **不再删除旧行**
+    //   （删了会丢历史）。故 G 仍在库，轮5 nest 的底座直接命中 G（不再走 `lastVisibleAssistant` 兜底）。
+    expect(store.findMessageById(sessionId, G)).toBeDefined()
 
-    // 轮5 reset 后 nest（继续复用 G）★ 此时 G 已被删 ⇒ 走 `lastVisibleAssistant` 兜底，
-    //   底座 id 仍 = G、parts 非空（见 `ui-target-id-reset-superseded-base.test.ts`）。
+    // 轮5 reset 后 nest（继续复用 G）⇒ 底座 id 仍 = G、parts 非空。
     await runStoredAgentSession(store, {
       sessionId,
       cwd,

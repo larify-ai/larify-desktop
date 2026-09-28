@@ -16,8 +16,8 @@ export const modelLabels: Record<ModelId, string> = {
 }
 
 export const modelContextWindows: Record<ModelId, { limit: number; rollover: number }> = {
-  'deepseek-flash': { limit: 1_000_000, rollover: 500_000 },
-  'deepseek-v4-pro': { limit: 1_000_000, rollover: 500_000 }
+  'deepseek-flash': { limit: 1_000_000, rollover: 800_000 },
+  'deepseek-v4-pro': { limit: 1_000_000, rollover: 800_000 }
 }
 
 export const imageCapableModelIds = new Set<ModelId>(['deepseek-flash'])

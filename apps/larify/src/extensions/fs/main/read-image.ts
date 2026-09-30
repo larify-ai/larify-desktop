@@ -7,7 +7,7 @@ import { imageCapableModelIds, type ModelId } from '../../../main/core/model/con
 import { saveAttachmentBytes } from '../../../main/core/attachment/store'
 import { defineTool } from '../../../main/core/plugin/protocol'
 
-const MAX_IMAGE_BYTES = 32 * 1024 * 1024
+const MAX_IMAGE_BYTES = 100 * 1024
 /**
  * DeepSeek rejects any image whose width or height exceeds 8192 px, and drops
  * the per-side limit to 4096 px when a request carries 15 or more images. An
@@ -58,12 +58,12 @@ export const readImageTool = defineTool({
     const info = await stat(target)
     if (!info.isFile()) throw new Error(`Cannot read image: "${target}" is not a regular file.`)
     if (info.size > MAX_IMAGE_BYTES) {
-      throw new Error(`Cannot read image: file exceeds the 32 MiB limit.`)
+      throw new Error(`Cannot read image: file exceeds the 100 KiB limit.`)
     }
 
     const data = await readFile(target, { signal: ctx.signal })
     if (data.byteLength > MAX_IMAGE_BYTES) {
-      throw new Error(`Cannot read image: file exceeds the 32 MiB limit.`)
+      throw new Error(`Cannot read image: file exceeds the 100 KiB limit.`)
     }
     const detected = await fileTypeFromBuffer(data)
     if (!detected || ![...imageMediaTypes.values()].includes(detected.mime)) {

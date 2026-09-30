@@ -47,8 +47,33 @@ describe('createMessageLinkHandler', () => {
     expect(detail.rendererId).toBe('workspace')
     // 目标文件在工作区内 → root 保持为 cwd
     expect(detail.options.root).toBe(cwd)
+    // `file` 复用键 = 解析后的绝对路径，供工作台按文件维度开标签（不同文件新开、同一文件复用）
+    expect((detail.options as { file?: string }).file).toBe(`${cwd}\\src\\main\\index.ts`)
     // onOpen 回调触发工作区导航定位
     expect(typeof detail.onOpen).toBe('function')
+  })
+
+  it('carries a stable per-file reuse key so different files open separate tabs', async () => {
+    const handler = createMessageLinkHandler(cwd, sessionId)
+
+    handler({ kind: 'file', target: 'src\\a.ts' })
+    await vi.waitFor(() => expect(dispatchSpy).toHaveBeenCalledTimes(1))
+    handler({ kind: 'file', target: 'src\\b.ts' })
+    await vi.waitFor(() => expect(dispatchSpy).toHaveBeenCalledTimes(2))
+    handler({ kind: 'file', target: 'src\\a.ts' })
+    await vi.waitFor(() => expect(dispatchSpy).toHaveBeenCalledTimes(3))
+
+    const files = dispatchSpy.mock.calls.map(
+      ([event]) => (event as CustomEvent<{ options: { file: string } }>).detail.options.file
+    )
+    // 不同文件 ⇒ 不同复用键；同一文件重复打开 ⇒ 复用键稳定一致
+    expect(files).toEqual([
+      `${cwd}\\src\\a.ts`,
+      `${cwd}\\src\\b.ts`,
+      `${cwd}\\src\\a.ts`
+    ])
+    expect(files[0]).toBe(files[2])
+    expect(files[0]).not.toBe(files[1])
   })
 
   it('opens a url link in the built-in browser and selects the resource', async () => {

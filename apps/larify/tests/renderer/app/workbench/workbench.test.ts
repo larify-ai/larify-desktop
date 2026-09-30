@@ -362,6 +362,53 @@ describe('Workbench', () => {
     ])
   })
 
+  it('opens a new workspace tab per file when the options carry a distinct file key', async () => {
+    let resourceId = 6
+    invoke.mockImplementation((channel: string) =>
+      Promise.resolve(channel === 'resource:create' ? ++resourceId : [])
+    )
+    await renderWorkbench(root, registry, sessionId, 'D:\\Workspace')
+
+    for (const file of ['D:\\Workspace\\a.ts', 'D:\\Workspace\\b.ts']) {
+      await act(async () => {
+        window.dispatchEvent(
+          new CustomEvent('larify:workbench-open', {
+            detail: { options: { root: 'D:\\Workspace', file }, rendererId: 'workspace' }
+          })
+        )
+        await Promise.resolve()
+      })
+    }
+
+    // 不同文件 ⇒ 不同 options 组合（复用键）⇒ 各自创建一个工作区资源（新开标签）
+    expect(invoke.mock.calls.filter(([channel]) => channel === 'resource:create')).toEqual([
+      ['resource:create', 'workspace', sessionId, { root: 'D:\\Workspace', file: 'D:\\Workspace\\a.ts' }],
+      ['resource:create', 'workspace', sessionId, { root: 'D:\\Workspace', file: 'D:\\Workspace\\b.ts' }]
+    ])
+  })
+
+  it('reuses the same workspace tab for the same file key', async () => {
+    let resourceId = 6
+    invoke.mockImplementation((channel: string) =>
+      Promise.resolve(channel === 'resource:create' ? ++resourceId : [])
+    )
+    await renderWorkbench(root, registry, sessionId, 'D:\\Workspace')
+
+    for (const file of ['D:\\Workspace\\a.ts', 'D:\\Workspace\\a.ts']) {
+      await act(async () => {
+        window.dispatchEvent(
+          new CustomEvent('larify:workbench-open', {
+            detail: { options: { root: 'D:\\Workspace', file }, rendererId: 'workspace' }
+          })
+        )
+        await Promise.resolve()
+      })
+    }
+
+    // 同一文件 ⇒ 相同 options 组合 ⇒ 复用已有工作区资源（不重复开标签）
+    expect(invoke.mock.calls.filter(([channel]) => channel === 'resource:create')).toHaveLength(1)
+  })
+
   it('deduplicates concurrent scoped workspace requests', async () => {
     const created = deferred<unknown>()
     invoke.mockImplementation((channel: string) =>

@@ -33,7 +33,11 @@ function openWorkspaceFile(
     new CustomEvent('larify:workbench-open', {
       detail: {
         rendererId: 'workspace',
-        options: { root },
+        // `file` 只用于把「工作台视图的复用维度」从「按 root」细化到「按 root + 文件」：
+        // 工作台（workbench.tsx）以 options 组合作为 scoped 复用键，不同文件 ⇒ 不同键
+        // ⇒ 各自新开一个标签；同一文件 ⇒ 相同键 ⇒ 复用已有标签（不重复开）。
+        // 该字段只是复用键，workspace 资源打开时只读 options.root，多余字段被忽略。
+        options: { root, file: targetPath },
         onOpen: (resourceId: number) => {
           if (!isCurrent()) return
           requestWorkspaceNavigation({ path: targetPath, hash, resourceId })

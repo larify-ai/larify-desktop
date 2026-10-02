@@ -139,7 +139,7 @@ function withoutInternalStageParts(
   const partIndexes = item.partIndexes.filter((index) => !isInternalStagePart(message.parts[index]))
   const children = item.children
     ?.map((child) => withoutInternalStageParts(child, message))
-    .filter((child) => child.partIndexes.length > 0 || child.kind === 'status')
+    .filter((child) => child.partIndexes.length > 0)
   const filteredToolGroup =
     item.kind === 'tool-group' && partIndexes.length !== item.partIndexes.length
   return {
@@ -239,11 +239,11 @@ function computeItemsForMessage(
     superseded
   )
     .map((renderItem) => withoutInternalStageParts(renderItem, message))
-    .filter((renderItem) => renderItem.partIndexes.length > 0 || renderItem.kind === 'status')
+    .filter((renderItem) => renderItem.partIndexes.length > 0 || isActivityRenderItem(renderItem))
     .map((renderItem) => ({
       kind: 'content',
       key:
-        renderItem.kind === 'status' || renderItem.kind === 'activity-group'
+        renderItem.kind === 'activity-group'
           ? `${message.id}-activity`
           : `${message.id}-${renderItem.partIndexes[0] ?? renderItem.kind}`,
       message,

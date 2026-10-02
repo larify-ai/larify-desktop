@@ -50,7 +50,7 @@ export function MessageView({
     ? renderItem.partIndexes.map((index) => message.parts[index])
     : message.parts
   const hasContent =
-    renderItem?.kind === 'status' ||
+    (renderItem !== undefined && isActivityRenderItem(renderItem)) ||
     selectedParts.some(
       (part) =>
         part !== undefined &&
@@ -82,10 +82,7 @@ export function MessageView({
     renderItem && isActivityRenderItem(renderItem)
       ? [
           <ActivityGroupPart
-            key={
-              activityKey ??
-              `${message.id}-${renderItem.kind}-${renderItem.partIndexes[0] ?? 'activity'}`
-            }
+            key={activityKey ?? `${message.id}-activity`}
             item={renderItem}
             message={message}
             streaming={streaming}

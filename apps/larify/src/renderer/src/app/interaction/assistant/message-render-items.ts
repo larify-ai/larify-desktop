@@ -4,7 +4,6 @@ import { formatProcessingDuration, formatProcessingDurationMs } from './processi
 
 export type AssistantRenderItemKind =
   | 'final-text'
-  | 'status'
   | 'reasoning'
   | 'intermediate-text'
   | 'tool-group'
@@ -267,20 +266,6 @@ export function buildAssistantRenderItems(
     const processingSummary = isFiniteNumber(totalProcessingMs)
       ? formatProcessingDurationMs(totalProcessingMs)
       : '处理了 0秒'
-    if (activityItems.length === 0) {
-      return isFiniteNumber(startedAt)
-        ? [
-            {
-              kind: 'status',
-              partIndexes: [],
-              summary: processingSummary,
-              defaultOpen: false,
-              startedAt
-            },
-            ...items
-          ]
-        : items
-    }
     return [
       {
         kind: 'activity-group' as const,
@@ -300,10 +285,11 @@ export function buildAssistantRenderItems(
     return hasValidDuration(metadata) || interrupted
       ? [
           {
-            kind: 'status',
+            kind: 'activity-group' as const,
             partIndexes: [],
             summary: completedSummary(metadata, waitingForAnswer),
-            defaultOpen: false
+            defaultOpen: false,
+            children: []
           },
           ...items
         ]

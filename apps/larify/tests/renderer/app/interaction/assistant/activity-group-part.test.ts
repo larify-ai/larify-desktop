@@ -40,7 +40,10 @@ import { ActivityGroupPart } from '../../../../../src/renderer/src/app/interacti
 import { __count as markdownRenderCount } from '../../../../../src/renderer/src/app/interaction/assistant/message-parts/message-markdown'
 import { __partCount as messagePartRenderCount } from '../../../../../src/renderer/src/app/interaction/assistant/message-parts/message-part'
 import { MessageView } from '../../../../../src/renderer/src/app/interaction/assistant/message-view'
-import type { AssistantRenderItem } from '../../../../../src/renderer/src/app/interaction/assistant/message-render-items'
+import {
+  buildAssistantRenderItems,
+  type AssistantRenderItem
+} from '../../../../../src/renderer/src/app/interaction/assistant/message-render-items'
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
@@ -149,11 +152,12 @@ describe('activity group part', () => {
         root.render(
           createElement(ActivityGroupPart, {
             item: {
-              kind: 'status',
+              kind: 'activity-group',
               partIndexes: [],
               summary: '处理了 0秒',
               defaultOpen: false,
-              startedAt: 1_000
+              startedAt: 1_000,
+              children: []
             },
             message,
             streaming: true
@@ -792,9 +796,8 @@ describe('activity group part', () => {
   })
 
   it('updates a reused activity timer before paint when a new run starts', async () => {
+    // 计时器靠 effect 在 startedAt 变化时校准（不重挂载），故断言读数即时正确。
     vi.useFakeTimers()
-    const setInterval = vi.spyOn(window, 'setInterval')
-    const clearInterval = vi.spyOn(window, 'clearInterval')
     const renderTimer = async (startedAt: number, streaming = true): Promise<void> => {
       await act(async () =>
         root.render(
@@ -825,20 +828,48 @@ describe('activity group part', () => {
       vi.setSystemTime(6_000)
       await renderTimer(1_000)
       expect(container.textContent).toContain('处理了 5秒')
-      expect(setInterval).toHaveBeenCalledTimes(1)
 
       vi.setSystemTime(7_000)
       await renderTimer(2_000)
       expect(container.textContent).toContain('处理了 5秒')
       expect(container.textContent).not.toContain('处理了 4秒')
-      expect(setInterval).toHaveBeenCalledTimes(2)
-      expect(clearInterval).toHaveBeenCalledTimes(1)
 
       await renderTimer(2_000, false)
-      expect(clearInterval).toHaveBeenCalledTimes(2)
+      expect(container.textContent).toContain('处理过程')
     } finally {
-      setInterval.mockRestore()
-      clearInterval.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps the duration continuous when a live timer becomes an activity group', async () => {
+    // 守门：初发消息时「无活动项 → 出现活动项」不能把读数从 3 秒打回 0 秒。
+    vi.useFakeTimers()
+    const reasoningMessage = (): UIMessage =>
+      ({
+        id: 'assistant-flash',
+        role: 'assistant',
+        parts: [{ type: 'reasoning', text: 'x', state: 'streaming' }]
+      }) as UIMessage
+    const paint = async (parts: UIMessage['parts'], metadata: Record<string, unknown> = {}) => {
+      const m = { ...reasoningMessage(), parts, metadata } as UIMessage
+      const items = buildAssistantRenderItems(m, true)
+      await act(async () =>
+        root.render(
+          createElement(MessageView, { message: m, streaming: true, renderItem: items[0] })
+        )
+      )
+    }
+
+    try {
+      await paint([])
+      await act(async () => vi.advanceTimersByTime(3_000))
+      expect(container.textContent).toContain('处理了 3秒')
+
+      await paint([{ type: 'reasoning', text: 'x', state: 'streaming' } as never])
+      await act(async () => vi.advanceTimersByTime(0))
+      expect(container.textContent).toContain('处理了 3秒')
+      expect(container.textContent).not.toContain('处理了 0秒')
+    } finally {
       vi.useRealTimers()
     }
   })

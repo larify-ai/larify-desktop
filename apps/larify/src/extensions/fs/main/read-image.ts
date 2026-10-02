@@ -58,12 +58,12 @@ export const readImageTool = defineTool({
     const info = await stat(target)
     if (!info.isFile()) throw new Error(`Cannot read image: "${target}" is not a regular file.`)
     if (info.size > MAX_IMAGE_BYTES) {
-      throw new Error(`Cannot read image: file exceeds the 100 KiB limit.`)
+      throw new Error(`Cannot read image: file exceeds the 100 KB limit. Downscale the image and read the smaller copy.`)
     }
 
     const data = await readFile(target, { signal: ctx.signal })
     if (data.byteLength > MAX_IMAGE_BYTES) {
-      throw new Error(`Cannot read image: file exceeds the 100 KiB limit.`)
+      throw new Error(`Cannot read image: file exceeds the 100 KB limit. Downscale the image and read the smaller copy.`)
     }
     const detected = await fileTypeFromBuffer(data)
     if (!detected || ![...imageMediaTypes.values()].includes(detected.mime)) {

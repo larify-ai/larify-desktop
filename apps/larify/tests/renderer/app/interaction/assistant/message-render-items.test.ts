@@ -97,7 +97,7 @@ describe('assistant message render items', () => {
     const empty = { ...message(), metadata: { startedAt: 1_000, completedAt: 2_000 } } as UIMessage
 
     expect(buildAssistantRenderItems(empty, false)).toEqual([
-      expect.objectContaining({ kind: 'status', summary: '已完成 · 处理了 1秒' })
+      expect.objectContaining({ kind: 'activity-group', summary: '已完成 · 处理了 1秒' })
     ])
   })
 
@@ -279,7 +279,9 @@ describe('assistant message render items', () => {
       metadata: { startedAt: 1_000, completedAt: 2_000 }
     } as UIMessage
 
-    expect(buildAssistantRenderItems(streaming, true).map((item) => item.kind)).toEqual(['status'])
+    expect(buildAssistantRenderItems(streaming, true).map((item) => item.kind)).toEqual([
+      'activity-group'
+    ])
     const completedItems = buildAssistantRenderItems(completed, false)
     expect(completedItems).toHaveLength(1)
     expect(completedItems[0]).toEqual(

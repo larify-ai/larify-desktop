@@ -77,10 +77,10 @@ export const ActivityGroupPart = memo(function ActivityGroupPart({
     typeof meta?.totalProcessingMs === 'number' && Number.isFinite(meta.totalProcessingMs)
       ? meta.totalProcessingMs
       : 0
+  const isGroup = item.kind === 'activity-group'
   const summary =
-    !summaryIcon && streaming && item.startedAt !== undefined ? (
+    !summaryIcon && streaming && isGroup ? (
       <LiveProcessingDuration
-        key={item.startedAt}
         startedAt={item.startedAt}
         baseMs={totalProcessingMs}
         active={active}
@@ -88,21 +88,13 @@ export const ActivityGroupPart = memo(function ActivityGroupPart({
     ) : (
       item.summary
     )
-  const isGroup = item.kind === 'activity-group'
   const indexedParts = item.partIndexes.flatMap((index) => {
     const part = message.parts[index]
     return part ? [{ index, part }] : []
   })
   const fallbackStreamingIndex = streaming ? message.parts.findLastIndex(hasVisibleTextPart) : -1
-  if (item.kind === 'status') {
-    return (
-      <div>
-        <div className="text-sm text-muted-foreground">{summary}</div>
-        {item.startedAt === undefined ? <div className="mt-2 h-px bg-border" /> : null}
-      </div>
-    )
-  }
-  if (!indexedParts.length) return null
+  const collapsible = Boolean(item.children?.length) || indexedParts.length > 0
+  if (!collapsible && !isGroup) return null
   const content = item.children
     ? item.children.map((child) => (
         <ActivityGroupPart
@@ -144,10 +136,12 @@ export const ActivityGroupPart = memo(function ActivityGroupPart({
       className="not-prose min-w-0"
     >
       <CollapsibleTrigger
+        disabled={!collapsible}
         className={cn(
-          'group/summary flex w-full min-w-0 cursor-pointer select-none items-center gap-x-2 text-sm',
+          'group/summary flex w-full min-w-0 select-none items-center gap-x-2 text-sm',
           // 外层必须保留 flex-wrap：isGroup 时分隔线靠 order-last + basis-full 独占一行。
           isGroup ? 'flex-wrap gap-y-3' : 'flex-nowrap',
+          collapsible && 'cursor-pointer',
           summaryClassName ?? (isGroup ? 'text-muted-foreground' : 'text-foreground')
         )}
       >
@@ -170,12 +164,14 @@ export const ActivityGroupPart = memo(function ActivityGroupPart({
               </span>
             </>
           )}
-          <ChevronRightIcon
-            className={cn(
-              'size-3.5 shrink-0 transition-[opacity,transform]',
-              open ? 'rotate-90 opacity-100' : 'opacity-0 group-hover/summary:opacity-100'
-            )}
-          />
+          {collapsible ? (
+            <ChevronRightIcon
+              className={cn(
+                'size-3.5 shrink-0 transition-[opacity,transform]',
+                open ? 'rotate-90 opacity-100' : 'opacity-0 group-hover/summary:opacity-100'
+              )}
+            />
+          ) : null}
         </span>
         {isGroup && !summaryIcon ? (
           <span className="order-last h-px w-full basis-full bg-border" />

@@ -93,7 +93,7 @@ function WorkspaceTreeContent({
   const [expandedKeys, setExpandedKeys] = useState<Key[]>(() =>
     initialExpandedKeys(compactEntries, changesOnly)
   )
-  const initialized = useRef(entries.length > 0)
+  const knownDirs = useRef(new Set<string>())
   const [revealState, setRevealState] = useState({ dismissed: false, path: revealPath })
   const [selectedKeys, setSelectedKeys] = useState<Key[]>([])
   const [size, setSize] = useState({ height: 0, width: 0 })
@@ -137,11 +137,16 @@ function WorkspaceTreeContent({
     }
   }, [activationStore, active])
 
+  // 目录树数据会随改动重建，而本组件实例（key 只随 changesOnly 变化）与 expandedKeys
+  // 状态是复用的。只把「此前出现过的目录」之外的目录补进展开集，既能自动展开新增目录，
+  // 又不会碰用户手动折叠过的目录（后者属于「已见过」）。
   useEffect(() => {
-    if (initialized.current || entries.length === 0) return
-    initialized.current = true
-    setExpandedKeys(initialExpandedKeys(compactEntries, changesOnly))
-  }, [changesOnly, compactEntries, entries.length])
+    const expandable = initialExpandedKeys(compactEntries, changesOnly)
+    const fresh = expandable.filter((key) => !knownDirs.current.has(key))
+    expandable.forEach((key) => knownDirs.current.add(key))
+    if (fresh.length === 0) return
+    setExpandedKeys((keys) => [...new Set([...keys, ...fresh])])
+  }, [changesOnly, compactEntries])
 
   const revealed = useMemo(() => {
     if (!revealPath) return undefined

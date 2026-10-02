@@ -109,7 +109,7 @@ describe('read_image', () => {
     const source = join(mocks.attachments, 'large.png')
     await writeFile(source, '')
     await truncate(source, 100 * 1024 + 1)
-    await expect(readImage(source, mocks.attachments)).rejects.toThrow('exceeds the 100 KiB limit')
+    await expect(readImage(source, mocks.attachments)).rejects.toThrow('exceeds the 100 KB limit')
   })
 })
 

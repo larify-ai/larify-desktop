@@ -440,6 +440,43 @@ describe('viewport bottom anchor', () => {
     act(() => root.render(null))
     expect(disconnected).toBe(true)
   })
+
+  it('keeps correcting to the real bottom while the content height keeps growing', async () => {
+    // scrollHeight 常在收尾前一直偏小，scrollToBottom 须持续校正到高度稳定。
+    await act(async () => root.render(createElement(Harness)))
+    const scroller = container.querySelector<HTMLElement>('[data-scroller]')!
+    let height = 500
+    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, get: () => height })
+    Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 100 })
+    scroller.getBoundingClientRect = () => rect(0, 100)
+
+    scrollToBottom?.()
+    await nextFrame()
+    // jsdom 不 clamp：断言 scrollTop 被设为当时的 scrollHeight（浏览器等价于滚到底）。
+    expect(scroller.scrollTop).toBe(500)
+
+    height = 800
+    await nextFrame()
+    await nextFrame()
+    expect(scroller.scrollTop).toBe(800)
+  })
+
+  it('releaseAnchor cancels an in-flight correction so the reader keeps their position', async () => {
+    // 校正循环会连续写 scrollTop，用户上翻 / 展开卡片（releaseAnchor）必须立即取消它。
+    await act(async () => root.render(createElement(Harness)))
+    const scroller = container.querySelector<HTMLElement>('[data-scroller]')!
+    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 500 })
+    Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 100 })
+    scroller.getBoundingClientRect = () => rect(0, 100)
+
+    scrollToBottom?.()
+    releaseAnchor?.()
+    scroller.scrollTop = 120
+    await nextFrame()
+    await nextFrame()
+
+    expect(scroller.scrollTop).toBe(120)
+  })
 })
 
 function rect(top: number, bottom: number): DOMRect {

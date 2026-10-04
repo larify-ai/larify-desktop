@@ -58,16 +58,18 @@ export function useViewportBottomAnchor(resetKey?: unknown): {
   const renderedRange = useRef<RenderedRange | null>(null)
   const captureFrame = useRef<number | null>(null)
   const restoreFrame = useRef<number | null>(null)
+  const settleFrame = useRef<number | null>(null)
   const isScrolling = useRef(false)
   const scrollTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-
   const resetAnchor = useCallback(() => {
     anchor.current = null
     renderedRange.current = null
     if (captureFrame.current !== null) cancelAnimationFrame(captureFrame.current)
     if (restoreFrame.current !== null) cancelAnimationFrame(restoreFrame.current)
+    if (settleFrame.current !== null) cancelAnimationFrame(settleFrame.current)
     captureFrame.current = null
     restoreFrame.current = null
+    settleFrame.current = null
   }, [])
 
   useLayoutEffect(resetAnchor, [resetAnchor, resetKey])
@@ -166,7 +168,21 @@ export function useViewportBottomAnchor(resetKey?: unknown): {
   const scrollToBottom = useCallback(() => {
     resetAnchor()
     const element = scrollerElement.current
-    if (element) element.scrollTop = element.scrollHeight
+    if (!element) return
+    element.scrollTop = element.scrollHeight
+    let frames = 0
+    let lastHeight = -1
+    const settle = (): void => {
+      settleFrame.current = null
+      if (scrollerElement.current !== element) return
+      element.scrollTop = element.scrollHeight
+      const height = element.scrollHeight
+      frames += 1
+      if (frames >= 10 || height === lastHeight) return
+      lastHeight = height
+      settleFrame.current = requestAnimationFrame(settle)
+    }
+    settleFrame.current = requestAnimationFrame(settle)
   }, [resetAnchor])
 
   return {

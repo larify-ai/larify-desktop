@@ -56,9 +56,12 @@ interface VirtuosoProps {
 let container: HTMLDivElement
 let root: Root
 let resize: () => void
+const observed: Array<Element | null> = []
 
 class ResizeObserverMock {
-  observe = vi.fn()
+  observe = vi.fn((element: Element) => {
+    observed.push(element)
+  })
   disconnect = vi.fn()
 
   constructor(callback: ResizeObserverCallback) {
@@ -69,6 +72,7 @@ class ResizeObserverMock {
 beforeEach(() => {
   vi.stubGlobal('ResizeObserver', ResizeObserverMock)
   captured.mounts = 0
+  observed.length = 0
   captured.scrollToIndex.mockReset()
   container = document.createElement('div')
   document.body.append(container)
@@ -438,6 +442,147 @@ describe('interaction assistant message list', () => {
     const updated = captured.props as VirtuosoProps
     expect(updated.itemContent(0).props.children.props.streaming).toBe(false)
     expect(updated.itemContent(2).props.children.props.streaming).toBe(true)
+  })
+
+  it('keeps following when the first message arrives in a brand-new conversation', async () => {
+    // 回归：新建会话首次发送后最终输出要滑动才看到（初始定位把 following 覆盖成 positioning）。
+    await render({ messages: [], recentStart: 0 })
+
+    await render({
+      messages: [userMessage('first-user', 'hello')],
+      recentStart: 0,
+      followRequest: 1
+    })
+
+    const props = captured.props as VirtuosoProps
+    expect(props.totalCount).toBe(1)
+    expect(props.followOutput(true)).toBe('auto')
+  })
+
+  it('follows the final height applied only after streaming has ended', async () => {
+    // 收尾守门：Virtuoso 常在 live 结束后才把最终高度落到布局上，此时仍须贴底。
+    await render({ messages: [], recentStart: 0 })
+    await render({
+      messages: [userMessage('first-user', 'hello')],
+      recentStart: 0,
+      live: true,
+      followRequest: 1
+    })
+    act(() => (captured.props as VirtuosoProps).atBottomStateChange(true))
+    const scroller = createScroller(500, 500)
+    container.firstElementChild?.append(scroller)
+    act(() => (captured.props as VirtuosoProps).scrollerRef(scroller))
+
+    setScrollHeight(scroller, 900)
+    await render({
+      messages: [userMessage('first-user', 'hello'), message('assistant-stream')],
+      recentStart: 0,
+      live: true,
+      followRequest: 1
+    })
+    await flushFrames(4)
+    expect(scroller.scrollTop).toBe(900)
+
+    await render({
+      messages: [userMessage('first-user', 'hello'), message('assistant-stream')],
+      recentStart: 0,
+      live: false,
+      followRequest: 1
+    })
+    setScrollHeight(scroller, 1400)
+    await render({
+      messages: [userMessage('first-user', 'hello'), message('assistant-stream')],
+      recentStart: 0,
+      live: false,
+      followRequest: 1
+    })
+    await flushFrames(12)
+    expect(scroller.scrollTop).toBe(1400)
+  })
+
+  it('keeps following output that arrives after a long stall while streaming', async () => {
+    // 回归：dev 模型常在长时间无输出后一次性吐一大段；贴底循环不得在无输出期退出。
+    await render({
+      messages: [userMessage('u', 'hello')],
+      recentStart: 0,
+      live: true,
+      followRequest: 1
+    })
+    act(() => (captured.props as VirtuosoProps).atBottomStateChange(true))
+    const scroller = createScroller(500, 500)
+    container.firstElementChild?.append(scroller)
+    act(() => (captured.props as VirtuosoProps).scrollerRef(scroller))
+
+    await flushFrames(150)
+    expect(scroller.scrollTop).toBe(500)
+
+    setScrollHeight(scroller, 1600)
+    await flushFrames(4)
+    expect(scroller.scrollTop).toBe(1600)
+  })
+
+  it('does not drag a reader back to the bottom in an existing conversation', async () => {
+    // 回归守门：贴底跟随不得在非 live 的既有会话里运行（否则上翻阅读被拽回底部）。
+    await render({ messages: [message('m1')], recentStart: 0 })
+    act(() => (captured.props as VirtuosoProps).atBottomStateChange(true))
+    const scroller = createScroller(1880, 2000)
+    container.firstElementChild?.append(scroller)
+    act(() => (captured.props as VirtuosoProps).scrollerRef(scroller))
+    act(() => scroller.dispatchEvent(new Event('scroll')))
+    await act(() => new Promise((resolve) => setTimeout(resolve, 2)))
+
+    const before = scroller.scrollTop
+    await render({ messages: [message('m1'), message('m2')], recentStart: 0 })
+    await flushFrames(30)
+
+    expect(before).toBe(1880)
+    expect(scroller.scrollTop).toBe(1880)
+  })
+
+  it('observes the last message shell itself rather than the item list container', async () => {
+    // 回归守门：followGrowingList 的 ResizeObserver 必须观察最后一条消息的外壳本身。
+    // 观察 `virtuoso-item-list` 容器时回调频率远高于观察单个 item，会持续把
+    // resizingMessage 置真，使 onScrollCapture 的"上翻 → reading"被前置条件拦下（回归 B）。
+    await render({ messages: [message('streaming')], recentStart: 0, live: true })
+
+    // 必须把外壳放进真实的 `virtuoso-item-list` 容器里：否则 closest() 返回 null，
+    // 容器观察实现会回退到外壳本身，测试就失去区分力。
+    const listContainer = document.createElement('div')
+    listContainer.dataset.testid = 'virtuoso-item-list'
+    const parent = document.createElement('div')
+    listContainer.append(parent)
+    document.body.append(listContainer)
+    const shell = document.createElement('div')
+    parent.append(shell)
+    const detach = (captured.props as VirtuosoProps).itemContent(0).props.ref(shell)
+
+    expect(observed).not.toContain(listContainer)
+    expect(observed).toContain(shell)
+    detach()
+    listContainer.remove()
+  })
+
+  it('resets following when switching to another conversation', async () => {
+    // 回归守门：切会话时不得沿用上一个会话残留的 following，否则新会话会立即 followOutput='auto'
+    // 而"进去就自己滚一下"。切会话（active false→true）必须回到 positioning（followOutput=false）。
+    await render({ messages: [message('a')], recentStart: 0, live: true, followRequest: 1 })
+    act(() => (captured.props as VirtuosoProps).atBottomStateChange(true))
+    expect((captured.props as VirtuosoProps).followOutput(true)).toBe('auto')
+
+    await render({
+      messages: [message('a')],
+      recentStart: 0,
+      live: true,
+      followRequest: 1,
+      active: false
+    })
+    await render({
+      messages: [message('b1'), message('b2')],
+      recentStart: 0,
+      active: true
+    })
+
+    expect((captured.props as VirtuosoProps).followOutput(true)).toBe(false)
   })
 
   it('resumes following after a tool output is submitted', async () => {
@@ -1891,11 +2036,34 @@ function complexMessage(): UIMessage {
   }
 }
 
-function createScroller(scrollTop: number): HTMLDivElement {
+const scrollerHeights = new WeakMap<HTMLElement, number>()
+
+function setScrollHeight(scroller: HTMLElement, height: number): void {
+  scrollerHeights.set(scroller, height)
+}
+
+async function flushFrames(count: number): Promise<void> {
+  for (let index = 0; index < count; index += 1) {
+    await act(
+      () =>
+        new Promise<void>((resolve) =>
+          requestAnimationFrame(() => {
+            resolve()
+          })
+        )
+    )
+  }
+}
+
+function createScroller(scrollTop: number, scrollHeight = 200): HTMLDivElement {
   const scroller = document.createElement('div')
+  scrollerHeights.set(scroller, scrollHeight)
   Object.defineProperties(scroller, {
     clientHeight: { value: 100 },
-    scrollHeight: { value: 200 }
+    scrollHeight: {
+      configurable: true,
+      get: (): number => scrollerHeights.get(scroller) ?? scrollHeight
+    }
   })
   scroller.scrollTop = scrollTop
   return scroller

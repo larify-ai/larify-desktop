@@ -655,6 +655,7 @@ function ActiveAssistantMessageList({
   const [replayFinalMessageId, setReplayFinalMessageId] = useState<string>()
   const [visibleStartIndex, setVisibleStartIndex] = useState<number>()
   const pendingNavigationIndex = useRef<number | undefined>(undefined)
+  const following = useRef(false)
 
   // 可见起点：直接由 Virtuoso 的渲染 range 推导（rangeChanged 内设置），
   // 高频滚动/流式增长路径不再 querySelectorAll + getBoundingClientRect，
@@ -783,6 +784,32 @@ function ActiveAssistantMessageList({
     }
   }, [live, messages, scrollViewportToBottom])
 
+  useEffect(() => {
+    if (live) following.current = true
+    if (!following.current) return
+    let raf = 0
+    let frames = 0
+    let lastHeight = -1
+    const follow = (): void => {
+      const element = scrollElement.current
+      if (!element || scrollMode.current !== 'following') {
+        following.current = false
+        return
+      }
+      const height = element.scrollHeight
+      if (height - element.clientHeight - element.scrollTop > 1) element.scrollTop = height
+      frames = height === lastHeight ? frames + 1 : 0
+      lastHeight = height
+      if (!live && frames > 120) {
+        following.current = false
+        return
+      }
+      raf = requestAnimationFrame(follow)
+    }
+    raf = requestAnimationFrame(follow)
+    return () => cancelAnimationFrame(raf)
+  }, [live, messages])
+
   useLayoutEffect(() => {
     if (followRequest === 0) return
     scrollMode.current = 'following'
@@ -805,7 +832,6 @@ function ActiveAssistantMessageList({
   const followGrowingList = useCallback(
     (element: HTMLDivElement | null) => {
       if (!element || typeof ResizeObserver === 'undefined') return
-      const listElement = element.closest('[data-testid="virtuoso-item-list"]') ?? element
       const observer = new ResizeObserver(() => {
         const version = ++resizeVersion.current
         resizingMessage.current = true
@@ -819,7 +845,7 @@ function ActiveAssistantMessageList({
           }, 1)
         })
       })
-      observer.observe(listElement)
+      observer.observe(element)
       return () => observer.disconnect()
     },
     [scrollViewportToBottom]
@@ -851,6 +877,7 @@ function ActiveAssistantMessageList({
     if (active && !prevActiveRef.current) {
       prevActiveRef.current = true
       positioningStarted.current = false
+      scrollMode.current = 'positioning'
       setPosition((current) => ({ ...current, escaped: false }))
     } else if (!active) {
       prevActiveRef.current = false
@@ -858,7 +885,7 @@ function ActiveAssistantMessageList({
     if (!positioningKey) return
     if (positioningStarted.current) return
     positioningStarted.current = true
-    scrollMode.current = 'positioning'
+    if (scrollMode.current !== 'following') scrollMode.current = 'positioning'
     list.current?.autoscrollToBottom()
     scrollViewportToBottom()
   }, [positioningKey, scrollViewportToBottom, active])

@@ -706,12 +706,12 @@ describe('write', () => {
     vi.useRealTimers()
   })
 
-  it('rejects a timeout outside the 1-300 second range', () => {
+  it('rejects a timeout outside the 1-3600 second range', () => {
     expect(parseToolInput('write', { id: 1, input: 'x', timeout: 0 }).success).toBe(false)
-    expect(parseToolInput('write', { id: 1, input: 'x', timeout: 301 }).success).toBe(false)
+    expect(parseToolInput('write', { id: 1, input: 'x', timeout: 3601 }).success).toBe(false)
     expect(parseToolInput('write', { id: 1, input: 'x', timeout: 1 }).success).toBe(true)
     expect(parseToolInput('read', { id: 1, timeout: 0 }).success).toBe(false)
-    expect(parseToolInput('read', { id: 1, timeout: 300 }).success).toBe(true)
+    expect(parseToolInput('read', { id: 1, timeout: 3600 }).success).toBe(true)
   })
 })
 

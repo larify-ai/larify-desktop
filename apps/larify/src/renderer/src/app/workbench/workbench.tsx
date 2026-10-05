@@ -13,6 +13,20 @@ const resourceOptions = (id: string, cwd: string): Record<string, string> => {
 const optionsKey = (options: Record<string, string>): string =>
   JSON.stringify(Object.entries(options).sort(([first], [second]) => first.localeCompare(second)))
 
+/**
+ * `larify:workbench-open` 的 detail。
+ *
+ * ⚠️ `navigation.path`（这次要定位到哪个文件）**必须参与标签复用键**：只按 `options` 组合算键时，
+ * 任何入口少传一个区分字段就会静默顶替别的文件（变更卡片只传 `{ root }` ⇒ memory 锚点根下
+ * 所有文件共用一个标签）。由它推导复用键的规则见 `openWorkbenchTool`。
+ */
+type WorkbenchOpenDetail = {
+  navigation?: { path?: unknown }
+  onOpen?: unknown
+  options?: unknown
+  rendererId?: unknown
+}
+
 export function Workbench({
   active = true,
   sessionId,
@@ -133,12 +147,16 @@ export function Workbench({
     (
       rendererId: string,
       onOpen?: (resourceId: number) => void,
-      options?: Record<string, string>
+      options?: Record<string, string>,
+      target?: string
     ): void => {
       const defaults = resourceOptions(rendererId, cwd)
       const resolvedOptions = { ...defaults, ...options }
-      const scoped = options !== undefined && optionsKey(resolvedOptions) !== optionsKey(defaults)
-      const key = `${sessionId}:${rendererId}:${optionsKey(resolvedOptions)}`
+      const scoped =
+        target !== undefined ||
+        (options !== undefined && optionsKey(resolvedOptions) !== optionsKey(defaults))
+      // 复用键必须完整刻画「这个视图展示什么」：除 options 外并入导航目标 `target`（见 WorkbenchOpenDetail）。
+      const key = `${sessionId}:${rendererId}:${optionsKey(resolvedOptions)}|${target ?? ''}`
       const scopedResourceId = scoped ? scopedTools.current.get(key) : undefined
       const views = store.getState().views
       const existing = scoped
@@ -173,16 +191,17 @@ export function Workbench({
       if (typeof detail === 'string') {
         openWorkbenchTool(detail)
       } else if (detail && typeof detail === 'object' && 'rendererId' in detail) {
-        const { onOpen, options, rendererId } = detail as {
-          onOpen?: unknown
-          options?: unknown
-          rendererId?: unknown
-        }
+        const typed = detail as WorkbenchOpenDetail
+        const { onOpen, options, rendererId } = typed
+        const path = typed.navigation?.path
         if (typeof rendererId === 'string') {
           openWorkbenchTool(
             rendererId,
             typeof onOpen === 'function' ? (onOpen as (resourceId: number) => void) : undefined,
-            options && typeof options === 'object' ? (options as Record<string, string>) : undefined
+            options && typeof options === 'object'
+              ? (options as Record<string, string>)
+              : undefined,
+            typeof path === 'string' && path ? path : undefined
           )
         }
       }

@@ -54,6 +54,7 @@ export class WorkspaceService {
     if (size > 20 * 1024 * 1024) {
       throw new Error(`文件过大，无法预览（${(size / 1024 / 1024).toFixed(1)} MiB，最大 20 MiB）`)
     }
+    await this.watchFile(file)
     return readFile(file, 'utf8')
   }
 

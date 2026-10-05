@@ -362,50 +362,59 @@ describe('Workbench', () => {
     ])
   })
 
-  it('opens a new workspace tab per file when the options carry a distinct file key', async () => {
+  // 真因回归：变更卡片与消息链接都落在**同一个共用 root**（memory 锚点根）下，
+  // 复用键若只看 options，两个不同文件会命中同一标签、互相顶替（实测标签数不增）。
+  it('opens a separate workspace tab per navigation target even when options carry only the shared root', async () => {
     let resourceId = 6
     invoke.mockImplementation((channel: string) =>
       Promise.resolve(channel === 'resource:create' ? ++resourceId : [])
     )
     await renderWorkbench(root, registry, sessionId, 'D:\\Workspace')
 
-    for (const file of ['D:\\Workspace\\a.ts', 'D:\\Workspace\\b.ts']) {
+    for (const file of ['C:\\mem\\a\\x.md', 'C:\\mem\\b\\y.md']) {
       await act(async () => {
         window.dispatchEvent(
           new CustomEvent('larify:workbench-open', {
-            detail: { options: { root: 'D:\\Workspace', file }, rendererId: 'workspace' }
+            detail: {
+              navigation: { path: file },
+              options: { root: 'C:\\mem' },
+              rendererId: 'workspace'
+            }
           })
         )
         await Promise.resolve()
       })
     }
 
-    // 不同文件 ⇒ 不同 options 组合（复用键）⇒ 各自创建一个工作区资源（新开标签）
+    // 同一 root、不同 navigation.path ⇒ 各创建一个工作区资源（两个标签），而非互相顶替。
     expect(invoke.mock.calls.filter(([channel]) => channel === 'resource:create')).toEqual([
-      ['resource:create', 'workspace', sessionId, { root: 'D:\\Workspace', file: 'D:\\Workspace\\a.ts' }],
-      ['resource:create', 'workspace', sessionId, { root: 'D:\\Workspace', file: 'D:\\Workspace\\b.ts' }]
+      ['resource:create', 'workspace', sessionId, { root: 'C:\\mem' }],
+      ['resource:create', 'workspace', sessionId, { root: 'C:\\mem' }]
     ])
   })
 
-  it('reuses the same workspace tab for the same file key', async () => {
+  it('reuses the workspace tab for the same navigation target', async () => {
     let resourceId = 6
     invoke.mockImplementation((channel: string) =>
       Promise.resolve(channel === 'resource:create' ? ++resourceId : [])
     )
     await renderWorkbench(root, registry, sessionId, 'D:\\Workspace')
 
-    for (const file of ['D:\\Workspace\\a.ts', 'D:\\Workspace\\a.ts']) {
+    for (const _ of [1, 2]) {
       await act(async () => {
         window.dispatchEvent(
           new CustomEvent('larify:workbench-open', {
-            detail: { options: { root: 'D:\\Workspace', file }, rendererId: 'workspace' }
+            detail: {
+              navigation: { path: 'C:\\mem\\a\\x.md' },
+              options: { root: 'C:\\mem' },
+              rendererId: 'workspace'
+            }
           })
         )
         await Promise.resolve()
       })
     }
 
-    // 同一文件 ⇒ 相同 options 组合 ⇒ 复用已有工作区资源（不重复开标签）
     expect(invoke.mock.calls.filter(([channel]) => channel === 'resource:create')).toHaveLength(1)
   })
 

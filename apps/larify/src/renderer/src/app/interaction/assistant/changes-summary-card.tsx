@@ -125,6 +125,10 @@ export function ChangesSummaryCard({
         new CustomEvent('larify:workbench-open', {
           detail: {
             rendererId: 'workspace',
+            // 声明「这次要定位到哪个文件」，工作台以它参与标签复用判定
+            // （见 workbench.tsx 的 WorkbenchOpenDetail）——否则同一 targetRoot（如整个
+            // memory 锚点根）下的所有文件会共用一个标签、互相顶替。
+            navigation: { path: selectedPath },
             options: { root: targetRoot },
             onOpen: (resourceId: number) =>
               requestWorkspaceNavigation({ path: selectedPath, resourceId })

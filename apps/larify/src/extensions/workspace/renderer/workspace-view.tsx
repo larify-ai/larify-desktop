@@ -173,6 +173,10 @@ export function WorkspaceView({
             new CustomEvent('larify:workbench-open', {
               detail: {
                 rendererId: 'workspace',
+                // 声明「这次要定位到哪个文件」，工作台以它参与标签复用判定
+                // （见 workbench.tsx 的 WorkbenchOpenDetail）：避免同一 root
+                // 下的不同文件共用一个标签、互相顶替。
+                navigation: { path },
                 options: { root: targetRoot },
                 onOpen: (resourceId: number): void =>
                   requestWorkspaceNavigation({ path, hash, resourceId })

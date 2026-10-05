@@ -41,19 +41,21 @@ describe('createMessageLinkHandler', () => {
     expect(event.type).toBe('larify:workbench-open')
     const detail = event.detail as {
       rendererId: string
+      navigation: { path: string }
       options: { root: string }
       onOpen: (resourceId: number) => void
     }
     expect(detail.rendererId).toBe('workspace')
     // 目标文件在工作区内 → root 保持为 cwd
     expect(detail.options.root).toBe(cwd)
-    // `file` 复用键 = 解析后的绝对路径，供工作台按文件维度开标签（不同文件新开、同一文件复用）
-    expect((detail.options as { file?: string }).file).toBe(`${cwd}\\src\\main\\index.ts`)
+    // `navigation.path` 声明导航目标，同时参与工作台的复用键
+    // （不同文件新开标签、同一文件复用标签），不再依赖调用方另传 `options.file`
+    expect(detail.navigation.path).toBe(`${cwd}\\src\\main\\index.ts`)
     // onOpen 回调触发工作区导航定位
     expect(typeof detail.onOpen).toBe('function')
   })
 
-  it('carries a stable per-file reuse key so different files open separate tabs', async () => {
+  it('declares a stable per-file navigation target so different files open separate tabs', async () => {
     const handler = createMessageLinkHandler(cwd, sessionId)
 
     handler({ kind: 'file', target: 'src\\a.ts' })
@@ -63,17 +65,17 @@ describe('createMessageLinkHandler', () => {
     handler({ kind: 'file', target: 'src\\a.ts' })
     await vi.waitFor(() => expect(dispatchSpy).toHaveBeenCalledTimes(3))
 
-    const files = dispatchSpy.mock.calls.map(
-      ([event]) => (event as CustomEvent<{ options: { file: string } }>).detail.options.file
+    const targets = dispatchSpy.mock.calls.map(
+      ([event]) => (event as CustomEvent<{ navigation: { path: string } }>).detail.navigation.path
     )
-    // 不同文件 ⇒ 不同复用键；同一文件重复打开 ⇒ 复用键稳定一致
-    expect(files).toEqual([
+    // 不同文件 ⇒ 不同复用目标；同一文件重复打开 ⇒ 目标稳定一致
+    expect(targets).toEqual([
       `${cwd}\\src\\a.ts`,
       `${cwd}\\src\\b.ts`,
       `${cwd}\\src\\a.ts`
     ])
-    expect(files[0]).toBe(files[2])
-    expect(files[0]).not.toBe(files[1])
+    expect(targets[0]).toBe(targets[2])
+    expect(targets[0]).not.toBe(targets[1])
   })
 
   it('opens a url link in the built-in browser and selects the resource', async () => {

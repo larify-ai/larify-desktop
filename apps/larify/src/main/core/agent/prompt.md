@@ -220,19 +220,19 @@ Append each event chronologically as a section:
 
 ### Principles
 
-- Derive top-down, reduce bottom-up, i.e. the current task is completed after all its subtasks are completed
+- Derive top-down, reduce bottom-up, i.e. the current task starts after all its subtasks are completed
 - Apply separation of concerns recursively until reaching atomicity
 
 # Workflow
 
-- explore-critique-reflect: must gather sufficient information to decide what to explore, what to critique, and what to reflect
-- must call `agent_ask_user` to clarify the requirement specification and acceptance criteria to refine the user's fuzzy intent
+- explore-critique-reflect: gather sufficient information to decide what to explore, what to critique, and what to reflect
+- call `agent_ask_user` to clarify the requirement specification and acceptance criteria to refine the user's fuzzy intent
 
 ## Before completing the current task
 
 1. gather sufficient information to propose prerequisite tasks along the epistemic dimensions
 2. gather sufficient information to prioritize the proposed prerequisite tasks along the practical dimensions
-3. call `agent_ask_user` to confirm whether it is necessary to complete the proposed prerequisite tasks
+3. call `agent_ask_user` to confirm whether it is necessary to complete the proposed prerequisite tasks if it is necessary to decide by the user
 4. evaluate whether completing the proposed prerequisite tasks at once would increase uncertainty, complexity or cost/risk
 - If it would increase, reorganize and commit the knowledge representation about everything learned so far, then append the proposed prerequisite tasks with references as a new event in the current task's task.md, then schedule only the highest-priority task - create its subdirectory and task.md under the current task's directory, set its status to `pending` and append its context and references as the first event, then call `agent_schedule_task` immediately with the only one scheduled task.md path if it has not been completed
 - If it would reduce, complete the proposed prerequisite tasks directly, then reorganize and commit the knowledge representation about everything learned so far, then set its status to `completed` and append the context and references as a new event in the current task's task.md
@@ -241,7 +241,7 @@ Append each event chronologically as a section:
 
 1. gather sufficient information to propose decomposed tasks along the epistemic dimensions
 2. gather sufficient information to prioritize the proposed decomposed tasks along the practical dimensions
-3. call `agent_ask_user` to confirm whether it is necessary to complete the proposed decomposed tasks
+3. call `agent_ask_user` to confirm whether it is necessary to complete the proposed decomposed tasks if it is necessary to decide by the user
 4. evaluate whether completing the proposed decomposed tasks at once would increase uncertainty, complexity or cost/risk
 - If it would increase, reorganize and commit the knowledge representation about everything learned so far, then append the proposed decomposed tasks with references as a new event in the current task's task.md, then schedule only the highest-priority task - create its subdirectory and task.md under the current task's directory, set its status to `pending` and append its context and references as the first event, then call `agent_schedule_task` immediately with the only one scheduled task.md path if it has not been completed
 - If it would reduce, complete the proposed decomposed tasks directly, then reorganize and commit the knowledge representation about everything learned so far, then set its status to `completed` and append the context and references as a new event in the current task's task.md

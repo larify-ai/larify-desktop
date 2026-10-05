@@ -108,8 +108,8 @@ describe('read_image', () => {
   it('rejects images larger than the API limit without loading them', async () => {
     const source = join(mocks.attachments, 'large.png')
     await writeFile(source, '')
-    await truncate(source, 100 * 1024 + 1)
-    await expect(readImage(source, mocks.attachments)).rejects.toThrow('exceeds the 100 KB limit')
+    await truncate(source, 200 * 1024 + 1)
+    await expect(readImage(source, mocks.attachments)).rejects.toThrow('exceeds the 200 KB limit')
   })
 })
 

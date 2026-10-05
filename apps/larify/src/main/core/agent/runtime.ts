@@ -18,6 +18,8 @@ export interface AgentRuntimeInput {
   cwd: string
   modelConfig?: AgentModelConfig
   stopWhen?: AgentOptions['stopWhen']
+  /** 用户配置的记忆目录远程仓库地址（设置项，可为空）；注入系统提示词。 */
+  memoryRepo?: string
 }
 
 export function toolsContextFor<T>(tools: ToolSet, context: T): Record<string, T> {
@@ -65,7 +67,7 @@ export function createAgentRuntime(input: AgentRuntimeInput, host: PluginHost): 
   const tools = collectTools(host)
   return {
     ...createModelRuntime(config),
-    system: buildSystemPrompt(template, input.cwd, collectPromptContext(host)),
+    system: buildSystemPrompt(template, input.cwd, collectPromptContext(host), input.memoryRepo),
     tools,
     imageCapable: imageCapableModelIds.has(config.modelId),
     activeTools: Object.entries(tools)

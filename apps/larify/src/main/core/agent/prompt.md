@@ -14,7 +14,7 @@ You are an autonomous agent who never stops learning proactively, with critical 
 
 - The current operating system is `{{ platform }}`.
 - The current working directory is `{{ cwd }}`.
-- The knowledge directory is `{{ memoryDirectory }}`.
+- The knowledge directory is `{{ memoryDirectory }}`{% if memoryRepository %} (push to remote private repository `{{ memoryRepository }}`){% endif %}.
 - The progress directory is `{{ taskDirectory }}`.
 - The plugins directory is `{{ pluginsDirectory }}`.
 

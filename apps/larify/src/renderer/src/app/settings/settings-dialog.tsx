@@ -10,18 +10,21 @@ import {
 } from '@renderer/components/ui/dialog'
 import { Input } from '@renderer/components/ui/input'
 import { readOwnApiKey, saveOwnApiKey } from './api-key'
+import { readMemoryRepo, saveMemoryRepo } from './memory-repo'
 
 /**
- * 由父组件按需挂载，而不是常驻后用 open 控制：挂载即读一次已保存的 Key，
+ * 由父组件按需挂载，而不是常驻后用 open 控制：挂载即读一次已保存的配置，
  * 既能保证每次打开都看到最新值，也不用 effect 去同步外部存储。
  */
 export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.Element {
   const [apiKey, setApiKey] = useState(() => readOwnApiKey())
+  const [memoryRepo, setMemoryRepo] = useState(() => readMemoryRepo())
   const [revealed, setRevealed] = useState(false)
 
-  // 保存语义收敛在存储层：留空 = 清除配置、恢复走账号额度。
+  // 保存语义收敛在存储层：留空 = 清除该项配置。
   const submit = (): void => {
     saveOwnApiKey(apiKey)
+    saveMemoryRepo(memoryRepo)
     onClose()
   }
 
@@ -63,6 +66,17 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.
                 {revealed ? <EyeOffIcon className="size-3.5" /> : <EyeIcon className="size-3.5" />}
               </button>
             </div>
+          </label>
+          <label className="grid gap-1.5 pb-4">
+            <span className="text-xs font-medium text-muted-foreground">Memory Storage</span>
+            <Input
+              autoComplete="off"
+              className="focus-visible:border-input focus-visible:ring-0"
+              onChange={(event) => setMemoryRepo(event.target.value)}
+              placeholder="https://github.com/user/memory.git"
+              spellCheck={false}
+              value={memoryRepo}
+            />
           </label>
           <DialogFooter>
             <Button onClick={onClose} type="button" variant="outline">

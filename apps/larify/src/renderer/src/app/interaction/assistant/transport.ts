@@ -2,6 +2,7 @@ import type { ChatTransport, UIMessage, UIMessageChunk } from 'ai'
 import { USAGE_CHANGED_EVENT } from '@shared/events'
 import type { AgentModelConfig } from '../../../../../main/core/model/config'
 import { readOwnApiKey } from '../../settings/api-key'
+import { readMemoryRepo } from '../../settings/memory-repo'
 import { invalidateGitStatus } from '../../../../../extensions/workspace/renderer/changes/git-status-invalidation'
 
 function isGitSnapshotChunk(chunk: unknown): boolean {
@@ -138,7 +139,8 @@ export function createIpcTransport(
             message: saved,
             cwd,
             modelConfig,
-            uiTargetId
+            uiTargetId,
+            memoryRepo: readMemoryRepo()
           })
           if (onSaved)
             void Promise.resolve()

@@ -79,6 +79,8 @@ export interface AgentInput {
    * 哪条 UI 消息」只有一个权威（渲染端），不再从数据库反推 ⇒ 消除 UI 重复（详见 `persist.ts`）。
    */
   uiTargetId?: string
+  /** 用户配置的记忆目录远程仓库地址（设置项，可为空）；注入系统提示词。 */
+  memoryRepo?: string
 }
 
 export class Agent implements Disposable {
@@ -163,13 +165,7 @@ export class Agent implements Disposable {
 
   private async runScheduledTasks(
     firstWorker: AgentWorker,
-    request: {
-      sessionId: string
-      cwd: string
-      message: UIMessage
-      modelConfig?: AgentModelConfig
-      uiTargetId?: string
-    },
+    request: AgentInput & { cwd: string },
     firstRuntime: AgentOptions,
     track: SessionTrack,
     sink: AgentSink,

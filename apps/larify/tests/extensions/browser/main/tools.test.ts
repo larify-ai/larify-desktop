@@ -174,6 +174,7 @@ describe("browser toolkit", () => {
         "click",
         "close_tab",
         "create_tab",
+        "download",
         "fill",
         "list_tabs",
         "navigate",

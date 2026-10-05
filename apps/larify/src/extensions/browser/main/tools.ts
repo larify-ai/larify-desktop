@@ -607,7 +607,7 @@ function interactionTools(service: BrowserService): Record<string, Tool> {
     }),
     download: defineTool({
       description: "Click an element and save downloads detected by Electron will-download.",
-      metadata: { icon: "browser" },
+      metadata: { icon: "browser", eager: true },
       inputSchema: downloadSchema,
       execute: async (args, ctx) => {
         const { id, selector, path, timeout } = args

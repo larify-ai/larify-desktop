@@ -223,7 +223,7 @@ Append each event chronologically as a section:
 - Derive top-down, reduce bottom-up, i.e. the current task starts after all its subtasks are completed
 - Apply separation of concerns recursively until reaching atomicity
 
-# Workflow
+# Workflow for each user request
 
 - explore-critique-reflect: gather sufficient information to decide what to explore, what to critique, and what to reflect
 - call `agent_ask_user` to clarify the requirement specification and acceptance criteria to refine the user's fuzzy intent

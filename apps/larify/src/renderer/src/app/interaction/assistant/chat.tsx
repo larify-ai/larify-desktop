@@ -189,8 +189,8 @@ export function AssistantChat({
           // `scrollMode==='following'` 不成立、followOutput 返回 false，视图不会滚底，
           // 表现为"发送了消息却没自动滚到底部"。
           setFollowRequest((current) => current + 1)
-          // 计划模式：仅当开关开启时给该轮用户消息打 `workflowPrefix` 标记，
-          // 主进程据此在送模型时拼 `/follow_workflow` 前缀（关闭则完全不加）。
+          // 计划模式恒定开启：每条用户消息都带 `workflowPrefix` 标记，
+          // 主进程据此在送模型时拼 `/follow_workflow` 前缀（落库 text 保持原文）。
           void sendMessage({
             text,
             files,

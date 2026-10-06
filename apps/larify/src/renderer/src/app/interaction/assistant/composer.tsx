@@ -26,7 +26,10 @@ import { WorkspaceSelector } from './workspace-selector'
 import { ModelSelector } from './model-selector'
 
 export interface AssistantComposerSubmit extends PromptInputMessage {
-  /** 计划模式：开启时给本轮输入拼 `/follow_workflow` 前缀（默认关闭、不持久化）。 */
+  /**
+   * 是否给本轮输入拼 `/follow_workflow` 前缀。**当前恒定开启**——每条用户消息都会带上该
+   * 前缀，使每轮都按工作流（`nest` 递归调度）执行；开关 UI 已隐藏（见 `ComposerFooter`）。
+   */
   workflowPrefix: boolean
 }
 
@@ -183,7 +186,7 @@ export function AssistantComposer({
     submitting.current = true
     inputHistory.reset()
     setText('')
-    onSubmit({ text: value, files: message.files, workflowPrefix: planMode })
+    onSubmit({ text: value, files: message.files, workflowPrefix: true })
   }
 
   const stop = (): void => {

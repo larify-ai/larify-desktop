@@ -102,8 +102,8 @@ describe('AssistantComposer', () => {
     })
 
     expect(onSubmit).toHaveBeenCalledOnce()
-    // 默认关闭计划模式：提交载荷固定携带 workflowPrefix=false（主进程据此不加前缀）。
-    expect(onSubmit).toHaveBeenCalledWith({ text: 'hello', files: [], workflowPrefix: false })
+    // 计划模式恒定开启：提交载荷固定携带 workflowPrefix=true（主进程据此给每条消息加前缀）。
+    expect(onSubmit).toHaveBeenCalledWith({ text: 'hello', files: [], workflowPrefix: true })
     expect(container.querySelector('textarea')!.value).toBe('')
 
     await act(async () => render({ status: 'error', onSubmit }))
@@ -116,7 +116,7 @@ describe('AssistantComposer', () => {
     expect(onSubmit).toHaveBeenCalledTimes(2)
   })
 
-  it('submits with workflowPrefix=true only after the plan-mode toggle is on (default off)', async () => {
+  it('always submits with workflowPrefix=true and hides the plan-mode toggle', async () => {
     reactEnvironment.IS_REACT_ACT_ENVIRONMENT = true
     container = document.createElement('div')
     document.body.append(container)
@@ -124,13 +124,9 @@ describe('AssistantComposer', () => {
     const onSubmit = vi.fn()
 
     await act(async () => render({ onSubmit }))
-    const toggle = container.querySelector<HTMLButtonElement>('[aria-label="计划模式"]')!
-    // 默认关闭：计划模式开关呈未激活态。
-    expect(toggle.getAttribute('aria-pressed')).toBe('false')
+    // 计划模式开关已隐藏（恒定开启），容器内不应出现该入口。
+    expect(container.querySelector('[aria-label="计划模式"]')).toBeNull()
 
-    // 打开计划模式后再提交 → workflowPrefix=true。
-    await act(async () => toggle.click())
-    expect(toggle.getAttribute('aria-pressed')).toBe('true')
     await act(async () => input('实现这个功能'))
     await act(async () => submit())
     expect(onSubmit).toHaveBeenLastCalledWith({
@@ -139,17 +135,14 @@ describe('AssistantComposer', () => {
       workflowPrefix: true
     })
 
-    // 关闭计划模式，并重置提交守卫（status 变化才复位）→ 后续提交回到默认（不加前缀）。
-    await act(async () => toggle.click())
+    // 下一轮（status 变化复位提交守卫）仍恒定携带前缀。
     await act(async () => render({ status: 'error', onSubmit }))
-    const toggleAfter = container.querySelector<HTMLButtonElement>('[aria-label="计划模式"]')!
-    expect(toggleAfter.getAttribute('aria-pressed')).toBe('false')
     await act(async () => input('普通提问'))
     await act(async () => submit())
     expect(onSubmit).toHaveBeenLastCalledWith({
       text: '普通提问',
       files: [],
-      workflowPrefix: false
+      workflowPrefix: true
     })
   })
 

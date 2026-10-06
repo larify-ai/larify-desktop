@@ -108,7 +108,7 @@ describe('meta tools', () => {
     await expect(run(tool, { query: 'audio' })).resolves.toEqual([{ name: 'Audio' }])
     await run(tool, { query: 'bluetooth', limit: 5 })
 
-    expect(search).toHaveBeenNthCalledWith(1, 'audio', 100)
+    expect(search).toHaveBeenNthCalledWith(1, 'audio', 20)
     expect(search).toHaveBeenNthCalledWith(2, 'bluetooth', 5)
   })
 
@@ -121,8 +121,8 @@ describe('meta tools', () => {
     expect(schema.properties?.limit).toMatchObject({
       type: 'integer',
       exclusiveMinimum: 0,
-      maximum: 200,
-      default: 100
+      maximum: 100,
+      default: 20
     })
   })
 
@@ -140,7 +140,7 @@ describe('meta tools', () => {
     registry.register(contextWorkerToken, { search })
 
     await expect(run(tool, { query: 'audio' })).resolves.toEqual(['result'])
-    expect(search).toHaveBeenCalledWith('audio', 100)
+    expect(search).toHaveBeenCalledWith('audio', 20)
   })
 
   it('discovers plugins and all of their capabilities including eager', async () => {

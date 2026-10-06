@@ -13,11 +13,11 @@ export function createSearchMemoryTool(registry: Registry): Tool {
     inputSchema: z
       .object({
         query: z.string().trim().min(1).describe('Search query'),
-        limit: z.number().int().positive().max(200).default(100).describe('Maximum results')
+        limit: z.number().int().positive().max(100).default(20).describe('Maximum results')
       })
       .strict(),
     metadata: { eager: true, icon: 'search' },
-    execute: ({ query, limit = 100 }) => {
+    execute: ({ query, limit = 20 }) => {
       const memory = registry.get<MemorySearch>(contextWorkerToken)
       if (!memory) throw new Error('Memory search is unavailable.')
       return memory.search(query, limit)

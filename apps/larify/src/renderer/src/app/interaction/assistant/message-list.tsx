@@ -657,6 +657,8 @@ function ActiveAssistantMessageList({
   const pendingNavigationIndex = useRef<number | undefined>(undefined)
   const following = useRef(false)
   const wasLiveRef = useRef(live)
+  // 程序化滚动置真：它触发的 scroll 不是用户滚动，不得据它改写滚动意图。
+  const programmaticScroll = useRef(false)
 
   // 可见起点：直接由 Virtuoso 的渲染 range 推导（rangeChanged 内设置），
   // 高频滚动/流式增长路径不再 querySelectorAll + getBoundingClientRect，
@@ -779,15 +781,26 @@ function ActiveAssistantMessageList({
   }, [scrollViewportToBottom])
 
   useLayoutEffect(() => {
-    // 完成瞬间（live true→false）本轮正文才以打字机方式逐字长高。若此时滚动意图仍是
-    // positioning（Virtuoso 因 item 高度被低估而未判到底），贴底跟随循环不运行 ⇒ 答复
-    // 落在视口下方（用户报「已完成但看不到回复」）。升为 following 让后续长高被继续跟随；
-    // reading（用户主动上翻阅读）不打扰。
+    // 完成瞬间（live true→false）本轮答复落地，必须让 Virtuoso 重新测量并定位到真实末尾，
+    // 否则默认回复不可见（见 scrollToIndex 处注释）。reading（用户主动上翻阅读）不打扰。
     const wasLive = wasLiveRef.current
     wasLiveRef.current = live
-    if (wasLive && !live && scrollMode.current === 'positioning') {
+    if (wasLive && !live && scrollMode.current !== 'reading') {
       scrollMode.current = 'following'
       following.current = true
+      // 列表尾部靠 defaultItemHeight(80) 估算未渲染项，而末尾动辄数千 px ⇒ 滚动条"已到底"
+      // （dfb=0）却仍差数十条未渲染，形成「测量死锁」：内容在视口下方但没有可滚的余地
+      // （用户报「已完成但看不到回复」）。autoscrollToBottom() 在此态实测无效（scrollTop 不动），
+      // 必须 scrollToIndex 到真实末尾以触发重测；护栏避免其 scroll 被误判为用户滚到底。
+      programmaticScroll.current = true
+      list.current?.scrollToIndex({ index: 'LAST', align: 'end', behavior: 'auto' })
+      // 双 rAF 才解除：scrollToIndex 的多帧滚动可能跨帧抛出 scroll 事件，
+      // 单帧解除会漏判其后续帧（用双帧覆盖）。
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          programmaticScroll.current = false
+        })
+      })
     }
     if (live && scrollMode.current === 'following') {
       scrollViewportToBottom()
@@ -1117,6 +1130,11 @@ function ActiveAssistantMessageList({
       onScrollCapture={(event) => {
         const element = scrollElement.current
         if (!element || event.target !== element) return
+        // 程序化滚动引发的 scroll 不是用户意图，不参与滚动意图判定。
+        if (programmaticScroll.current) {
+          lastScrollTop.current = element.scrollTop
+          return
+        }
         // 可见起点已由 rangeChanged 推导（零布局读），滚动路径不再读布局
         const { scrollTop } = element
         const movedUp = scrollTop < lastScrollTop.current

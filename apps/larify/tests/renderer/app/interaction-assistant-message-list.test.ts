@@ -539,6 +539,69 @@ describe('interaction assistant message list', () => {
     expect(scroller.scrollTop).toBe(1880)
   })
 
+  it('re-measures and lands on the true last item when the turn completes', async () => {
+    // 回归守门：「已完成但看不到回复」的真身是**列表尾部测量死锁**——Virtuoso 用
+    // defaultItemHeight(80) 估算未渲染 item，而本轮末尾动辄数千 px，于是滚动条"已到底"
+    // 却仍差数十条未渲染内容（真机实测：末项只渲染到 index 55，真实末条是 83，主区全空）。
+    // 完成瞬间必须 scrollToIndex 到真实末尾以触发重新测量。
+    // ⚠️ 必须用 scrollToIndex({index:'LAST'})：实测 autoscrollToBottom() 在死锁态**无效**。
+    await render({ messages: [message('streaming')], recentStart: 0, live: true })
+    captured.scrollToIndex.mockClear()
+    captured.autoscrollToBottom.mockClear()
+
+    await render({ messages: [message('finished')], recentStart: 0, live: false })
+
+    expect(captured.scrollToIndex).toHaveBeenCalledWith({
+      index: 'LAST',
+      align: 'end',
+      behavior: 'auto'
+    })
+  })
+
+  it('does not move the viewport or resume following when the reader is reading', async () => {
+    // 回归守门：用户已上翻阅读（reading）时，本轮结束时**不得**移动视口、**不得**升为 following。
+    // 真机上曾观察到 reading 被强制拉到底（scrollTop 42030 → 83227），打断阅读。
+    await render({ messages: [message('streaming')], recentStart: 0, live: true })
+    const scroller = createScroller(100)
+    container.firstElementChild?.append(scroller)
+    act(() => (captured.props as VirtuosoProps).scrollerRef(scroller))
+    act(() => container.firstElementChild?.dispatchEvent(new WheelEvent('wheel', { deltaY: -200 })))
+    captured.scrollToIndex.mockClear()
+
+    await render({ messages: [message('finished')], recentStart: 0, live: false })
+    await flushFrames(4)
+
+    expect(captured.scrollToIndex).not.toHaveBeenCalled()
+    expect((captured.props as VirtuosoProps).followOutput(true)).toBe(false)
+  })
+
+  it('does not rewrite scroll intent from the scroll events a programmatic scroll raises', async () => {
+    // 回归守门：scrollToIndex 引发的 scroll 事件不是用户滚动。真机实测：完成瞬间的
+    // scrollToIndex 会触发 scroll → onScrollCapture 把 reading 误判为「用户滚到底」→ following。
+    // 这里在**非阅读**态触发完成（才有程序化滚动），随后派发该次程序化 scroll 断言其被忽略。
+    await render({ messages: [message('streaming')], recentStart: 0, live: true })
+    const scroller = createScroller(100)
+    container.firstElementChild?.append(scroller)
+    act(() => (captured.props as VirtuosoProps).scrollerRef(scroller))
+
+    await render({ messages: [message('finished')], recentStart: 0, live: false })
+    expect(captured.scrollToIndex).toHaveBeenCalled()
+
+    // 模拟「用户在程序化滚动前刚上翻」：进入 reading（此时 programmaticScroll 仍为真）
+    act(() => container.firstElementChild?.dispatchEvent(new WheelEvent('wheel', { deltaY: -200 })))
+    scroller.scrollTop = 100
+    act(() => scroller.dispatchEvent(new Event('scroll')))
+    // 程序化滚动窗口内的 scroll 不得把 reading 改写成 following
+    expect((captured.props as VirtuosoProps).followOutput(true)).toBe(false)
+
+    // 标记结算后，用户向下滚回接近底部应恢复 following（既有行为不变）
+    await flushFrames(3)
+    scroller.scrollTop = 101
+    act(() => scroller.dispatchEvent(new Event('scroll')))
+    await act(() => new Promise((resolve) => setTimeout(resolve, 2)))
+    expect((captured.props as VirtuosoProps).followOutput(true)).toBe('auto')
+  })
+
   it('observes the last message shell itself rather than the item list container', async () => {
     // 回归守门：followGrowingList 的 ResizeObserver 必须观察最后一条消息的外壳本身。
     // 观察 `virtuoso-item-list` 容器时回调频率远高于观察单个 item，会持续把

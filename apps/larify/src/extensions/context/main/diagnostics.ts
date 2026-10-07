@@ -51,7 +51,7 @@ async function metadataDiagnostics(
   if (typeof data.description === 'string' && data.description.length > DESCRIPTION_MAX_LENGTH) {
     diagnostics.push(
       diagnostic(
-        `Description is too long: ${data.description.length} > ${DESCRIPTION_MAX_LENGTH} characters. Keep it a short retrieval summary.`
+        `Description is too long: ${data.description.length} > ${DESCRIPTION_MAX_LENGTH} characters. Shorten it to a short retrieval summary.`
       )
     )
   }

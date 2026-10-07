@@ -118,7 +118,7 @@ describe('context diagnostics', () => {
     const result = await createContextDiagnosticsProvider(root, noDuplicate).provide(file)
 
     expect(result.diagnostics.map(({ message }) => message)).toEqual([
-      'Description is too long: 501 > 500 characters. Keep it a short retrieval summary.'
+      'Description is too long: 501 > 500 characters. Shorten it to a short retrieval summary.'
     ])
   })
 

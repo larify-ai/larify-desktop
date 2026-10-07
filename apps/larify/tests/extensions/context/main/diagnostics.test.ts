@@ -113,19 +113,19 @@ describe('context diagnostics', () => {
   it('reports a description that is too long', async () => {
     const root = createRoot()
     const file = join(root, 'index.md')
-    writeFileSync(file, markdown('Index', '', 'x'.repeat(301)))
+    writeFileSync(file, markdown('Index', '', 'x'.repeat(501)))
 
     const result = await createContextDiagnosticsProvider(root, noDuplicate).provide(file)
 
     expect(result.diagnostics.map(({ message }) => message)).toEqual([
-      'Description is too long: 301 > 300 characters. Keep it a short retrieval summary.'
+      'Description is too long: 501 > 500 characters. Keep it a short retrieval summary.'
     ])
   })
 
   it('accepts a description at the length threshold', async () => {
     const root = createRoot()
     const file = join(root, 'index.md')
-    writeFileSync(file, markdown('Index', '', 'x'.repeat(300)))
+    writeFileSync(file, markdown('Index', '', 'x'.repeat(500)))
 
     const result = await createContextDiagnosticsProvider(root, noDuplicate).provide(file)
 

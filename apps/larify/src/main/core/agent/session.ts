@@ -29,7 +29,14 @@ export async function runAgentSession(
   onChunk?: (chunk: UIMessageChunk) => void,
   onMessage?: (message: UIMessage) => void,
   uiOriginalMessages?: UIMessage[],
-  baseProcessingMs = 0
+  baseProcessingMs = 0,
+  /**
+   * 本轮流**响应消息 id**。给定时透传给 `createUIMessageStream.generateMessageId`：AI SDK 的
+   * `getResponseUIMessageId` 只在 `originalMessages` 末条**不是** assistant 时才采用它（否则强制
+   * 复用末条 assistant 的 id）。reset 续写轮据此把流 id 定为「reset 新行 id」⇒ 渲染端末端 id
+   * 收敛到 `sessions.start` 之后 ⇒ 后续 ask_user 回答天然可被模型读到（见 persist.ts）。
+   */
+  responseId?: string
 ): Promise<UIMessage[]> {
   const startedAt = Date.now()
   // 跨 run 累加纯处理时长：
@@ -83,6 +90,7 @@ export async function runAgentSession(
   // messages 不变（上下文压缩保留），且 originalMessages 的额外消息不进模型。
   const stream = createUIMessageStream({
     originalMessages: uiOriginalMessages ?? messages,
+    ...(responseId !== undefined ? { generateMessageId: () => responseId } : {}),
     onError: errorMessage,
     execute: async ({ writer }) => {
       const uiStream = toUIMessageStream({

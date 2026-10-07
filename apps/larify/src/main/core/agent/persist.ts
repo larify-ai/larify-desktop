@@ -301,6 +301,8 @@ export async function runStoredAgentSession(
     lastMsg?.role === 'user' &&
     (lastMsg?.metadata as Record<string, unknown> | undefined)?.compaction === true
   const continuationOf = isCompaction ? sessions.lastAssistant(sessionId, 'before') : undefined
+  // reset 续写轮的落库 id（提前到 `uiOriginalMessages` 之前：它现在**同时**充当「流的响应 id」）。
+  const resetStoredId = isCompaction ? randomUUID() : undefined
   // UI 消息身份（`uiOriginalMessages`）与模型输入（`messages`）分离：AI SDK 靠「末条是 assistant
   // 就复用其 id」把本轮产出合并进那条 UI 消息。故末条要挂到渲染端**已有的** assistant 上——
   // 否则渲染端 replaceLastMessage 失败 ⇒ pushMessage 新建（并把锚点 parts 复制为基线）⇒ **UI 重复**。
@@ -355,9 +357,16 @@ export async function runStoredAgentSession(
       const uiTarget: UIMessage = uiTargetFromRenderer
         ? { ...uiTargetFromRenderer, id: request.uiTargetId }
         : { id: request.uiTargetId, role: 'assistant', parts: [] }
-      return continuationOf ? [...messages, uiTarget] : [uiTarget]
+      // ★ 根本修复：reset 续写轮**故意不让末条是 assistant**（即不挂 `uiTarget`/`continuationOf`），
+      // 并下传 `generateMessageId = resetStoredId` ⇒ AI SDK 的 `getResponseUIMessageId` 因末条不是
+      // assistant 而**采用新 id** ⇒ 流 `start` chunk 的 messageId = 新 id ⇒ **渲染端末端 id 随之
+      // 收敛到 `start` 之后** ⇒ 此后所有 ask_user 回答天然落在模型可见区内（不再有「按旧 id 写回
+      // ⇒ 落在 start 之前 ⇒ 读不到」）。模型输入 `messages` **一字不改**（压缩效果不变）。
+      // 代价：reset 边界在 UI 上表现为**一条新消息**（不再并进 reset 前那条）。
+      if (continuationOf) return messages
+      return [uiTarget]
     }
-    if (continuationOf) return [...messages, continuationOf]
+    if (continuationOf) return messages
     if (!request.nested || !message) return undefined
     const nestedAnchor =
       withAnsweredTool(continuationAnchor, message, request.answeredToolCallId) ??
@@ -394,8 +403,6 @@ export async function runStoredAgentSession(
   // 本轮嵌套行的落库 id 后缀：每次 runStoredAgentSession 生成一次（轮内多次 saveResponse 复用
   // ⇒ 原地替换；跨轮各自不同 ⇒ 不互相覆盖）。续写轮不新建行，故无需后缀。
   const nestedSuffix = request.nested && !continuationAnchor ? randomUUID() : undefined
-  // reset 续写轮的落库 id 重定向（见 `locateCurrentRow` 第 3 条路径）。
-  const resetStoredId = isCompaction ? randomUUID() : undefined
 
   /**
    * **落库原语一：定位「本轮该写哪条行」**。返回 `id`（写进哪一行）、`nestedRow`（是否打
@@ -489,13 +496,21 @@ export async function runStoredAgentSession(
       //   可能**长于**（或短于）`continuationOf.parts`（探针实测：基线 2 parts vs `continuationOf` 1 part）
       //   ⇒ 按 `continuationOf` 切会**切错长度**（残留旧 part 或丢增量）。
       // 与「新建嵌套轮」的切片判据（`sliceFrom: uiOriginalMessages?.at(-1)`）**保持同一来源**。
-      // **无基线**（首轮无 `originalMessages`）时无基线可切 ⇒ 原样落库。
+      //
+      // ⚠️ **切片的必要前提 = 流式基线是 assistant**（AI SDK 会克隆其整份 parts 作起点、只追加
+      // 增量 ⇒ `response.parts` = 「基线 + 增量」，须切掉基线部分）。**根本修复后 reset 轮的
+      // `uiOriginalMessages` 末条恒非 assistant**（= 模型输入，末条是 compaction user）⇒ AI SDK
+      // 从**空**起构（`createStreamingUIMessageState` 走 `{id, parts: []}` 分支）⇒ `response.parts`
+      // **就是本段全部产出**（无基线可切）。此时若仍按基线 `parts.length` 切，会把本段前若干个 part
+      // **误切掉**（实测：本段 4 parts 被切剩 2；本段仅 1 part 时被切成 **0** ⇒ 整轮落空）。故
+      // **仅当基线确为 assistant 时**才切（保留对「基线恰为 assistant」的极旧回退形态的兼容）。
       const resetBaseline = uiOriginalMessages?.at(-1)
-      const stored = resetBaseline
+      const sliceBaseline = resetBaseline?.role === 'assistant' ? resetBaseline : undefined
+      const stored = sliceBaseline
         ? {
             ...response,
             id: resetStoredId,
-            parts: response.parts.slice(resetBaseline.parts.length)
+            parts: response.parts.slice(sliceBaseline.parts.length)
           }
         : { ...response, id: resetStoredId }
       // reset 续写**换新 id**（使其落在 `sessions.start` 之后、可被 `loadMessages` 读到），于是本轮
@@ -579,13 +594,28 @@ export async function runStoredAgentSession(
     // reset 续写换新 id 落库后，用新版本**取代**旧行（其内容已被 `stored` 完整包含，见 `LocatedRow`）。
     if (row.supersededId !== undefined) sessions.deleteBeforeStart(sessionId, row.supersededId)
   }
+  // 跨 run 纯处理时长的累加基数：
+  // - reset 续写轮**不再**把 `continuationOf` 挂进 `uiOriginalMessages`（见上：末条恒非 assistant），
+  //   于是 `session.ts` 无法再从 `uiOriginalMessages` 里读到 reset 前那段的 `totalProcessingMs`
+  //   ⇒ 时长会在 reset 边界**归零**（实测：reset 前累计 5000ms，reset 后续写轮得 0）。
+  //   这里显式把 reset 前那条 assistant 的累计时长作为基数下传，使渲染端「处理时长」跨 reset 连续。
+  // - 其余轮沿用编排层给的 `baseProcessingMs`（嵌套各轮独立上下文，由编排层累加）。
+  const resetBaseProcessingMs = (() => {
+    if (!resetStoredId) return request.baseProcessingMs
+    const base = request.baseProcessingMs ?? 0
+    if (base > 0) return base
+    const total = (continuationOf?.metadata as Record<string, unknown> | undefined)
+      ?.totalProcessingMs
+    return typeof total === 'number' && Number.isFinite(total) ? total : base
+  })()
   const finalMessages = await runAgentSession(
     messages,
     options,
     onChunk,
     saveResponse,
     uiOriginalMessages,
-    request.baseProcessingMs
+    resetBaseProcessingMs,
+    resetStoredId
   )
   // originalMessages 可能比 messages 长，AI SDK 把合并后的消息放在末尾 ⇒ 取末尾 assistant。
   const finalResponse = finalMessages.at(-1)
@@ -597,6 +627,7 @@ export async function runStoredAgentSession(
   // - 否则（新提问轮）⇒ AI SDK 自生成的新 id，即 UI 底座的 id（无底座时取末条产出 id）。
   // 供编排层在该轮派生的 nest/reset 内部轮**复用**（它们是同一条 UI 消息的连续产出）。
   const uiMessageId =
+    (resetStoredId !== undefined ? resetStoredId : undefined) ??
     request.uiTargetId ??
     (uiOriginalMessages?.at(-1)?.role === 'assistant'
       ? (uiOriginalMessages.at(-1) as UIMessage).id

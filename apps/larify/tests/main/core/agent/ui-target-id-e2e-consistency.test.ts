@@ -95,7 +95,7 @@ describe('解 A 端到端不变式：全链 UI 消息 id 恒一致（渲染端�
     for (const s of open.splice(0)) s.dispose()
   })
 
-  it('新提问 → nest → nest 续写 → reset → reset 后 nest：messageId 全链恒 = 首轮新 id', async () => {
+  it('新提问 → nest → nest 续写 → reset → reset 后 nest：reset 边界换新 id（渲染端随之收敛）', async () => {
     const { runStoredAgentSession } = await import('../../../../src/main/core/agent/persist')
 
     // 轮1 新提问（渲染端不给 uiTargetId ⇒ 新建）
@@ -155,23 +155,22 @@ describe('解 A 端到端不变式：全链 UI 消息 id 恒一致（渲染端�
       message: comp,
       previousStored: comp
     })
-    // ★ 必须是 G，而非 c1。若 findMessageById 带 `position >= start` 过滤 ⇒ 此处会变成 c1。
-    expect(sent.at(-1)).toBe(G)
-    // ★ reset 分支仍在：产出落**新行**（`resetStoredId`），而非写回渲染端那条（G）。
-    //   （reset 分支的判据是 `response.id === continuationOf?.id`；标准流程里 `uiTargetId` 恰等于
-    //   `continuationOf.id`，故成立。若二者分歧 ⇒ 会落到「主链轮」分支、写回 `uiTargetId`。）
+    // ★ 根本修复后：reset 轮 UI 底座**末条不是 assistant**（= compaction user `c1`）
+    //   ⇒ 流 id 改由 `generateMessageId`（= reset 新行 id）决定，渲染端随之收敛。
+    expect(sent.at(-1)).toBe('c1')
     expect(preReset?.id).toBe(G)
     expect(r4!.stored.id).not.toBe(G)
-    // ★ 回归修复后：reset 落库改为「只存本轮增量」⇒ 新行**不再包含**旧行 ⇒ **不再删除旧行**
-    //   （删了会丢历史）。故 G 仍在库，轮5 nest 的底座直接命中 G（不再走 `lastVisibleAssistant` 兜底）。
-    expect(store.findMessageById(sessionId, G)).toBeDefined()
+    // ★ reset 轮把落库新 id 回传为 UI id ⇒ 渲染端末端 id = reset 新行 id。
+    const N = r4!.uiMessageId
+    expect(N).toBe(r4!.stored.id)
+    expect(store.findMessageById(sessionId, N)).toBeDefined()
 
-    // 轮5 reset 后 nest（继续复用 G）⇒ 底座 id 仍 = G、parts 非空。
+    // 轮5 reset 后 nest（★ 渲染端此刻持有 N）⇒ 底座 id = N、parts 非空。
     await runStoredAgentSession(store, {
       sessionId,
       cwd,
       nested: true,
-      uiTargetId: G,
+      uiTargetId: N,
       options: { model: streamOf(['E'], { prefix: 'r5' }) } as never,
       message: {
         id: 'n2',
@@ -180,9 +179,9 @@ describe('解 A 端到端不变式：全链 UI 消息 id 恒一致（渲染端�
         parts: [text('判据2')]
       } as UIMessage
     })
-    expect(sent.at(-1)).toBe(G)
+    expect(sent.at(-1)).toBe(N)
 
-    // 全链：仅首轮 undefined（新建），其余恒 G。
-    expect(sent).toEqual([undefined, G, G, G, G])
+    // 全链：轮1 新建（undefined）；轮2/3 复用 G；轮4 = reset 换新 id；轮5 复用该新 id。
+    expect(sent).toEqual([undefined, G, G, 'c1', N])
   })
 })

@@ -63,24 +63,32 @@ describe('解 A 守门：reset 取代旧行后，复用的 uiTargetId 底座不�
     sent.length = 0
     const sessionMod = await import('../../../../src/main/core/agent/session')
     spy = vi.spyOn(sessionMod, 'runAgentSession')
-    spy.mockImplementation(async (_m, _o, _c, saveResponse, uiOriginalMessages) => {
-      const anchor = uiOriginalMessages?.at(-1)
-      sent.push({ id: anchor?.id, parts: anchor?.parts.length ?? -1 })
-      const resp: UIMessage = {
-        id: anchor?.id ?? `gen-${sent.length}`,
-        role: 'assistant',
-        parts: [{ type: 'text', text: 'round-output' }]
+    // ★ mock 必须**忠实复刻 AI SDK 的 id 语义**（`getResponseUIMessageId`）：
+    //   - `originalMessages` 末条是 assistant ⇒ 复用其 id（= `uiTargetId` 底座）；
+    //   - 否则（reset 续写的末条是 compaction user）⇒ 用 `generateMessageId()`（= 第 7 参 `responseId`
+    //     = `resetStoredId`）。
+    spy.mockImplementation(
+      async (_m, _o, _c, saveResponse, uiOriginalMessages, _base, responseId) => {
+        const anchor = uiOriginalMessages?.at(-1)
+        sent.push({ id: anchor?.id, parts: anchor?.parts.length ?? -1 })
+        const id =
+          anchor?.role === 'assistant' ? anchor.id : (responseId ?? `gen-${sent.length}`)
+        const resp: UIMessage = {
+          id,
+          role: 'assistant',
+          parts: [{ type: 'text', text: 'round-output' }]
+        }
+        saveResponse?.(resp)
+        return [resp]
       }
-      saveResponse?.(resp)
-      return [resp]
-    })
+    )
   })
   afterEach(() => {
     spy?.mockRestore()
     for (const s of open.splice(0)) s.dispose()
   })
 
-  it('新提问 → reset → nest：nest 轮的 UI 底座 id = G 且 parts 非空（未被清空）', async () => {
+  it('新提问 → reset → nest：nest 轮的 UI 底座 id = reset 新 id 且 parts 非空（未被清空）', async () => {
     const { runStoredAgentSession } = await import('../../../../src/main/core/agent/persist')
 
     // 轮1：新提问（无 uiTargetId）⇒ 渲染端新建 G。
@@ -90,10 +98,10 @@ describe('解 A 守门：reset 取代旧行后，复用的 uiTargetId 底座不�
       options: {} as never,
       message: { id: 'u1', role: 'user', parts: [text('问')] } as UIMessage
     })
-    const G = r1!.uiMessageId
     expect(sent.at(-1)).toEqual({ id: undefined, parts: -1 })
 
-    // 轮2：主链 reset 续写（带 uiTargetId=G）⇒ 产出落新行、G 那条被 deleteBeforeStart 取代。
+    // 轮2：主链 reset 续写（带 uiTargetId=渲染端新建的 G）⇒ 产出落新行、G 那条被甩到 start 之前。
+    const G = r1!.uiMessageId
     const comp: UIMessage = {
       id: 'c1',
       role: 'user',
@@ -101,7 +109,7 @@ describe('解 A 守门：reset 取代旧行后，复用的 uiTargetId 底座不�
       parts: [text('问'), text('# Handoff')]
     }
     store.saveStart(sessionId, comp)
-    await runStoredAgentSession(store, {
+    const r2 = await runStoredAgentSession(store, {
       sessionId,
       cwd: workspace,
       uiTargetId: G,
@@ -109,28 +117,33 @@ describe('解 A 守门：reset 取代旧行后，复用的 uiTargetId 底座不�
       message: comp,
       previousStored: comp
     })
-    expect(sent.at(-1)?.id).toBe(G)
-    // ★ 回归修复后：**不再删除 G**（reset 落库改为「只存本轮增量」，新行不再包含旧行 ⇒ 删旧行
-    //   会丢历史）。故 G 仍在库 ⇒ `findMessageById(G)` 命中，nest 轮底座直接取 G（不再走兜底）。
-    expect(store.findMessageById(sessionId, G)).toBeDefined()
+    // ★ 根本修复后：reset 轮 UI 底座**末条不是 assistant**（= compaction user，无 id 底座）
+    //   ⇒ 流 id 改由 `generateMessageId`（= reset 新行 id）决定 ⇒ 渲染端末端 id 收敛到 start 之后。
+    expect(sent.at(-1)?.id).toBe('c1')
+    expect(r2!.uiMessageId).toBe(r2!.stored.id)
+    // 渲染端此刻持有的末端 id = reset 轮回报的 `r2.uiMessageId`（重置了 reset 新行，故库内存在）。
+    const N = r2!.uiMessageId
+    expect(store.findMessageById(sessionId, N)).toBeDefined()
 
-    // 轮3：reset 后 nest（复用 G）⇒ 底座 id 仍 = G，但 parts 必须**非空**。
+    // 轮3：reset 后 nest（★ 渲染端下传 uiTargetId = N；nest 输入是 assistant 快照，模拟渲染端
+    //      `addToolOutput` 后的快照行，故用 role='assistant' 以免被当 nest 判据打 nested 标记）。
     await runStoredAgentSession(store, {
       sessionId,
       cwd: workspace,
       nested: true,
-      uiTargetId: G,
+      uiTargetId: N,
       options: {} as never,
       message: {
-        id: 'n1',
-        role: 'user',
-        metadata: { nested: true, compaction: true },
-        parts: [text('判据')]
+        id: N,
+        role: 'assistant',
+        parts: [text('reset 轮回报内容')]
       } as UIMessage
     })
     const last = sent.at(-1)!
-    // ★ 修复前：parts = 0（空底座 ⇒ 渲染端 replace 清空既有内容）；修复后：> 0。
-    expect(last.id).toBe(G)
+    // ★ 底座 id = 渲染端此刻持有的 N（reset 新 id）。
+    expect(last.id).toBe(N)
+    // 探测：N 在库内存在（第一种画法）或已被甩到 start 之前（第二种画法，`findMessageById` 仍可命
+    // 中因其不过滤 start）——两种画法都应由 `findMessageById(N)` 命中 ⇒ parts 非空。
     expect(last.parts).toBeGreaterThan(0)
   })
 })

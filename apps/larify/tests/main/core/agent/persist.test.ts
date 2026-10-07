@@ -445,9 +445,10 @@ describe('runStoredAgentSession', () => {
     expect(sessions.lastVisibleAssistant).not.toHaveBeenCalled()
   })
 
-  it('★ 不变式：reset 续写 + uiTargetId ⇒ UI 底座末条是该 id（而非 DB 的 reset 前 assistant）', async () => {
-    // reset 续写：模型输入末尾是 compaction user；UI 底座 = 模型输入 + uiTarget ⇒ 末条 assistant 的
-    // id = uiTargetId ⇒ 渲染端 replaceLastMessage 必真、不新建（消除 reset 型重复）。
+  it('★ 不变式：reset 续写轮 ⇒ UI 底座**不带** assistant（末条是 compaction user）、UI id 换 reset 新行', async () => {
+    // 根本修复：reset 续写轮**故意不让 uiOriginalMessages 末条是 assistant**（不挂 uiTarget/continuationOf），
+    // 并下传 generateMessageId = reset 新行 id ⇒ AI SDK 采用新 id ⇒ 渲染端末端 id 收敛到 start 之后
+    // （后续 ask_user 回答天然可被模型读到）。详见 persist.ts 的注释。
     const compactionUser: UIMessage = {
       id: 'compaction',
       role: 'user',
@@ -487,9 +488,14 @@ describe('runStoredAgentSession', () => {
     })
 
     const uiOriginalMessages = mocks.run.mock.calls[0][4] as UIMessage[]
-    // ★ UI 底座末条 id **恒等于渲染端权威的 `uiTargetId`**（而非 DB 的 reset 前 assistant `dbAnchor`）。
-    expect(uiOriginalMessages.at(-1)?.id).toBe('ui-authority')
-    expect(result?.uiMessageId).toBe('ui-authority')
+    const responseId = mocks.run.mock.calls[0][6] as string | undefined
+    // ★ UI 底座**末条不是 assistant**（= 模型输入，末条是 compaction user）⇒ AI SDK 采用新 id。
+    expect(uiOriginalMessages.at(-1)?.role).toBe('user')
+    expect(uiOriginalMessages.at(-1)?.id).toBe('compaction')
+    // ★ 下传的 responseId（= reset 新行 id）非空，且与回报的 uiMessageId 一致。
+    expect(typeof responseId).toBe('string')
+    expect(result?.uiMessageId).toBe(responseId)
+    expect(result?.uiMessageId).not.toBe('ui-authority')
   })
 
   it('★ 不变式：嵌套轮 + uiTargetId ⇒ 不再调 lastVisibleAssistant 反推（有权威 id 时纯浪费）', async () => {
@@ -654,9 +660,10 @@ describe('runStoredAgentSession', () => {
     expect(mocks.run.mock.calls[0][4]).toEqual([mainAssistant])
   })
 
-  it('passes the reset continuation assistant into the UI merge identity', async () => {
-    // reset 续写：模型输入末尾是 compaction user。应读取截断前最后一条 assistant 并作为
-    // uiOriginalMessages 末尾传入 runAgentSession，使 AI SDK 复用其 id 合并成一条。
+  it('reset continuation does NOT attach the pre-reset assistant (new response id instead)', async () => {
+    // reset 续写：模型输入末尾是 compaction user。**根本修复**：不再把截断前最后一条 assistant
+    // 挂到 uiOriginalMessages 末尾（那样会强制复用旧 id ⇒ 旧行在 start 之前 ⇒ 回答读不到）；
+    // 改为让末条不是 assistant + 下传 generateMessageId = reset 新行 id ⇒ 渲染端收敛到 start 之后。
     const compactionUser: UIMessage = {
       id: 'compaction',
       role: 'user',
@@ -687,8 +694,48 @@ describe('runStoredAgentSession', () => {
 
     expect(sessions.lastAssistant).toHaveBeenCalledWith('session', 'before')
     expect(mocks.run).toHaveBeenCalledTimes(1)
-    // 第 5 参 uiOriginalMessages 应为「模型输入 + reset 前 assistant」作为合并底座
-    expect(mocks.run.mock.calls[0][4]).toEqual([compactionUser, earlierAssistant])
+    // 第 5 参 uiOriginalMessages **只有模型输入**（末条是 compaction user，不带 assistant 底座）。
+    expect(mocks.run.mock.calls[0][4]).toEqual([compactionUser])
+    // 第 7 参 responseId = reset 新行 id（非空）。
+    expect(typeof mocks.run.mock.calls[0][6]).toBe('string')
+  })
+
+  it('★ 不变式：reset 续写轮保留 reset 前那段的处理时长（baseProcessingMs 不归零）', async () => {
+    // 根本修复把 `continuationOf` 从 `uiOriginalMessages` 里拿掉后，`session.ts` 无法再从
+    // `uiOriginalMessages` 读到 reset 前那段的 `totalProcessingMs` ⇒ 时长会在 reset 边界归零
+    // （实测：reset 前累计 5000ms，reset 后续写轮得 0）。故须把该时长作为 `baseProcessingMs`
+    // 显式下传，使渲染端「处理时长」跨 reset 连续。
+    const compactionUser: UIMessage = {
+      id: 'compaction',
+      role: 'user',
+      metadata: { compaction: true },
+      parts: [{ type: 'text', text: '# Handoff\nContinue.' }]
+    }
+    const earlierAssistant: UIMessage = {
+      id: 'earlier',
+      role: 'assistant',
+      metadata: { totalProcessingMs: 5000 },
+      parts: [{ type: 'text', text: 'prior' }]
+    }
+    mocks.prepare.mockResolvedValue([compactionUser])
+    mocks.run.mockResolvedValue([compactionUser])
+    const sessions = {
+      hasSession: vi.fn(() => true),
+      loadMessages: vi.fn(() => [compactionUser]),
+      lastAssistant: vi.fn(() => earlierAssistant),
+      renameSession: vi.fn(),
+      saveMessages: vi.fn()
+    }
+
+    await runStoredAgentSession(sessions as never, {
+      sessionId: 'session',
+      cwd: 'cwd',
+      message: user,
+      options: {} as never
+    })
+
+    // 第 6 参 baseProcessingMs = reset 前那条 assistant 的累计时长。
+    expect(mocks.run.mock.calls[0][5]).toBe(5000)
   })
 
   it('does not return an assistant message from an earlier run', async () => {

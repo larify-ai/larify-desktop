@@ -21,7 +21,7 @@ import { SessionStore } from '../../../../src/main/core/session/store'
  * ⇒ 该轮 reset 行与上一轮 reset 行**同时可见** ⇒ **同一轮 UI 重复复发**（DB 型）。
  *
  * 修法：reset 轮的唯一可靠标志是 `resetStoredId`（由 `isCompaction` 决定，与 id 来源无关）。
- * 本测试锁死「连续两次 reset 后，可见 assistant 行恒为 1 条」。
+ * 本测试锁死「连续两次 reset 后：每次换新行落库、回报的新 id 被下游复用、模型输入可读到最新产出」。
  */
 const text = (v: string): UIMessage['parts'][number] => ({ type: 'text', text: v })
 
@@ -47,7 +47,7 @@ const streamOf = (n: number, prefix: string): MockLanguageModelV4 =>
     })
   })
 
-describe('解 A 守门：连续两次 reset 不产生重复可见行', () => {
+describe('解 A 守门：连续两次 reset 各换新行、模型输入可续', () => {
   const sessionId = 's-double-reset'
   let store: SessionStore
   const open: SessionStore[] = []
@@ -61,17 +61,20 @@ describe('解 A 守门：连续两次 reset 不产生重复可见行', () => {
     sent.length = 0
     const sessionMod = await import('../../../../src/main/core/agent/session')
     spy = vi.spyOn(sessionMod, 'runAgentSession')
-    spy.mockImplementation(async (_m, _o, _c, saveResponse, uiOriginalMessages) => {
+    // 忠实模拟 AI SDK 的 `getResponseUIMessageId` + `createStreamingUIMessageState`：
+    // - 末条**是 assistant** ⇒ 复用其 id、克隆其整份 parts 作流式基线（再追加本轮增量）；
+    // - 末条**不是 assistant**（reset 续写轮：末条是 compaction user）⇒ 用 `generateMessageId()`
+    //   （= 第 7 参 `responseId`）、从**空**起构（`{id, parts: []}`）、再追加本轮增量。
+    spy.mockImplementation(async (_m, _o, _c, saveResponse, uiOriginalMessages, _b, responseId) => {
       const anchor = uiOriginalMessages?.at(-1)
       sent.push({ id: anchor?.id, parts: anchor?.parts.length ?? -1 })
-      // 模拟 AI SDK：以 anchor 为基线克隆其 parts + 追加 2 个新 part（带轮次唯一标识，使各轮内容
-      // 不同 —— 这样切片后每行只含本轮增量，便于断言"内容互不相同"）。
+      const isAssistant = anchor?.role === 'assistant'
       const mark = `δ-${sent.length}`
       const resp: UIMessage = {
-        id: anchor?.id ?? `gen-${sent.length}`,
+        id: isAssistant ? anchor.id : (responseId ?? `gen-${sent.length}`),
         role: 'assistant',
         parts: [
-          ...(anchor?.parts ?? []),
+          ...(isAssistant ? (anchor.parts ?? []) : []),
           { type: 'text', text: `${mark}a` },
           { type: 'text', text: `${mark}b` }
         ]
@@ -85,7 +88,7 @@ describe('解 A 守门：连续两次 reset 不产生重复可见行', () => {
     for (const s of open.splice(0)) s.dispose()
   })
 
-  it('新提问 → reset → reset：可见 assistant 行恒为 1 条，且模型输入可读到最新产出', async () => {
+  it('新提问 → reset → reset：每次换新行落库，模型输入可读到最新产出', async () => {
     const { runStoredAgentSession } = await import('../../../../src/main/core/agent/persist')
 
     // 轮1：新提问 ⇒ 渲染端新建 G。
@@ -116,6 +119,8 @@ describe('解 A 守门：连续两次 reset 不产生重复可见行', () => {
     expect(r2!.stored.id).not.toBe(G) // 换新行落库
 
     // 轮3：第二次 reset（★ 回归点：旧判据在此落空 ⇒ 写回已被删的 G ⇒ 两行同时可见）。
+    // ★ 根本修复后渲染端会**采纳 reset 的新 id**（流 start chunk 的 messageId）⇒ 本轮 uiTargetId
+    //   自然是上一轮回报的 `uiMessageId`（= r2.stored.id），而非旧的 G。
     const comp2: UIMessage = {
       id: 'c2',
       role: 'user',
@@ -126,7 +131,7 @@ describe('解 A 守门：连续两次 reset 不产生重复可见行', () => {
     const r3 = await runStoredAgentSession(store, {
       sessionId,
       cwd: workspace,
-      uiTargetId: G,
+      uiTargetId: r2!.uiMessageId,
       options: { model: streamOf(2, 'r3') } as never,
       message: comp2,
       previousStored: comp2
@@ -134,9 +139,10 @@ describe('解 A 守门：连续两次 reset 不产生重复可见行', () => {
     // 每次都换新行（不复用渲染端旧 id、也不复用上一轮 reset 行）。
     expect(r3!.stored.id).not.toBe(G)
     expect(r3!.stored.id).not.toBe(r2!.stored.id)
-    // UI 身份仍恒为渲染端权威的 G（渲染端恒 replace）。
-    expect(r2!.uiMessageId).toBe(G)
-    expect(r3!.uiMessageId).toBe(G)
+    // ★ 新语义：reset 轮把**落库新 id 回传为 UI id**（渲染端据此收敛到 start 之后）⇒ uiMessageId = stored.id。
+    expect(r2!.uiMessageId).toBe(r2!.stored.id)
+    expect(r3!.uiMessageId).toBe(r3!.stored.id)
+    expect(r2!.uiMessageId).not.toBe(G)
 
     // ★ 可见 assistant 行 = 3 条（每轮一条），且**内容互不相同**（= 各轮增量，非重复副本）。
     //   背景：reset 落库已改为「只存本轮增量」（见 persist.ts reset 分支）⇒ 不再有「新行完整包含旧行」

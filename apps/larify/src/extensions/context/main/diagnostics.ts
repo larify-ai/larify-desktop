@@ -8,7 +8,7 @@ import { isMarkdown, isWithin, markdownLinks, resolveContextLink } from './files
 type DuplicateName = (file: string, name: string) => Promise<boolean>
 
 /** `description` 的长度上限——它是检索时**原样返回**的字段，写成文章级摘要会放大单次返回体量、加速会话 reset。 */
-const DESCRIPTION_MAX_LENGTH = 150
+const DESCRIPTION_MAX_LENGTH = 300
 
 export function createContextDiagnosticsProvider(
   root: string,

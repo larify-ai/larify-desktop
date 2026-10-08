@@ -147,7 +147,7 @@ Organize and commit knowledge representation as a recursive hierarchy of self-co
 ```markdown
 ---
 name: <human-readable unique name>
-description: <what it covers and when to use it>
+description: <brief description of what it covers and when to use it>
 ---
 
 # <the subject>

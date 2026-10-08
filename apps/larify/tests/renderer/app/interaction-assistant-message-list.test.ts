@@ -1598,7 +1598,10 @@ describe('interaction assistant message list', () => {
     let content = props.itemContent(0).props.children
     let history = content.props.sections ? content : content.props.children[0]
     expect(history.props.sections.map(({ title }) => title)).toEqual(['列出当前目录'])
-    expect(history.props.sections[0].streaming).toBe(true)
+    // `agent_reset_context` 现在也是**阶段边界**（见 `isResetBoundary`）：reset 会**收尾**前一段，
+    // 故该段不再是 streaming（它已结束、上下文已交接）。这是「同一 send() 内 reset 续写轮与首轮
+    // 共享一条 UI 消息流、parts 被累积」导致 UI 重复的根治点——切段后 LIVE == RELOAD。
+    expect(history.props.sections[0].streaming).toBe(false)
 
     await render({ messages: [response], recentStart: 0, live: true })
 
@@ -1614,6 +1617,255 @@ describe('interaction assistant message list', () => {
     expect(history.props.sections[1].item.partIndexes).toEqual([4])
     expect(history.props.sections[1].continuations).toHaveLength(1)
     expect(history.props.sections[1].continuations[0].item.partIndexes).toEqual([6])
+  })
+
+  it('splits a live message at agent_reset_context so the pre-reset work is not swallowed by the post-reset stage', async () => {
+    // 复现真实会话 648dcb99（robot_lab模型）：同一个 send() 内模型调用 agent_reset_context，
+    // reset 的内部续写轮与首轮**共享一条 UI 消息流**，而 AI SDK 对第二个 `start` chunk 只覆盖
+    // `message.id`、**不重置 parts** ⇒ 渲染端那条消息把「reset 前 52 parts」与「reset 后 8 parts」
+    // **累积在一起**。若只在 show_progress 处切段，reset 前那半段会被并进 reset 后那半段的标题下
+    // ⇒ 同一批 items 在 UI 上出现两遍（重启后从 DB 两条独立行重载即消失）。
+    // 期望：reset 处切段 ⇒ 前半段独立成段（无标题），后半段归到其 show_progress 标题下。
+    const pre = {
+      parts: [
+        { type: 'step-start' },
+        { type: 'text', text: 'PRE_RESET_WORK', state: 'done' },
+        {
+          type: 'dynamic-tool',
+          toolName: 'agent_reset_context',
+          toolCallId: 'reset-1',
+          state: 'output-available',
+          input: { handoff: 'Continue.' },
+          output: 'Context reset requested.'
+        }
+      ]
+    }
+    const post = {
+      parts: [
+        { type: 'step-start' },
+        { type: 'text', text: 'POST_INTRO', state: 'done' },
+        {
+          type: 'dynamic-tool',
+          toolName: 'agent_show_progress',
+          toolCallId: 'progress-post',
+          state: 'output-available',
+          input: { title: '核算 8010' },
+          output: 'Progress shown.'
+        },
+        { type: 'text', text: 'POST_WORK', state: 'done' }
+      ]
+    }
+    const merged = {
+      id: 'merged-run',
+      role: 'assistant',
+      parts: [...pre.parts, ...post.parts]
+    } as UIMessage
+
+    await render({ messages: [merged], recentStart: 0, live: true })
+
+    const props = captured.props as VirtuosoProps
+    const content = props.itemContent(0).props.children
+    const history = content.props.sections ? content : content.props.children[0]
+    const sections = history.props.sections as Array<{
+      title: string
+      item: { partIndexes: number[] }
+    }>
+    // 前半段（含 reset）：无标题（contentOnly）、且**只含** reset 前的内容。
+    expect(sections.map((s) => s.title)).toEqual(['', '核算 8010'])
+    // parts: 0=step-start, 1=PRE_RESET_WORK, 2=reset_context, 3=step-start, 4=POST_INTRO,
+    //        5=show_progress（隐藏）, 6=POST_WORK（step-start 不渲染、show_progress 隐藏）
+    expect(sections[0].item.partIndexes).toEqual([1, 2])
+    // 后半段（标题 "核算 8010"）：只含 post 的内容。
+    expect(sections[1].item.partIndexes).toEqual([4])
+    // 关键：reset 前的内容不得出现在 reset 后的标题段里（否则就是 UI 重复）。
+    expect(sections[1].item.partIndexes).not.toContain(1)
+  })
+
+  it('keeps the same-titled stage on the two sides of agent_reset_context as separate sections', async () => {
+    // reset 是硬边界（上下文已交接）：reset 前后**即使同一条消息、同名阶段也不得合并**，
+    // 否则前半段内容会被并进后半段的标题下（旧缺陷形态）。
+    const sp = (id: string, title: string): UIMessage['parts'][number] => ({
+      type: 'dynamic-tool',
+      toolName: 'agent_show_progress',
+      toolCallId: id,
+      state: 'output-available',
+      input: { title },
+      output: 'ok'
+    })
+    const merged = {
+      id: 'same-title-across-reset',
+      role: 'assistant',
+      parts: [
+        sp('s0', 'SAME'),
+        { type: 'text', text: 'BEFORE_RESET', state: 'done' },
+        {
+          type: 'dynamic-tool',
+          toolName: 'agent_reset_context',
+          toolCallId: 'r1',
+          state: 'output-available',
+          input: { handoff: 'h' },
+          output: 'ok'
+        },
+        sp('s1', 'SAME'),
+        { type: 'text', text: 'AFTER_RESET', state: 'done' }
+      ]
+    } as unknown as UIMessage
+
+    await render({ messages: [merged], recentStart: 0, live: true })
+
+    const props = captured.props as VirtuosoProps
+    const content = props.itemContent(0).props.children
+    const history = content.props.sections ? content : content.props.children[0]
+    const sections = history.props.sections as Array<{
+      title: string
+      streaming: boolean
+      item: { partIndexes: number[] }
+    }>
+    // 两个同名 stage 各自成 section（跨 reset 不合并）。
+    expect(sections.map((s) => s.title)).toEqual(['SAME', 'SAME'])
+    // 前一段含 BEFORE_RESET(part1) + reset(part2)；后一段含 AFTER_RESET(part4)。
+    expect(sections[0].item.partIndexes).toEqual([1, 2])
+    expect(sections[1].item.partIndexes).toEqual([4])
+  })
+
+  it('keeps the part right after agent_reset_context when no show_progress follows it', async () => {
+    // reset 切点是半开区间（前段含 reset part、后段从 reset part 之后开始）。若实现只用单一
+    // 下标（如 `resetPartIndex + 1`），后段的严格 `> lowerBound` 会**跳过** `resetPartIndex + 1`
+    // 那个 part —— 当 reset 后仅紧跟正文、没有 `show_progress` 定义后段时，该正文会**丢失**。
+    // 本用例锁死：reset 后的紧跟内容必须保留在后段（默认无标题段）。
+    const reset = (id: string) => ({
+      type: 'dynamic-tool',
+      toolName: 'agent_reset_context',
+      toolCallId: id,
+      state: 'output-available',
+      input: { handoff: 'h' },
+      output: 'ok'
+    })
+    const response = {
+      id: 'reset-then-text',
+      role: 'assistant',
+      parts: [
+        {
+          type: 'dynamic-tool',
+          toolName: 'agent_show_progress',
+          toolCallId: 'progress-one',
+          state: 'output-available',
+          input: { title: 'A' },
+          output: 'ok'
+        },
+        { type: 'text', text: 'BEFORE', state: 'done' },
+        reset('r1'),
+        { type: 'text', text: 'AFTER', state: 'done' }
+      ]
+    } as unknown as UIMessage
+
+    await render({ messages: [response], recentStart: 0, live: true })
+
+    const props = captured.props as VirtuosoProps
+    const content = props.itemContent(0).props.children
+    const history = content.props.sections ? content : content.props.children[0]
+    const sections = history.props.sections as Array<{ title: string; item: { partIndexes: number[] } }>
+    // 前段 'A' 含 BEFORE(part1) + reset(part2)；后段（默认无标题）含 AFTER(part3)——不得丢失。
+    expect(sections.map((s) => s.title)).toEqual(['A', ''])
+    expect(sections[0].item.partIndexes).toEqual([1, 2])
+    expect(sections[1].item.partIndexes).toEqual([3])
+  })
+
+  it('does not create an empty stage when agent_reset_context is the last part', async () => {
+    // reset 边界把切点取在 reset part **之后**（index = resetPartIndex + 1）。当 reset 是消息末尾时，
+    // 切点 = parts.length：其后无任何内容 ⇒ 不得产生空标题段（否则会多出一个空折叠头，且
+    // qualifiesForAggregation 会被空段影响）。reset part 本身归属**前一段**。
+    const response = {
+      id: 'reset-at-end',
+      role: 'assistant',
+      parts: [
+        {
+          type: 'dynamic-tool',
+          toolName: 'agent_show_progress',
+          toolCallId: 'progress-one',
+          state: 'output-available',
+          input: { title: '唯一阶段' },
+          output: 'Progress shown.'
+        },
+        { type: 'text', text: 'work', state: 'done' },
+        {
+          type: 'dynamic-tool',
+          toolName: 'agent_reset_context',
+          toolCallId: 'reset-last',
+          state: 'output-available',
+          input: { handoff: 'Continue.' },
+          output: 'Context reset requested.'
+        }
+      ]
+    } as UIMessage
+
+    await render({ messages: [response], recentStart: 0, live: true })
+
+    const props = captured.props as VirtuosoProps
+    const content = props.itemContent(0).props.children
+    const history = content.props.sections ? content : content.props.children[0]
+    const sections = history.props.sections as Array<{
+      title: string
+      item: { partIndexes: number[] }
+    }>
+    // 只有一段（reset 无后续内容 ≯ 空段），且 reset part 归入该段。
+    expect(sections.map((s) => s.title)).toEqual(['唯一阶段'])
+    expect(sections[0].item.partIndexes).toEqual([1, 2])
+  })
+
+  it('keeps the same-titled stage continuation and only splits across agent_reset_context', async () => {
+    // reset 前有两个同名阶段（应作为 continuation 合并为一段），reset 后又有同名阶段。
+    // 期望：reset 前合并为一段（含 continuation），跨 reset 才另起一段 ⇒ 内容全保留、不重复、不丢失。
+    const progress = (id: string): UIMessage['parts'][number] => ({
+      type: 'dynamic-tool',
+      toolName: 'agent_show_progress',
+      toolCallId: id,
+      state: 'output-available',
+      input: { title: 'SAME' },
+      output: 'ok'
+    })
+    const response = {
+      id: 'continuation-across-reset',
+      role: 'assistant',
+      parts: [
+        progress('p1'),
+        { type: 'text', text: 'BEFORE_ONE', state: 'done' },
+        progress('p2'),
+        { type: 'text', text: 'BEFORE_TWO', state: 'done' },
+        {
+          type: 'dynamic-tool',
+          toolName: 'agent_reset_context',
+          toolCallId: 'reset-1',
+          state: 'output-available',
+          input: { handoff: 'h' },
+          output: 'ok'
+        },
+        progress('p3'),
+        { type: 'text', text: 'AFTER_ONE', state: 'done' }
+      ]
+    } as unknown as UIMessage
+
+    await render({ messages: [response], recentStart: 0, live: true })
+
+    const props = captured.props as VirtuosoProps
+    const content = props.itemContent(0).props.children
+    const history = content.props.sections ? content : content.props.children[0]
+    const sections = history.props.sections as Array<{
+      title: string
+      item: { partIndexes: number[] }
+      continuations?: Array<{ item: { partIndexes: number[] } }>
+    }>
+    // 恰好两段（reset 前合并 / reset 后独立），标题相同但分属两侧。
+    expect(sections.map((s) => s.title)).toEqual(['SAME', 'SAME'])
+    // reset 前那段：主条 BEFORE_ONE(part1) + continuation 的第二同名阶段内容(part3)+reset(part4)。
+    const beforeIndexes = [
+      ...sections[0].item.partIndexes,
+      ...(sections[0].continuations ?? []).flatMap((c) => c.item.partIndexes)
+    ]
+    expect(beforeIndexes).toEqual(expect.arrayContaining([1, 3, 4]))
+    // reset 后那段：AFTER_ONE(part6)。两侧内容互不混入（无重复、无丢失）。
+    expect(sections[1].item.partIndexes).toEqual([6])
+    expect(sections[1].item.partIndexes).not.toContain(1)
   })
 
   it('keeps progress stages together across the historical and recent boundary', async () => {

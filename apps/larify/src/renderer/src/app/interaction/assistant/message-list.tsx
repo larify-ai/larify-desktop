@@ -114,6 +114,17 @@ function hasStageBoundary(message: UIMessage | undefined): boolean {
   return Boolean(message?.parts.some((part) => stageTitle(part) !== undefined))
 }
 
+// `agent_reset_context` 是「上下文压缩 / 交接」的切点：它之前与之后属于**两段产出**
+// （落库也是两条独立 assistant 行）。但同一个 `send()` 内 reset 的内部续写轮与首轮共享**同一条
+// UI 消息流**（AI SDK 收到第二个 `start` chunk 只覆盖 `message.id`、**不重置 parts**），于是渲染端
+// 那条消息把两段内容**累积在一起**。若不在此切段，`activityHistoryRun` 只能按 `show_progress`
+// 切，会把 reset 前那半段并进 reset 后那半段的标题下 ⇒ **同一批 items 出现两遍**（用户报「UI 显示
+// 重复」，重启后从 DB 两条独立行重载即消失）。故把 reset part 也当作阶段边界：**收尾当前阶段**并
+// **重置阶段状态**（reset 之后重新从「无命名阶段」开始，直到下一个 `show_progress`）。
+function isResetBoundary(part: UIMessage['parts'][number] | undefined): boolean {
+  return Boolean(part && isToolUIPart(part) && getToolName(part) === 'agent_reset_context')
+}
+
 function isInternalStagePart(part: UIMessage['parts'][number] | undefined): boolean {
   if (!part || !isToolUIPart(part)) return false
   const name = getToolName(part)
@@ -331,6 +342,11 @@ function activityHistoryRun(
   let crossedCompaction = false
   let waiting = false
   let cursor = start
+  // 自上次 push section 以来是否跨过 reset 边界。reset 是硬边界（上下文已交接）：reset 前后
+  // **即使是同一条消息、同名阶段也不得合并**，否则前半段内容会被并进后半段标题下（旧缺陷形态）。
+  // 用一个局部标志即可（无需给 `ActivityHistorySection` 加字段）：append 若见到该标志为真，
+  // 就强制另起 section 并把标志清掉。
+  let resetSinceLastAppend = false
 
   const append = (
     title: string,
@@ -340,14 +356,15 @@ function activityHistoryRun(
   ): void => {
     const entry = { message, item, streaming }
     const previous = sections.at(-1)
-    // 仅合并"同一条消息内、同标题"的阶段（continuation）；跨消息即使标题相同也另起 section，
-    // 否则子任务轮会因标题雷同被并入主任务阶段，造成内容错归与重复显示。
-    if (previous?.title === title && previous.message.id === message.id) {
+    // 仅合并"同一条消息内、同标题、且其间未跨 reset 边界"的阶段（continuation）；跨消息或
+    // 跨 reset 即使标号相同也另起 section，否则内容会被错归/重复显示。
+    if (!resetSinceLastAppend && previous?.title === title && previous.message.id === message.id) {
       previous.continuations = [...(previous.continuations ?? []), entry]
       previous.streaming ||= streaming
     } else {
       sections.push({ title, ...entry })
     }
+    resetSinceLastAppend = false
   }
   const flushPending = (title: string, preserveStreaming = false): void => {
     for (const entry of pending.splice(0)) {
@@ -391,28 +408,55 @@ function activityHistoryRun(
     )
     const activity = messageItems[activityIndex]
     if (activity?.kind !== 'content' || !activity.renderItem) break
-    const boundaries = message.parts.flatMap((part, index) => {
+    // 切点 = 命名阶段（`show_progress`）**与** reset 边界（`agent_reset_context`）。
+    // - 命名阶段：阶段从该 part **之后**开始 ⇒ 切点 `index = 阶段 part 下标`，其 part 归**前一段**。
+    // - reset 边界：上下文已交接、须在此**切段**，但 reset part 本身是**前一段的最后一件事**
+    //   （它仍要作为可见工具卡片渲染）⇒ 切点 `index = reset part 下标` 且前段**含**该 part。
+    // 二者用统一的半开区间 `(lowerBound, upperBound)` 表达，reset 边界额外带 `includeBoundary`
+    // 使其上界含 reset part。⚠️ 曾用 `index + 1` 表示「前段含 reset part」——但后段区间是严格
+    // `partIndex > lowerBound`，`+1` 会**跳过 `resetPartIndex + 1`**；当 reset 后仅紧跟正文、
+    // 无 `show_progress` 定义后段时该 part 会**丢失**。故必须用「单 index + 含端点标志」表达。
+    interface StageBoundary {
+      index: number
+      title: string | undefined
+      includeBoundary?: boolean
+    }
+    const boundaries = message.parts.flatMap<StageBoundary>((part, index) => {
+      if (isResetBoundary(part)) return [{ index, title: undefined, includeBoundary: true }]
       const title = stageTitle(part)
       return title ? [{ index, title }] : []
     })
     // 尚未出现任何命名阶段前的内容归入默认（无标题）阶段；用于聚合"无 show_progress 的轮次"。
     if (!boundaries.length && !seenBoundary) pendingStartTitle = ''
     let lowerBound = -1
-    for (const { index: boundaryIndex, title } of boundaries) {
+    for (const { index: boundaryIndex, title, includeBoundary } of boundaries) {
+      const upper = boundaryIndex + (includeBoundary ? 1 : 0)
       const item = filterRenderItem(
         activity.renderItem,
         new Set(
           activity.renderItem.partIndexes.filter(
-            (partIndex) => partIndex > lowerBound && partIndex < boundaryIndex
+            (partIndex) => partIndex > lowerBound && partIndex < upper
           )
         )
       )
-      if (item) {
-        startPendingStage()
-        pending.push({ message, item, streaming: false })
+      if (title === undefined) {
+        // reset 边界：把截至 reset part 的 pending 归入**当前**阶段后收尾（reset 之后另起一段，
+        // 无标题直至下一个 show_progress——与 DB 两条独立行同形），并标记「已跨 reset 边界」，
+        // 使其后内容即使与之前同消息同标题也不合并（见 `append`）。
+        if (item) pending.push({ message, item, streaming: false })
+        endCurrentStage()
+        seenBoundary = false
+        resetSinceLastAppend = true
+      } else {
+        if (item) {
+          startPendingStage()
+          pending.push({ message, item, streaming: false })
+        }
+        pendingStartTitle = title
+        seenBoundary = true
       }
-      pendingStartTitle = title
-      seenBoundary = true
+      // 后段下界恒为切点 part 的下标（严格 `> lowerBound`）：命名阶段的后段从其 part **之后**
+      // 开始、reset 边界的后段从 reset part **之后**开始，二者一致。
       lowerBound = boundaryIndex
     }
     const item = filterRenderItem(

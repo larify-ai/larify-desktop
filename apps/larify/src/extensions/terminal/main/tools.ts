@@ -183,8 +183,8 @@ const writeSchema = z.object({
     .number()
     .min(1)
     .max(3600)
-    .default(300)
-    .describe('Wait timeout in seconds, 1-3600, default 300'),
+    .default(60)
+    .describe('Wait timeout in seconds, 1-3600, default 60'),
   idle: z
     .number()
     .nonnegative()
@@ -199,8 +199,8 @@ const readSchema = z.object({
     .number()
     .min(1)
     .max(3600)
-    .default(300)
-    .describe('Wait timeout in seconds, 1-3600, default 300'),
+    .default(60)
+    .describe('Wait timeout in seconds, 1-3600, default 60'),
   idle: z
     .number()
     .nonnegative()

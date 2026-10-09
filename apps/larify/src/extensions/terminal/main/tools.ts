@@ -178,13 +178,13 @@ const writeSchema = z.object({
   interrupt: z
     .boolean()
     .default(true)
-    .describe('Send \\u0003 before writing the input'),
+    .describe('Send \\u0003 before writing the input, always send'),
   timeout: z
     .number()
     .min(1)
-    .max(3600)
+    .max(600)
     .default(60)
-    .describe('Wait timeout in seconds, 1-3600, default 60'),
+    .describe('Wait timeout in seconds, 1-600, default 60'),
   idle: z
     .number()
     .nonnegative()
@@ -198,9 +198,9 @@ const readSchema = z.object({
   timeout: z
     .number()
     .min(1)
-    .max(3600)
+    .max(600)
     .default(60)
-    .describe('Wait timeout in seconds, 1-3600, default 60'),
+    .describe('Wait timeout in seconds, 1-600, default 60'),
   idle: z
     .number()
     .nonnegative()

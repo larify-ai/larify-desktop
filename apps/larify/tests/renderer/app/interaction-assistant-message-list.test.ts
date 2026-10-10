@@ -1813,6 +1813,138 @@ describe('interaction assistant message list', () => {
     expect(sections[0].item.partIndexes).toEqual([1, 2])
   })
 
+  it('keeps showing processing (not completed) while a live turn pauses at the agent_reset_context boundary', async () => {
+    // 回归守门：`agent_reset_context` 是**阶段**边界（前一段收尾 ⇒ section streaming=false），但
+    // **不是轮次结束**——reset 的进程内续写轮仍在跑（`worker.ts` 的 `while (handoff)`：刷插件 /
+    // 重建上下文 / 等模型首 token）。旧判据只看 `sections.some(streaming)` ⇒ 这段间隙会误显示
+    // 「已完成」，随后又跳回实时计时（用户报「reset 的时候 ui 上会先显示已完成」）。
+    const response = {
+      id: 'reset-at-end-live',
+      role: 'assistant',
+      metadata: { startedAt: 1_000, completedAt: 6_300, totalProcessingMs: 5_300 },
+      parts: [
+        {
+          type: 'dynamic-tool',
+          toolName: 'agent_show_progress',
+          toolCallId: 'progress-one',
+          state: 'output-available',
+          input: { title: '唯一阶段' },
+          output: 'Progress shown.'
+        },
+        { type: 'text', text: 'work', state: 'done' },
+        {
+          type: 'dynamic-tool',
+          toolName: 'agent_reset_context',
+          toolCallId: 'reset-last',
+          state: 'output-available',
+          input: { handoff: 'Continue.' },
+          output: 'Context reset requested.'
+        }
+      ]
+    } as UIMessage
+
+    await render({ messages: [response], recentStart: 0, live: true })
+
+    const props = captured.props as VirtuosoProps
+    const content = props.itemContent(0).props.children
+    const history = content.props.sections ? content : content.props.children[0]
+    expect(history.props.running).toBe(true)
+    // section 级仍应是「阶段已收尾」（不转圈）——卡片级才代表轮次仍在跑。
+    expect(
+      history.props.sections.map(({ streaming }: { streaming: boolean }) => streaming)
+    ).toEqual([false])
+
+    await act(async () => root.render(props.itemContent(0)))
+    // 间隙期标题是**冻结的**累计时长（不带「已完成」），不能走实时墙钟（否则上一段累计被双记）。
+    expect(container.textContent).toContain('处理了')
+    expect(container.textContent).not.toContain('已完成')
+    // 间隙期也不得自动折叠（阶段收尾 ≠ 轮次结束）：否则卡会收起、续写开始时再弹开。
+    expect(
+      container.querySelector<HTMLButtonElement>('[data-activity-history] > button')?.dataset.state
+    ).toBe('open')
+
+    // 整轮跑完（live=false）后才显示「已完成 · 处理了 X」。
+    await render({ messages: [response], recentStart: 0, live: false })
+    await act(async () => root.render((captured.props as VirtuosoProps).itemContent(0)))
+    expect(container.textContent).toContain('已完成')
+  })
+
+  it('returns to live processing once the reset continuation emits its first part', async () => {
+    const response = {
+      id: 'reset-then-post',
+      role: 'assistant',
+      metadata: { startedAt: 1_000, totalProcessingMs: 5_300 },
+      parts: [
+        {
+          type: 'dynamic-tool',
+          toolName: 'agent_show_progress',
+          toolCallId: 'progress-one',
+          state: 'output-available',
+          input: { title: '前一段' },
+          output: 'Progress shown.'
+        },
+        {
+          type: 'dynamic-tool',
+          toolName: 'agent_reset_context',
+          toolCallId: 'reset-mid',
+          state: 'output-available',
+          input: { handoff: 'Continue.' },
+          output: 'Context reset requested.'
+        },
+        {
+          type: 'dynamic-tool',
+          toolName: 'agent_show_progress',
+          toolCallId: 'progress-two',
+          state: 'output-available',
+          input: { title: '后一段' },
+          output: 'Progress shown.'
+        },
+        { type: 'reasoning', text: 'post reset work', state: 'streaming' }
+      ]
+    } as unknown as UIMessage
+
+    await render({ messages: [response], recentStart: 0, live: true })
+    await act(async () => root.render((captured.props as VirtuosoProps).itemContent(0)))
+
+    expect(container.textContent).toContain('处理了')
+    expect(container.textContent).not.toContain('已完成')
+  })
+
+  it('does not treat a finished card as running when a newer user message follows', async () => {
+    // 反面守门：只有「run 延伸到可见消息末尾」才算 running。用户已发出下一条消息后，上一轮的卡
+    // 必须恢复「已完成 · 处理了 X」，否则会被永远显示成「处理中」。
+    const response = {
+      id: 'finished-card',
+      role: 'assistant',
+      metadata: { startedAt: 1_000, completedAt: 6_300, totalProcessingMs: 5_300 },
+      parts: [
+        {
+          type: 'dynamic-tool',
+          toolName: 'agent_show_progress',
+          toolCallId: 'progress-one',
+          state: 'output-available',
+          input: { title: '唯一阶段' },
+          output: 'Progress shown.'
+        },
+        { type: 'reasoning', text: 'work', state: 'done' }
+      ]
+    } as UIMessage
+
+    await render({
+      messages: [response, userMessage('user-two', 'next request')],
+      recentStart: 0,
+      live: true
+    })
+
+    const props = captured.props as VirtuosoProps
+    const content = props.itemContent(0).props.children
+    const history = content.props.sections ? content : content.props.children[0]
+    expect(history.props.running).toBe(false)
+
+    await act(async () => root.render(props.itemContent(0)))
+    expect(container.textContent).toContain('已完成')
+  })
+
   it('keeps the same-titled stage continuation and only splits across agent_reset_context', async () => {
     // reset 前有两个同名阶段（应作为 continuation 合并为一段），reset 后又有同名阶段。
     // 期望：reset 前合并为一段（含 continuation），跨 reset 才另起一段 ⇒ 内容全保留、不重复、不丢失。

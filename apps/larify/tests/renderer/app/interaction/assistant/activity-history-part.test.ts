@@ -241,6 +241,99 @@ describe('activity history part summary duration', () => {
     }
   })
 
+  it('shows processing (frozen accumulated duration) and stays expanded while a live turn sits at the reset boundary', async () => {
+    // 回归：reset 边界会把前一段收尾（section.streaming=false），但**轮次**仍在跑（进程内续写轮）。
+    // 只按 sections.some(streaming) 判 → 这段间隙误显示「已完成」且卡自动折叠。
+    vi.useFakeTimers()
+    vi.setSystemTime(10_000_000)
+    const metadata = { startedAt: 1_000_000, completedAt: 1_006_300, totalProcessingMs: 5_300 }
+    try {
+      await act(async () =>
+        root.render(
+          createElement(ActivityHistoryPart, {
+            sections: [section(assistant('a', metadata), '调研')], // streaming=false
+            running: true,
+            active: true
+          })
+        )
+      )
+
+      // 冻结的累计时长（不带走实时墙钟 → 否则把上一段双记成数万天）。
+      expect(container.textContent).toContain('处理了 6秒')
+      expect(container.textContent).not.toContain('已完成')
+      expect(container.textContent).not.toContain('天')
+      // 间隙期保持展开（默认展开判据与标题同源）。
+      expect(
+        container.querySelector<HTMLButtonElement>('[data-activity-history] > button')?.dataset
+          .state
+      ).toBe('open')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('uses the live wall clock when the turn is running and a section really streams', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(6_000)
+    try {
+      await act(async () =>
+        root.render(
+          createElement(ActivityHistoryPart, {
+            sections: [section(assistant('a', { startedAt: 1_000 }), '调研', true)],
+            running: true,
+            active: true
+          })
+        )
+      )
+
+      expect(container.textContent).toContain('处理了 5秒')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not show processing for an aborted card even while the session is running', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(10_000_000)
+    const metadata = {
+      startedAt: 1_000_000,
+      completedAt: 1_500_000,
+      totalProcessingMs: 510_593,
+      outcome: 'aborted'
+    }
+    try {
+      await act(async () =>
+        root.render(
+          createElement(ActivityHistoryPart, {
+            sections: [section(assistant('a', metadata), '调研')],
+            running: true,
+            active: true
+          })
+        )
+      )
+
+      expect(container.textContent).toContain('已中断')
+      expect(container.textContent).not.toContain('处理了 1')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('shows completed (not processing) for a finished card that is no longer running', async () => {
+    const metadata = { startedAt: 1_000, completedAt: 6_300, totalProcessingMs: 5_300 }
+    await act(async () =>
+      root.render(
+        createElement(ActivityHistoryPart, {
+          sections: [section(assistant('a', metadata), '调研')],
+          running: false,
+          active: true
+        })
+      )
+    )
+
+    expect(container.textContent).toContain('已完成 · 处理了 6秒')
+  })
+
   it('shows a bare waiting label when no duration has been recorded yet', async () => {
     // waiting 且尚无 totalProcessingMs/completedAt（首轮尚未结束）：无 durationPart，只显示「等待回答」。
     vi.useFakeTimers()

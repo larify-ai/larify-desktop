@@ -74,6 +74,12 @@ interface MessageActivityHistoryListItem {
   message: UIMessage
   sections: ActivityHistorySection[]
   waiting?: boolean
+  /**
+   * 本轮仍在跑：该 run 一直延伸到可见消息末尾（`cursor === messages.length`）且会话处于运行态。
+   * 与「有 section 在 streaming」区分——reset 边界会把前一段收尾（section streaming=false），
+   * 但其进程内续写轮仍在跑，此间标题不得回落成「已完成」（见 `activity-history-part.tsx`）。
+   */
+  running?: boolean
   trailing?: MessageListItem[]
 }
 
@@ -557,6 +563,9 @@ function recentListItems(
       message: sections[0].message,
       sections,
       waiting,
+      // 该 run 一直扫到可见消息末尾 ⇒ 这条卡就是「正在被产出的那条」，会话仍在运行时不得显示已完成
+      // （reset 间隙期：reset 边界已把前一段收尾，但续写轮还没吐出 part）。
+      running: live && cursor === shown.length,
       trailing
     })
     index = cursor - 1
@@ -610,6 +619,7 @@ function boundaryActivityHistory(
         message: run.sections[0].message,
         sections: run.sections,
         waiting: run.waiting,
+        running: live && run.cursor === combined.length,
         trailing: run.trailing
       },
       recentMessageIds: new Set(
@@ -1321,6 +1331,7 @@ function ActiveAssistantMessageList({
                   <ActivityHistoryPart
                     sections={listItem.sections}
                     waiting={listItem.waiting}
+                    running={listItem.running}
                     initialOpen={openActivities.current.get(listItem.key)}
                     active={active}
                     onOpenChange={(open) => handleActivityOpenChange(listItem.key, open)}

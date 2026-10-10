@@ -34,6 +34,7 @@ export function activityHistorySectionKey(section: ActivityHistorySection, index
 export function ActivityHistoryPart({
   sections,
   waiting = false,
+  running = false,
   initialOpen,
   onOpenChange,
   stageOpen,
@@ -41,6 +42,16 @@ export function ActivityHistoryPart({
 }: {
   sections: ActivityHistorySection[]
   waiting?: boolean
+  /**
+   * 本轮**仍在跑**（该 run 一直延伸到可见消息末尾且会话处于运行态）。
+   *
+   * 必须与「某个 section 在 streaming」区分开：`agent_reset_context` 是阶段边界，它会给前一段
+   * **收尾**（section 级 `streaming=false`），但那是**阶段**结束、不是**轮次**结束——reset 的
+   * 进程内 handoff 续写轮还在跑（`worker.ts` 的 `while (handoff)`，其间要刷插件、重建上下文、
+   * 等模型首 token）。若标题只按 `sections.some(streaming)` 判，这段间隙会误显示「已完成」，随后
+   * 又跳回实时计时（用户报「reset 时 ui 上会先显示已完成」）。
+   */
+  running?: boolean
   initialOpen?: boolean
   onOpenChange?: (open: boolean) => void
   // 阶段分组（stage section）展开状态的持久化通道。虚拟列表回收重挂载后，
@@ -55,7 +66,6 @@ export function ActivityHistoryPart({
   }
   active?: boolean
 }): React.JSX.Element {
-  const defaultOpen = sections.some(({ streaming }) => streaming) || waiting
   const aborted = sections.some(
     ({ message }) =>
       message.metadata &&
@@ -121,25 +131,36 @@ export function ActivityHistoryPart({
   // `running`（用于禁用 Composer、禁止开新轮）。若此处仍按 streaming 走 LiveProcessingDuration
   // （实时墙钟 = baseMs + now - startedAt），等待期间计时会**一直增长**。故 waiting 时一律用
   // 已记录的累计时长定格（durationPart），让计时暂停。
-  const summary = waiting ? (
-    durationPart ? (
-      `等待回答 · ${durationPart}`
-    ) : (
-      '等待回答'
-    )
-  ) : streaming ? (
+  const processingSummary =
     typeof startedAt === 'number' && Number.isFinite(startedAt) ? (
       <LiveProcessingDuration startedAt={startedAt} baseMs={baseProcessingMs} active={active} />
     ) : (
       '处理过程'
     )
-  ) : durationPart ? (
-    `${aborted ? interruptedSummary : '已完成'} · ${durationPart}`
-  ) : aborted ? (
-    interruptedSummary
-  ) : (
-    '已完成'
-  )
+  // 「本轮还在跑」= 某个 section 在 streaming（有产出正在流）**或** `running`（该 run 延伸到可见
+  // 消息末尾、会话仍在运行——reset 间隙期就是这种：阶段已收尾、续写轮还没吐出 part）。
+  // 二者缺一都会误显示「已完成」（见 `running` 的说明）。`aborted` 时不显示为处理中（中断已有专属文案）。
+  const inProgress = streaming || (running && !aborted)
+  // 默认展开的判据与标题同源：处理中（含 reset 间隙）或等待回答时展开。二者都基于同一 `inProgress`，
+  // 避免 reset 间隙 `streaming` 由真变假导致卡自动折叠、续写开始后又弹开。
+  const defaultOpen = inProgress || waiting
+  // 标题里的状态与时长。inProgress 且非真正 streaming 时（= reset 间隙：阶段已收尾、续写轮还没吐出
+  // part）**不能**走实时墙钟：此时消息元数据仍是上一段的 `startedAt` + `totalProcessingMs`，
+  // `baseMs + (now − startedAt)` 会把上一段累计**双记**（实测会跳成数万天）。故优先展示**冻结的**
+  // 累计时长（`durationPart` 本身就是「处理了 X」、不带「已完成」前缀），待续写轮的 `start` chunk
+  // 覆盖元数据后再由 streaming 分支切实时计时 ⇒ 读数连续。
+  const finishedSummary = aborted ? interruptedSummary : '已完成'
+  const summary = waiting
+    ? durationPart
+      ? `等待回答 · ${durationPart}`
+      : '等待回答'
+    : inProgress
+      ? streaming
+        ? processingSummary
+        : (durationPart ?? processingSummary)
+      : durationPart
+        ? `${finishedSummary} · ${durationPart}`
+        : finishedSummary
   const [open, setOpenSticky] = useStickyOpen(initialOpen, defaultOpen)
 
   return (

@@ -225,9 +225,6 @@ Append each event chronologically as a section:
 
 # Workflow for each user request
 
-- explore-critique-reflect: gather sufficient information to decide what to explore, what to critique, and what to reflect
-- call `agent_ask_user` to clarify the requirement specification and acceptance criteria to refine the user's fuzzy intent
-
 ## Before completing the current task
 
 1. gather sufficient information to propose prerequisite tasks along the epistemic dimensions
@@ -243,3 +240,8 @@ Append each event chronologically as a section:
 3. evaluate whether completing the proposed decomposed tasks at once would increase uncertainty, complexity or cost/risk
 - If it would increase, reorganize and commit the knowledge representation about everything learned so far, then append the proposed decomposed tasks with references as a new event in the current task's task.md, then schedule only the highest-priority task - create its subdirectory and task.md under the current task's directory, set its status to `pending` and append its context and references as the first event, then call `agent_schedule_task` immediately with the only one scheduled task.md path if it has not been completed
 - If it would reduce, complete the proposed decomposed tasks directly, then reorganize and commit the knowledge representation about everything learned so far, then set its status to `completed` and append the context and references as a new event in the current task's task.md
+
+## Tips
+
+- explore-critique-reflect: gather sufficient information to decide what to explore, what to critique, and what to reflect
+- call `agent_ask_user` to clarify the requirement specification and acceptance criteria to refine the user's fuzzy intent

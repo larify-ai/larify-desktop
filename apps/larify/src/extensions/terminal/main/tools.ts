@@ -178,7 +178,7 @@ const writeSchema = z.object({
   interrupt: z
     .boolean()
     .default(true)
-    .describe('Send \\u0003 before writing the input, always send'),
+    .describe('Send \\u0003 before writing the input, always true recommended'),
   timeout: z
     .number()
     .min(1)

@@ -10,7 +10,7 @@ import {
   or
 } from 'ai-retry/language-model'
 import {
-  smoothStream,
+  // smoothStream,
   streamText,
   wrapLanguageModel,
   type AsyncIterableStream,
@@ -133,10 +133,10 @@ export function runAgent(
     // 与上方 ai-retry 互补：ai-retry 负责"内容未流出"的重试，本处负责"内容流出后"。
     streamRetries: 0,
     onError: ({ error }) => (isRetryableStreamError(error) ? { retry: true } : undefined),
-    toolsContext: toolsContext as never,
-    experimental_transform: smoothStream({
-      delayInMs: 20,
-      chunking: new Intl.Segmenter('zh', { granularity: 'word' })
-    })
+    toolsContext: toolsContext as never
+    // experimental_transform: smoothStream({
+    //   delayInMs: 20,
+    //   chunking: new Intl.Segmenter('zh', { granularity: 'word' })
+    // })
   }).stream
 }

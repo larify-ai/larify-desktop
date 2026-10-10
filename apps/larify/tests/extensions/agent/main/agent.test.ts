@@ -289,10 +289,8 @@ describe('runAgentSession', () => {
     )
 
     expect(session.at(-1)?.role).toBe('assistant')
-    // runAgent 走 smoothStream + onError 流级重试：内容已流出后收到可重试的中断
-    // （普通 Error），smoothStream 会把缓存中未 flush 的 text-delta 在 error 前
-    // 再放一次，因此部分文本出现重复（'partial responsepartial response'）。
-    // 这是 ai 库的缓冲回放行为，不是本项目逻辑缺陷；核心是"已流出内容仍在 UI 渲染"。
+    // runAgent 走 onError 流级重试：内容已流出后收到可重试的中断（普通 Error），
+    // 核心是"已流出内容仍在 UI 渲染"。
     expect(textOf(session.at(-1)!)).toContain('partial response')
     expect(errors).toEqual(['interrupted'])
     expect(session.at(-1)?.metadata).toEqual({

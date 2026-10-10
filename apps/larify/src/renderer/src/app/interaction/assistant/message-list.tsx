@@ -8,6 +8,7 @@ import { summarizeMessageChanges, type ChangeSummary } from './change-summary'
 import { ChangesSummaryCard } from './changes-summary-card'
 import { messagePageSize } from './session-messages'
 import type { SessionNavigationItem } from './session-messages'
+import { dedupeAssistantCopies } from './assistant-copy-dedupe'
 import { useViewportBottomAnchor } from './use-viewport-bottom-anchor'
 import {
   buildAssistantRenderItems,
@@ -513,19 +514,28 @@ function recentListItems(
   live: boolean,
   groupedMessageIds = new Set<string>()
 ): MessageListItem[] {
-  const laterUserFlags = laterUserMessageFlags(messages)
-  const itemsByMessage = messages.map((message, index) =>
+  // 丢弃「相邻 assistant 副本」（reset 边界 live state push 型重复、以及历史库里遗留的副本行）：
+  // 只改显示、不动数据，覆盖 live + DB + 全部历史会话。见 `dedupeAssistantCopies`。
+  // 第二个参数是**护栏②**：渲染端末端是下一轮 `uiTargetId` 的落点，即使它被前条包含也不折
+  // （否则产出会写进看不见的行）。「谁算末端」只有这里知道，故在调用点给出。
+  //
+  // ⚠️ 由护栏② 可推出**不变量**：`shown.at(-1) === messages.at(-1)`（末端恒不被折），故下面
+  // `itemContent` 等处按 `messages.at(-1)?.id` 判 streaming / 末尾 item 与折叠结果一致；
+  // 若将来改动护栏②，必须同步这些判据。
+  const shown = dedupeAssistantCopies(messages, messages.at(-1)?.id)
+  const laterUserFlags = laterUserMessageFlags(shown)
+  const itemsByMessage = shown.map((message, index) =>
     itemsForMessage(
       message,
-      live && message.id === messages.at(-1)?.id,
+      live && message.id === shown.at(-1)?.id,
       message.role === 'assistant' && laterUserFlags[index]
     )
   )
   const result: MessageListItem[] = []
 
-  for (let index = 0; index < messages.length; index += 1) {
-    if (groupedMessageIds.has(messages[index].id)) {
-      if (isCompactionMessage(messages[index])) continue
+  for (let index = 0; index < shown.length; index += 1) {
+    if (groupedMessageIds.has(shown[index].id)) {
+      if (isCompactionMessage(shown[index])) continue
       result.push(
         ...itemsByMessage[index].filter(
           (item) =>
@@ -535,7 +545,7 @@ function recentListItems(
       )
       continue
     }
-    const run = activityHistoryRun(messages, itemsByMessage, index, live)
+    const run = activityHistoryRun(shown, itemsByMessage, index, live)
     const { cursor, sections, trailing, waiting } = run
     if (sections.length === 0 || !qualifiesForAggregation(run)) {
       result.push(...itemsByMessage[index])

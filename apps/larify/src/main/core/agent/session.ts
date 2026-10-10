@@ -31,10 +31,14 @@ export async function runAgentSession(
   uiOriginalMessages?: UIMessage[],
   baseProcessingMs = 0,
   /**
-   * 本轮流**响应消息 id**。给定时透传给 `createUIMessageStream.generateMessageId`：AI SDK 的
+   * 本轮流**响应消息 id**。给定时透传给 `createUIMessageStream.generateId`：`createUIMessageStream`
+   * 用它作为流响应 id（再由 `handleUIMessageStreamFinish` 注入 `start` chunk），而 AI SDK 的
    * `getResponseUIMessageId` 只在 `originalMessages` 末条**不是** assistant 时才采用它（否则强制
-   * 复用末条 assistant 的 id）。reset 续写轮据此把流 id 定为「reset 新行 id」⇒ 渲染端末端 id
-   * 收敛到 `sessions.start` 之后 ⇒ 后续 ask_user 回答天然可被模型读到（见 persist.ts）。
+   * 复用末条 assistant 的 id）。reset 续写轮据此把流 id 定为「reset 新行 id（`resetStoredId`）」⇒
+   * 渲染端末端 id 收敛到 `sessions.start` 之后 ⇒ 后续 ask_user 回答天然可被模型读到（见 persist.ts）。
+   *
+   * ⚠️ 必须传 `generateId`（不是 `generateMessageId`）：`createUIMessageStream` 只解构
+   * `generateId`，未识别键会被**静默忽略** ⇒ 否则流 id 会退化成随机 id，与落库身份不一致。
    */
   responseId?: string
 ): Promise<UIMessage[]> {
@@ -90,7 +94,7 @@ export async function runAgentSession(
   // messages 不变（上下文压缩保留），且 originalMessages 的额外消息不进模型。
   const stream = createUIMessageStream({
     originalMessages: uiOriginalMessages ?? messages,
-    ...(responseId !== undefined ? { generateMessageId: () => responseId } : {}),
+    ...(responseId !== undefined ? { generateId: () => responseId } : {}),
     onError: errorMessage,
     execute: async ({ writer }) => {
       const uiStream = toUIMessageStream({

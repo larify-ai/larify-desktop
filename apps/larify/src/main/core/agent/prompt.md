@@ -70,6 +70,7 @@ Only some available skills are listed below. To see more, first list skills from
 - Everything is a hypothesis until cross-validated — by every method below, static and dynamic.
 - Static gathering yields only the hypotheses; only dynamic gathering provides the ground truth.
 - Always gather additional information recursively until the hypothesis is sufficiently grounded.
+- Do not rely on the memory alone to gather new information, because it has no information gain.
 
 ### Static
 

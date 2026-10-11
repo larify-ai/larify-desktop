@@ -92,6 +92,15 @@ interface Window {
   continueFrom: Position | null
 }
 
+const isHighSurrogate = (unit: number): boolean => unit >= 0xd800 && unit <= 0xdbff
+const isLowSurrogate = (unit: number): boolean => unit >= 0xdc00 && unit <= 0xdfff
+
+const wholeStart = (chunk: string, at: number): number =>
+  at > 0 && isLowSurrogate(chunk.charCodeAt(at)) ? at - 1 : at
+
+const wholeEnd = (chunk: string, at: number): number =>
+  at > 0 && isHighSurrogate(chunk.charCodeAt(at - 1)) ? at + 1 : at
+
 async function readWindow(target: string, from: number, to: number): Promise<Window> {
   let position: Position = { index: 0, line: 1, lineStart: 0 }
   let start: Position | null = null
@@ -99,10 +108,16 @@ async function readWindow(target: string, from: number, to: number): Promise<Win
   for await (const chunk of normalizedChunks(target)) {
     const { index } = position
     const next = index + chunk.length
-    if (from < next) start ??= positionAt(position, chunk, from)
-    text += chunk.slice(Math.max(from - index, 0), Math.min(to - index, chunk.length))
+    const head = wholeStart(chunk, Math.max(from - index, 0))
+    const tail = wholeEnd(chunk, Math.min(to - index, chunk.length))
+    if (from < next) start ??= positionAt(position, chunk, index + head)
+    text += chunk.slice(head, tail)
     if (to < next) {
-      return { text, start: start ?? position, continueFrom: positionAt(position, chunk, to) }
+      return {
+        text,
+        start: start ?? position,
+        continueFrom: positionAt(position, chunk, index + tail)
+      }
     }
     position = positionAt(position, chunk, next)
   }

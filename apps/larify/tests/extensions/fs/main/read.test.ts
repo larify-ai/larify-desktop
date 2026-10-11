@@ -222,3 +222,86 @@ describe("read", () => {
   })
 
 })
+
+describe("代理对不被切断（emoji / 数学符号）", () => {
+  // 'a'×9 + '🙂'(占 2 码元) + 'b'×10 ⇒ 码元下标 9、10 是那一对
+  const source = `${"a".repeat(9)}🙂${"b".repeat(10)}`
+  const fileOf = (name: string, content: string): string => {
+    const file = path.join(root, name)
+    writeFileSync(file, content)
+    return file
+  }
+
+  it("limit 切在代理对中间时读到完整字符，而非半个（孤立代理）", async () => {
+    const file = fileOf("astral.txt", source)
+
+    const output = await read({ file_path: file, limit: 10 }, { sessionId: freshSession() })
+
+    expect(bodyOf(output)).toBe(`${"a".repeat(9)}🙂`)
+    expect(output.isWellFormed()).toBe(true)
+    expect(output).toContain("Continue from offset 1 column 12.")
+  })
+
+  it("向上回读时起点也落在完整字符上", async () => {
+    const file = fileOf("astral-up.txt", source)
+
+    // anchor=21、limit=11 ⇒ from=10（恰是低代理）⇒ 起点回退到该字符的高代理
+    const output = await read(
+      { file_path: file, limit: 11, scroll: "up" },
+      { sessionId: freshSession() },
+    )
+
+    expect(bodyOf(output)).toBe(`🙂${"b".repeat(10)}`)
+    expect(output.isWellFormed()).toBe(true)
+    // 起点回退到高代理后，真正被省略的是前 9 个字符 ⇒ 描述须按回退后的下标算
+    expect(output).toContain("Omitted before offset 1 column 10.")
+  })
+
+  it("跨 1MB 分片的切点同样读到完整字符", async () => {
+    const chunk = 1 << 20
+    const source = `${"a".repeat(chunk + 100)}🙂${"b".repeat(10)}`
+    const file = fileOf("astral-chunk.txt", source)
+    const anchor = chunk + 101 // 恰是 🙂 的低代理（U+1F642 = \ud83d\ude42）
+
+    // 对照：朴素切片（旧实现）从 anchor 起读会留下孤立低代理
+    expect(source.slice(anchor, anchor + 1)).toBe("\ude42")
+
+    const output = await read(
+      { file_path: file, offset: 1, column: anchor + 1, limit: 5000 },
+      { sessionId: freshSession() },
+    )
+
+    expect(output.isWellFormed()).toBe(true)
+    expect(bodyOf(output)).toBe(`🙂${"b".repeat(10)}`)
+  })
+
+  it("翻页重建与原文逐字符一致，且每一页都不含孤立代理", async () => {
+    const file = fileOf("astral-page.txt", source)
+    const pages: string[] = []
+    let next: Record<string, unknown> = { file_path: file, limit: 10 }
+
+    for (let page = 0; page < 20; page++) {
+      const output = await read(next, { sessionId: freshSession() })
+      expect(output.isWellFormed(), `第 ${page + 1} 页含孤立代理`).toBe(true)
+      const rows = output.split("\n")
+      const tail = rows.at(-1)?.startsWith("(Continue from ") ? rows.pop() : undefined
+      if (rows[0]?.startsWith("(Omitted before ")) rows.shift()
+      pages.push(rows.join("\n"))
+      if (!tail) break
+      const at = /Continue from offset (\d+)(?: column (\d+))?/.exec(tail)
+      if (!at) break
+      next = { file_path: file, limit: 10, offset: Number(at[1]), column: at[2] ? Number(at[2]) : 1 }
+    }
+
+    expect(pages.join("")).toBe(source)
+  })
+
+  it("事故同形：切点恰在 𝑣（U+1D463）中间时读到完整字符", async () => {
+    const file = fileOf("math.txt", `${"x".repeat(54_999)}𝑣${"y".repeat(10)}`)
+
+    const output = await read({ file_path: file, limit: 55_000 }, { sessionId: freshSession() })
+
+    expect(output.isWellFormed()).toBe(true)
+    expect(bodyOf(output).endsWith("𝑣")).toBe(true)
+  })
+})

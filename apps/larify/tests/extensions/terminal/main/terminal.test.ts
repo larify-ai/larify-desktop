@@ -327,6 +327,22 @@ describe('Terminal', () => {
     expect(terminal.state().shellIntegration).toBe(true)
   })
 
+  it('emits command started on every 633 E even while a command is running', async () => {
+    const fakePty = createFakePty()
+    spawnMock.mockReturnValue(fakePty)
+    const { Terminal } = await importTerminal()
+    const terminal = new Terminal(1, { shell: 'sh', cwd })
+    const onStarted = vi.fn()
+    terminal.bindCommandStarted(onStarted)
+
+    fakePty.emitData('\x1b]633;E;one\x07\x1b]633;C\x07')
+    fakePty.emitData('\x1b]633;E;two\x07\x1b]633;C\x07')
+    await terminal.snapshot()
+
+    expect(onStarted).toHaveBeenCalledTimes(2)
+    terminal.dispose()
+  })
+
   it('never claims shell integration for a shell that stays silent', async () => {
     const fakePty = createFakePty()
     spawnMock.mockReturnValue(fakePty)

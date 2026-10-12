@@ -493,7 +493,7 @@ describe('write', () => {
     })
     vi.mocked(service.write).mockImplementation(() => {
       commandStarted?.('session-1', 1)
-      commandFinished?.('session-1', 1, {})
+      commandFinished?.('session-1', 1, { exitCode: 0 })
     })
     vi.mocked(service.startRun).mockResolvedValue({ runId: 'run-1', sessionId: 'session-1' })
     vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: 'done' })
@@ -566,7 +566,7 @@ describe('write', () => {
       return () => {}
     })
     vi.mocked(service.write).mockImplementation(() => {
-      commandFinished?.('session-1', 1)
+      commandFinished?.('session-1', 1, { exitCode: 0 })
     })
     vi.mocked(service.startRun).mockResolvedValue({ runId: 'run-1', sessionId: 'session-1' })
     vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: 'Hi Larify' })
@@ -600,7 +600,7 @@ describe('write', () => {
       return () => {}
     })
     vi.mocked(service.startRun).mockImplementation(async () => {
-      commandFinished?.('session-1', 1, {})
+      commandFinished?.('session-1', 1, { exitCode: 0 })
       return { runId: 'run-1', sessionId: 'session-1' }
     })
     vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: 'done' })
@@ -706,12 +706,13 @@ describe('write', () => {
     vi.useRealTimers()
   })
 
-  it('rejects a timeout outside the 1-3600 second range', () => {
+  it('rejects a timeout outside the 1-300 second range', () => {
     expect(parseToolInput('write', { id: 1, input: 'x', timeout: 0 }).success).toBe(false)
-    expect(parseToolInput('write', { id: 1, input: 'x', timeout: 3601 }).success).toBe(false)
+    expect(parseToolInput('write', { id: 1, input: 'x', timeout: 301 }).success).toBe(false)
     expect(parseToolInput('write', { id: 1, input: 'x', timeout: 1 }).success).toBe(true)
+    expect(parseToolInput('write', { id: 1, input: 'x', timeout: 300 }).success).toBe(true)
     expect(parseToolInput('read', { id: 1, timeout: 0 }).success).toBe(false)
-    expect(parseToolInput('read', { id: 1, timeout: 3600 }).success).toBe(true)
+    expect(parseToolInput('read', { id: 1, timeout: 300 }).success).toBe(true)
   })
 })
 
@@ -811,6 +812,31 @@ describe('read', () => {
     })
   })
 
+  it('reports a finished command immediately when the terminal is idle', async () => {
+    const service = createService()
+    vi.mocked(service.terminalState).mockReturnValue({
+      id: 1,
+      pid: 100,
+      title: 'powershell',
+      cwd: 'D:\\Workspace',
+      shell: 'powershell.exe',
+      shellIntegration: true,
+      exitCode: null
+    })
+    vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: 'idle prompt' })
+
+    await expect(
+      tool('read', service).execute({ id: 1, timeout: 30, idle: 30 }, ctx)
+    ).resolves.toEqual({
+      status: 'shell integration command finish event received',
+      snapshot: {
+        screen: 'idle prompt'
+      }
+    })
+    expect(service.bindCommandFinished).not.toHaveBeenCalled()
+    expect(service.bindData).not.toHaveBeenCalled()
+  })
+
   it('waits for a running shell integration command before reading', async () => {
     const service = createService()
     let commandFinished: ((sessionId: string, terminalId: number) => void) | undefined
@@ -839,13 +865,13 @@ describe('read', () => {
       return () => {}
     })
     vi.mocked(service.flushRunHistory).mockImplementation(async () => {
-      commandFinished?.('session-1', 1, {})
+      commandFinished?.('session-1', 1, { exitCode: 0 })
       return null
     })
     vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: 'done' })
 
     const promise = tool('read', service).execute({ id: 1, timeout: 30, idle: 0 }, ctx)
-    commandFinished?.('session-1', 1, {})
+    commandFinished?.('session-1', 1, { exitCode: 0 })
 
     await expect(promise).resolves.toEqual({
       status: 'shell integration command finish event received',
@@ -854,7 +880,7 @@ describe('read', () => {
     expect(service.bindCommandFinished).toHaveBeenCalled()
   })
 
-  it('does not report an old finish event after another command has started', async () => {
+  it('reports the finish event that ended the command it waited for', async () => {
     vi.useFakeTimers()
     const service = createService()
     let commandFinished: ((sessionId: string, terminalId: number) => void) | undefined
@@ -875,11 +901,11 @@ describe('read', () => {
     vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: 'next command' })
 
     const reading = tool('read', service).execute({ id: 1, timeout: 30, idle: 0 }, ctx)
-    commandFinished?.('session-1', 1, {})
+    commandFinished?.('session-1', 1, { exitCode: 0 })
     await vi.advanceTimersByTimeAsync(1000)
 
     await expect(reading).resolves.toMatchObject({
-      status: 'command may still be running or waiting for input'
+      status: 'shell integration command finish event received'
     })
     vi.useRealTimers()
   })

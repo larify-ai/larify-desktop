@@ -18,7 +18,7 @@ vi.mock('../../../../src/main/utils/app-paths', () => ({
 
 const OSC = {
   prompt: '\x1b]633;A\x07\x1b]633;B\x07',
-  started: '\x1b]633;C\x07',
+  started: (line = 'command') => `\x1b]633;E;${line}\x07\x1b]633;C\x07`,
   done: (code: string) => `\x1b]633;D;${code}\x07`
 }
 
@@ -82,7 +82,7 @@ const runCommand = async (
     idle: 1
   })
   await new Promise((resolve) => setTimeout(resolve, 60))
-  emit?.(`${OSC.started}output line\r\n${OSC.done(exitCode)}${OSC.prompt}`)
+  emit?.(`${OSC.started('cmd')}output line\r\n${OSC.done(exitCode)}${OSC.prompt}`)
   return pending
 }
 
@@ -112,10 +112,88 @@ describe('the agent is told when a command finished', () => {
   }, 30_000)
 })
 
+describe('reading an idle terminal does not wait', () => {
+  it('reports the finish and returns at once once the prompt is back', async () => {
+    const { service, call, id } = await boot()
+
+    await runCommand(call, id, '0')
+    const startedAt = Date.now()
+
+    const result = await call<{ status: string }>('read', { id, timeout: 60, idle: 30 })
+
+    expect(result.status).toBe('shell integration command finish event received')
+    expect(Date.now() - startedAt).toBeLessThan(3000)
+    await service.destroy()
+  }, 30_000)
+
+  it('still waits for a command that is running when the read arrives', async () => {
+    const { service, call, id } = await boot()
+    const writing = runCommand(call, id, '0')
+    await new Promise((resolve) => setTimeout(resolve, 60))
+
+    const reading = call<{ status: string }>('read', { id, timeout: 8, idle: 1 })
+    await new Promise((resolve) => setTimeout(resolve, 400))
+
+    await expect(reading).resolves.toMatchObject({
+      status: 'shell integration command finish event received'
+    })
+    await writing
+    await service.destroy()
+  }, 30_000)
+})
+
+describe('an interrupt write never inherits the finish of the command it interrupts', () => {
+  it('keeps waiting when the interrupted long command ends after our write', async () => {
+    const { service, call, id } = await boot()
+    emit?.(`${OSC.started('cmd')}LAUNCH\r\n`)
+    await new Promise((resolve) => setTimeout(resolve, 100))
+
+    const pending = call<{ status: string }>('write', {
+      id,
+      input: 'next command',
+      submit: true,
+      interrupt: true,
+      timeout: 8,
+      idle: 5
+    })
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    emit?.(`${OSC.done('0')}${OSC.prompt}`)
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    emit?.(`${OSC.started('cmd')}NEXT\r\n${OSC.done('0')}${OSC.prompt}`)
+
+    await expect(pending).resolves.toMatchObject({
+      status: 'shell integration command finish event received'
+    })
+    await service.destroy()
+  }, 30_000)
+
+  it('reports pending while the interrupt leaves only the old bare finish behind', async () => {
+    const { service, call, id } = await boot()
+    emit?.(`${OSC.started('cmd')}LAUNCH\r\n`)
+    await new Promise((resolve) => setTimeout(resolve, 100))
+
+    const pending = call<{ status: string }>('write', {
+      id,
+      input: 'next command',
+      submit: true,
+      interrupt: true,
+      timeout: 2,
+      idle: 1
+    })
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    emit?.(`${OSC.started('cmd')}\r\n\x1b]633;D\x07${OSC.prompt}`)
+
+    await expect(pending).resolves.toMatchObject({
+      status: 'command may still be running or waiting for input'
+    })
+    await service.destroy()
+  }, 30_000)
+})
+
 describe('waiting only happens when a finish signal can actually arrive', () => {
   it('does not report a stale finish while answering a running command', async () => {
     const { service, call, id } = await boot()
-    emit?.(OSC.started)
+    emit?.(OSC.started('cmd'))
     await new Promise((resolve) => setTimeout(resolve, 100))
     expect(service.terminalState('outcome', id)?.commandRunning).toBe(true)
 
@@ -143,7 +221,7 @@ describe('waiting only happens when a finish signal can actually arrive', () => 
     })
     await new Promise((resolve) => setTimeout(resolve, 60))
     expect(written.at(-1)).toBe('\r')
-    emit?.(`${OSC.started}${OSC.done('0')}${OSC.prompt}`)
+    emit?.(`${OSC.started('cmd')}${OSC.done('0')}${OSC.prompt}`)
 
     expect((await pending).status).toBe('shell integration command finish event received')
     await service.destroy()
@@ -151,7 +229,7 @@ describe('waiting only happens when a finish signal can actually arrive', () => 
 
   it('falls back to the idle window when the agent sends nothing', async () => {
     const { service, call, id } = await boot()
-    emit?.(OSC.started)
+    emit?.(OSC.started('cmd'))
     await new Promise((resolve) => setTimeout(resolve, 100))
 
     const startedAt = Date.now()
@@ -220,7 +298,7 @@ describe('a terminal whose shell has exited leaves the list', () => {
       idle: 1
     })
     await new Promise((resolve) => setTimeout(resolve, 60))
-    emit?.(`${OSC.started}goodbye\r\n`)
+    emit?.(`${OSC.started('cmd')}goodbye\r\n`)
     fireExit?.({ exitCode: 0 })
 
     const result = await pending

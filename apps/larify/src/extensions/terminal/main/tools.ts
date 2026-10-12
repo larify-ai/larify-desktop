@@ -115,14 +115,20 @@ function waitForCommandFinished(
       idleTimer = setTimeout(() => finish('pending'), idleMs)
     }
 
-    const unbindFinished = service.bindCommandFinished((eventSessionId, eventTerminalId) => {
-      if (eventSessionId !== sessionId || eventTerminalId !== terminalId) return
-      if (idleTimer) {
-        clearTimeout(idleTimer)
-        idleTimer = null
+    const unbindFinished = service.bindCommandFinished(
+      (eventSessionId, eventTerminalId, event) => {
+        if (eventSessionId !== sessionId || eventTerminalId !== terminalId) return
+        if (idleTimer) {
+          clearTimeout(idleTimer)
+          idleTimer = null
+        }
+        if (event.exitCode === undefined) {
+          armIdle()
+          return
+        }
+        armSettle()
       }
-      armSettle()
-    })
+    )
 
     const unbindStarted = service.bindCommandStarted((eventSessionId, eventTerminalId) => {
       if (eventSessionId !== sessionId || eventTerminalId !== terminalId) return
@@ -330,22 +336,20 @@ export function createTerminalToolkit(service: TerminalService): Record<string, 
           return service.withWriterLock(ctx.sessionId, id, async () => {
             const state = service.terminalState(ctx.sessionId, id)
             if (!state) throw new Error(`Terminal "${id}" not found.`)
-            const waitForCommand = state.shellIntegration && state.commandRunning && timeout > 0
-            const outcome = waitForCommand
-              ? await waitForCommandFinished(service, ctx.sessionId, id, timeout, ctx.signal)
-              : 'pending'
-            if (!waitForCommand) {
+            const shellIntegrated = Boolean(state.shellIntegration)
+            let outcome: CommandWaitOutcome
+            if (shellIntegrated && timeout > 0) {
+              outcome = state.commandRunning
+                ? await waitForCommandFinished(service, ctx.sessionId, id, timeout, ctx.signal)
+                : 'finished'
+            } else {
               await waitForIdle(service, ctx.sessionId, id, idle, timeout, ctx.signal)
+              outcome = 'pending'
             }
             const log = await service.flushRunHistory(ctx.sessionId, id)
             const snapshot = await service.agentSnapshot(ctx.sessionId, id)
             if (!snapshot) throw new Error(`Terminal "${id}" not found.`)
-            const latestState = service.terminalState(ctx.sessionId, id)
-            return terminalResult(
-              snapshot,
-              outcome === 'finished' && latestState?.commandRunning ? 'pending' : outcome,
-              log ?? undefined
-            )
+            return terminalResult(snapshot, outcome, log ?? undefined)
           })
         }
       })

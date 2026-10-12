@@ -46,7 +46,7 @@ function createFakePty(): FakePty {
 }
 
 const OSC = {
-  started: '\x1b]633;C\x07',
+  started: (line: string): string => `\x1b]633;E;${line}\x07\x1b]633;C\x07`,
   done: '\x1b]633;D;0\x07',
   prompt: '\x1b]633;A\x07\x1b]633;B\x07'
 }
@@ -97,19 +97,26 @@ const screenOf = (result: unknown): string =>
 const statusOf = (result: unknown): string => (result as { status?: string }).status ?? ''
 
 describe('waiting for a run that contains more than one command', () => {
-  it('keeps waiting when another command starts after the first finishes', async () => {
+  it('waits for every command the write submitted before answering', async () => {
     const { service, call, id } = await makeToolkit()
 
     const pending = call('write', { id, input: 'one\ntwo', submit: true, timeout: 30 })
 
+    let settledEarly = false
+    void pending.then(() => {
+      settledEarly = true
+    })
     await vi.waitFor(() => expect(fakePty.write).toHaveBeenCalled())
-    fakePty.emit(`${OSC.started}FIRST\r\n${OSC.done}${OSC.prompt}`)
+    fakePty.emit(`${OSC.started('one')}FIRST\r\n${OSC.done}${OSC.prompt}`)
     await new Promise((r) => setTimeout(r, 200))
-    fakePty.emit(OSC.started)
+    expect(settledEarly).toBe(false)
+    fakePty.emit(OSC.started('two'))
     await new Promise((r) => setTimeout(r, 1400))
     fakePty.emit(`SECOND\r\n${OSC.done}${OSC.prompt}`)
 
-    const screen = screenOf(await pending)
+    const result = await pending
+    expect(statusOf(result)).toContain('command finish event received')
+    const screen = screenOf(result)
     expect(screen).toContain('FIRST')
     expect(screen).toContain('SECOND')
     await service.destroy()
@@ -121,7 +128,7 @@ describe('waiting for a run that contains more than one command', () => {
     const pending = call('write', { id, input: 'one', submit: true, timeout: 30 })
 
     await vi.waitFor(() => expect(fakePty.write).toHaveBeenCalled())
-    fakePty.emit(`${OSC.started}ONLY\r\n${OSC.done}${OSC.prompt}`)
+    fakePty.emit(`${OSC.started('one')}ONLY\r\n${OSC.done}${OSC.prompt}`)
 
     const result = await pending
     expect(screenOf(result)).toContain('ONLY')
@@ -135,7 +142,7 @@ describe('waiting for a run that contains more than one command', () => {
     const pending = call('write', { id, input: 'server', submit: true, timeout: 2 })
 
     await vi.waitFor(() => expect(fakePty.write).toHaveBeenCalled())
-    fakePty.emit(`${OSC.started}LISTENING\r\n`)
+    fakePty.emit(`${OSC.started('server')}LISTENING\r\n`)
 
     const result = await pending
     expect(screenOf(result)).toContain('LISTENING')
@@ -152,9 +159,9 @@ describe('a finished command does not close the run', () => {
 
     await vi.waitFor(() => expect(fakePty.write).toHaveBeenCalled())
     const bulk = Array.from({ length: 2600 }, (_, i) => `A${i + 1}`).join('\r\n')
-    fakePty.emit(`${OSC.started}${bulk}\r\n${OSC.done}${OSC.prompt}`)
+    fakePty.emit(`${OSC.started('one')}${bulk}\r\n${OSC.done}${OSC.prompt}`)
     await new Promise((r) => setTimeout(r, 200))
-    fakePty.emit(OSC.started)
+    fakePty.emit(OSC.started('two'))
     await new Promise((r) => setTimeout(r, 300))
     fakePty.emit(`TAIL-MARKER\r\n${OSC.done}${OSC.prompt}`)
 

@@ -381,9 +381,10 @@ export class Terminal {
     }
     const [command, ...args] = data.split(';')
     if (command === 'C' || command === 'E') {
-      const wasRunning = this.commandRunning
       this.commandRunning = true
-      if (!wasRunning) for (const listener of this.commandStartedListeners) listener()
+      if (command === 'E') {
+        for (const listener of this.commandStartedListeners) listener()
+      }
       return
     }
     if (command !== 'D') return

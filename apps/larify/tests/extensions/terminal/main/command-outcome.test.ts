@@ -161,6 +161,26 @@ describe('waiting only happens when a finish signal can actually arrive', () => 
     await service.destroy()
   }, 30_000)
 
+  it('falls back to the idle window instead of waiting out the timeout when the shell integration goes silent', async () => {
+    const { service, call, id } = await boot()
+    emit?.(OSC.started('ssh train117'))
+    await new Promise((resolve) => setTimeout(resolve, 100))
+
+    const startedAt = Date.now()
+    const result = await call<{ status: string }>('write', {
+      id,
+      input: 'sleep 90; echo done',
+      submit: true,
+      interrupt: false,
+      timeout: 30,
+      idle: 1
+    })
+
+    expect(result.status).toContain('may still be running')
+    expect(Date.now() - startedAt).toBeLessThan(4000)
+    await service.destroy()
+  }, 30_000)
+
   it('presses enter for an empty submit and waits for the command it starts', async () => {
     const { service, call, id } = await boot()
 

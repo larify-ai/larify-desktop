@@ -548,6 +548,43 @@ describe('write', () => {
     vi.useRealTimers()
   })
 
+  it('falls back to the idle window when the shell integration never reports a command', async () => {
+    vi.useFakeTimers()
+    const service = createService()
+    vi.mocked(service.terminalState).mockReturnValue({
+      id: 1,
+      pid: 100,
+      title: 'powershell',
+      cwd: 'D:\\Workspace',
+      shell: 'powershell.exe',
+      shellIntegration: true,
+      commandRunning: true,
+      exitCode: null
+    })
+    vi.mocked(service.startRun).mockResolvedValue({ runId: 'run-1', sessionId: 'session-1' })
+    vi.mocked(service.write).mockImplementation(() => {})
+    vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: 'remote$ sleep 90' })
+
+    const pending = tool('write', service).execute(
+      { id: 1, input: 'sleep 90; echo done', submit: true, interrupt: false, timeout: 150, idle: 3 },
+      ctx
+    )
+    await vi.advanceTimersByTimeAsync(2999)
+    let settled = false
+    void pending.then(() => {
+      settled = true
+    })
+    await Promise.resolve()
+    expect(settled).toBe(false)
+
+    await vi.advanceTimersByTimeAsync(1)
+    await expect(pending).resolves.toMatchObject({
+      status: 'command may still be running or waiting for input',
+      snapshot: { screen: 'remote$ sleep 90' }
+    })
+    vi.useRealTimers()
+  })
+
   it('honors the finish when answering an already-running command with no new start', async () => {
     const service = createService()
     let commandFinished: ((sessionId: string, terminalId: number) => void) | undefined
@@ -810,6 +847,38 @@ describe('read', () => {
       },
       log_path: 'run-1.log'
     })
+  })
+
+  it('falls back to the idle window when reading a terminal whose shell integration went silent', async () => {
+    vi.useFakeTimers()
+    const service = createService()
+    vi.mocked(service.terminalState).mockReturnValue({
+      id: 1,
+      pid: 100,
+      title: 'powershell',
+      cwd: 'D:\\Workspace',
+      shell: 'powershell.exe',
+      shellIntegration: true,
+      commandRunning: true,
+      exitCode: null
+    })
+    vi.mocked(service.agentSnapshot).mockResolvedValue({ screen: 'remote$ sleep 90' })
+
+    const pending = tool('read', service).execute({ id: 1, timeout: 150, idle: 3 }, ctx)
+    await vi.advanceTimersByTimeAsync(2999)
+    let settled = false
+    void pending.then(() => {
+      settled = true
+    })
+    await Promise.resolve()
+    expect(settled).toBe(false)
+
+    await vi.advanceTimersByTimeAsync(1)
+    await expect(pending).resolves.toMatchObject({
+      status: 'command may still be running or waiting for input',
+      snapshot: { screen: 'remote$ sleep 90' }
+    })
+    vi.useRealTimers()
   })
 
   it('reports a finished command immediately when the terminal is idle', async () => {

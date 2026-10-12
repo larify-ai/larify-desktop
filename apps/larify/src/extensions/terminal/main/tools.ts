@@ -86,7 +86,6 @@ function waitForCommandFinished(
   if (signal?.aborted) return Promise.resolve('pending')
   return new Promise((resolve) => {
     let settled = false
-    let started = false
     let settleTimer: NodeJS.Timeout | null = null
     let idleTimer: NodeJS.Timeout | null = null
     const idleMs = Math.max(0, idleSeconds * 1000)
@@ -110,7 +109,7 @@ function waitForCommandFinished(
     }
 
     const armIdle = (): void => {
-      if (!started || idleMs <= 0) return
+      if (idleMs <= 0) return
       if (idleTimer) clearTimeout(idleTimer)
       idleTimer = setTimeout(() => finish('pending'), idleMs)
     }
@@ -126,7 +125,6 @@ function waitForCommandFinished(
 
     const unbindStarted = service.bindCommandStarted((eventSessionId, eventTerminalId) => {
       if (eventSessionId !== sessionId || eventTerminalId !== terminalId) return
-      started = true
       if (settleTimer) {
         clearTimeout(settleTimer)
         settleTimer = null
@@ -149,6 +147,7 @@ function waitForCommandFinished(
       () => finish('pending'),
       Math.max(0, timeoutSeconds * 1000)
     )
+    armIdle()
   })
 }
 
@@ -334,7 +333,7 @@ export function createTerminalToolkit(service: TerminalService): Record<string, 
             let outcome: CommandWaitOutcome
             if (shellIntegrated && timeout > 0) {
               outcome = state.commandRunning
-                ? await waitForCommandFinished(service, ctx.sessionId, id, timeout, ctx.signal)
+                ? await waitForCommandFinished(service, ctx.sessionId, id, timeout, ctx.signal, idle)
                 : 'finished'
             } else {
               await waitForIdle(service, ctx.sessionId, id, idle, timeout, ctx.signal)

@@ -115,20 +115,14 @@ function waitForCommandFinished(
       idleTimer = setTimeout(() => finish('pending'), idleMs)
     }
 
-    const unbindFinished = service.bindCommandFinished(
-      (eventSessionId, eventTerminalId, event) => {
-        if (eventSessionId !== sessionId || eventTerminalId !== terminalId) return
-        if (idleTimer) {
-          clearTimeout(idleTimer)
-          idleTimer = null
-        }
-        if (event.exitCode === undefined) {
-          armIdle()
-          return
-        }
-        armSettle()
+    const unbindFinished = service.bindCommandFinished((eventSessionId, eventTerminalId) => {
+      if (eventSessionId !== sessionId || eventTerminalId !== terminalId) return
+      if (idleTimer) {
+        clearTimeout(idleTimer)
+        idleTimer = null
       }
-    )
+      armSettle()
+    })
 
     const unbindStarted = service.bindCommandStarted((eventSessionId, eventTerminalId) => {
       if (eventSessionId !== sessionId || eventTerminalId !== terminalId) return

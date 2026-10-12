@@ -142,54 +142,6 @@ describe('reading an idle terminal does not wait', () => {
   }, 30_000)
 })
 
-describe('an interrupt write never inherits the finish of the command it interrupts', () => {
-  it('keeps waiting when the interrupted long command ends after our write', async () => {
-    const { service, call, id } = await boot()
-    emit?.(`${OSC.started('cmd')}LAUNCH\r\n`)
-    await new Promise((resolve) => setTimeout(resolve, 100))
-
-    const pending = call<{ status: string }>('write', {
-      id,
-      input: 'next command',
-      submit: true,
-      interrupt: true,
-      timeout: 8,
-      idle: 5
-    })
-    await new Promise((resolve) => setTimeout(resolve, 100))
-    emit?.(`${OSC.done('0')}${OSC.prompt}`)
-    await new Promise((resolve) => setTimeout(resolve, 200))
-    emit?.(`${OSC.started('cmd')}NEXT\r\n${OSC.done('0')}${OSC.prompt}`)
-
-    await expect(pending).resolves.toMatchObject({
-      status: 'shell integration command finish event received'
-    })
-    await service.destroy()
-  }, 30_000)
-
-  it('reports pending while the interrupt leaves only the old bare finish behind', async () => {
-    const { service, call, id } = await boot()
-    emit?.(`${OSC.started('cmd')}LAUNCH\r\n`)
-    await new Promise((resolve) => setTimeout(resolve, 100))
-
-    const pending = call<{ status: string }>('write', {
-      id,
-      input: 'next command',
-      submit: true,
-      interrupt: true,
-      timeout: 2,
-      idle: 1
-    })
-    await new Promise((resolve) => setTimeout(resolve, 100))
-    emit?.(`${OSC.started('cmd')}\r\n\x1b]633;D\x07${OSC.prompt}`)
-
-    await expect(pending).resolves.toMatchObject({
-      status: 'command may still be running or waiting for input'
-    })
-    await service.destroy()
-  }, 30_000)
-})
-
 describe('waiting only happens when a finish signal can actually arrive', () => {
   it('does not report a stale finish while answering a running command', async () => {
     const { service, call, id } = await boot()

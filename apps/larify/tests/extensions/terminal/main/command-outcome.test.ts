@@ -113,16 +113,21 @@ describe('the agent is told when a command finished', () => {
 })
 
 describe('waiting only happens when a finish signal can actually arrive', () => {
-  it('does not wait for a finish that a raw keystroke cannot produce', async () => {
+  it('does not report a stale finish while answering a running command', async () => {
     const { service, call, id } = await boot()
     emit?.(OSC.started)
     await new Promise((resolve) => setTimeout(resolve, 100))
     expect(service.terminalState('outcome', id)?.commandRunning).toBe(true)
-    const startedAt = Date.now()
 
-    await call('write', { id, input: '\x1b[B', submit: false, timeout: 8, idle: 1 })
+    const result = await call<{ status: string }>('write', {
+      id,
+      input: '\x1b[B',
+      submit: false,
+      timeout: 3,
+      idle: 1
+    })
 
-    expect(Date.now() - startedAt).toBeLessThan(4000)
+    expect(result.status).toContain('may still be running')
     await service.destroy()
   }, 30_000)
 
@@ -144,22 +149,22 @@ describe('waiting only happens when a finish signal can actually arrive', () => 
     await service.destroy()
   }, 30_000)
 
-  it('waits for the running command when the agent sends nothing', async () => {
+  it('falls back to the idle window when the agent sends nothing', async () => {
     const { service, call, id } = await boot()
     emit?.(OSC.started)
     await new Promise((resolve) => setTimeout(resolve, 100))
 
-    const pending = call<{ status: string }>('write', {
+    const startedAt = Date.now()
+    const result = await call<{ status: string }>('write', {
       id,
       input: '',
       submit: false,
       timeout: 8,
       idle: 1
     })
-    await new Promise((resolve) => setTimeout(resolve, 2500))
-    emit?.(`${OSC.done('0')}${OSC.prompt}`)
 
-    expect((await pending).status).toBe('shell integration command finish event received')
+    expect(result.status).toContain('may still be running')
+    expect(Date.now() - startedAt).toBeLessThan(4000)
     await service.destroy()
   }, 30_000)
 

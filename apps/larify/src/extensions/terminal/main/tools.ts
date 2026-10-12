@@ -284,7 +284,8 @@ export function createTerminalToolkit(service: TerminalService): Record<string, 
               : normalizeTerminalInputLineBreaks(input)
             const submittedInput = data.endsWith('\r')
             const shouldWaitForCommand =
-              (submittedInput || (!data && state.commandRunning)) && Boolean(state.shellIntegration)
+              (submittedInput || (Boolean(data) && state.commandRunning)) &&
+              Boolean(state.shellIntegration)
             const commandWaitAbort = shouldWaitForCommand
               ? linkedAbortController(ctx.signal)
               : null

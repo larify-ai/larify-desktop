@@ -174,7 +174,7 @@ const writeSchema = z.object({
   submit: z
     .boolean()
     .default(true)
-    .describe('Append \\r to execute the input'),
+    .describe('Append \\r to execute the input, always true recommended'),
   interrupt: z
     .boolean()
     .default(true)

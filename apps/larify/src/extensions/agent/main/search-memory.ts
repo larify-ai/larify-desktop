@@ -9,7 +9,8 @@ interface MemorySearch {
 
 export function createSearchMemoryTool(registry: Registry): Tool {
   return defineTool({
-    description: 'Search relevant memory using hybrid retrieval (BM25 and vector).',
+    // description: 'Search relevant memory using hybrid retrieval (BM25 and vector).',
+    description: 'Search relevant memory using bm25 retrieval.',
     inputSchema: z
       .object({
         query: z.string().trim().min(1).describe('Search query'),

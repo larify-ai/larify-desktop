@@ -5,7 +5,6 @@ describe('discoverBuiltinPlugins', () => {
   it('returns built-in plugins in activation order', () => {
     expect(discoverBuiltinPlugins().map(({ manifest }) => manifest.id)).toEqual([
       'agent',
-      'embedding',
       'context',
       'fs',
       'terminal',

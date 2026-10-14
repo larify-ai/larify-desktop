@@ -1,6 +1,5 @@
 import type { Plugin } from '../../../main/core/plugin/protocol'
 import { gitService } from '../../../main/core/git'
-import { embeddingWorkerToken } from '../../embedding/main/service'
 import { registerFileDiagnosticsProvider } from '../../fs/main/diagnostics'
 import { createContextDiagnosticsProvider } from './diagnostics'
 import { memoryRootPath, tasksRootPath } from './indexer'
@@ -14,7 +13,7 @@ const plugin: Plugin = {
     const git = await gitService.open(root)
     if (!(await git.checkIsRepo())) await git.init()
     const { ContextWorker } = await import('./worker-client')
-    const worker = new ContextWorker(() => context.registry.get(embeddingWorkerToken))
+    const worker = new ContextWorker()
     context.registry.register(contextWorkerToken, worker)
     context.subscriptions.push({
       dispose: () => context.registry.dispose(contextWorkerToken)

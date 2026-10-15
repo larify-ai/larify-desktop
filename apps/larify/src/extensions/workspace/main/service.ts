@@ -3,6 +3,7 @@ import path from 'node:path'
 import { fileTypeFromFile } from 'file-type'
 import { lookup } from 'mime-types'
 import type { FileDescriptor, FileNode } from '../shared/types'
+import { isTextMime } from '../shared/mime'
 import { readDirectory } from './directory'
 import { resolveWorkspace } from './workspace'
 import { workspaceWatcherPool, type WorkspaceWatcherSubscription } from './watcher-pool'
@@ -72,9 +73,10 @@ export class WorkspaceService {
     const normalized = path.normalize(file)
     const detected = await fileTypeFromFile(normalized)
     await this.watchFile(normalized)
+    const mime = detected?.mime ?? (lookup(normalized) || 'application/octet-stream')
     return {
-      binary: detected !== undefined,
-      mime: detected?.mime ?? (lookup(normalized) || 'application/octet-stream'),
+      binary: !isTextMime(mime),
+      mime,
       path: normalized
     }
   }

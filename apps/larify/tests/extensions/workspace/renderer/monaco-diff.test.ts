@@ -709,7 +709,7 @@ describe('MonacoDiff', () => {
     await act(async () => root.unmount())
   })
 
-  it('shows binary detection failures instead of leaving an unhandled rejection', async () => {
+  it('shows detection failures for a deleted file instead of leaving an unhandled rejection', async () => {
     harness.detectType.mockRejectedValue(new Error('类型检测失败'))
     const container = document.createElement('div')
     const root = createRoot(container)
@@ -720,7 +720,7 @@ describe('MonacoDiff', () => {
           mode: 'unified',
           resourceId: 7,
           root: 'D:\\workspace',
-          status: status()
+          status: status({ working_dir: 'D' })
         })
       )
       await Promise.resolve()
@@ -728,6 +728,29 @@ describe('MonacoDiff', () => {
 
     expect(container.textContent).toBe('类型检测失败')
     expect(container.querySelector('[data-testid="diff-editor"]')).toBeNull()
+    await act(async () => root.unmount())
+  })
+
+  it('previews an XML-based robot file as a text diff instead of a binary one', async () => {
+    harness.detectType.mockResolvedValue({ ext: 'xml', mime: 'application/xml' })
+    const container = document.createElement('div')
+    const root = createRoot(container)
+
+    await act(async () => {
+      root.render(
+        createElement(MonacoDiff, {
+          mode: 'unified',
+          resourceId: 7,
+          root: 'D:\\workspace',
+          status: status({ path: 'D:\\workspace\\robot.urdf', working_dir: 'D' })
+        })
+      )
+      await Promise.resolve()
+    })
+
+    // `application/xml` 是纯文本：不能因 HEAD 内容被认成 xml 就把 diff 换成二进制预览。
+    expect(container.querySelector('[data-testid="file-preview"]')).toBeNull()
+    expect(container.textContent).not.toBe('文件已删除')
     await act(async () => root.unmount())
   })
 

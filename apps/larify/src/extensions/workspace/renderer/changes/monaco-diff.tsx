@@ -4,6 +4,7 @@ import { fileTypeFromBuffer } from 'file-type'
 import { editor, Uri } from 'monaco-editor/editor/editor.api'
 import { useTheme } from 'next-themes'
 import type { FileStatusResult } from 'simple-git'
+import { isTextMime } from '../../shared/mime'
 import { gitClient } from '../git-client'
 import { workspaceClient } from '../workspace-client'
 import { FilePreview } from '../preview/file-preview'
@@ -290,7 +291,10 @@ export function MonacoDiff({
         }))
     void Promise.all([gitClient.original(root, originalFile), workingTree])
       .then(async ([original, current]) => {
-        const binary = current.binary || Boolean(original && (await fileTypeFromBuffer(original)))
+        // 工作区文件不在（已删除/暂存删除）时无 descriptor 可用，只能回退到按 HEAD 内容判；
+        // 用 isTextMime 而非「认没认出来」——`<?xml ...?>` 开头的纯文本会被认成 xml 而误判为二进制。
+        const detected = original && !current.exists ? await fileTypeFromBuffer(original) : undefined
+        const binary = current.binary || (detected ? !isTextMime(detected.mime) : false)
         if (alive) {
           loadedRef.current = { requestKey, status }
           setState({

@@ -79,6 +79,20 @@ describe('WorkspaceService', () => {
     await service.dispose()
   })
 
+  it('previews a URDF that starts with an XML declaration as text', async () => {
+    const root = await createRoot()
+    const file = path.join(root, 'robot.urdf')
+    await writeFile(file, '<?xml version="1.0"?>\n<robot name="demo"/>')
+    const service = new WorkspaceService(root, () => undefined)
+
+    await expect(service.inspectFile(file)).resolves.toEqual({
+      binary: false,
+      mime: 'application/xml',
+      path: file
+    })
+    await service.dispose()
+  })
+
   it('identifies binary files from their contents', async () => {
     const root = await createRoot()
     const file = path.join(root, 'image')

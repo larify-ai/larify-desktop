@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import MonacoEditor, { DiffEditor } from '@monaco-editor/react'
-import { fileTypeFromBuffer } from 'file-type'
 import { editor, Uri } from 'monaco-editor/editor/editor.api'
 import { useTheme } from 'next-themes'
 import type { FileStatusResult } from 'simple-git'
-import { isTextMime } from '../../shared/mime'
+import { isBinaryContent } from '../../shared/binary-content'
 import { gitClient } from '../git-client'
 import { workspaceClient } from '../workspace-client'
 import { FilePreview } from '../preview/file-preview'
@@ -290,11 +289,13 @@ export function MonacoDiff({
           exists: true
         }))
     void Promise.all([gitClient.original(root, originalFile), workingTree])
-      .then(async ([original, current]) => {
+      .then(([original, current]) => {
         // 工作区文件不在（已删除/暂存删除）时无 descriptor 可用，只能回退到按 HEAD 内容判；
-        // 用 isTextMime 而非「认没认出来」——`<?xml ...?>` 开头的纯文本会被认成 xml 而误判为二进制。
-        const detected = original && !current.exists ? await fileTypeFromBuffer(original) : undefined
-        const binary = current.binary || (detected ? !isTextMime(detected.mime) : false)
+        // 判据与 service.ts 一致：按内容（NUL 字节）判二进制，而非按 MIME/「认没认出来」。
+        // 仅在无 descriptor 时才看 HEAD：否则「工作区已是文本、HEAD 仍是二进制」的转换态会被
+        // 误判为二进制而丢掉 diff（HEAD 那条分支只服务于 exists=false）。
+        const binary =
+          current.binary || (!current.exists && original ? isBinaryContent(original) : false)
         if (alive) {
           loadedRef.current = { requestKey, status }
           setState({

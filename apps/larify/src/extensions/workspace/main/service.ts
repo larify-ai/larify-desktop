@@ -1,9 +1,9 @@
-import { readFile, realpath, stat } from 'node:fs/promises'
+import { open, readFile, realpath, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { fileTypeFromFile } from 'file-type'
 import { lookup } from 'mime-types'
 import type { FileDescriptor, FileNode } from '../shared/types'
-import { isTextMime } from '../shared/mime'
+import { isBinaryContent } from '../shared/binary-content'
 import { readDirectory } from './directory'
 import { resolveWorkspace } from './workspace'
 import { workspaceWatcherPool, type WorkspaceWatcherSubscription } from './watcher-pool'
@@ -73,11 +73,24 @@ export class WorkspaceService {
     const normalized = path.normalize(file)
     const detected = await fileTypeFromFile(normalized)
     await this.watchFile(normalized)
-    const mime = detected?.mime ?? (lookup(normalized) || 'application/octet-stream')
+    // binary 判据与「能否当文本读」对齐：读一小段头部按内容判定，而不是按 MIME 猜
+    // （file-type 认的是格式、mime-types 认的是扩展名，都与「能不能当文本读」是两回事）。
+    const binary = await this.isBinary(normalized)
     return {
-      binary: !isTextMime(mime),
-      mime,
+      binary,
+      mime: detected?.mime ?? (lookup(normalized) || 'application/octet-stream'),
       path: normalized
+    }
+  }
+
+  private async isBinary(file: string): Promise<boolean> {
+    const handle = await open(file, 'r')
+    try {
+      const head = Buffer.alloc(8192)
+      const { bytesRead } = await handle.read(head, 0, head.length, 0)
+      return isBinaryContent(head.subarray(0, bytesRead))
+    } finally {
+      await handle.close()
     }
   }
 

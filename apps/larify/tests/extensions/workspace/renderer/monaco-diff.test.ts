@@ -8,15 +8,12 @@ import type { FileStatusResult } from 'simple-git'
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
 const harness = vi.hoisted(() => ({
-  detectType: vi.fn(),
   inspectFile: vi.fn(),
   original: vi.fn(),
   previewProps: vi.fn(),
   props: vi.fn(),
   readFile: vi.fn()
 }))
-
-vi.mock('file-type', () => ({ fileTypeFromBuffer: harness.detectType }))
 
 vi.mock('@monaco-editor/react', () => ({
   default: (props: unknown) => {
@@ -127,7 +124,6 @@ describe('classifyWholeFile', () => {
 describe('MonacoDiff', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    harness.detectType.mockResolvedValue(undefined)
     harness.inspectFile.mockResolvedValue({
       binary: false,
       mime: 'text/plain',
@@ -709,8 +705,8 @@ describe('MonacoDiff', () => {
     await act(async () => root.unmount())
   })
 
-  it('shows detection failures for a deleted file instead of leaving an unhandled rejection', async () => {
-    harness.detectType.mockRejectedValue(new Error('类型检测失败'))
+  it('reads a deleted text file from HEAD without an unhandled rejection', async () => {
+    harness.original.mockResolvedValue(new TextEncoder().encode('before'))
     const container = document.createElement('div')
     const root = createRoot(container)
 
@@ -726,13 +722,15 @@ describe('MonacoDiff', () => {
       await Promise.resolve()
     })
 
-    expect(container.textContent).toBe('类型检测失败')
     expect(container.querySelector('[data-testid="diff-editor"]')).toBeNull()
+    expect(container.querySelector('.workspace-removed-only-editor')).not.toBeNull()
     await act(async () => root.unmount())
   })
 
   it('previews an XML-based robot file as a text diff instead of a binary one', async () => {
-    harness.detectType.mockResolvedValue({ ext: 'xml', mime: 'application/xml' })
+    harness.original.mockResolvedValue(
+      new TextEncoder().encode('<?xml version="1.0"?>\n<robot name="demo"/>')
+    )
     const container = document.createElement('div')
     const root = createRoot(container)
 
@@ -748,15 +746,47 @@ describe('MonacoDiff', () => {
       await Promise.resolve()
     })
 
-    // `application/xml` 是纯文本：不能因 HEAD 内容被认成 xml 就把 diff 换成二进制预览。
+    // `<?xml ...?>` 开头的纯文本按内容判（无 NUL 字节）是文本：不能换成二进制预览。
     expect(container.querySelector('[data-testid="file-preview"]')).toBeNull()
     expect(container.textContent).not.toBe('文件已删除')
     await act(async () => root.unmount())
   })
 
+  it('keeps a text diff when only the HEAD blob is binary but the working tree is text', async () => {
+    // HEAD 是被替换掉的旧二进制、工作区已是文本（如二进制→文本 转换）⇒ 不能因 HEAD 是二进制
+    // 就丢掉 diff：HEAD 内容只服务于「工作区文件不存在」的回退路径。
+    const header = new Uint8Array(16)
+    header.set([137, 80, 78, 71, 13, 10, 26, 10])
+    harness.original.mockResolvedValue(header)
+    harness.inspectFile.mockResolvedValue({
+      binary: false,
+      mime: 'text/plain',
+      path: 'D:\\workspace\\file.ts'
+    })
+    const container = document.createElement('div')
+    const root = createRoot(container)
+
+    await act(async () => {
+      root.render(
+        createElement(MonacoDiff, {
+          mode: 'unified',
+          resourceId: 7,
+          root: 'D:\\workspace',
+          status: status()
+        })
+      )
+      await Promise.resolve()
+    })
+
+    expect(container.querySelector('[data-testid="file-preview"]')).toBeNull()
+    expect(container.querySelector('[data-testid="diff-editor"]')).not.toBeNull()
+    await act(async () => root.unmount())
+  })
+
   it('detects binary content from HEAD for a deleted file', async () => {
-    harness.original.mockResolvedValue(new Uint8Array([137, 80, 78, 71]))
-    harness.detectType.mockResolvedValue({ ext: 'png', mime: 'image/png' })
+    const header = new Uint8Array(16)
+    header.set([137, 80, 78, 71, 13, 10, 26, 10]) // PNG 签名，其后含 NUL 字节
+    harness.original.mockResolvedValue(header)
     const container = document.createElement('div')
     const root = createRoot(container)
 

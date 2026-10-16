@@ -93,6 +93,26 @@ describe('WorkspaceService', () => {
     await service.dispose()
   })
 
+  it.each([
+    ['run.sh', '#!/bin/bash\necho hello\n', 'application/x-sh'],
+    ['index.ts', 'export const value = 1\n', 'video/mp2t'],
+    ['app.js', 'const value = 1\n', 'application/javascript'],
+    ['config.toml', 'value = 1\n', 'application/toml']
+  ])('previews %s as text even though its MIME is not text/*', async (name, content, mime) => {
+    const root = await createRoot()
+    const file = path.join(root, name)
+    await writeFile(file, content)
+    const service = new WorkspaceService(root, () => undefined)
+
+    // 判据按内容（无 NUL 字节即文本），与扩展名/MIME 表无关。
+    await expect(service.inspectFile(file)).resolves.toEqual({
+      binary: false,
+      mime,
+      path: file
+    })
+    await service.dispose()
+  })
+
   it('identifies binary files from their contents', async () => {
     const root = await createRoot()
     const file = path.join(root, 'image')
@@ -128,6 +148,29 @@ describe('WorkspaceService', () => {
     const service = new WorkspaceService(root, () => undefined)
 
     await expect(service.readFile(path.join(root, 'missing.txt'))).rejects.toThrow()
+    await service.dispose()
+  })
+
+  it('rejects inspecting a missing file with ENOENT', async () => {
+    // `changes-view` 用「inspectFile 抛出的错误里是否含 ENOENT」当「文件缺失」探针，
+    // 这条契约不能因判据改动而失守。
+    const root = await createRoot()
+    const service = new WorkspaceService(root, () => undefined)
+
+    await expect(service.inspectFile(path.join(root, 'missing.txt'))).rejects.toThrow(/ENOENT/)
+    await service.dispose()
+  })
+
+  it('treats a file whose only NUL byte sits past the sampling window as text', async () => {
+    // 采样窗口 = 前 8KB（与 git buffer_is_binary 同源）：窗口外的 NUL 不影响判定。
+    const root = await createRoot()
+    const file = path.join(root, 'late-nul.txt')
+    const payload = Buffer.alloc(9000, 65)
+    payload[8500] = 0
+    await writeFile(file, payload)
+    const service = new WorkspaceService(root, () => undefined)
+
+    await expect(service.inspectFile(file)).resolves.toMatchObject({ binary: false })
     await service.dispose()
   })
 

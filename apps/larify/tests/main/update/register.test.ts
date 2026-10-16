@@ -11,8 +11,11 @@ const mocks = vi.hoisted(() => {
     removeHandler: vi.fn(),
     autoUpdater: {
       disableDifferentialDownload: false,
+      autoDownload: true,
+      autoInstallOnAppQuit: true,
       setFeedURL: vi.fn(),
       checkForUpdates: vi.fn().mockResolvedValue({}),
+      downloadUpdate: vi.fn().mockResolvedValue([]),
       quitAndInstall: vi.fn(),
       on: vi.fn((event: string, handler: (...args: unknown[]) => void): void => {
         ;(handlers[event] ??= []).push(handler)
@@ -71,6 +74,9 @@ describe('registerUpdate', () => {
     )
     // 禁用差量下载（CDN 不支持 Range，差量必失败回退导致进度回退）。
     expect(mocks.autoUpdater.disableDifferentialDownload).toBe(true)
+    // 关掉两个默认静默行为：后台静默下载、关 app 时静默安装。
+    expect(mocks.autoUpdater.autoDownload).toBe(false)
+    expect(mocks.autoUpdater.autoInstallOnAppQuit).toBe(false)
     expect(mocks.autoUpdater.on).toHaveBeenCalledTimes(3)
     expect(mocks.handle.mock.calls.map(([ch]) => ch)).toEqual([
       'update:check',
@@ -123,9 +129,13 @@ describe('registerUpdate', () => {
       status: 'available',
       version: '0.0.12'
     })
+    // 用户点「检查更新」即触发下载（autoDownload=false 时唯一的下载入口）。
+    expect(mocks.autoUpdater.downloadUpdate).toHaveBeenCalledOnce()
 
     mocks.autoUpdater.checkForUpdates.mockResolvedValueOnce({ isUpdateAvailable: false })
     await expect(handlers['update:check']()).resolves.toEqual({ status: 'current' })
+    // 已是最新 ⇒ 不下载。
+    expect(mocks.autoUpdater.downloadUpdate).toHaveBeenCalledOnce()
   })
 
   it('update:check returns development for an unpackaged build', async () => {

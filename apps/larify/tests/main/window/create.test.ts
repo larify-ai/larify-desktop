@@ -12,7 +12,9 @@ const electron = vi.hoisted(() => ({
   webContentsSend: vi.fn(),
   windowOn: vi.fn(),
   setApplicationMenu: vi.fn(),
-  openExternal: vi.fn(() => Promise.resolve())
+  openExternal: vi.fn(() => Promise.resolve()),
+  appOnce: vi.fn(),
+  showMessageBoxSync: vi.fn(() => 0)
 }))
 
 vi.mock('electron', () => ({
@@ -34,6 +36,8 @@ vi.mock('electron', () => ({
     }
   }),
   Menu: { setApplicationMenu: electron.setApplicationMenu },
+  app: { once: electron.appOnce },
+  dialog: { showMessageBoxSync: electron.showMessageBoxSync },
   nativeTheme: { shouldUseDarkColors: true },
   shell: { openExternal: electron.openExternal },
   screen: {
@@ -61,6 +65,9 @@ beforeEach(() => {
   electron.windowOn.mockClear()
   electron.setApplicationMenu.mockClear()
   electron.openExternal.mockClear()
+  electron.appOnce.mockClear()
+  electron.showMessageBoxSync.mockClear()
+  electron.showMessageBoxSync.mockReturnValue(0)
 })
 
 describe('createWindow', () => {
@@ -133,6 +140,43 @@ describe('createWindow', () => {
     createWindow()
 
     expect(electron.setApplicationMenu).toHaveBeenCalledWith(null)
+  })
+
+  it('confirms before closing the window when a close is requested', () => {
+    const close = vi.fn()
+    const window = createWindow()
+    window.close = close
+    const closeHandler = electron.windowOn.mock.calls.find(([event]) => event === 'close')?.[1]
+
+    expect(closeHandler).toBeTypeOf('function')
+
+    // 取消（choice=0）⇒ 阻止默认关闭、不调用 close。
+    const cancelled = { preventDefault: vi.fn() }
+    electron.showMessageBoxSync.mockReturnValueOnce(0)
+    closeHandler(cancelled)
+    expect(cancelled.preventDefault).toHaveBeenCalledOnce()
+    expect(electron.showMessageBoxSync).toHaveBeenCalledOnce()
+    expect(close).not.toHaveBeenCalled()
+
+    // 确认（choice=1）⇒ 放行并真正关闭。
+    const confirmed = { preventDefault: vi.fn() }
+    electron.showMessageBoxSync.mockReturnValueOnce(1)
+    closeHandler(confirmed)
+    expect(confirmed.preventDefault).toHaveBeenCalledOnce()
+    expect(close).toHaveBeenCalledOnce()
+  })
+
+  it('skips the close confirmation on programmatic quit (e.g. update install)', () => {
+    createWindow()
+    const closeHandler = electron.windowOn.mock.calls.find(([event]) => event === 'close')?.[1]
+    const beforeQuit = electron.appOnce.mock.calls.find(([event]) => event === 'before-quit')?.[1]
+
+    // app.quit() 会先触发 before-quit，随后关窗口 ⇒ 该次关闭应直接放行、不弹框。
+    beforeQuit()
+    const event = { preventDefault: vi.fn() }
+    closeHandler(event)
+    expect(event.preventDefault).not.toHaveBeenCalled()
+    expect(electron.showMessageBoxSync).not.toHaveBeenCalled()
   })
 
   it('only attaches sandboxed browser guests in the browser partition', () => {

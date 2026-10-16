@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { BrowserWindow, Menu, nativeTheme, screen, shell } from 'electron'
+import { app, BrowserWindow, dialog, Menu, nativeTheme, screen, shell } from 'electron'
 import { is } from '@electron-toolkit/utils'
 import { BROWSER_PARTITION } from '../../extensions/browser/shared/types'
 import { resourcePath } from '../utils/app-paths'
@@ -102,6 +102,30 @@ export function createWindow(): BrowserWindow {
     is.dev && process.env['ELECTRON_RENDERER_URL']
       ? window.loadURL(process.env['ELECTRON_RENDERER_URL'])
       : window.loadFile(join(__dirname, '../renderer/index.html'))
+  // 点击关闭按钮时先确认（避免任务跑到一半误点关闭 ⇒ 任务被静默中断）。
+  // 程序化退出（app.quit()，如「重启并安装」更新）会**先**触发 before-quit，
+  // 故用 quitting 标志放行，避免挡住更新安装等退出路径。
+  let quitting = false
+  app.once('before-quit', () => {
+    quitting = true
+  })
+  window.on('close', (event) => {
+    if (quitting) return
+    event.preventDefault()
+    const choice = dialog.showMessageBoxSync(window, {
+      type: 'warning',
+      buttons: ['取消', '确认关闭'],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+      title: '确认关闭',
+      message: '关闭窗口会停止正在执行的任务',
+      detail: '确定要关闭吗？'
+    })
+    if (choice !== 1) return
+    quitting = true
+    window.close()
+  })
   window.on('ready-to-show', () => {
     // 修复多显示器混合 DPI 下窗口过小：在 Windows 上，当屏幕同时存在不同缩放
     // （主屏 200%、副屏 100%）时，new BrowserWindow 的 width/height 会被按主屏 DPI

@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { AuthState } from '@shared/auth'
-import { Spinner } from '@renderer/components/ui/spinner'
+// import { Spinner } from '@renderer/components/ui/spinner'
 import { AuthContext } from './auth-context'
-import { LoginView } from './login-view'
+// import { LoginView } from './login-view'
 
 interface AuthGateProps {
   children: React.ReactNode
@@ -40,25 +40,33 @@ export function AuthGate({ children }: AuthGateProps): React.JSX.Element {
 
   // After sign-in, mint/fetch the New API credentials so the model runtime can
   // use them immediately. Failures surface later in the account menu.
+  // 保留为 no-op：登录关闭后 state 不会变为 authenticated，故永不触发。
   useEffect(() => {
     if (state.status !== 'authenticated') return
     window.bridge.invoke('model-api:get-credentials').catch(() => undefined)
   }, [state.status])
 
-  if (state.status === 'restoring') {
-    return (
-      <main
-        className="flex h-screen items-center justify-center bg-background"
-        aria-label="正在恢复登录"
-      >
-        <Spinner className="size-5" />
-      </main>
-    )
-  }
+  // 登录功能已临时关闭（larify.ai 不可用）：始终渲染主应用，不再弹登录页。
+  // 原「restoring 转圈」「authenticated 才渲染 LoginView」逻辑已注释，便于回退：
+  // if (state.status === 'restoring') {
+  //   return (
+  //     <main
+  //       className="flex h-screen items-center justify-center bg-background"
+  //       aria-label="正在恢复登录"
+  //     >
+  //       <Spinner className="size-5" />
+  //     </main>
+  //   )
+  // }
+  // return (
+  //   <AuthContext.Provider value={auth}>
+  //     {state.status === 'authenticated' ? children : <LoginView initialError={state.error} />}
+  //   </AuthContext.Provider>
+  // )
 
   return (
     <AuthContext.Provider value={auth}>
-      {state.status === 'authenticated' ? children : <LoginView initialError={state.error} />}
+      {children}
     </AuthContext.Provider>
   )
 }

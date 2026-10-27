@@ -1,16 +1,14 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useState } from 'react'
 import {
   CircleArrowUpIcon,
-  CrownIcon,
-  LogOutIcon,
   PaletteIcon,
   SettingsIcon,
-  UserRoundIcon
+  SlidersIcon
 } from 'lucide-react'
 import { useTheme } from 'next-themes'
 
-import type { ModelApiBalance } from '@shared/model-api'
-import { USAGE_CHANGED_EVENT } from '@shared/events'
+// import type { ModelApiBalance } from '@shared/model-api'
+// import { USAGE_CHANGED_EVENT } from '@shared/events'
 import { Button } from '@renderer/components/ui/button'
 import {
   Dialog,
@@ -24,21 +22,23 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
+  // DropdownMenuSeparator,
   DropdownMenuTrigger
 } from '@renderer/components/ui/dropdown-menu'
-import { useAuth } from './auth-context'
+// import { useAuth } from './auth-context'
 import { useUpdateCheck } from './use-update-check'
 import { SettingsDialog } from '../settings/settings-dialog'
 
 export function AccountMenu(): React.JSX.Element {
-  const { email, logout } = useAuth()
+  // const { email, logout } = useAuth()
   const { resolvedTheme, setTheme } = useTheme()
   const update = useUpdateCheck()
-  const [confirming, setConfirming] = useState(false)
+  // const [confirming, setConfirming] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [isLoggingOut, setIsLoggingOut] = useState(false)
-  const [logoutError, setLogoutError] = useState('')
+  // const [isLoggingOut, setIsLoggingOut] = useState(false)
+  // const [logoutError, setLogoutError] = useState('')
+
+  /* —— 以下「额度 / 套餐」相关逻辑已临时关闭（larify.ai 不可用），保留以便回退 ——
   const [balance, setBalance] = useState<ModelApiBalance | null>(null)
   const [balanceError, setBalanceError] = useState('')
 
@@ -78,7 +78,9 @@ export function AccountMenu(): React.JSX.Element {
     subscription && subscription.total > 0 ? Math.max(0, subscription.total - subscription.used) : 0
   const remainingRatio =
     subscription && subscription.total > 0 ? Math.min(1, remaining / subscription.total) : 0
+  —— */
 
+  /* —— 退出登录逻辑已临时关闭（登录功能关闭）——
   const confirmLogout = async (): Promise<void> => {
     setIsLoggingOut(true)
     setLogoutError('')
@@ -91,6 +93,7 @@ export function AccountMenu(): React.JSX.Element {
       setIsLoggingOut(false)
     }
   }
+  —— */
 
   return (
     <>
@@ -98,9 +101,10 @@ export function AccountMenu(): React.JSX.Element {
         <DropdownMenuTrigger asChild>
           <button
             type="button"
-            aria-label="套餐与账户菜单"
+            aria-label="设置"
             className="mx-1 grid h-14 w-[calc(100%-0.5rem)] grid-cols-[minmax(0,1fr)_auto] content-center gap-x-2 gap-y-1.5 rounded-lg px-2 text-left text-sm text-foreground hover:bg-sidebar-accent focus-visible:bg-sidebar-accent focus-visible:outline-none"
           >
+            {/*
             <span className="flex min-w-0 items-center gap-1.5 font-medium">
               <CrownIcon aria-hidden="true" className="size-4 shrink-0 stroke-[1.75]" />
               <span className="truncate">{planTitle}</span>
@@ -118,6 +122,11 @@ export function AccountMenu(): React.JSX.Element {
                 style={{ width: `${remainingRatio * 100}%` }}
               />
             </span>
+            */}
+            <span className="flex min-w-0 items-center gap-2 font-medium">
+              <SettingsIcon aria-hidden="true" className="size-5 shrink-0 stroke-[1.75]" />
+              <span className="truncate text-sm text-foreground">设置</span>
+            </span>
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent
@@ -126,6 +135,7 @@ export function AccountMenu(): React.JSX.Element {
           sideOffset={8}
           className="w-[var(--radix-dropdown-menu-trigger-width)] rounded-2xl border-border/80 bg-popover/95 p-3 shadow-xl backdrop-blur"
         >
+          {/* 账户邮箱行与分隔符已隐藏（登录功能关闭）
           <div className="grid min-h-10 grid-cols-[20px_minmax(0,1fr)] items-center gap-2 rounded-lg px-2 text-sm">
             <UserRoundIcon aria-hidden="true" className="size-5 stroke-[1.75] text-foreground" />
             <span className="truncate" title={email ?? undefined}>
@@ -134,6 +144,7 @@ export function AccountMenu(): React.JSX.Element {
           </div>
 
           <DropdownMenuSeparator className="my-2" />
+          */}
           <div className="grid min-h-10 grid-cols-[20px_auto_minmax(0,1fr)] items-center gap-2 rounded-lg px-2 text-sm">
             <PaletteIcon aria-hidden="true" className="size-5 stroke-[1.75] text-foreground" />
             <span className="min-w-12 whitespace-nowrap">主题</span>
@@ -169,8 +180,8 @@ export function AccountMenu(): React.JSX.Element {
               window.setTimeout(() => setSettingsOpen(true), 0)
             }}
           >
-            <SettingsIcon aria-hidden="true" className="size-5 stroke-[1.75] text-foreground" />
-            <span className="min-w-16 whitespace-nowrap">设置</span>
+            <SlidersIcon aria-hidden="true" className="size-5 stroke-[1.75] text-foreground" />
+            <span className="min-w-16 whitespace-nowrap">模型配置</span>
           </DropdownMenuItem>
           <DropdownMenuItem
             className="grid min-h-10 grid-cols-[20px_auto_minmax(0,1fr)] gap-2 rounded-lg px-2 text-sm"
@@ -204,6 +215,7 @@ export function AccountMenu(): React.JSX.Element {
               )
             )}
           </DropdownMenuItem>
+          {/*
           <DropdownMenuSeparator className="my-2" />
           <DropdownMenuItem
             className="grid min-h-10 grid-cols-[20px_auto_minmax(0,1fr)] gap-2 rounded-lg px-2 text-sm"
@@ -212,34 +224,12 @@ export function AccountMenu(): React.JSX.Element {
             <LogOutIcon aria-hidden="true" className="size-5 stroke-[1.75] text-foreground" />
             <span className="min-w-16 whitespace-nowrap">退出登录</span>
           </DropdownMenuItem>
+          */}
         </DropdownMenuContent>
       </DropdownMenu>
 
       {/* 只在打开时挂载：每次展开都重新读一次已保存的 Key，省去 effect 同步。 */}
       {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
-
-      <Dialog open={confirming} onOpenChange={(open) => !isLoggingOut && setConfirming(open)}>
-        <DialogContent showCloseButton={false} className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>确认退出登录</DialogTitle>
-            <DialogDescription>退出登录会停止正在执行的任务</DialogDescription>
-          </DialogHeader>
-          {logoutError && <p className="mt-3 text-sm text-destructive">{logoutError}</p>}
-          <DialogFooter>
-            <Button
-              variant="outline"
-              disabled={isLoggingOut}
-              onClick={() => setConfirming(false)}
-              className="focus-visible:ring-0 focus-visible:border-input dark:focus-visible:border-input"
-            >
-              取消
-            </Button>
-            <Button disabled={isLoggingOut} onClick={() => void confirmLogout()}>
-              {isLoggingOut ? '正在退出…' : '确认退出'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* 更新已就绪：重启并安装 */}
       <Dialog open={update.dialogOpen} onOpenChange={update.setDialogOpen}>

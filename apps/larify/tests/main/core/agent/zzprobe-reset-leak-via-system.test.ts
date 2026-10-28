@@ -81,6 +81,7 @@ describe('探针：reset 通过系统提示泄漏', () => {
     )
     console.log('[probe] get_tool_schemas(reset) =', JSON.stringify(out))
 
-    expect(runtime.system.includes('reset context')).toBe(true)
+    // 插件描述已不再罗列 reset context（那是泄漏源），故断言翻转为「不得出现」。
+    expect(runtime.system.includes('reset context')).toBe(false)
   })
 })

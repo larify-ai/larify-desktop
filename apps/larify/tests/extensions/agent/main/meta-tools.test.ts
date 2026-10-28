@@ -150,7 +150,7 @@ describe('meta tools', () => {
       {
         name: 'agent',
         description:
-          'List plugins, list tools, list skills, read schemas, search memory, ask user, show progress, reset context, and schedule tasks. (9 tools, 0 skills)'
+          'List plugins, list tools, list skills, read schemas, search memory, ask user, and show progress. (8 tools, 0 skills)'
       },
       { name: 'demo', description: 'Demo plugin (2 tools, 2 skills)' }
     ])
@@ -221,7 +221,7 @@ describe('meta tools', () => {
       {
         name: 'agent',
         description:
-          'List plugins, list tools, list skills, read schemas, search memory, ask user, show progress, reset context, and schedule tasks. (9 tools, 0 skills)'
+          'List plugins, list tools, list skills, read schemas, search memory, ask user, and show progress. (8 tools, 0 skills)'
       },
       { name: 'demo', description: 'Demo plugin (2 tools, 2 skills)' },
       { name: 'eager-only', description: '(1 tools, 0 skills)' },

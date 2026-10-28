@@ -88,7 +88,9 @@ async function pageThrough(file: string, limit: number): Promise<string> {
 describe("read", () => {
   it("treats offset 0 and 1 as the first line", async () => {
     const first = await callTool<string>(readFileTool, { file_path: tenPath, offset: 1 })
-    const zero = await callTool<string>(readFileTool, { file_path: tenPath, offset: 0 })
+    const zero = await callTool<string>(readFileTool, { file_path: tenPath, offset: 0 }, {
+      sessionId: freshSession(),
+    })
 
     expect(zero).toBe(first)
   })

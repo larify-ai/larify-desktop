@@ -126,6 +126,14 @@ async function readWindow(target: string, from: number, to: number): Promise<Win
 
 type ReadFileArgs = z.infer<typeof inputSchema>
 
+/**
+ * 每个会话读过、且已经读到文件末尾的窗口 → 当时读到的 mtime。键是「会话 + 文件 + 真实起止
+ * 行」而不是调用方传的 offset/column/limit/scroll——那四个参数只是「怎么求窗口」的手段，换一组
+ * 参数完全可能落到同一段文字上，用参数当键会把真正的重复判成不同。只有读到末尾的窗口才登记：
+ * 否则文件后来追加的内容会被当成「没变过」直接挡掉。
+ */
+const readWindows = new Map<string, number>()
+
 export async function readFileWindow(args: ReadFileArgs, ctx: ToolRunContext): Promise<string> {
   const { file_path, offset, column, limit, scroll } = args
   const target = path.resolve(ctx.cwd, file_path)
@@ -141,7 +149,17 @@ export async function readFileWindow(args: ReadFileArgs, ctx: ToolRunContext): P
   const from = scroll === 'up' ? Math.max(0, anchor - limit) : anchor
   const to = scroll === 'up' ? anchor : anchor + limit
   const window = await readWindow(target, from, to)
+
+  // 同一会话、同一文件、同一段文字（由窗口的起止下标唯一确定，不必再看 offset/scroll 是哪种
+  // 形态）已经读过，且磁盘没变、上次还读到了文件末尾 ⇒ 这段文字早就在本会话更早的工具结果里，
+  // 再送一遍只是重复占上下文。mtime 是不可省的那半个判据：内容被原地换成同样长度时起止不变。
+  const mtime = Math.floor(stats.mtimeMs)
+  const seenKey = `${ctx.sessionId}\u0000${target}\u0000${from}\u0000${to}`
+  if (window.continueFrom === null && readWindows.get(seenKey) === mtime) {
+    return 'File unchanged since the last read; that content is still current, no need to re-read.'
+  }
   markRead(ctx.sessionId, target, stats.mtimeMs)
+  if (window.continueFrom === null) readWindows.set(seenKey, mtime)
 
   return [
     from > 0 ? `(Omitted before ${describePosition(window.start)}.)` : null,

@@ -145,10 +145,9 @@ describe('workbench layout specification', () => {
     expect(navigation).not.toContain('ChevronDownIcon')
     expect(navigation).not.toContain('ChevronRightIcon')
     expect(navigation).toContain('grid-cols-[20px_minmax(0,1fr)]')
-    expect(navigation).toContain('<AccountMenu />')
+    // 设置入口已从侧栏底部挪到主区顶栏（工作台开关左边），侧栏不再挂 AccountMenu。
+    expect(navigation).not.toContain('AccountMenu')
     expect(navigation).toContain('rounded-lg')
-    expect(navigation).toContain('mx-1')
-    expect(navigation).toContain('w-[calc(100%-0.5rem)]')
     expect(navigation).toContain('space-y-0.5')
     expect(navigation).toContain('const pageSize = 5')
     expect(navigation).toContain('workspace.sessions.slice(0, visibleCount)')
@@ -193,7 +192,12 @@ describe('workbench layout specification', () => {
     expect(header).toContain('label="显示侧边栏"')
     expect(header).toContain("label={workbenchCollapsed ? '显示工作台' : '隐藏工作台'}")
     expect(navigationRegion).toContain('label="隐藏侧边栏"')
-    expect(header).toContain('top-1/2 -translate-y-1/2')
+    expect(header).toContain('top-1/2 flex -translate-y-1/2 items-center gap-1')
+    // 设置入口紧挨在工作台开关左边：同一个绝对定位容器内，AccountMenu 在 PanelToggle 之前。
+    expect(header).toContain('<AccountMenu compact />')
+    expect(header.indexOf('<AccountMenu compact />')).toBeLessThan(
+      header.indexOf('label={workbenchCollapsed ? ')
+    )
     expect(header).toContain("paddingLeft: 'calc(var(--titlebar-inset-left) - 6px)'")
     expect(navigationRegion).toContain("paddingLeft: 'calc(var(--titlebar-inset-left) - 7px)'")
     expect(navigationRegion).not.toContain('justify-start')

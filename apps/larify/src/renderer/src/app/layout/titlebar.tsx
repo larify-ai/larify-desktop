@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { PanelLeftOpenIcon, PanelRightCloseIcon, PanelRightOpenIcon } from 'lucide-react'
 
+import { AccountMenu } from '../auth/account-menu'
 import { PanelToggle } from './panel-toggle'
 
 interface TitlebarProps {
@@ -38,11 +39,12 @@ export function Titlebar({
         {children}
       </div>
       <div
-        className="absolute top-1/2 -translate-y-1/2"
+        className="absolute top-1/2 flex -translate-y-1/2 items-center gap-1"
         style={{
           right: 'calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw))'
         }}
       >
+        <AccountMenu compact />
         <PanelToggle
           label={workbenchCollapsed ? '显示工作台' : '隐藏工作台'}
           icon={workbenchCollapsed ? PanelRightOpenIcon : PanelRightCloseIcon}

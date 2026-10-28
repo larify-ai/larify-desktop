@@ -29,7 +29,11 @@ import {
 import { useUpdateCheck } from './use-update-check'
 import { SettingsDialog } from '../settings/settings-dialog'
 
-export function AccountMenu(): React.JSX.Element {
+/**
+ * `compact` 用于顶栏：触发器收成与 `PanelToggle` 同尺寸的图标按钮，菜单改为向下弹出。
+ * 底部那种整行触发器（侧栏）保持默认形态不变。
+ */
+export function AccountMenu({ compact = false }: { compact?: boolean } = {}): React.JSX.Element {
   // const { email, logout } = useAuth()
   const { resolvedTheme, setTheme } = useTheme()
   const update = useUpdateCheck()
@@ -102,7 +106,8 @@ export function AccountMenu(): React.JSX.Element {
           <button
             type="button"
             aria-label="设置"
-            className="mx-1 grid h-14 w-[calc(100%-0.5rem)] grid-cols-[minmax(0,1fr)_auto] content-center gap-x-2 gap-y-1.5 rounded-lg px-2 text-left text-sm text-foreground hover:bg-sidebar-accent focus-visible:bg-sidebar-accent focus-visible:outline-none"
+            title="设置"
+            className={`${compact ? 'inline-flex size-8 items-center justify-center rounded-md [-webkit-app-region:no-drag] ' : 'mx-1 grid h-14 w-[calc(100%-0.5rem)] grid-cols-[minmax(0,1fr)_auto] content-center gap-x-2 gap-y-1.5 rounded-lg px-2 '}text-left text-sm text-foreground hover:bg-sidebar-accent focus-visible:bg-sidebar-accent focus-visible:outline-none`}
           >
             {/*
             <span className="flex min-w-0 items-center gap-1.5 font-medium">
@@ -124,15 +129,18 @@ export function AccountMenu(): React.JSX.Element {
             </span>
             */}
             <span className="flex min-w-0 items-center gap-2 font-medium">
-              <SettingsIcon aria-hidden="true" className="size-5 shrink-0 stroke-[1.75]" />
-              <span className="truncate text-sm text-foreground">设置</span>
+              <SettingsIcon
+                aria-hidden="true"
+                className={`size-5 shrink-0 stroke-[1.75] ${compact ? 'pointer-events-none size-[18px]' : ''}`}
+              />
+              {!compact && <span className="truncate text-sm text-foreground">设置</span>}
             </span>
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent
           align="start"
-          side="top"
-          sideOffset={8}
+          side={compact ? 'bottom' : 'top'}
+          sideOffset={compact ? 6 : 8}
           className="w-[var(--radix-dropdown-menu-trigger-width)] rounded-2xl border-border/80 bg-popover/95 p-3 shadow-xl backdrop-blur"
         >
           {/* 账户邮箱行与分隔符已隐藏（登录功能关闭）

@@ -6,7 +6,6 @@ import { useAssistantSessions } from '../interaction/assistant/sessions-context'
 import { NavigationAction } from './navigation-action'
 import { Workspace } from './workspace'
 import { createWorkspaces } from './workspaces'
-import { AccountMenu } from '../auth/account-menu'
 
 const hiddenWorkspacesKey = 'larify:hidden-workspaces'
 
@@ -93,10 +92,6 @@ export function NavigationContent(): React.JSX.Element {
           ))}
         </div>
       </nav>
-
-      <div className="shrink-0 pt-2">
-        <AccountMenu />
-      </div>
     </div>
   )
 }

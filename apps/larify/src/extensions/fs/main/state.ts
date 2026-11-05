@@ -27,8 +27,17 @@ export function readAtFor(sessionId: string, target: string): number | undefined
   return fileStates.get(sessionId)?.get(target)
 }
 
+const clearedListeners = new Set<(sessionId: string) => void>()
+
+/** 订阅「会话读取状态被清空」（reset context / 删除会话）。 */
+export function onReadStateCleared(listener: (sessionId: string) => void): () => void {
+  clearedListeners.add(listener)
+  return () => clearedListeners.delete(listener)
+}
+
 export function clearReadState(sessionId: string): void {
   fileStates.delete(sessionId)
+  for (const listener of clearedListeners) listener(sessionId)
 }
 
 export function withFileLock<T>(target: string, run: () => Promise<T>): Promise<T> {

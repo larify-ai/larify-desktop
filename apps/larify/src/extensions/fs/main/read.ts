@@ -3,7 +3,7 @@ import path from 'node:path'
 import { z } from 'zod'
 import { defineTool, type ToolRunContext } from '../../../main/core/plugin/protocol'
 import { normalizedChunks } from './stream'
-import { markRead } from './state'
+import { markRead, onReadStateCleared } from './state'
 
 const READ_CHARACTER_UNIT = 1_000
 const MIN_READ_UNITS = 5
@@ -133,6 +133,16 @@ type ReadFileArgs = z.infer<typeof inputSchema>
  * 否则文件后来追加的内容会被当成「没变过」直接挡掉。
  */
 const readWindows = new Map<string, number>()
+
+/**
+ * 上下文被清空（reset context / 会话删除）时，本会话的「已读窗口」也必须一起作废：那时之前送进
+ * 上下文的那段正文已经不在模型眼前了，再回「内容没变、无需重读」就等于让模型永远看不到这段文字。
+ * 用 `sessionId\0` 前缀清扫，键的前半段与 `readFileWindow` 里的拼接顺序保持一致。
+ */
+onReadStateCleared((sessionId) => {
+  const prefix = `${sessionId}\u0000`
+  for (const key of readWindows.keys()) if (key.startsWith(prefix)) readWindows.delete(key)
+})
 
 export async function readFileWindow(args: ReadFileArgs, ctx: ToolRunContext): Promise<string> {
   const { file_path, offset, column, limit, scroll } = args

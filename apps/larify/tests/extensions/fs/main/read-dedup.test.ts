@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { readFileTool, readFileWindow } from '../../../../src/extensions/fs/main/read'
 import { editFileTool } from '../../../../src/extensions/fs/main/edit'
+import { clearReadState } from '../../../../src/extensions/fs/main/state'
 import { callTool, freshSession } from './harness'
 
 const read = (
@@ -119,6 +120,25 @@ describe('真实工具入口（经 zod 解析、limit 已换算成字符）', ()
     )
 
     expect(edit.summary).toContain('Edited')
+  })
+})
+
+describe('上下文被清空（reset context）后，那段文字已不在模型眼前 ⇒ 必须重读', () => {
+  it('clearReadState 之后同一段文字不再回执，只清本会话', async () => {
+    const session = freshSession()
+    const other = freshSession()
+    const target = path.join(root, 'after-reset.txt')
+    writeFileSync(target, 'payload\n')
+
+    expect(await read({ file_path: target }, session)).toBe('payload\n')
+    expect(isReceipt(await read({ file_path: target }, session))).toBe(true)
+    await read({ file_path: target }, other)
+
+    clearReadState(session)
+
+    expect(await read({ file_path: target }, session)).toBe('payload\n')
+    // 别的会话的已读窗口不受影响
+    expect(isReceipt(await read({ file_path: target }, other))).toBe(true)
   })
 })
 

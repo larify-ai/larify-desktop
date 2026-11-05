@@ -21,7 +21,11 @@ describe('AccountMenu', () => {
   })
 
   it('matches the menu width to its trigger and confirms before logging out', () => {
-    expect(accountMenu).toContain('w-[var(--radix-dropdown-menu-trigger-width)]')
+    // 宽度必须按形态区分：侧栏整行形态跟触发器同宽；顶栏 compact 触发器只有 32px，
+    // 若仍套用触发器宽度，菜单只有 32px 宽、内容被 overflow-x-hidden 裁掉（设置菜单显示不全）。
+    expect(accountMenu).toContain(
+      "${compact ? 'w-auto' : 'w-[var(--radix-dropdown-menu-trigger-width)]'}"
+    )
     expect(accountMenu).toContain('<DialogTitle>确认退出登录</DialogTitle>')
     expect(accountMenu).toContain('await logout()')
     expect(accountMenu).not.toContain('variant="destructive"')

@@ -141,7 +141,7 @@ export function AccountMenu({ compact = false }: { compact?: boolean } = {}): Re
           align="start"
           side={compact ? 'bottom' : 'top'}
           sideOffset={compact ? 6 : 8}
-          className="w-[var(--radix-dropdown-menu-trigger-width)] rounded-2xl border-border/80 bg-popover/95 p-3 shadow-xl backdrop-blur"
+          className={`${compact ? 'w-auto' : 'w-[var(--radix-dropdown-menu-trigger-width)]'} rounded-2xl border-border/80 bg-popover/95 p-3 shadow-xl backdrop-blur`}
         >
           {/* 账户邮箱行与分隔符已隐藏（登录功能关闭）
           <div className="grid min-h-10 grid-cols-[20px_minmax(0,1fr)] items-center gap-2 rounded-lg px-2 text-sm">
